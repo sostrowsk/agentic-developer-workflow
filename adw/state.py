@@ -74,6 +74,11 @@ class RunState(BaseModel):
     # --no-approval muss den Crash überleben — der Resume-Aufruf kennt das
     # CLI-Flag nicht mehr.
     skip_approval: bool = False
+    # Runden-Zähler der Integration/E2E-Phase — persistiert, damit ein Crash
+    # das 10-Runden-Limit nicht zurücksetzt. last_failures ist die
+    # Circuit-Breaker-Basis (wird erst NACH dem Fix-Dispatch fortgeschrieben).
+    integration_rounds: int = 0
+    integration_last_failures: list[str] = Field(default_factory=list)
     # Checkpoint des Spec-/Plan-Authoring-Loops: Session, offener Fix-Task und
     # Findings-Basis überleben so einen Crash mitten im Review-Zyklus.
     authoring_session: str | None = None

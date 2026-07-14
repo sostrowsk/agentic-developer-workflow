@@ -24,9 +24,9 @@ from pathlib import Path
 from adw import ci
 from adw.agents import REGISTRY, AgentRunner
 from adw.codex import CodexReviewer
-from adw.config import AdwConfig
+from adw.config import AdwConfig, Gate
 from adw.env import safe_env
-from adw.findings import FindingsParseError, ReviewResult
+from adw.findings import Finding, FindingsParseError, ReviewResult, extract_review_result
 from adw.gates import GateReport, run_gates
 from adw.state import LaneState, RunState
 from adw.triage import (
@@ -34,12 +34,15 @@ from adw.triage import (
     NoProgressError,
     check_gate_iterations,
     check_progress,
+    triage_final_review,
 )
 from adw.worktrees import (
     create_lane_worktree,
     ensure_runs_gitignored,
+    lane_branch,
     lane_worktree_path,
     ports_for,
+    remove_lane_worktree,
 )
 
 ARTIFACTS = ("spec.md", "plan.md", "contract.yaml")
@@ -478,9 +481,7 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             lane_state.expected_head = current_head
             resume = lane_state.session_id
             ctx.save()  # Checkpoint VOR dem Agent-Lauf
-        result = ctx.agents.run(
-            spec, task, cwd=worktree, resume=resume, deny_read_paths=deny
-        )
+        result = ctx.agents.run(spec, task, cwd=worktree, resume=resume, deny_read_paths=deny)
         if _git(ctx, worktree, "rev-parse", "HEAD").strip() != current_head:
             raise escalate(
                 ctx,
@@ -622,9 +623,7 @@ def _seed_artifacts(ctx: RunContext, worktree: Path) -> None:
 
 def _run_lane_gates(ctx: RunContext, lane: str, worktree: Path, lane_state: LaneState):
     gates = ctx.config.lanes[lane].gates
-    extra_env = {
-        f"{name.upper()}_PORT": str(port) for name, port in lane_state.ports.items()
-    }
+    extra_env = {f"{name.upper()}_PORT": str(port) for name, port in lane_state.ports.items()}
     return run_gates(gates, cwd=worktree, extra_env=extra_env)
 
 
@@ -753,6 +752,184 @@ def _git(ctx: RunContext, cwd: Path, *args: str) -> str:
             ctx, f"git {' '.join(args)} in {cwd} fehlgeschlagen: {result.stderr.strip()}"
         )
     return result.stdout
+
+
+# --- Phase 4: Integration + E2E (nur --parallel) -----------------------------
+
+MAX_E2E_ROUNDS = 10
+INTEGRATION_LANE = "integration"
+
+
+def run_integration_phase(ctx: RunContext) -> None:
+    """Phase 4: Lane-Branches auf einen Integrations-Branch mergen, E2E-Gate
+    fahren; bei Rot triagiert der E2E-Agent die Fehler in die Lanes zurück.
+    Max. 10 Runden, Circuit-Breaker bei identischem E2E-Output."""
+    if ctx.state.phase != "integration":
+        return
+    lanes = _active_lanes(ctx)
+    previous: list[str] | None = ctx.state.integration_last_failures or None
+    while True:
+        # Limit VOR Merge/E2E prüfen: Ein Crash zwischen Runden-Save und
+        # Eskalation darf beim Resume keine weitere Runde starten.
+        if ctx.state.integration_rounds >= MAX_E2E_ROUNDS:
+            raise escalate(
+                ctx,
+                f"Integration/E2E: {ctx.state.integration_rounds} Runden erreicht "
+                f"(Limit {MAX_E2E_ROUNDS}) — Eskalation",
+            )
+        worktree = _fresh_integration_worktree(ctx, lanes)
+        report = _run_e2e_gate(ctx, worktree, lanes)
+        if report is None or report.passed:
+            break
+        with ctx.state_lock:
+            ctx.state.integration_rounds += 1
+            ctx.save()  # Runden-Limit überlebt jeden Crash ab hier
+        if ctx.state.integration_rounds >= MAX_E2E_ROUNDS:
+            raise escalate(
+                ctx,
+                f"Integration/E2E: {ctx.state.integration_rounds} Runden erreicht "
+                f"(Limit {MAX_E2E_ROUNDS}) — Eskalation.\n\n{_gate_failure_text(report)}",
+            )
+        failures = [f"{f.gate}|{f.exit_code}|{f.output}" for f in report.failures]
+        try:
+            check_progress(previous, failures)
+        except NoProgressError as exc:
+            raise escalate(
+                ctx,
+                f"E2E-Fix-Runde hat nichts verändert — Circuit-Breaker.\n\n"
+                f"{_gate_failure_text(report)}",
+            ) from exc
+        review = _triage_e2e(ctx, worktree, report)
+        _dispatch_lane_fixes(ctx, review.findings, lanes, source="E2E")
+        with ctx.state_lock:
+            # Erst NACH dem Fix-Dispatch fortschreiben: ein Crash davor darf
+            # beim Resume nicht als "identische Runde" fehl-eskalieren.
+            ctx.state.integration_last_failures = failures
+            ctx.save()
+        previous = failures
+    with ctx.state_lock:
+        ctx.state.integration_last_failures = []
+        ctx.state.phase = "codex_review"
+        ctx.save()
+
+
+def _fresh_integration_worktree(ctx: RunContext, lanes: list[str]) -> Path:
+    """Integrations-Branch je Runde frisch ab Base-Branch aufbauen und alle
+    Lane-Branches hineinmergen — idempotent und damit crash-sicher."""
+    remove_lane_worktree(ctx.repo, ctx.state.run_id, INTEGRATION_LANE)
+    worktree = create_lane_worktree(
+        ctx.repo, ctx.state.run_id, INTEGRATION_LANE, ctx.config.base_branch
+    )
+    for lane in lanes:
+        branch = lane_branch(ctx.state.run_id, lane)
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(worktree),
+                    "-c",
+                    "core.hooksPath=/dev/null",
+                    "merge",
+                    "--no-edit",
+                    branch,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env=safe_env(ctx.git_env),
+            )
+        except subprocess.TimeoutExpired as exc:
+            _abort_merge(ctx, worktree)
+            raise escalate(
+                ctx,
+                f"Integrations-Merge der Lane {lane} ({branch}) hat das Timeout "
+                f"überschritten — Merge abgebrochen, Mensch übernimmt",
+            ) from exc
+        if result.returncode != 0:
+            _abort_merge(ctx, worktree)
+            raise escalate(
+                ctx,
+                f"Integrations-Merge der Lane {lane} ({branch}) fehlgeschlagen — "
+                f"Konflikt braucht menschliche Auflösung:\n"
+                f"{result.stdout.strip()}\n{result.stderr.strip()}",
+            )
+    return worktree
+
+
+def _abort_merge(ctx: RunContext, worktree: Path) -> None:
+    """Best effort: halb gemergten Zustand nicht liegen lassen."""
+    try:
+        subprocess.run(
+            ["git", "-C", str(worktree), "-c", "core.hooksPath=/dev/null", "merge", "--abort"],
+            capture_output=True,
+            timeout=120,
+            env=safe_env(ctx.git_env),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        pass  # der Worktree wird ohnehin je Runde neu aufgebaut
+
+
+def _run_e2e_gate(ctx: RunContext, worktree: Path, lanes: list[str]) -> GateReport | None:
+    if ctx.config.e2e is None:
+        return None  # keine E2E-Config: Integration ist reiner Merge
+    gate = Gate(name="e2e", cmd=ctx.config.e2e.cmd, timeout=ctx.config.e2e.timeout)
+    extra_env: dict[str, str] = {}
+    for lane in lanes:
+        for name, port in ctx.state.lanes[lane].ports.items():
+            extra_env[f"{name.upper()}_PORT"] = str(port)
+    return run_gates([gate], cwd=worktree, extra_env=extra_env)
+
+
+def _triage_e2e(ctx: RunContext, worktree: Path, report: GateReport) -> ReviewResult:
+    spec = REGISTRY["e2e_triage"]
+    task = (
+        "Die E2E-Tests auf dem Integrations-Branch sind rot. Ordne jeden Fehler "
+        "einer Lane zu (frontend/backend/unknown) und antworte AUSSCHLIESSLICH "
+        "mit dem Findings-JSON (verdict/findings, siehe Schema-Konvention):\n\n"
+        f"{_gate_failure_text(report)}"
+    )
+    result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
+    try:
+        return extract_review_result(result.text)
+    except FindingsParseError as exc:
+        raise escalate(ctx, f"E2E-Triage-Output unlesbar: {exc}") from exc
+
+
+def _dispatch_lane_fixes(
+    ctx: RunContext, findings: list[Finding], lanes: list[str], source: str
+) -> None:
+    """Findings je Lane als Fix-Task in den regulären Lane-Loop geben —
+    jeder Fix nimmt den validierten Pfad (Gates, Commit, kein Sonderweg)."""
+    decision = triage_final_review(
+        ReviewResult(verdict="needs_fixes", findings=findings)
+        if findings
+        else ReviewResult(verdict="ok", findings=[]),
+        active_lanes=lanes,
+    )
+    for lane, items in decision.fix_tasks.items():
+        lane_state = ctx.state.lanes.get(lane)
+        if lane_state is None:
+            raise escalate(
+                ctx,
+                f"{source}-Finding für unbekannte Lane {lane!r} — aktive Lanes: {', '.join(lanes)}",
+            )
+        text = _findings_text(ReviewResult(verdict="needs_fixes", findings=items))
+        task = (
+            f"{source}-Findings für deine Lane. Fixe die Ursachen (kein Workaround "
+            f"an den Tests vorbei), TDD wo sinnvoll. Du committest nicht.\n\n{text}"
+        )
+        with ctx.state_lock:
+            # Lane geht zurück in den Loop: neuer Fix-Task, frisches
+            # Iterations-Budget (das Limit gilt pro Task, nicht pro Run).
+            lane_state.completed = False
+            lane_state.gates_passed = False
+            lane_state.gates_tree = None
+            lane_state.pending_task = task
+            lane_state.last_failures = []
+            lane_state.gate_iterations = 0
+            ctx.save()
+        _run_lane(ctx, lane, lanes)
 
 
 def _gate_failure_text(report: GateReport) -> str:

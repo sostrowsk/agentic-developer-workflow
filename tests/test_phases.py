@@ -1,5 +1,7 @@
 """Tests der Phasen-Orchestrierung — komplett mit Mocks, 0 Tokens, echtes git."""
 
+import json
+
 import pytest
 
 from adw.config import AdwConfig
@@ -10,6 +12,7 @@ from adw.phases import (
     EscalationError,
     RunContext,
     run_build_phase,
+    run_integration_phase,
     run_spec_and_plan,
 )
 from adw.state import RunState
@@ -1386,3 +1389,229 @@ def test_parallel_lanes_build_isolated_worktrees(target_repo):
     assert any(any("frontend" in p for p in paths) for paths in deny_sets)
     assert any(any("backend" in p for p in paths) for paths in deny_sets)
     assert ctx.state.phase == "integration"
+
+
+# --- 10d: Integration + E2E -------------------------------------------------
+
+E2E_MARKER_CONFIG = """\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - {name: pass-gate, cmd: "true", timeout: 10}
+  frontend:
+    gates:
+      - {name: pass-gate, cmd: "true", timeout: 10}
+e2e:
+  cmd: "sh -c 'test -f e2e-fixed || { echo E2E-KAPUTT; exit 1; }'"
+  timeout: 60
+ci:
+  staging_job: deploy-staging
+"""
+
+
+def triage_json(lane: str, issue: str = "Button kaputt") -> str:
+    return json.dumps(
+        {
+            "verdict": "needs_fixes",
+            "findings": [
+                {
+                    "severity": "P1",
+                    "lane": lane,
+                    "file": "irgendwo.js",
+                    "issue": issue,
+                    "remediation_plan": ["Ursache fixen"],
+                }
+            ],
+        }
+    )
+
+
+@pytest.fixture
+def pctx(target_repo):
+    """Paralleler Context: zwei Lanes + E2E-Config, Spec/Plan-Agents gescriptet."""
+    write_config(target_repo, PARALLEL_CONFIG)
+    agents = MockAgentRunner()
+    agents.script_files("spec_agent", {".adw/spec.md": "# Spec\n"})
+    agents.script_files(
+        "plan_agent", {".adw/plan.md": "# Plan\n", ".adw/contract.yaml": "openapi: 3.1.0\n"}
+    )
+    codex = MockCodexRunner()
+    state = RunState.new(issue="ISSUE-2: parallel", parallel=True)
+    return RunContext(
+        repo=target_repo,
+        config=AdwConfig.load(target_repo),
+        state=state,
+        agents=agents,
+        codex=codex,
+        skip_approval=True,
+    )
+
+
+def prepare_built_parallel(pctx, lane_files=None, build_responses=2):
+    """Bringt den parallelen Context bis phase='integration' (Lanes gebaut)."""
+    pctx.agents.script("spec_agent", "Spec")
+    pctx.agents.script("plan_agent", "Plan")
+    pctx.codex.script(OK, OK)
+    pctx.agents.file_writes["build_agent"] = lane_files or (
+        lambda cwd: {f"{cwd.name}.py": f"# {cwd.name}\n"}
+    )
+    pctx.agents.script("build_agent", *["gebaut"] * build_responses)
+    run_spec_and_plan(pctx)
+    run_build_phase(pctx)
+    assert pctx.state.phase == "integration"
+
+
+def test_integration_merges_lane_branches(pctx):
+    prepare_built_parallel(pctx)
+    run_integration_phase(pctx)
+    worktree = pctx.repo / ".adw" / "runs" / pctx.state.run_id / "trees" / "integration"
+    assert (worktree / "backend.py").is_file()
+    assert (worktree / "frontend.py").is_file()
+    assert pctx.state.phase == "codex_review"
+    saved = RunState.load(pctx.repo, pctx.state.run_id)
+    assert saved.phase == "codex_review"
+
+
+def test_merge_conflict_escalates(pctx):
+    prepare_built_parallel(pctx, lane_files=lambda cwd: {"same.txt": f"Version {cwd.name}\n"})
+    with pytest.raises(EscalationError, match="[Mm]erge"):
+        run_integration_phase(pctx)
+    assert (pctx.run_dir / "escalation.md").is_file()
+    assert RunState.load(pctx.repo, pctx.state.run_id).phase == "escalated"
+
+
+def test_e2e_failure_routes_triage_findings_to_the_named_lane(pctx, target_repo):
+    write_config(target_repo, E2E_MARKER_CONFIG)
+    pctx.config = AdwConfig.load(target_repo)
+
+    def writes(cwd):
+        if cwd.name != "frontend":
+            return {"backend.py": "pass\n"}
+        fix_runs = [c for c in pctx.agents.calls if c.agent == "build_agent" and c.cwd == cwd]
+        if len(fix_runs) >= 2:  # zweiter Lauf in der frontend-Lane = E2E-Fix
+            return {"e2e-fixed": "ok\n"}
+        return {"frontend.js": "v1\n"}
+
+    prepare_built_parallel(pctx, lane_files=writes, build_responses=3)
+    pctx.agents.script("e2e_triage", triage_json("frontend"))
+    run_integration_phase(pctx)
+
+    triage_calls = [c for c in pctx.agents.calls if c.agent == "e2e_triage"]
+    assert len(triage_calls) == 1
+    assert "E2E-KAPUTT" in triage_calls[0].task
+    frontend_calls = [
+        c for c in pctx.agents.calls if c.agent == "build_agent" and c.cwd.name == "frontend"
+    ]
+    backend_calls = [
+        c for c in pctx.agents.calls if c.agent == "build_agent" and c.cwd.name == "backend"
+    ]
+    assert len(frontend_calls) == 2  # Build + E2E-Fix
+    assert len(backend_calls) == 1  # Backend bleibt unangetastet
+    assert "Button kaputt" in frontend_calls[1].task
+    assert frontend_calls[1].resume == frontend_calls[0].resume or frontend_calls[1].resume
+    worktree = pctx.repo / ".adw" / "runs" / pctx.state.run_id / "trees" / "integration"
+    assert (worktree / "e2e-fixed").is_file()
+    assert pctx.state.phase == "codex_review"
+
+
+def test_identical_e2e_failures_trigger_circuit_breaker(pctx, target_repo):
+    write_config(
+        target_repo,
+        PARALLEL_CONFIG.replace(
+            'cmd: "true"\n  timeout: 60',
+            "cmd: \"sh -c 'echo IMMER-GLEICH; exit 1'\"\n  timeout: 60",
+        ),
+    )
+    pctx.config = AdwConfig.load(target_repo)
+
+    def writes(cwd):
+        return {f"datei-{len(pctx.agents.calls)}.txt": "x\n"}
+
+    prepare_built_parallel(pctx, lane_files=writes, build_responses=6)
+    pctx.agents.script("e2e_triage", triage_json("backend"), triage_json("backend"))
+    with pytest.raises(EscalationError, match="Circuit|unverändert"):
+        run_integration_phase(pctx)
+    triage_calls = [c for c in pctx.agents.calls if c.agent == "e2e_triage"]
+    assert len(triage_calls) == 1  # zweite identische Runde eskaliert VOR der Triage
+
+
+def test_e2e_round_limit_escalates(pctx, target_repo):
+    # Zähler lebt AUSSERHALB des Integration-Worktrees (der wird je Runde neu
+    # aufgebaut) — so variiert der Output und der Circuit-Breaker greift nicht.
+    write_config(
+        target_repo,
+        PARALLEL_CONFIG.replace(
+            'cmd: "true"\n  timeout: 60',
+            "cmd: \"sh -c 'cat ../../zaehler 2>/dev/null | wc -l; "
+            "echo x >> ../../zaehler; exit 1'\"\n  timeout: 60",
+        ),
+    )
+    pctx.config = AdwConfig.load(target_repo)
+
+    def writes(cwd):
+        return {f"datei-{len(pctx.agents.calls)}.txt": "x\n"}
+
+    prepare_built_parallel(pctx, lane_files=writes, build_responses=30)
+    pctx.agents.script("e2e_triage", *[triage_json("backend", f"Runde {i}") for i in range(12)])
+    with pytest.raises(EscalationError, match="Runden|[Ll]imit"):
+        run_integration_phase(pctx)
+    triage_calls = [c for c in pctx.agents.calls if c.agent == "e2e_triage"]
+    assert len(triage_calls) == 9  # 10 E2E-Läufe, nach dem 10. keine Triage mehr
+
+
+def test_unparseable_e2e_triage_output_escalates(pctx, target_repo):
+    write_config(target_repo, E2E_MARKER_CONFIG)
+    pctx.config = AdwConfig.load(target_repo)
+    prepare_built_parallel(pctx)
+    pctx.agents.script("e2e_triage", "Ich glaube das Frontend ist kaputt (kein JSON)")
+    with pytest.raises(EscalationError, match="[Tt]riage"):
+        run_integration_phase(pctx)
+
+
+def test_integration_round_counter_survives_resume(pctx, target_repo):
+    write_config(target_repo, E2E_MARKER_CONFIG)
+    pctx.config = AdwConfig.load(target_repo)
+    prepare_built_parallel(pctx)
+    pctx.state.integration_rounds = 9  # persistierter Stand eines gecrashten Runs
+    pctx.save()
+    with pytest.raises(EscalationError, match="Runden|[Ll]imit"):
+        run_integration_phase(pctx)
+    triage_calls = [c for c in pctx.agents.calls if c.agent == "e2e_triage"]
+    assert triage_calls == []  # Limit war schon erreicht — kein 11. Fix-Versuch
+
+
+def test_exhausted_round_limit_escalates_before_any_new_e2e_run(pctx, target_repo):
+    """Regression (Codex): Crash zwischen Runden-Save und Limit-Check darf beim
+    Resume keine 11. Runde starten — Limit-Check VOR Merge/E2E."""
+    write_config(target_repo, E2E_MARKER_CONFIG)
+    pctx.config = AdwConfig.load(target_repo)
+    prepare_built_parallel(pctx)
+    calls_before = len(pctx.agents.calls)
+    pctx.state.integration_rounds = 10
+    pctx.save()
+    with pytest.raises(EscalationError, match="Runden|[Ll]imit"):
+        run_integration_phase(pctx)
+    assert len(pctx.agents.calls) == calls_before  # kein Agent mehr gelaufen
+    worktree = pctx.repo / ".adw" / "runs" / pctx.state.run_id / "trees" / "integration"
+    assert not worktree.exists()  # nicht mal der Merge wurde neu aufgebaut
+
+
+def test_merge_timeout_escalates_instead_of_crashing(pctx, monkeypatch):
+    """Regression (Codex): TimeoutExpired beim Merge muss im Eskalationspfad
+    landen (Report + phase=escalated), nicht als roher Traceback."""
+    import subprocess as sp
+
+    prepare_built_parallel(pctx)
+    real_run = sp.run
+
+    def slow_merge(argv, *args, **kwargs):
+        if isinstance(argv, list) and "merge" in argv and "--abort" not in argv:
+            raise sp.TimeoutExpired(cmd=argv, timeout=300)
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr("adw.phases.subprocess.run", slow_merge)
+    with pytest.raises(EscalationError, match="[Mm]erge"):
+        run_integration_phase(pctx)
+    assert (pctx.run_dir / "escalation.md").is_file()
+    assert RunState.load(pctx.repo, pctx.state.run_id).phase == "escalated"

@@ -1,6 +1,7 @@
 """Mocks für --dry-run und Tests: skriptbare Agent-/Codex-Antworten, 0 Tokens."""
 
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -26,7 +27,11 @@ class MockAgentRunner:
     calls: list[AgentCall] = field(default_factory=list)
     # Simulierte Datei-Outputs je Agent: werden bei jedem run() relativ zum
     # cwd geschrieben — so entstehen .adw/spec.md & Co. auch im Dry-Run.
-    file_writes: dict[str, dict[str, str]] = field(default_factory=dict)
+    # Statt eines dicts ist auch ein Callable (cwd -> dict) erlaubt, wenn der
+    # Output vom Arbeitsverzeichnis abhängt (z. B. je Lane verschieden).
+    file_writes: dict[str, dict[str, str] | Callable[[Path], dict[str, str]]] = field(
+        default_factory=dict
+    )
     _session_counter: int = 0
 
     def script(self, agent_name: str, *responses: str) -> None:
@@ -57,7 +62,10 @@ class MockAgentRunner:
             raise AssertionError(
                 f"Kein gescriptetes Ergebnis für Agent {agent.name!r} (Task: {task[:80]!r})"
             )
-        for relpath, content in self.file_writes.get(agent.name, {}).items():
+        files = self.file_writes.get(agent.name, {})
+        if callable(files):
+            files = files(Path(cwd))
+        for relpath, content in files.items():
             target = Path(cwd) / relpath
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
