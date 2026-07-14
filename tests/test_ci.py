@@ -118,6 +118,29 @@ def test_no_pipeline_for_branch_keeps_polling_then_times_out(tmp_path):
         poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=FakeSleep())
 
 
+def test_sleep_never_exceeds_remaining_budget(tmp_path):
+    """Regression: timeout=90/interval=60 darf nicht 120s schlafen."""
+    cfg = CiConfig(poll_interval=60, timeout=90, staging_job=None)
+    glab = FakeGlab([pipeline_json("running")] * 10)
+    sleep = FakeSleep()
+    with pytest.raises(CiTimeoutError):
+        poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=sleep)
+    assert sleep.total <= 90
+    assert sleep.calls == [60, 30]
+
+
+def test_jobs_are_paginated_beyond_100(tmp_path):
+    """Regression: Staging-Job auf Seite 2 darf nicht als 'fehlt' gelten."""
+    page1 = json.dumps(
+        [{"id": i, "name": f"job-{i}", "status": "success"} for i in range(1, 101)]
+    )
+    page2 = json.dumps([{"id": 101, "name": "deploy-staging", "status": "success"}])
+    cfg = CiConfig(staging_job="deploy-staging")
+    glab = FakeGlab([pipeline_json("success"), page1, page2])
+    result = poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=FakeSleep())
+    assert result.passed
+
+
 def test_broken_glab_json_raises_clear_error(tmp_path):
     from adw.ci import CiError
 

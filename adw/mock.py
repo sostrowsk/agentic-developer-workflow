@@ -24,10 +24,16 @@ class MockAgentRunner:
 
     scripts: dict[str, deque[str]] = field(default_factory=lambda: defaultdict(deque))
     calls: list[AgentCall] = field(default_factory=list)
+    # Simulierte Datei-Outputs je Agent: werden bei jedem run() relativ zum
+    # cwd geschrieben — so entstehen .adw/spec.md & Co. auch im Dry-Run.
+    file_writes: dict[str, dict[str, str]] = field(default_factory=dict)
     _session_counter: int = 0
 
     def script(self, agent_name: str, *responses: str) -> None:
         self.scripts[agent_name].extend(responses)
+
+    def script_files(self, agent_name: str, files: dict[str, str]) -> None:
+        self.file_writes[agent_name] = files
 
     def run(
         self,
@@ -51,6 +57,10 @@ class MockAgentRunner:
             raise AssertionError(
                 f"Kein gescriptetes Ergebnis für Agent {agent.name!r} (Task: {task[:80]!r})"
             )
+        for relpath, content in self.file_writes.get(agent.name, {}).items():
+            target = Path(cwd) / relpath
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
         if resume:
             session_id = resume  # Resume behält die Session — wie das echte SDK
         else:

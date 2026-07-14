@@ -24,7 +24,15 @@ BUILDER_TOOLS = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"]
 # Approval-Regeln immer workspace-relativ — cwd allein ist keine
 # Dateisystem-Grenze; ohne passende Regel wird headless verweigert.
 SCOPED_READ_RULES = ["Read(./**)", "Grep(./**)", "Glob(./**)"]
-SCOPED_ADW_WRITE_RULES = ["Write(.adw/**)", "Edit(.adw/**)"]
+# Artefakt-EXAKTE Schreibrechte: .adw/** würde auch .adw/runs/ (State!)
+# und .adw/config.yaml erlauben.
+SPEC_WRITE_RULES = ["Write(.adw/spec.md)", "Edit(.adw/spec.md)"]
+PLAN_WRITE_RULES = [
+    "Write(.adw/plan.md)",
+    "Edit(.adw/plan.md)",
+    "Write(.adw/contract.yaml)",
+    "Edit(.adw/contract.yaml)",
+]
 SCOPED_WORKTREE_WRITE_RULES = ["Write(./**)", "Edit(./**)"]
 
 # Deny schlägt Allow — Secret-Stores sind für ALLE Agents tabu, auch für
@@ -57,9 +65,13 @@ _SECRET_FILES = [
     "~/.bash_history",
     "~/.zsh_history",
 ]
-SECRET_STORE_DENY_RULES = [
-    rule for store in _SECRET_STORES for rule in (f"Read({store})", f"Read({store}/**)")
-] + [f"Read({file})" for file in _SECRET_FILES]
+SECRET_STORE_DENY_RULES = (
+    [rule for store in _SECRET_STORES for rule in (f"Read({store})", f"Read({store}/**)")]
+    + [f"Read({file})" for file in _SECRET_FILES]
+    # Run-State und Transkripte gehören dem Orchestrator — kein Agent
+    # schreibt in .adw/runs/ (Deny schlägt jedes Allow).
+    + ["Write(.adw/runs/**)", "Edit(.adw/runs/**)"]
+)
 
 
 class AgentRunError(Exception):
@@ -103,7 +115,7 @@ REGISTRY: dict[str, AgentSpec] = {
         name="spec_agent",
         model=FABLE,
         tools=WRITER_TOOLS,
-        allowed_tools=[*SCOPED_READ_RULES, *SCOPED_ADW_WRITE_RULES],
+        allowed_tools=[*SCOPED_READ_RULES, *SPEC_WRITE_RULES],
         system_append=(
             "Du bist der Spec-Agent eines Agentic Developer Workflow. Du schreibst "
             "AUSSCHLIESSLICH die Spezifikation nach fester Vorlage (Ziel, Scope, "
@@ -115,7 +127,7 @@ REGISTRY: dict[str, AgentSpec] = {
         name="plan_agent",
         model=FABLE,
         tools=WRITER_TOOLS,
-        allowed_tools=[*SCOPED_READ_RULES, *SCOPED_ADW_WRITE_RULES],
+        allowed_tools=[*SCOPED_READ_RULES, *PLAN_WRITE_RULES],
         system_append=(
             "Du bist der Plan-Agent eines Agentic Developer Workflow. Du erzeugst aus "
             ".adw/spec.md den Implementierungsplan .adw/plan.md mit den Workstreams "

@@ -67,14 +67,15 @@ def test_non_ascii_repo_path_is_idempotent(tmp_path):
     assert first == second
 
 
-def test_git_calls_do_not_leak_secrets_to_hooks(target_repo, monkeypatch, tmp_path):
-    leak = tmp_path / "leak.txt"
+def test_repo_hooks_never_run_during_worktree_ops(target_repo, tmp_path):
+    """Repo-Hooks laufen bei Orchestrator-Git-Ops GAR NICHT (core.hooksPath=/dev/null)."""
+    marker = tmp_path / "hook-lief.txt"
     hook = target_repo / ".git" / "hooks" / "post-checkout"
-    hook.write_text(f'#!/bin/sh\nprintf "%s" "${{ANTHROPIC_API_KEY:-clean}}" > "{leak}"\n')
+    hook.write_text(f'#!/bin/sh\ntouch "{marker}"\n')
     hook.chmod(0o755)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "geheim")
     create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
-    assert leak.read_text() == "clean"
+    remove_lane_worktree(target_repo, RUN_ID, "backend")
+    assert not marker.exists()
 
 
 def test_locked_branch_deletion_raises_instead_of_silent_success(target_repo):
@@ -99,14 +100,6 @@ def test_remove_twice_is_idempotent_even_with_localized_git(target_repo, monkeyp
     create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
     remove_lane_worktree(target_repo, RUN_ID, "backend")
     remove_lane_worktree(target_repo, RUN_ID, "backend")  # darf nicht raisen
-
-
-def test_noisy_hook_output_does_not_blow_memory(target_repo):
-    hook = target_repo / ".git" / "hooks" / "post-checkout"
-    hook.write_text("#!/bin/sh\nyes x | head -c 10000000\n")
-    hook.chmod(0o755)
-    path = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
-    assert path.is_dir()
 
 
 def test_registered_but_deleted_worktree_is_recreated(target_repo):
@@ -141,66 +134,37 @@ def test_existing_gitignore_without_catchall_gets_amended(target_repo):
     assert ".adw/runs/" not in status or ".gitignore" in status
 
 
-def test_partially_created_worktree_is_not_accepted_on_retry(target_repo, tmp_path):
-    """Regression: nach fehlgeschlagenem worktree add (Hook-Fail) muss der Retry NEU erstellen."""
-    import pytest
-
-    from adw.worktrees import WorktreeError
-
-    count = tmp_path / "hook-count"
-    hook = target_repo / ".git" / "hooks" / "post-checkout"
-    hook.write_text(
-        "#!/bin/sh\n"
-        f'echo x >> "{count}"\n'
-        f'[ "$(wc -l < "{count}")" -ge 2 ] || exit 1\n'
-    )
-    hook.chmod(0o755)
-    with pytest.raises(WorktreeError):
-        create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
+def test_partially_created_worktree_is_not_accepted_on_retry(target_repo):
+    """Regression: registrierter Worktree OHNE Ready-Marker (abgebrochenes add)
+    muss beim Retry frisch neu erstellt werden."""
     path = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
-    assert path.is_dir()
-    assert int(count.read_text().count("x")) >= 2  # Hook lief beim Retry erneut
+    (path / "rest-des-abbruchs.txt").write_text("halbfertig")
+    marker = target_repo / ".adw" / "runs" / RUN_ID / "trees" / "backend.ready"
+    marker.unlink()  # Partial-Signatur: registriert + Dir + KEIN Marker
+    recreated = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
+    assert recreated.is_dir()
+    assert not (recreated / "rest-des-abbruchs.txt").exists()  # frisch neu erstellt
+    assert marker.exists()
 
 
-def test_stale_ready_marker_does_not_bless_partial_recreate(target_repo, tmp_path):
-    """Regression: alter .ready-Marker darf einen fehlgeschlagenen Neuaufbau nicht adeln."""
+def test_stale_ready_marker_does_not_bless_missing_worktree(target_repo):
+    """Regression: alter .ready-Marker + fehlendes Dir darf nicht als fertig gelten."""
     import shutil
-
-    import pytest
-
-    from adw.worktrees import WorktreeError
 
     path = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
     shutil.rmtree(path)  # Marker bleibt liegen
-    hook = target_repo / ".git" / "hooks" / "post-checkout"
-    hook.write_text("#!/bin/sh\nexit 1\n")
-    hook.chmod(0o755)
-    with pytest.raises(WorktreeError):
-        create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
-    count = tmp_path / "hook-count"
-    hook.write_text(f'#!/bin/sh\necho x >> "{count}"\nexit 0\n')
     recreated = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
     assert recreated.is_dir()
-    assert count.exists(), "Partial wurde als fertig akzeptiert — add lief nicht erneut"
     assert git(recreated, "rev-parse", "--abbrev-ref", "HEAD") == f"adw/{RUN_ID}/backend"
 
 
-def test_stale_marker_on_unregistered_worktree_is_cleared_before_add(target_repo, tmp_path):
-    import pytest
-
-    from adw.worktrees import WorktreeError
-
+def test_stale_marker_on_unregistered_worktree_is_cleared_before_add(target_repo):
+    """Regression: extern entfernter Worktree + alter Marker → sauber neu erstellen."""
     path = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
     git(target_repo, "worktree", "remove", "--force", str(path))  # Marker bleibt
-    hook = target_repo / ".git" / "hooks" / "post-checkout"
-    hook.write_text("#!/bin/sh\nexit 1\n")
-    hook.chmod(0o755)
-    with pytest.raises(WorktreeError):
-        create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
-    count = tmp_path / "hook-count"
-    hook.write_text(f'#!/bin/sh\necho x >> "{count}"\nexit 0\n')
-    create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
-    assert count.exists(), "Partial wurde als fertig akzeptiert — add lief nicht erneut"
+    recreated = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
+    assert recreated.is_dir()
+    assert git(recreated, "rev-parse", "--abbrev-ref", "HEAD") == f"adw/{RUN_ID}/backend"
 
 
 def test_locked_partial_worktree_is_recovered(target_repo):

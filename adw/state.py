@@ -40,8 +40,26 @@ class LaneState(BaseModel):
     branch: str
     session_id: str | None = None
     ports: dict[str, int] = Field(default_factory=dict)
+    # Fork-Point der Lane (SHA bei Worktree-Erstellung) — Restaurationen
+    # nutzen diesen unbeweglichen Stand, nicht den weiterrückenden Base-Branch.
+    base_sha: str | None = None
     gate_iterations: int = 0
     fix_cycles: int = 0
+    # Fertige Lanes werden beim Resume übersprungen — sonst würde ein Crash
+    # vor dem Phasenübergang ein akzeptiertes Ergebnis neu bauen.
+    completed: bool = False
+    # Vom ORCHESTRATOR persistierter Beweis, dass die Gates grün waren —
+    # Commit-Messages wären agent-fälschbar, dieser Flag nicht. gates_tree
+    # bindet den Beweis an den EXAKTEN Baum-Inhalt (inkl. untracked Files).
+    gates_passed: bool = False
+    gates_tree: str | None = None
+    # Offenes Gate-Feedback für den nächsten Fix-Lauf + Circuit-Breaker-Basis —
+    # überlebt einen Crash zwischen Gate-Fail und Fix-Iteration.
+    pending_task: str | None = None
+    last_failures: list[str] = Field(default_factory=list)
+    # HEAD vor dem Agent-Lauf: erkennt Agent-Commits auch über ein Crash-
+    # Fenster hinweg (Orchestrator-only-Commit-Invariante).
+    expected_head: str | None = None
 
 
 class RunState(BaseModel):
@@ -53,6 +71,14 @@ class RunState(BaseModel):
     parallel: bool
     lanes: dict[str, LaneState] = Field(default_factory=dict)
     approval_granted: bool = False
+    # --no-approval muss den Crash überleben — der Resume-Aufruf kennt das
+    # CLI-Flag nicht mehr.
+    skip_approval: bool = False
+    # Checkpoint des Spec-/Plan-Authoring-Loops: Session, offener Fix-Task und
+    # Findings-Basis überleben so einen Crash mitten im Review-Zyklus.
+    authoring_session: str | None = None
+    authoring_pending_task: str | None = None
+    authoring_last_findings: list[str] = Field(default_factory=list)
     # Monotone Speicher-Sequenz für find_latest — Datei-mtimes haben nur
     # Kernel-Tick-Granularität und produzieren Gleichstände.
     seq: int = 0

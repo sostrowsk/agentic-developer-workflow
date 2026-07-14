@@ -21,11 +21,13 @@ def _git(repo: Path, *args: str) -> str:
     """Git-Query mit parsebarem stdout — nur für Kommandos OHNE Hook-Ausführung."""
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo), *args],
+            # Repo-Hooks deaktiviert: worktree add/remove führt sonst
+            # repo-kontrollierte Hooks als Orchestrator (außerhalb jeder
+            # Sandbox) aus. Whitelist-Env: keine Secrets in git-Subprozesse.
+            ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", *args],
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT,
-            # Whitelist-Env: keine Secrets in git-Subprozesse.
             env=safe_env(),
         )
     except subprocess.TimeoutExpired as exc:
@@ -39,7 +41,10 @@ def _git_effect(repo: Path, *args: str) -> None:
     """Git-Kommando mit Seiteneffekt (kann Hooks ausführen) — Output nur als
     RAM-bounded Tail für die Fehlermeldung, eine laute Hook kann den
     Orchestrator nicht fluten."""
-    quoted = " ".join(shlex.quote(a) for a in ["git", "-C", str(repo), *args])
+    quoted = " ".join(
+        shlex.quote(a)
+        for a in ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", *args]
+    )
     report = run_gates(
         [Gate(name=f"git-{args[0]}", cmd=quoted, timeout=_GIT_TIMEOUT)], cwd=repo
     )
@@ -48,7 +53,7 @@ def _git_effect(repo: Path, *args: str) -> None:
         raise WorktreeError(f"git {' '.join(args)}: {failure.output}")
 
 
-def _ensure_runs_gitignored(repo: Path) -> None:
+def ensure_runs_gitignored(repo: Path) -> None:
     """Selbst-ignorierendes .gitignore — Run-Artefakte tauchen nie in git status auf."""
     runs_dir = repo / RUNS_RELPATH
     runs_dir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +77,7 @@ def lane_branch(run_id: str, lane: str) -> str:
 def create_lane_worktree(repo: Path, run_id: str, lane: str, base_branch: str) -> Path:
     """Worktree auf eigenem Lane-Branch ab base_branch; idempotent."""
     repo = repo.resolve()  # relative Pfade + `git -C` + cwd vertragen sich nicht
-    _ensure_runs_gitignored(repo)
+    ensure_runs_gitignored(repo)
     path = lane_worktree_path(repo, run_id, lane)
     branch = lane_branch(run_id, lane)
     ready = _ready_marker(path)
@@ -128,7 +133,17 @@ def remove_lane_worktree(repo: Path, run_id: str, lane: str) -> None:
 def _branch_exists(repo: Path, branch: str) -> bool:
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo), "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "core.hooksPath=/dev/null",
+                "show-ref",
+                "--verify",
+                "--quiet",
+                f"refs/heads/{branch}",
+            ],
             capture_output=True,
             text=True,
             timeout=_GIT_TIMEOUT,

@@ -65,18 +65,21 @@ def poll_pipeline(
     Staging-Job ist grün. Bei Rot kommen die Logs der fehlgeschlagenen
     Jobs als Excerpt mit — Futter für den Log-Analyst.
     """
-    waited = 0
+    # Budget als Restzeit führen und den Sleep darauf kappen — sonst schläft
+    # ein 61s-Budget bei 60s-Intervall bis 120s.
+    remaining = float(cfg.timeout)
     while True:
         pipeline = _latest_pipeline(repo, branch, run_glab)
         if pipeline is not None and pipeline["status"] in _TERMINAL_STATUSES:
             return _evaluate(repo, pipeline, cfg, run_glab)
-        if waited >= cfg.timeout:
+        if remaining <= 0:
             raise CiTimeoutError(
                 f"Pipeline für {branch} nach {cfg.timeout}s nicht abgeschlossen "
                 f"(Status: {pipeline['status'] if pipeline else 'keine Pipeline gefunden'})"
             )
-        sleep(cfg.poll_interval)
-        waited += cfg.poll_interval
+        nap = min(float(cfg.poll_interval), remaining)
+        sleep(nap)
+        remaining -= nap
 
 
 def _latest_pipeline(repo: Path, branch: str, run_glab: RunGlab) -> dict | None:
@@ -115,15 +118,28 @@ def fetch_failed_job_logs(repo: Path, pipeline_id: int, run_glab: RunGlab = run_
     return _logs_for(repo, failed, run_glab)
 
 
+_JOBS_PER_PAGE = 100
+
+
 def _jobs(repo: Path, pipeline_id: int | None, run_glab: RunGlab) -> list[dict]:
-    raw = run_glab(
-        ["api", f"projects/:id/pipelines/{pipeline_id}/jobs?per_page=100"],
-        repo,
-    )
-    jobs = _parse_json(raw, "pipeline jobs")
-    if not isinstance(jobs, list):
-        raise CiError(f"glab api jobs: unerwartetes JSON — {raw[:200]}")
-    return jobs
+    jobs: list[dict] = []
+    page = 1
+    while True:
+        raw = run_glab(
+            [
+                "api",
+                f"projects/:id/pipelines/{pipeline_id}/jobs"
+                f"?per_page={_JOBS_PER_PAGE}&page={page}",
+            ],
+            repo,
+        )
+        batch = _parse_json(raw, "pipeline jobs")
+        if not isinstance(batch, list):
+            raise CiError(f"glab api jobs: unerwartetes JSON — {raw[:200]}")
+        jobs.extend(batch)
+        if len(batch) < _JOBS_PER_PAGE:
+            return jobs
+        page += 1
 
 
 def _logs_for(repo: Path, jobs: list[dict], run_glab: RunGlab) -> str:

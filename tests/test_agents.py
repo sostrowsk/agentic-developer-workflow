@@ -140,11 +140,12 @@ def test_sdk_runner_exposes_only_spec_tools_and_sanitized_env(
     assert options.env.get("PATH", "geerbt")  # PATH wird nie geblankt
 
 
-def test_spec_agent_writes_are_only_approved_inside_adw_dir(captured_query, tmp_path):
+def test_spec_agent_writes_are_only_approved_for_its_artifact(captured_query, tmp_path):
     SdkAgentRunner().run(REGISTRY["spec_agent"], "task", cwd=tmp_path)
     options = captured_query["options"]
-    assert "Write(.adw/**)" in options.allowed_tools
+    assert "Write(.adw/spec.md)" in options.allowed_tools
     assert "Write" not in options.allowed_tools  # kein pauschales Write-Approval
+    assert not any(".adw/**" in rule for rule in options.allowed_tools)
 
 
 def test_build_agent_is_worktree_scoped_and_bash_sandboxed(captured_query, tmp_path):
