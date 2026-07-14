@@ -129,8 +129,15 @@ außer den dokumentierten (`poll_interval`, `timeout`).
 ```
 
 `category` befüllt nur der finale Reviewer (Triage-Grundlage). Codex wird per Prompt +
-`--output-schema`-ähnlicher Instruktion auf dieses Schema festgelegt; Parsing tolerant
-(JSON-Block-Extraktion), aber Validierung strikt via Pydantic.
+`--output-schema`-ähnlicher Instruktion auf dieses Schema festgelegt.
+
+**Parser-Kontrakt (strikt, bewusste Design-Entscheidung):** Akzeptiert wird ausschließlich
+(a) Output, der als Ganzes ein JSON-Objekt ist, oder (b) der Inhalt des letzten
+```` ```json ````-Fence. Alles andere (Prosa um nacktes JSON, Entwürfe, abgeschnittene oder
+verpackte Antworten, unclosed Fences) → `FindingsParseError` = Retry-/Eskalationsfall.
+Toleranz-Heuristiken sind gegen adversariale Outputs nicht abdichtbar (Stale-ok-Risiko);
+ein Parse-Fehler ist safe, ein falsches „ok" nicht. Validierung strikt via Pydantic
+(`extra="forbid"`, Verdict-Findings-Konsistenz, Pflichtfelder außer `category`).
 
 ### Artefakte & State
 

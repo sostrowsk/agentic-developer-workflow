@@ -31,10 +31,10 @@
 
 **Files:** Create: `adw/findings.py`, `tests/test_findings.py`
 
-Pydantic-Models exakt nach SPEC §5: `Finding` (`severity: Literal["P1","P2","P3"]`, `lane: Literal["frontend","backend","unknown"]`, `file`, `issue`, `remediation_plan: list[str]`, `category: Literal["scope_gap","implementation","trivial"] | None`) und `ReviewResult` (`verdict: Literal["ok","needs_fixes"]`, `findings: list[Finding]`). Dazu `extract_review_result(text: str) -> ReviewResult`: extrahiert den letzten ```json-Block bzw. rohes JSON aus Freitext (tolerant), validiert strikt.
+Pydantic-Models exakt nach SPEC §5: `Finding` (`severity: Literal["P1","P2","P3"]`, `lane: Literal["frontend","backend","unknown"]`, `file`, `issue`, `remediation_plan: list[str]`, `category: Literal["scope_gap","implementation","trivial"] | None`) und `ReviewResult` (`verdict: Literal["ok","needs_fixes"]`, `findings: list[Finding]`). Dazu `extract_review_result(text: str) -> ReviewResult` nach dem **strikten Parser-Kontrakt** (SPEC §5): ganzer Text = JSON-Objekt ODER Inhalt des letzten ```json-Fence; alles andere → `FindingsParseError` (Retry-/Eskalationsfall). Keine Prosa-Toleranz-Heuristiken — nicht abdichtbar, Stale-ok-Risiko.
 
-**Tests (je ein Verhalten):** valid parse; legacy-freier Fehlerfall (kaputtes JSON → `FindingsParseError` mit Roh-Text im Message); JSON eingebettet in Prosa/Codefence wird gefunden; `verdict=ok` mit leeren findings; unbekannte `severity` → ValidationError.
-RED → implementieren → GREEN → Commit `feat: Findings-Schema mit toleranter JSON-Extraktion`.
+**Tests (je ein Verhalten):** valid parse (pur + letzter Fence); kaputtes/abgeschnittenes JSON und unclosed Fences → `FindingsParseError` mit Roh-Text; Prosa um nacktes JSON → Fehler; `verdict=ok` mit leeren findings; Schema-Verstöße (severity, extra keys, Verdict-Konsistenz) → ValidationError; adversariale Inputs (Duplicate Keys, Nesting-Tiefe, Riesen-Integer) fail-closed in linearer Zeit.
+RED → implementieren → GREEN → Commit `feat: Findings-Schema mit striktem Parser-Kontrakt`.
 
 ### Task 2: Ziel-Repo-Config (`adw/config.py`)
 
