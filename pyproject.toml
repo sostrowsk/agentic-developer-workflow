@@ -7,7 +7,8 @@ dependencies = [
     "pydantic>=2",
     "typer>=0.12",
     "pyyaml>=6",
-    "claude-agent-sdk>=0.1",
+    # >=0.2.118: braucht tools/setting_sources/strict_mcp_config/sandbox
+    "claude-agent-sdk>=0.2.118",
     "anyio>=4",
 ]
 

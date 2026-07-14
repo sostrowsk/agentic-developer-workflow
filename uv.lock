@@ -30,7 +30,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", specifier = ">=4" },
-    { name = "claude-agent-sdk", specifier = ">=0.1" },
+    { name = "claude-agent-sdk", specifier = ">=0.2.118" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "typer", specifier = ">=0.12" },

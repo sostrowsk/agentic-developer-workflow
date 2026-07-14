@@ -18,6 +18,9 @@ _ALLOWED = {
     "PYTHONPATH",
     "NODE_ENV",
     "CI",
+    # Nicht-geheimer Pfad zur Claude-CLI-Konfiguration — nötig, damit
+    # stored-login/Session-Resume auch mit custom Config-Dir funktioniert.
+    "CLAUDE_CONFIG_DIR",
 }
 _ALLOWED_PREFIXES = ("LC_",)
 
