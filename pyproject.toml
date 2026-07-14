@@ -1,0 +1,39 @@
+[project]
+name = "adw"
+version = "0.1.0"
+description = "Agentic Developer Workflow — 7-Phasen-Orchestrator: Claude Agent SDK + Codex + deterministische Gates"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2",
+    "typer>=0.12",
+    "pyyaml>=6",
+    "claude-agent-sdk>=0.1",
+    "anyio>=4",
+]
+
+[project.scripts]
+adw = "adw.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["adw"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
