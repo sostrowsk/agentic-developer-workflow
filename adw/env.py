@@ -20,6 +20,8 @@ _ALLOWED = {
     "CI",
     # Nicht-geheimer Pfad zur Claude-CLI-Konfiguration — nötig, damit
     # stored-login/Session-Resume auch mit custom Config-Dir funktioniert.
+    # CODEX_HOME bewusst NICHT global: der Pfad wird nur dem CodexRunner
+    # gereicht, damit Gates/Agents das Auth-Verzeichnis nicht orten können.
     "CLAUDE_CONFIG_DIR",
 }
 _ALLOWED_PREFIXES = ("LC_",)

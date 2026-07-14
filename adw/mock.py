@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from adw.agents import AgentResult, AgentSpec
+from adw.findings import ReviewResult
 
 
 @dataclass(frozen=True)
@@ -56,3 +57,27 @@ class MockAgentRunner:
             self._session_counter += 1
             session_id = f"mock-session-{agent.name}-{self._session_counter}"
         return AgentResult(text=queue.popleft(), session_id=session_id)
+
+
+@dataclass(frozen=True)
+class CodexCall:
+    kind: str
+    content_refs: tuple[str, ...]
+    cwd: Path
+
+
+@dataclass
+class MockCodexRunner:
+    """Skriptbare Codex-Review-Ergebnisse in Aufruf-Reihenfolge, 0 Tokens."""
+
+    results: deque[ReviewResult] = field(default_factory=deque)
+    calls: list[CodexCall] = field(default_factory=list)
+
+    def script(self, *results: ReviewResult) -> None:
+        self.results.extend(results)
+
+    def review(self, kind: str, content_refs: list[str], cwd: Path) -> ReviewResult:
+        self.calls.append(CodexCall(kind=kind, content_refs=tuple(content_refs), cwd=Path(cwd)))
+        if not self.results:
+            raise AssertionError(f"Kein gescriptetes Codex-Ergebnis (kind={kind!r})")
+        return self.results.popleft()

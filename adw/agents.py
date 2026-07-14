@@ -39,6 +39,7 @@ _SECRET_STORES = [
     "~/.docker",
     "~/.kube",
     "~/.azure",
+    "~/.codex",
 ]
 _SECRET_FILES = [
     "~/.netrc",
@@ -229,6 +230,13 @@ def _deny_rules(deny_read_paths: list[str] | None = None) -> list[str]:
         # Write(./**) sonst das Überschreiben der Credentials erlauben.
         for tool in ("Read", "Write", "Edit"):
             rules.extend([f"{tool}({config_dir})", f"{tool}({config_dir}/**)"])
+    codex_home = os.environ.get("CODEX_HOME")
+    if codex_home:
+        resolved = Path(codex_home).resolve()
+        # Wie beim Claude-Config-Dir: auch Write/Edit verbieten, falls das
+        # Codex-Home im Workspace liegt (kein Credential-/Config-Planting).
+        for tool in ("Read", "Write", "Edit"):
+            rules.extend([f"{tool}({resolved})", f"{tool}({resolved}/**)"])
     for path in deny_read_paths or []:
         rules.extend([f"Read({path})", f"Read({path}/**)"])
     return rules

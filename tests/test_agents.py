@@ -188,9 +188,18 @@ def test_secret_stores_are_deny_listed_for_all_agents(captured_query, tmp_path):
     denied = set(captured_query["options"].disallowed_tools)
     # Beide Formen: Glob für die File-Tools UND plain Directory für die
     # Linux-Sandbox (die Glob-only-Denies ignoriert).
-    for store in ("~/.ssh", "~/.aws", "~/.claude", "~/.azure"):
+    for store in ("~/.ssh", "~/.aws", "~/.claude", "~/.azure", "~/.codex"):
         assert f"Read({store}/**)" in denied
         assert f"Read({store})" in denied
+
+
+def test_custom_codex_home_is_deny_listed_for_agents(captured_query, tmp_path, monkeypatch):
+    monkeypatch.setenv("CODEX_HOME", "/custom/codex-home")
+    SdkAgentRunner().run(REGISTRY["build_agent"], "task", cwd=tmp_path)
+    denied = set(captured_query["options"].disallowed_tools)
+    for tool in ("Read", "Write", "Edit"):
+        assert f"{tool}(/custom/codex-home)" in denied
+        assert f"{tool}(/custom/codex-home/**)" in denied
 
 
 def test_shell_startup_and_history_files_are_deny_listed(captured_query, tmp_path):
