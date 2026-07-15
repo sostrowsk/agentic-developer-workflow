@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADW — User-Handbuch</title>
+<style>
+  :root{
+    --ink:#1a2332; --muted:#5a6a7e; --bg:#ffffff; --panel:#f5f7fa;
+    --line:#dde4ec; --accent:#0b5fff; --accent-soft:#e8f0fe;
+    --ok:#1a7f37; --warn:#b35900; --err:#c0392b;
+    --mono:"SF Mono","Cascadia Code",Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.65 -apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:var(--ink);background:var(--bg)}
+  header{background:linear-gradient(135deg,#0b3d91 0%,#0b5fff 100%);color:#fff;padding:2.4rem 1.5rem 2rem}
+  header .wrap{max-width:980px;margin:0 auto}
+  header h1{margin:0 0 .3rem;font-size:1.9rem;letter-spacing:-.02em}
+  header p{margin:0;opacity:.85;font-size:1.02rem}
+  .badge{display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);border-radius:999px;padding:.1rem .7rem;font-size:.78rem;margin-bottom:.8rem;letter-spacing:.04em}
+  main{max-width:980px;margin:0 auto;padding:1.5rem}
+  h2{font-size:1.35rem;margin:2.6rem 0 .8rem;padding-bottom:.35rem;border-bottom:2px solid var(--line);letter-spacing:-.01em}
+  h3{font-size:1.08rem;margin:1.6rem 0 .5rem}
+  p{margin:.5rem 0 .9rem}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:.08em .35em}
+  pre{background:#10161f;color:#dce6f2;border-radius:8px;padding:.9rem 1.1rem;overflow-x:auto;font-family:var(--mono);font-size:.83rem;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  pre .c{color:#7d8da1}
+  table{border-collapse:collapse;width:100%;margin:.8rem 0 1.2rem;font-size:.92rem}
+  th,td{border:1px solid var(--line);padding:.45rem .65rem;text-align:left;vertical-align:top}
+  th{background:var(--panel);font-weight:600}
+  tr:nth-child(even) td{background:#fafbfd}
+  .tldr{background:var(--accent-soft);border:1px solid #bcd2ff;border-radius:10px;padding:1.1rem 1.3rem;margin:1.4rem 0}
+  .tldr h2{margin:0 0 .6rem;border:none;font-size:1.15rem;padding:0}
+  .tldr ul{margin:.2rem 0 .2rem 1.2rem;padding:0}
+  .tldr li{margin:.3rem 0}
+  .kern{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.8rem;margin:1rem 0}
+  .kern .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.8rem 1rem}
+  .kern .card b{display:block;margin-bottom:.25rem}
+  nav.toc{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:1rem 1.3rem;margin:1.4rem 0;columns:2;column-gap:2rem}
+  nav.toc ol{margin:0;padding-left:1.2rem}
+  nav.toc li{margin:.25rem 0;break-inside:avoid}
+  details{border:1px solid var(--line);border-radius:8px;margin:.7rem 0;background:#fff}
+  details summary{cursor:pointer;padding:.6rem .9rem;font-weight:600;background:var(--panel);border-radius:8px;list-style-position:inside}
+  details[open] summary{border-bottom:1px solid var(--line);border-radius:8px 8px 0 0}
+  details .inner{padding:.6rem 1rem}
+  .hint{border-left:4px solid var(--accent);background:var(--accent-soft);padding:.6rem .9rem;border-radius:0 8px 8px 0;margin:.8rem 0}
+  .warnbox{border-left:4px solid var(--warn);background:#fff6e9;padding:.6rem .9rem;border-radius:0 8px 8px 0;margin:.8rem 0}
+  .errbox{border-left:4px solid var(--err);background:#fdeeec;padding:.6rem .9rem;border-radius:0 8px 8px 0;margin:.8rem 0}
+  .phase-flow{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin:1rem 0;font-size:.85rem}
+  .phase-flow .ph{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.45rem .7rem;font-weight:600;white-space:nowrap}
+  .phase-flow .ph small{display:block;font-weight:400;color:var(--muted)}
+  .phase-flow .arrow{color:var(--muted)}
+  .exitcode{font-family:var(--mono);font-weight:700}
+  .ec0{color:var(--ok)} .ec2{color:var(--warn)} .ec1{color:var(--err)}
+  footer{max-width:980px;margin:2rem auto;padding:1rem 1.5rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line)}
+  .top{font-size:.8rem}
+  @media (max-width:720px){nav.toc{columns:1}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <span class="badge">USER-HANDBUCH · Stand 2026-07-15 · adw 0.1.0</span>
+    <h1>Agentic Developer Workflow (ADW)</h1>
+    <p>Ein Issue rein, ein geprüfter Feature-Branch mit grüner CI raus — vollautomatisch durch sieben Phasen.</p>
+  </div>
+</header>
+<main>
+
+<section class="tldr" id="tldr">
+  <h2>⚡ Auf einen Blick</h2>
+  <ul>
+    <li><b>Was:</b> <code>adw run</code> führt ein Issue durch <b>Spec → Plan+Kontrakt → Build → Integration/E2E → Codex-Review → finaler Review → Push/CI</b> — Agenten liefern Urteilsvermögen, der Kontrollfluss ist deterministischer Code.</li>
+    <li><b>Start:</b> <code>uv sync</code>, dann <code>.adw/config.yaml</code> im Ziel-Repo anlegen, dann <code>uv run adw run --repo &lt;pfad&gt; --issue "…"</code>.</li>
+    <li><b>Gefahrlos testen:</b> <code>--dry-run</code> fährt den kompletten Ablauf mit Mocks — 0 Tokens, kein Netz, kein Push.</li>
+    <li><b>Kontrolle behalten:</b> Nach dem Plan pausiert der Run (Exit 2). Plan lesen, dann <code>adw approve &lt;run_id&gt;</code>. Abschaltbar mit <code>--no-approval</code>.</li>
+    <li><b>Wenn etwas schiefgeht:</b> Exit 1 + Report unter <code>.adw/runs/&lt;run_id&gt;/escalation.md</code>. Nach Crash: <code>adw resume &lt;run_id&gt;</code> macht exakt dort weiter.</li>
+  </ul>
+</section>
+
+<section id="kernaussagen">
+  <h2>Kernaussagen</h2>
+  <div class="kern">
+    <div class="card"><b>Du gibst ein Issue, ADW liefert einen Branch.</b> Am Ende steht ein gepushter Feature-Branch, dessen Pipeline inklusive Staging-Deploy grün ist.</div>
+    <div class="card"><b>Reviewer fixen nie.</b> Jeder Fix läuft durch die Build-Agents und erneut durch alle Gates — es gibt keinen Sonderweg für „triviale" Fixes.</div>
+    <div class="card"><b>Alles ist begrenzt.</b> Feste Limits (10 Gate-Iterationen, 3 Fix-Zyklen, 1 CI-Re-Entry) und ein Circuit-Breaker verhindern Endlosschleifen; danach übernimmt ein Mensch.</div>
+    <div class="card"><b>Jeder Zustand überlebt einen Crash.</b> Der Run-State wird laufend persistiert; <code>adw resume</code> setzt in derselben Phase fort, ohne Ergebnisse zu verlieren.</div>
+  </div>
+</section>
+
+<nav class="toc" id="inhalt">
+  <ol>
+    <li><a href="#voraussetzungen">Voraussetzungen &amp; Installation</a></li>
+    <li><a href="#zielrepo">Das Ziel-Repo vorbereiten</a></li>
+    <li><a href="#erster-lauf">Der erste Lauf (Dry-Run)</a></li>
+    <li><a href="#cli">CLI-Referenz</a></li>
+    <li><a href="#ablauf">Was passiert in den sieben Phasen?</a></li>
+    <li><a href="#approval">Das Plan-Approval-Gate</a></li>
+    <li><a href="#artefakte">Artefakte, Reports &amp; Run-Verzeichnis</a></li>
+    <li><a href="#resume">Crash, Pause, Resume</a></li>
+    <li><a href="#eskalation">Eskalationen verstehen</a></li>
+    <li><a href="#troubleshooting">Troubleshooting &amp; FAQ</a></li>
+    <li><a href="#glossar">Glossar</a></li>
+  </ol>
+</nav>
+
+<h2 id="voraussetzungen">1. Voraussetzungen &amp; Installation</h2>
+<table>
+  <tr><th>Werkzeug</th><th>Wozu</th><th>Check</th></tr>
+  <tr><td>Python ≥ 3.12 + <b>uv</b></td><td>Laufzeitumgebung des Orchestrators</td><td><code>uv --version</code></td></tr>
+  <tr><td><b>Claude-CLI-Login</b></td><td>Die Claude-Agenten (Spec, Plan, Build, Reviews) laufen über das Agent SDK mit deinem gespeicherten Login</td><td><code>claude</code> einmal interaktiv anmelden</td></tr>
+  <tr><td><b>codex</b> (CLI)</td><td>Unabhängiger Reviewer für Spec, Plan und Code</td><td><code>codex login</code> einmalig</td></tr>
+  <tr><td><b>glab</b> (CLI)</td><td>GitLab-Issue lesen, CI-Pipeline überwachen</td><td><code>glab auth status</code></td></tr>
+  <tr><td><b>git</b></td><td>Worktrees, Branches, Merges, Push</td><td>—</td></tr>
+</table>
+
+<pre><code><span class="c"># Repo klonen und Abhängigkeiten installieren</span>
+git clone git@gitlab.com:addvendo/agentic-developer-workflow.git
+cd agentic-developer-workflow
+uv sync</code></pre>
+
+<div class="hint">Ohne gespeicherten Claude-Login bricht ADW <b>vor</b> dem ersten Agent-Lauf mit einer klaren Meldung ab (fail fast) — es wird nie stillschweigend ein API-Key aus der Umgebung benutzt.</div>
+
+<h2 id="zielrepo">2. Das Ziel-Repo vorbereiten</h2>
+<p>ADW arbeitet <b>gegen ein beliebiges Git-Repo</b> („Ziel-Repo"). Die gesamte projektspezifische Konfiguration lebt dort in <b>einer Datei</b>: <code>.adw/config.yaml</code>. Eine Vorlage liegt unter <code>examples/config.yaml</code>.</p>
+
+<pre><code>mkdir -p /pfad/zum/repo/.adw
+cp examples/config.yaml /pfad/zum/repo/.adw/config.yaml   <span class="c"># und anpassen</span></code></pre>
+
+<pre><code><span class="c"># .adw/config.yaml — Minimalbeispiel (eine Lane)</span>
+base_branch: staging
+lanes:
+  backend:
+    gates:                      <span class="c"># Reihenfolge = Ausführungsreihenfolge, fail fast</span>
+      - {name: black,  cmd: "black --check .",      timeout: 120}
+      - {name: isort,  cmd: "isort --check-only .", timeout: 120}
+      - {name: pytest, cmd: "pytest -x -q",         timeout: 1800}</code></pre>
+
+<details>
+  <summary>Vollständige Config-Referenz (alle Schlüssel)</summary>
+  <div class="inner">
+    <table>
+      <tr><th>Schlüssel</th><th>Pflicht</th><th>Bedeutung</th></tr>
+      <tr><td><code>base_branch</code></td><td>ja</td><td>Branch, von dem die Lanes forken und gegen den Diffs gerechnet werden.</td></tr>
+      <tr><td><code>lanes.&lt;name&gt;.gates[]</code></td><td>ja (≥ 1 Lane)</td><td>Gate-Liste je Lane. Jedes Gate braucht <code>name</code>, <code>cmd</code> und <code>timeout</code> (Sekunden). Gates laufen der Reihe nach; das erste rote Gate stoppt den Durchlauf.</td></tr>
+      <tr><td><code>lanes.frontend</code></td><td>optional</td><td>Fehlt die Lane, läuft ADW im Single-Lane-Modus. <code>--parallel</code> verlangt <code>backend</code> <b>und</b> <code>frontend</code>.</td></tr>
+      <tr><td><code>e2e.cmd</code> / <code>e2e.timeout</code></td><td>optional</td><td>E2E-Kommando (z.&nbsp;B. <code>npx playwright test</code>) — läuft nur mit <code>--parallel</code> auf dem Integrations-Branch.</td></tr>
+      <tr><td><code>ci.poll_interval</code></td><td>optional (60)</td><td>Sekunden zwischen zwei Pipeline-Abfragen.</td></tr>
+      <tr><td><code>ci.timeout</code></td><td>optional (2700)</td><td>Gesamtbudget fürs CI-Warten (45 min Default).</td></tr>
+      <tr><td><code>ci.staging_job</code></td><td>optional</td><td>Name eines Jobs (z.&nbsp;B. <code>deploy-staging</code>), der zusätzlich grün sein muss.</td></tr>
+    </table>
+    <p>Fehlende oder kaputte Config (unbekannte Schlüssel, Lane ohne Gates, Gate ohne Timeout, doppelte Schlüssel) bricht <b>sofort</b> mit einer klaren Meldung ab — es werden keine Defaults geraten, außer den beiden dokumentierten (<code>poll_interval</code>, <code>timeout</code>).</p>
+  </div>
+</details>
+
+<div class="warnbox"><b>Gates sind deine Qualitätsgrenze.</b> ADW akzeptiert Build-Ergebnisse nur, wenn <i>alle</i> Gates grün sind. Was die Gates nicht prüfen, prüft in Phase 3 niemand — konfiguriere also mindestens Formatter/Linter und die Testsuite.</div>
+
+<h2 id="erster-lauf">3. Der erste Lauf (Dry-Run)</h2>
+<p>Bevor Tokens fließen: Der Dry-Run fährt <b>den kompletten Kontrollfluss</b> mit gescripteten Mock-Agenten — 0 Tokens, kein Netz, kein Push. Er verifiziert deine Config, die Gates und den gesamten Ablauf:</p>
+<pre><code>uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --no-approval
+uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --no-approval --parallel</code></pre>
+<p>Der Dry-Run ist bewusst kein reiner Schönwetterlauf: Er simuliert <b>einen Gate-Fail</b> (der Fix geht als Folge-Task an dieselbe Agent-Session) und im <code>--parallel</code>-Modus <b>einen roten E2E-Lauf</b>, den der Triage-Agent in eine Lane zurückroutet. Du siehst also genau die Loops, die auch ein echter Lauf nehmen würde.</p>
+<p>Danach der echte Lauf:</p>
+<pre><code><span class="c"># Issue-Text direkt …</span>
+uv run adw run --repo /pfad/zum/repo --issue "Bug: Login bricht ab, wenn …"
+<span class="c"># … oder aus GitLab ziehen (Titel + Beschreibung via glab)</span>
+uv run adw run --repo /pfad/zum/repo --gitlab-issue 42 --parallel</code></pre>
+
+<h2 id="cli">4. CLI-Referenz</h2>
+<pre><code>adw run --repo &lt;pfad&gt; (--issue "Text" | --gitlab-issue &lt;id&gt;)
+        [--parallel] [--dry-run] [--no-approval] [--base-branch &lt;name&gt;]
+adw resume  &lt;run_id&gt; [--repo &lt;pfad&gt;]     <span class="c"># nach Crash; bei Approval-Pause → approve</span>
+adw approve &lt;run_id&gt; [--repo &lt;pfad&gt;]     <span class="c"># Plan-Approval erteilen + fortsetzen</span>
+adw status  [&lt;run_id&gt;] [--repo &lt;pfad&gt;]   <span class="c"># Runs + Phase anzeigen</span></code></pre>
+
+<table>
+  <tr><th>Option</th><th>Bedeutung</th></tr>
+  <tr><td><code>--issue "Text"</code></td><td>Issue-Beschreibung direkt auf der Kommandozeile. Genau <b>eine</b> Issue-Quelle ist Pflicht.</td></tr>
+  <tr><td><code>--gitlab-issue &lt;id&gt;</code></td><td>Holt Titel + Beschreibung des Issues via <code>glab issue view</code> aus dem GitLab-Projekt des Ziel-Repos.</td></tr>
+  <tr><td><code>--parallel</code></td><td>Baut Frontend- und Backend-Workstream in <b>zwei parallelen Lanes</b> (eigene Worktrees, Sessions, Ports) und aktiviert Integration + E2E-Gate. Verlangt beide Lanes in der Config.</td></tr>
+  <tr><td><code>--dry-run</code></td><td>Mocks statt Agenten, Fake-CI statt glab, kein Push. Der Modus wird im Run-State gespeichert — auch ein <code>resume</code>/<code>approve</code> eines Dry-Runs bleibt tokenfrei.</td></tr>
+  <tr><td><code>--no-approval</code></td><td>Überspringt die Plan-Approval-Pause. Gilt für den ganzen Run (überlebt Crash + Resume).</td></tr>
+  <tr><td><code>--base-branch &lt;name&gt;</code></td><td>Überschreibt <code>base_branch</code> aus der Config. Wird beim Run-Start <b>gepinnt</b>: spätere Änderungen an der Config verschieben einen laufenden Run nicht; ein Wechsel per Flag ist nur möglich, solange noch keine Lanes existieren.</td></tr>
+</table>
+
+<h3>Exit-Codes</h3>
+<table>
+  <tr><th>Code</th><th>Bedeutung</th><th>Nächster Schritt</th></tr>
+  <tr><td><span class="exitcode ec0">0</span></td><td>Run abgeschlossen (<code>done</code>) — Branch gepusht, Pipeline + Staging grün.</td><td>Merge Request stellen / mergen.</td></tr>
+  <tr><td><span class="exitcode ec2">2</span></td><td><code>awaiting_approval</code> — der Run wartet auf deine Plan-Freigabe.</td><td>Plan lesen, dann <code>adw approve &lt;run_id&gt;</code>.</td></tr>
+  <tr><td><span class="exitcode ec1">1</span></td><td>Eskalation oder Fehler.</td><td><code>.adw/runs/&lt;run_id&gt;/escalation.md</code> lesen.</td></tr>
+</table>
+
+<h2 id="ablauf">5. Was passiert in den sieben Phasen?</h2>
+<div class="phase-flow">
+  <span class="ph">1 Spec<small>Fable 5 + Codex</small></span><span class="arrow">→</span>
+  <span class="ph">2 Plan + Kontrakt<small>Fable 5 + Codex · Approval</small></span><span class="arrow">→</span>
+  <span class="ph">3 Build<small>Opus 4.8 je Lane + Gates</small></span><span class="arrow">→</span>
+  <span class="ph">4 Integration + E2E<small>nur --parallel</small></span><span class="arrow">→</span>
+  <span class="ph">5 Codex-Review<small>Code-Diff</small></span><span class="arrow">→</span>
+  <span class="ph">6 Finaler Review<small>Fable 5 + Triage</small></span><span class="arrow">→</span>
+  <span class="ph">7 Push + CI<small>glab-Polling</small></span>
+</div>
+
+<details open>
+  <summary>Phase 1–2: Spec und Plan entstehen — und werden unabhängig reviewt</summary>
+  <div class="inner">
+    <p>Der <b>Spec-Agent</b> schreibt aus deinem Issue eine Spezifikation nach fester Vorlage (Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, Definition of Done) nach <code>.adw/spec.md</code>. <b>Codex</b> reviewt sie; Findings gehen als Folge-Task <b>an dieselbe Agent-Session</b> zurück, bis das Verdict <code>ok</code> ist. Danach erzeugt der <b>Plan-Agent</b> analog <code>.adw/plan.md</code> (Workstreams) und <code>.adw/contract.yaml</code> (Schnittstellen-Kontrakt: OpenAPI/Typen/Events) — Codex prüft beides <b>gemeinsam gegen die Spec</b>. Anschließend pausiert der Run für dein Approval (Abschnitt 6).</p>
+  </div>
+</details>
+<details>
+  <summary>Phase 3: Build in isolierten Lanes mit Gate-Loop</summary>
+  <div class="inner">
+    <p>Je Lane entsteht ein eigener <b>Git-Worktree</b> unter <code>.adw/runs/&lt;run_id&gt;/trees/&lt;lane&gt;</code> mit eigenem Branch <code>adw/&lt;run_id&gt;/&lt;lane&gt;</code>, eigener Agent-Session und eigenen Ports (als <code>BACKEND_PORT</code>/<code>FRONTEND_PORT</code> in die Gates injiziert). Der <b>Build-Agent (Opus 4.8)</b> implementiert seinen Workstream strikt gegen den Kontrakt, mit TDD. Danach laufen deine <b>Gates</b>. Rot? Die Fehlerausgabe geht als Folge-Task an dieselbe Session — maximal 10 Iterationen, bei zweimal identischem Fehler bricht der Circuit-Breaker sofort ab. Grün? <b>Der Orchestrator committet</b> (nie der Agent).</p>
+  </div>
+</details>
+<details>
+  <summary>Phase 4: Integration + E2E (nur --parallel)</summary>
+  <div class="inner">
+    <p>Der Orchestrator mergt beide Lane-Branches auf einen frischen Integrations-Branch <code>adw/&lt;run_id&gt;/integration</code> und fährt dein E2E-Kommando. Bei Rot ordnet der <b>E2E-Triage-Agent</b> (Haiku, read-only) jeden Fehler einer Lane zu; der Fix läuft durch den regulären Lane-Loop (Gates!, Commit) und es wird neu integriert. Maximal 10 Runden. Ein Merge-Konflikt eskaliert sofort an dich — Konflikte löst kein Agent.</p>
+  </div>
+</details>
+<details>
+  <summary>Phase 5–6: Zwei unabhängige Reviews + Triage</summary>
+  <div class="inner">
+    <p><b>Codex</b> reviewt den integrierten Diff (Findings mit Fix-Plan, geroutet per Lane, bis <code>ok</code>). Danach prüft der <b>finale Reviewer</b> (Fable 5, strikt read-only) die Implementierung gegen die Spec. Die <b>Triage ist Code</b>: Findings der Kategorie <code>scope_gap</code> („war nie Teil des Plans") landen als Follow-up in <code>followups.md</code> — sie lösen <i>keinen</i> Umbau aus. <code>implementation</code>/<code>trivial</code>-Findings gehen als Fix-Zyklus in die zuständige Lane (max. 3 Zyklen je Lane), inklusive erneutem Gate-Lauf und Re-Review. Wichtig: Build-Agents dürfen von Fix-Plänen <b>begründet abweichen</b> — der Reviewer beschreibt das Problem, der Builder entscheidet die Lösung.</p>
+  </div>
+</details>
+<details>
+  <summary>Phase 7: Push + CI-Überwachung</summary>
+  <div class="inner">
+    <p>Der Feature-Branch (Single-Lane: der Lane-Branch; parallel: der Integrations-Branch) wird gepusht. ADW pollt die GitLab-Pipeline <b>dieses konkreten Pushes</b> (SHA-gebunden — eine alte oder fremde Pipeline kann das Ergebnis nicht verfälschen) bis Pipeline und konfigurierter Staging-Job grün sind. Bei Rot liest der <b>Log-Analyst</b> (Haiku) die Job-Logs und routet Findings in die Lanes — <b>genau ein</b> automatischer Re-Entry, danach eskaliert der Run mit den Logs im Report.</p>
+  </div>
+</details>
+
+<h2 id="approval">6. Das Plan-Approval-Gate</h2>
+<p>Nach Phase 2 hält der Run standardmäßig an (<span class="exitcode ec2">Exit 2</span>) — <b>bevor</b> irgendetwas gebaut wird und bevor nennenswert Tokens in die Implementierung fließen:</p>
+<pre><code>$ uv run adw run --repo ~/projekte/shop --issue "Warenkorb-Rabatte"
+Run 3f9a12c4 gestartet (Phase: spec)
+Plan-Approval ausstehend: .adw/runs/3f9a12c4/plan.md lesen, dann `adw approve 3f9a12c4`
+
+$ less ~/projekte/shop/.adw/runs/3f9a12c4/plan.md      <span class="c"># Plan prüfen</span>
+$ less ~/projekte/shop/.adw/runs/3f9a12c4/contract.yaml <span class="c"># Kontrakt prüfen</span>
+$ uv run adw approve 3f9a12c4 --repo ~/projekte/shop    <span class="c"># weiter mit Phase 3–7</span></code></pre>
+<div class="hint">Das Approval-Gate ist der billigste Ort, um falsche Richtungen zu stoppen: Eine korrigierte Annahme auf Plan-Ebene kostet nichts, auf Code-Ebene kostet sie Build-, Review- und Fix-Zyklen. Für kleine, risikoarme Aufgaben: <code>--no-approval</code>.</div>
+
+<h2 id="artefakte">7. Artefakte, Reports &amp; Run-Verzeichnis</h2>
+<table>
+  <tr><th>Pfad (im Ziel-Repo)</th><th>Inhalt</th><th>Git-Status</th></tr>
+  <tr><td><code>.adw/spec.md</code>, <code>.adw/plan.md</code>, <code>.adw/contract.yaml</code></td><td>Spec, Plan, Kontrakt — werden in die Lane-Worktrees kopiert und <b>auf dem Feature-Branch mitcommittet</b> (Traceability).</td><td>auf dem Feature-Branch getrackt; der Haupt-Checkout bleibt sauber</td></tr>
+  <tr><td><code>.adw/runs/&lt;run_id&gt;/state.json</code></td><td>Kompletter Run-Zustand (Phase, Lanes, Sessions, Zähler) — Grundlage für <code>resume</code>.</td><td rowspan="5">gitignored (ADW legt die Ignore-Regel selbst an)</td></tr>
+  <tr><td><code>.adw/runs/&lt;run_id&gt;/spec.md</code> etc.</td><td>Archivierte, reviewte Artefakt-Stände dieses Runs.</td></tr>
+  <tr><td><code>.adw/runs/&lt;run_id&gt;/escalation.md</code></td><td>Eskalations-Report: erreichter Stand, Phase, konkreter Grund.</td></tr>
+  <tr><td><code>.adw/runs/&lt;run_id&gt;/followups.md</code></td><td>Follow-up-Issues aus <code>scope_gap</code>-Findings (dedupliziert).</td></tr>
+  <tr><td><code>.adw/runs/&lt;run_id&gt;/trees/&lt;lane&gt;</code></td><td>Lane-Worktrees (+ <code>trees/integration</code> bei <code>--parallel</code>).</td></tr>
+</table>
+
+<h2 id="resume">8. Crash, Pause, Resume</h2>
+<p>ADW checkpointet jeden Phasenübergang <b>und</b> jedes offene Zwischenergebnis (Gate-Feedback, Review-Session, Zähler) atomar in <code>state.json</code>. Stirbt der Prozess — Stromausfall, <code>Ctrl-C</code>, Netzwegfall — gilt:</p>
+<pre><code>$ uv run adw status --repo ~/projekte/shop
+3f9a12c4  build              single    Warenkorb-Rabatte
+
+$ uv run adw resume 3f9a12c4 --repo ~/projekte/shop
+Run 3f9a12c4 wird fortgesetzt (Phase: build)</code></pre>
+<ul>
+  <li>Fertige Lanes werden <b>nicht neu gebaut</b> — ihr Ergebnis wird über einen Baum-Hash verifiziert und übernommen.</li>
+  <li>Ein offener Fix (Gate-Feedback lag vor, Fix lief noch nicht) wird mit <b>derselben Agent-Session</b> nachgeholt.</li>
+  <li>Limits (Iterationen, Runden, Zyklen) überleben den Crash — ein Neustart verschafft dem Run keine zusätzlichen Versuche.</li>
+  <li>Dry-Run bleibt Dry-Run: der Modus steckt im State, ein Resume verdrahtet nie versehentlich echte Agenten.</li>
+</ul>
+<div class="warnbox">Eskalierte Runs (<code>phase: escalated</code>) sind bewusst <b>nicht</b> fortsetzbar — erst Ursache klären (Report lesen), dann einen neuen Run starten.</div>
+
+<h2 id="eskalation">9. Eskalationen verstehen</h2>
+<p>ADW gibt auf, <b>bevor</b> es Schaden anrichtet oder Budget verbrennt. Jede Eskalation beendet den Run mit Exit 1 und schreibt <code>escalation.md</code> mit dem erreichten Stand und dem konkreten Grund:</p>
+<table>
+  <tr><th>Auslöser</th><th>Limit</th><th>Typische Ursache</th></tr>
+  <tr><td>Gate-Loop einer Lane</td><td>10 Iterationen pro Task</td><td>Anforderung und Gates widersprechen sich; Flaky Tests</td></tr>
+  <tr><td>Circuit-Breaker</td><td>2× exakt derselbe Fehler</td><td>Der Agent dreht sich im Kreis — sofortiger Abbruch statt Limit ausreizen</td></tr>
+  <tr><td>Integration/E2E</td><td>10 Runden pro Run</td><td>Cross-Lane-Inkompatibilität, Kontrakt-Lücke</td></tr>
+  <tr><td>Merge-Konflikt</td><td>sofort</td><td>Lanes haben dieselben Dateien widersprüchlich geändert</td></tr>
+  <tr><td>Review-Loops</td><td>10 Codex-Runden / 3 Fix-Zyklen je Lane</td><td>Grundsatzproblem, das Reviews nicht „wegfixen" können</td></tr>
+  <tr><td>CI</td><td>1 Re-Entry, 45 min Budget</td><td>Infrastruktur-/Pipeline-Problem, Umgebungsunterschied</td></tr>
+  <tr><td>Unlesbare Reviewer-Antwort</td><td>sofort</td><td>Agent/Codex hat das Findings-JSON-Schema nicht eingehalten</td></tr>
+</table>
+
+<h2 id="troubleshooting">10. Troubleshooting &amp; FAQ</h2>
+<details>
+  <summary><code>Fehler: .adw/config.yaml fehlt …</code></summary>
+  <div class="inner"><p>Das Ziel-Repo hat keine (gültige) Workflow-Config. <code>examples/config.yaml</code> kopieren und anpassen — siehe <a href="#zielrepo">Abschnitt 2</a>. ADW rät bewusst keine Defaults.</p></div>
+</details>
+<details>
+  <summary>Run steht auf <code>awaiting_approval</code> — <code>resume</code> „tut nichts"</summary>
+  <div class="inner"><p>Das ist das Approval-Gate: <code>resume</code> pausiert wieder mit Exit 2, weil die Freigabe fehlt. <code>adw approve &lt;run_id&gt;</code> erteilt sie und setzt fort. <code>resume</code> ist für Crash-Fortsetzung gedacht.</p></div>
+</details>
+<details>
+  <summary><code>--parallel</code> wird abgelehnt</summary>
+  <div class="inner"><p><code>--parallel verlangt eine frontend- UND backend-Lane</code>: Die Config des Ziel-Repos definiert nur eine Lane. Entweder die zweite Lane (mit eigenen Gates) ergänzen oder ohne <code>--parallel</code> laufen lassen.</p></div>
+</details>
+<details>
+  <summary><code>.adw/spec.md ist getrackt und hat uncommittete Änderungen …</code></summary>
+  <div class="inner"><p>Im Ziel-Repo liegen ungesicherte Änderungen an einem früheren ADW-Artefakt. ADW verwirft nie stillschweigend deine Edits: erst committen oder stashen, dann neu starten.</p></div>
+</details>
+<details>
+  <summary>Eskalation „HEAD hat sich außerhalb des Orchestrators bewegt" / „Build-Agent hat selbst committet"</summary>
+  <div class="inner"><p>Schutzmechanismus: Commits macht ausschließlich der Orchestrator — nach nachweislich grünen Gates. Wenn im Lane-Worktree fremde Commits auftauchen (manuell hineingearbeitet? paralleles Tooling?), bricht ADW ab, statt ungeprüfte Änderungen weiterzureichen. Worktree-Stand klären, neuen Run starten.</p></div>
+</details>
+<details>
+  <summary>Pipeline rot „ohne verwertbare Job-Logs"</summary>
+  <div class="inner"><p>Die Pipeline war <code>canceled</code>/<code>skipped</code> oder scheiterte ohne fehlgeschlagene Jobs (z.&nbsp;B. YAML-Fehler in der CI-Config). Ohne Logs würde der Log-Analyst nur raten — deshalb geht das direkt an dich.</p></div>
+</details>
+<details>
+  <summary>Warum sehe ich <code>adw_dry_run_*.md</code>-Dateien auf Dry-Run-Branches?</summary>
+  <div class="inner"><p>Das sind die Demo-Artefakte der Mock-Build-Agenten. Dry-Run-Branches (<code>adw/&lt;run_id&gt;/…</code>) sind rein lokal und werden nie gepusht — sie lassen sich gefahrlos löschen.</p></div>
+</details>
+<details>
+  <summary>Was kostet ein Lauf?</summary>
+  <div class="inner"><p>Dry-Run: nichts (0 Tokens). Echter Lauf: modellökonomisch verteilt — Fable 5 nur für Spec/Plan/finalen Review, Opus 4.8 baut, Haiku triagiert, Codex läuft über dein Codex-Abo. Die Limits (Abschnitt 9) deckeln den Worst Case strukturell.</p></div>
+</details>
+
+<h2 id="glossar">11. Glossar</h2>
+<table>
+  <tr><th>Begriff</th><th>Bedeutung</th></tr>
+  <tr><td><b>Lane</b></td><td>Ein Workstream (backend/frontend) mit eigenem Git-Worktree, eigenem Branch, eigener Agent-Session und eigenen Ports.</td></tr>
+  <tr><td><b>Gate</b></td><td>Ein konfiguriertes Prüfkommando (Linter, Tests, …) mit hartem Timeout. Alle Gates grün = Bedingung für jeden Commit.</td></tr>
+  <tr><td><b>Kontrakt</b></td><td><code>.adw/contract.yaml</code> — die vereinbarte Schnittstelle (OpenAPI/Typen/Events), gegen die beide Lanes unabhängig bauen.</td></tr>
+  <tr><td><b>Finding</b></td><td>Strukturiertes Review-Ergebnis (JSON): Severity P1–P3, Lane, Datei, Problem, Fix-Empfehlung, ggf. Kategorie.</td></tr>
+  <tr><td><b>scope_gap</b></td><td>Finding-Kategorie „fehlt, war aber nie im Plan" → wird Follow-up-Issue, kein Auto-Umbau.</td></tr>
+  <tr><td><b>Circuit-Breaker</b></td><td>Abbruchregel: liefert eine Fix-Iteration exakt dasselbe Fehlerbild wie zuvor, wird sofort eskaliert statt das Limit auszureizen.</td></tr>
+  <tr><td><b>Eskalation</b></td><td>Kontrollierte Übergabe an den Menschen: Exit ≠ 0 + <code>escalation.md</code> mit Stand und Grund.</td></tr>
+  <tr><td><b>Session-Resume</b></td><td>Fix-Tasks gehen an die <i>bestehende</i> Agent-Session (voller Kontext) statt an einen frischen Agenten.</td></tr>
+  <tr><td><b>Run-ID</b></td><td>8-stellige Hex-ID eines Laufs; alle Artefakte liegen unter <code>.adw/runs/&lt;run_id&gt;/</code>.</td></tr>
+</table>
+
+<p class="top"><a href="#tldr">↑ nach oben</a></p>
+</main>
+<footer>
+  ADW User-Handbuch · generiert am 2026-07-15 · Quelle: Repo <code>agentic-developer-workflow</code> (README.md, docs/SPEC.md, docs/PLAN.md, Stand main <code>9b89dd6</code>) · Technische Details: <code>docs/spec/ADW-TECHNISCHE-SPEC.html</code>
+</footer>
+</body>
+</html>

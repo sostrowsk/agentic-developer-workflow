@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADW — Technische Spezifikation</title>
+<style>
+  :root{
+    --ink:#1c2430; --muted:#5a6a7e; --bg:#ffffff; --panel:#f5f7fa;
+    --line:#dde4ec; --accent:#7c3aed; --accent-soft:#f1eafe;
+    --ok:#1a7f37; --warn:#b35900; --err:#c0392b;
+    --mono:"SF Mono","Cascadia Code",Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:16px/1.65 -apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:var(--ink);background:var(--bg)}
+  header{background:linear-gradient(135deg,#3b1d78 0%,#7c3aed 100%);color:#fff;padding:2.4rem 1.5rem 2rem}
+  header .wrap{max-width:1020px;margin:0 auto}
+  header h1{margin:0 0 .3rem;font-size:1.9rem;letter-spacing:-.02em}
+  header p{margin:0;opacity:.88;font-size:1.02rem}
+  .badge{display:inline-block;background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.35);border-radius:999px;padding:.1rem .7rem;font-size:.78rem;margin-bottom:.8rem;letter-spacing:.04em}
+  main{max-width:1020px;margin:0 auto;padding:1.5rem}
+  h2{font-size:1.35rem;margin:2.6rem 0 .8rem;padding-bottom:.35rem;border-bottom:2px solid var(--line);letter-spacing:-.01em}
+  h3{font-size:1.08rem;margin:1.6rem 0 .5rem}
+  p{margin:.5rem 0 .9rem}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:.08em .35em}
+  pre{background:#151022;color:#e7defa;border-radius:8px;padding:.9rem 1.1rem;overflow-x:auto;font-family:var(--mono);font-size:.82rem;line-height:1.6}
+  pre code{background:none;border:none;color:inherit;padding:0}
+  pre .c{color:#8b7fb0}
+  table{border-collapse:collapse;width:100%;margin:.8rem 0 1.2rem;font-size:.9rem}
+  th,td{border:1px solid var(--line);padding:.45rem .65rem;text-align:left;vertical-align:top}
+  th{background:var(--panel);font-weight:600}
+  tr:nth-child(even) td{background:#fafbfd}
+  .tldr{background:var(--accent-soft);border:1px solid #d5c3f7;border-radius:10px;padding:1.1rem 1.3rem;margin:1.4rem 0}
+  .tldr h2{margin:0 0 .6rem;border:none;font-size:1.15rem;padding:0}
+  .tldr ul{margin:.2rem 0 .2rem 1.2rem;padding:0}
+  .tldr li{margin:.3rem 0}
+  .kern{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:.8rem;margin:1rem 0}
+  .kern .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:.8rem 1rem}
+  .kern .card b{display:block;margin-bottom:.25rem}
+  nav.toc{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:1rem 1.3rem;margin:1.4rem 0;columns:2;column-gap:2rem}
+  nav.toc ol{margin:0;padding-left:1.2rem}
+  nav.toc li{margin:.25rem 0;break-inside:avoid}
+  details{border:1px solid var(--line);border-radius:8px;margin:.7rem 0;background:#fff}
+  details summary{cursor:pointer;padding:.6rem .9rem;font-weight:600;background:var(--panel);border-radius:8px;list-style-position:inside}
+  details[open] summary{border-bottom:1px solid var(--line);border-radius:8px 8px 0 0}
+  details .inner{padding:.6rem 1rem}
+  .hint{border-left:4px solid var(--accent);background:var(--accent-soft);padding:.6rem .9rem;border-radius:0 8px 8px 0;margin:.8rem 0}
+  .warnbox{border-left:4px solid var(--warn);background:#fff6e9;padding:.6rem .9rem;border-radius:0 8px 8px 0;margin:.8rem 0}
+  .decision{border:1px solid var(--line);border-left:5px solid var(--accent);border-radius:0 8px 8px 0;padding:.7rem 1rem;margin:.9rem 0;background:#fdfcff}
+  .decision b.title{display:block;margin-bottom:.25rem}
+  .decision .why{color:var(--muted);font-size:.92rem}
+  .arch{font-family:var(--mono);font-size:.78rem;line-height:1.5;background:#151022;color:#e7defa;border-radius:8px;padding:1rem 1.2rem;overflow-x:auto;white-space:pre}
+  footer{max-width:1020px;margin:2rem auto;padding:1rem 1.5rem;color:var(--muted);font-size:.85rem;border-top:1px solid var(--line)}
+  .top{font-size:.8rem}
+  @media (max-width:720px){nav.toc{columns:1}}
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <span class="badge">TECHNISCHE SPEZIFIKATION · Stand 2026-07-15 · adw 0.1.0 · main 9b89dd6</span>
+    <h1>ADW — Funktionsweise, Implementierung, Design-Entscheidungen</h1>
+    <p>Wie der 7-Phasen-Orchestrator gebaut ist: Architektur, Kontrollfluss, Crash-Resume-Engineering, Sicherheitsmodell und Tech-Stack.</p>
+  </div>
+</header>
+<main>
+
+<section class="tldr" id="tldr">
+  <h2>⚡ Auf einen Blick</h2>
+  <ul>
+    <li><b>Architekturprinzip:</b> „Kontrollfluss ist Code, nicht Prompt." Loops, Gates, Merges, Dispatch, Triage, Limits, CI-Polling = deterministisches Python (0 Tokens). Agenten liefern ausschließlich Urteilsvermögen — hinter zwei schmalen Interfaces (<code>AgentRunner</code>, <code>CodexReviewer</code>), die per Mock ersetzbar sind.</li>
+    <li><b>Aufbau:</b> Package <code>adw/</code> mit deterministischem Kern (config, state, findings, gates, worktrees, triage, ci), zwei Agent-Adaptern (Claude Agent SDK, Codex CLI), Phasen-Orchestrierung (<code>phases.py</code>, ~1.300 Zeilen) und typer-CLI.</li>
+    <li><b>Verlässlichkeit:</b> Jeder Übergang und jedes offene Feedback wird atomar in <code>state.json</code> checkpointed (flock + tmp/rename); Gate-Beweise sind an Baum-Hashes gebunden; alle Loops haben harte Limits + Circuit-Breaker.</li>
+    <li><b>Sicherheit:</b> Tool- und Pfad-Whitelists je Agent, sandboxed Bash im Worktree, Env-Whitelist für alle Subprozesse, Commits nur durch den Orchestrator, unveränderliche Artefakte (Restore nach jedem Agent-Lauf).</li>
+    <li><b>Stack:</b> Python ≥ 3.12, uv, pydantic v2, typer, PyYAML, claude-agent-sdk (≥ 0.2.118), anyio; extern: codex-CLI, glab, git. 331 pytest-Tests, mocks-only (kein Netz, keine Tokens), echtes git.</li>
+  </ul>
+</section>
+
+<section id="kernaussagen">
+  <h2>Kernaussagen</h2>
+  <div class="kern">
+    <div class="card"><b>Drei Akteure, klar getrennt.</b> Claude-Agenten (SDK), Codex (CLI-Subprocess) und deterministischer Code. Reviewer fixen nie; jeder Fix nimmt den validierten Pfad durch alle Gates.</div>
+    <div class="card"><b>Strukturierte Übergaben statt Freitext.</b> Alle Reviewer antworten im selben Findings-JSON-Schema; der Parser ist bewusst strikt — ein Parse-Fehler ist safe, ein falsches „ok" nicht.</div>
+    <div class="card"><b>Misstrauen als Designannahme.</b> Der Orchestrator verifiziert Agent-Ergebnisse kryptographisch-nah (Tree-Hashes, HEAD-Invarianten, Branch-Checks) statt ihnen zu glauben.</div>
+    <div class="card"><b>v1 = v2 mit einer Lane.</b> Ein Codepfad, eine CLI; <code>--parallel</code> aktiviert Mehr-Lanen-Betrieb, Integration und E2E — keine getrennten Skripte.</div>
+  </div>
+</section>
+
+<nav class="toc" id="inhalt">
+  <ol>
+    <li><a href="#architektur">Architektur &amp; Modul-Landkarte</a></li>
+    <li><a href="#phasen">Kontrollfluss der sieben Phasen</a></li>
+    <li><a href="#agenten">Agent-Registry &amp; Modell-Ökonomie</a></li>
+    <li><a href="#findings">Findings-Schema &amp; strikter Parser-Kontrakt</a></li>
+    <li><a href="#state">State, Checkpoints &amp; Crash-Resume</a></li>
+    <li><a href="#limits">Limits &amp; Circuit-Breaker</a></li>
+    <li><a href="#sicherheit">Sicherheitsmodell</a></li>
+    <li><a href="#entscheidungen">Design-Entscheidungen (mit Begründung)</a></li>
+    <li><a href="#stack">Pakete, Frameworks &amp; externe Werkzeuge</a></li>
+    <li><a href="#testing">Test-Strategie</a></li>
+    <li><a href="#limitations">Known Limitations</a></li>
+    <li><a href="#glossar">Glossar</a></li>
+  </ol>
+</nav>
+
+<h2 id="architektur">1. Architektur &amp; Modul-Landkarte</h2>
+<div class="arch">                          ┌────────────────────────────────────────────┐
+  adw run/resume/approve  │  cli.py (typer)                            │
+  ────────────────────────▶  Argument-Validierung · Runner-Verdrahtung │
+                          │  Dry-Run-Fixtures · Exit-Codes 0/2/1       │
+                          └───────────────┬────────────────────────────┘
+                                          │ RunContext (repo, config, state,
+                                          │ agents, codex, run_glab, sleep, …)
+                          ┌───────────────▼────────────────────────────┐
+                          │  phases.py — Orchestrierung der 7 Phasen   │
+                          │  Loops · Limits · Dispatch · Triage ·      │
+                          │  Eskalation · State-Übergänge              │
+                          └──┬──────────┬──────────┬───────────┬───────┘
+             Urteilsvermögen │          │          │           │ deterministischer Kern
+        ┌────────────────────▼──┐  ┌────▼──────┐  ┌▼──────────┐│
+        │ agents.py             │  │ codex.py  │  │ gates.py  ││ config.py   findings.py
+        │ SdkAgentRunner        │  │ CodexRunner│ │ worktrees │▼ state.py    triage.py
+        │ (Claude Agent SDK)    │  │ (codex exec│ │ ci.py     │  mock.py (Dry-Run/Tests)
+        └───────────────────────┘  │ read-only) │ └───────────┘
+                                   └────────────┘</div>
+<table>
+  <tr><th>Modul</th><th>Verantwortung</th><th>Kern-API</th></tr>
+  <tr><td><code>adw/cli.py</code></td><td>typer-Eingang: <code>run/resume/approve/status</code>, Issue-Intake (Text oder <code>glab issue view</code>), Dry-Run-Verdrahtung, Exit-Codes</td><td><code>app</code>, <code>_build_context()</code>, <code>_execute()</code></td></tr>
+  <tr><td><code>adw/phases.py</code></td><td>Die 7 Phasen über einem <code>RunContext</code> — sämtliche Loops, Limits, Dispatch, Triage, Eskalation</td><td><code>run_spec_and_plan</code>, <code>run_build_phase</code>, <code>run_integration_phase</code>, <code>run_codex_review_phase</code>, <code>run_final_review_phase</code>, <code>run_ci_phase</code>, <code>escalate</code></td></tr>
+  <tr><td><code>adw/agents.py</code></td><td>Agent-Registry (Modelle, Tools, Prompts, Permissions) + <code>SdkAgentRunner</code> über das Claude Agent SDK; Login-Pflicht, Env-Härtung, Pfad-Deny-Regeln</td><td><code>REGISTRY</code>, <code>AgentRunner</code>-Protokoll, <code>AgentResult(text, session_id)</code></td></tr>
+  <tr><td><code>adw/codex.py</code></td><td>Codex-CLI als read-only-Subprocess mit isoliertem <code>CODEX_HOME</code>; baut Review-Prompts (Schema eingebettet), parst strikt</td><td><code>CodexRunner.review(kind, content_refs, cwd)</code>, <code>CodexReviewer</code>-Protokoll</td></tr>
+  <tr><td><code>adw/findings.py</code></td><td>Findings-Schema (pydantic, <code>extra="forbid"</code>) + strikter Parser + geteilte Schema-Instruktion für alle Reviewer-Prompts</td><td><code>Finding</code>, <code>ReviewResult</code>, <code>extract_review_result</code>, <code>SCHEMA_INSTRUCTION</code></td></tr>
+  <tr><td><code>adw/config.py</code></td><td>Loader für <code>.adw/config.yaml</code>, fail fast (StrictLoader lehnt Duplikate ab; Lane ohne Gates, Gate ohne Timeout → Fehler)</td><td><code>AdwConfig.load(repo)</code>, <code>Gate</code>, <code>E2eConfig</code>, <code>CiConfig</code></td></tr>
+  <tr><td><code>adw/state.py</code></td><td>Persistierter Run-Zustand: atomare Snapshots, Transaktionen, monotone Sequenz</td><td><code>RunState</code>, <code>LaneState</code>, <code>save/load/update/find_latest</code></td></tr>
+  <tr><td><code>adw/gates.py</code></td><td>Gate-Runner: <code>subprocess</code> mit echtem Timeout, Prozessgruppen-Kill, RAM-bounded Output-Tail (200 Zeilen à max. 4 KiB)</td><td><code>run_gates(gates, cwd, extra_env) → GateReport</code></td></tr>
+  <tr><td><code>adw/worktrees.py</code></td><td>Lane-Worktrees (idempotent, Ready-Marker, Recovery von Partial-Adds) + deterministische Ports mit Bind-Check</td><td><code>create_lane_worktree</code>, <code>remove_lane_worktree</code>, <code>ports_for</code>, <code>lane_branch</code></td></tr>
+  <tr><td><code>adw/triage.py</code></td><td>Reine Funktionen: Finding-Routing, Iterations-Limits, Circuit-Breaker</td><td><code>triage_final_review</code>, <code>check_gate_iterations/fix_cycles/progress</code></td></tr>
+  <tr><td><code>adw/ci.py</code></td><td>GitLab-Polling über glab (SHA-gebunden), Job-Log-Abruf, injizierbare Zeit</td><td><code>poll_pipeline(…, sha=…)</code>, <code>fetch_failed_job_logs</code></td></tr>
+  <tr><td><code>adw/env.py</code></td><td>Env-Whitelist für alle Subprozesse (kein Secret-Leakage)</td><td><code>safe_env(extra)</code></td></tr>
+  <tr><td><code>adw/mock.py</code></td><td>Skriptbare Mock-Runner: Antwort-Queues je Agent, simulierte Datei-Outputs (statisch oder als <code>Callable(cwd)</code>), Aufruf-Aufzeichnung</td><td><code>MockAgentRunner</code>, <code>MockCodexRunner</code></td></tr>
+</table>
+<p>Verbindendes Element ist der <b><code>RunContext</code></b> (dataclass): Repo-Pfad, geladene Config, <code>RunState</code>, die beiden Runner-Interfaces sowie injizierbare Seams für glab (<code>run_glab</code>) und Zeit (<code>sleep</code>). Ein <code>threading.RLock</code> serialisiert State-Mutationen über parallele Lane-Threads. Weil <b>alle</b> Außenwelt-Kontakte (Agenten, Codex, glab, sleep, Push) über diesen Kontext laufen, ist derselbe Produktions-Codepfad vollständig mit Mocks betreibbar — das ist die technische Grundlage von <code>--dry-run</code> und der gesamten Testsuite.</p>
+
+<h2 id="phasen">2. Kontrollfluss der sieben Phasen</h2>
+<p>Jede Phasenfunktion prüft selbst, ob sie „dran" ist (<code>state.phase</code>-Guard) — die CLI ruft immer die komplette Kette; ein Resume startet dadurch automatisch in der richtigen Phase.</p>
+
+<details open>
+  <summary>Phase 1–2 — <code>run_spec_and_plan</code>: Authoring-Loops + Approval-Gate</summary>
+  <div class="inner">
+    <p>Gemeinsamer Baustein ist der <b>Reviewed-Authoring-Loop</b>: Agent schreibt Artefakt(e) → Codex reviewt (<code>kind=spec</code> bzw. <code>plan</code>, der Plan-Review bekommt die Spec als Referenz mit) → Findings gehen als Folge-Task an <b>dieselbe SDK-Session</b> (<code>resume=session_id</code>) → bis Verdict <code>ok</code>. Absicherungen:</p>
+    <ul>
+      <li><b>Prior-Content-Check:</b> Ein Altbestand (z.&nbsp;B. gemergte Artefakte eines früheren Runs) adelt keinen untätigen Agenten — das Artefakt muss sich beim Erstlauf ändern, sonst Eskalation.</li>
+      <li><b>Protected Files:</b> <code>.adw/config.yaml</code> und (ab Phase 2) die reviewte Spec werden nach <i>jedem</i> Agent-Lauf byte-genau restauriert — Agents können sie technisch beschreiben, aber nie effektiv ändern.</li>
+      <li><b>Uncommitted-Guard:</b> Getrackte Artefakte mit Nutzer-Änderungen brechen den Lauf ab, statt Edits still zu verwerfen; eigene (gecrashte) Zwischenstände sind als Ausnahme erkannt.</li>
+      <li><b>Archivierung:</b> Reviewte Artefakte wandern nach <code>.adw/runs/&lt;id&gt;/</code>; der Haupt-Checkout wird auf den eingecheckten Stand zurückgesetzt und bleibt sauber.</li>
+    </ul>
+    <p>Danach: <code>phase=awaiting_approval</code>, State gespeichert, <code>AwaitingApproval</code>-Exception → CLI Exit 2. <code>--no-approval</code> bzw. <code>approval_granted</code> überspringt die Pause; beides ist im State persistiert.</p>
+  </div>
+</details>
+
+<details>
+  <summary>Phase 3 — <code>run_build_phase</code> / <code>_run_lane</code>: der Gate-Loop</summary>
+  <div class="inner">
+    <p>Lanes laufen sequenziell oder (bei <code>--parallel</code>) im <code>ThreadPoolExecutor</code>. Pro Lane:</p>
+    <ol>
+      <li>Worktree erzeugen (idempotent), Fork-Punkt als <code>base_sha</code> pinnen, Artefakte hineinkopieren und committen.</li>
+      <li><b>Loop:</b> Limit-Check → Checkpoint (HEAD als <code>expected_head</code>, Iteration++) → Build-Agent (Opus, Session-Resume, Nachbar-Lanes per Deny-Regel unsichtbar) → Invarianten-Checks (kein Agent-Commit, richtiger Branch) → Artefakt-Restore → Gates.</li>
+      <li>Gates rot: Fehlerausgabe + Circuit-Breaker-Basis als <code>pending_task</code>/<code>last_failures</code> persistieren, zurück zu 2. Gates grün: <code>gates_passed</code>-Beweis <b>mit Baum-Hash</b> persistieren, dann committet der Orchestrator.</li>
+    </ol>
+    <p>Der Baum-Hash entsteht über einen temporären Git-Index (<code>GIT_INDEX_FILE</code>, geseedet aus HEAD, dann <code>add -A</code> + <code>write-tree</code>) — er bindet den „Gates waren grün"-Beweis an exakt den geprüften Inhalt inklusive untracked Files. Beim Resume wird auch eine als <code>completed</code> markierte Lane dagegen revalidiert; stimmt der Baum nicht mehr, geht die Lane zurück in den Loop statt ungeprüft weitergereicht zu werden.</p>
+  </div>
+</details>
+
+<details>
+  <summary>Phase 4 — <code>run_integration_phase</code> / <code>_integration_loop</code>: Merge + E2E</summary>
+  <div class="inner">
+    <p>Der Integrations-Branch wird <b>je Runde frisch</b> ab Base-Branch aufgebaut (Worktree + Branch löschen, neu anlegen, Lane-Branches mergen) — dadurch ist die Operation idempotent und crash-sicher, es gibt keinen halb-gemergten Zustand, den ein Resume interpretieren müsste. Merge-Konflikt oder Merge-Timeout → <code>merge --abort</code> + Eskalation. Das E2E-Gate läuft mit den Ports beider Lanes im Env. Bei Rot: Runden-Zähler persistieren → E2E-Triage-Agent (Haiku) → Findings über <code>_dispatch_lane_fixes</code> in die Lanes (voller Gate-Loop!) → neu integrieren. <code>_integration_loop</code> ist bewusst wiederverwendbar: Auch die Review-Phasen holen sich darüber ihren Worktree — <b>jeder Review-Fix läuft wieder durch Merge + E2E</b>, nicht nur durch die Lane-Gates.</p>
+  </div>
+</details>
+
+<details>
+  <summary>Phase 5–6 — Codex-Review + finaler Review + Triage</summary>
+  <div class="inner">
+    <p>Vor jedem Review: <code>_resume_pending_lanes</code> schickt <b>jede</b> Lane durch <code>_run_lane</code> — unfertige Fixes (Crash-Fenster) holen Gates + Commit nach, fertige werden per Tree-Hash revalidiert. Kein ungegateter Stand erreicht je ein Review.</p>
+    <p><b>Phase 5:</b> <code>codex.review("code", &lt;geänderte Dateien via 3-Punkte-Diff&gt;, cwd=Review-Worktree)</code>. <code>needs_fixes</code> → Runde persistieren, Limit-Check <i>vor</i> dem Dispatch (kein „Terminal-Fix", den nie wieder ein Review prüft), Circuit-Breaker auf identische Finding-Mengen, Dispatch in die Lanes, Re-Review.</p>
+    <p><b>Phase 6:</b> Finaler Reviewer (Fable, read-only) antwortet im Findings-JSON <b>mit Pflicht-<code>category</code></b> (fehlt sie, ist keine Triage möglich → Eskalation statt stiller Default). <code>triage_final_review</code> (reiner Code) trennt: <code>scope_gap</code> → deduplizierter Follow-up-Report; Rest → Fix-Zyklen je Lane (max. 3). Das Zyklus-Inkrement wird <b>im selben Save</b> wie der gestagte Fix-Task persistiert (<code>mutate_staged</code>-Hook im Dispatch) — ein Crash kann kein Budget verbrennen, ohne dass der zugehörige Fix beim Resume nachgeholt wird.</p>
+  </div>
+</details>
+
+<details>
+  <summary>Phase 7 — <code>run_ci_phase</code>: Push + Pipeline-Überwachung</summary>
+  <div class="inner">
+    <p>Push per <code>git push --force-with-lease -u origin &lt;branch&gt;</code> (der Integrations-Branch wird je Runde neu aufgebaut, non-fast-forward ist also erwartet; fremde Remote-Änderungen werden trotzdem nie überschrieben). <code>poll_pipeline</code> fragt die Pipeline <b>server-seitig SHA-gefiltert</b> ab (<code>glab api projects/:id/pipelines?ref=…&amp;sha=…</code>): weder bewertet die terminale Pipeline des vorherigen Pushes das neue Ergebnis, noch kann eine fremde neuere Pipeline die gesuchte verdecken. Das Zeitbudget wird als Restzeit geführt und der Sleep darauf gekappt. Rot mit Logs → Log-Analyst (Haiku, cwd = gepushter Worktree) → ein Re-Entry über die Lane-Loops; rot <i>ohne</i> Logs (canceled/YAML-Fehler) → direkte Eskalation statt Analyse auf Null-Evidenz.</p>
+  </div>
+</details>
+
+<h2 id="agenten">3. Agent-Registry &amp; Modell-Ökonomie</h2>
+<p>Jeder Agent ist ein deklarativer <code>AgentSpec</code> (Modell, Tool-Restriktion, Pfad-Regeln, System-Prompt-Zusatz, Permission-Mode). Der <code>SdkAgentRunner</code> übersetzt ihn in <code>ClaudeAgentOptions</code> (system_prompt-Preset <code>claude_code</code> + append, <code>cwd</code>, <code>resume</code>, isolierte Settings: keine repo-kontrollierten Hooks/MCP-Server).</p>
+<table>
+  <tr><th>Agent</th><th>Modell</th><th>Werkzeuge</th><th>Auftrag / harte Regel</th></tr>
+  <tr><td><code>spec_agent</code></td><td>Fable 5 (<code>claude-fable-5</code>)</td><td>Read/Grep/Glob + Write <b>nur</b> <code>.adw/spec.md</code></td><td>Spezifikation nach fester Vorlage; implementiert nie</td></tr>
+  <tr><td><code>plan_agent</code></td><td>Fable 5</td><td>Read/Grep/Glob + Write <b>nur</b> <code>.adw/plan.md</code> + <code>.adw/contract.yaml</code></td><td>Plan (Workstreams) + Schnittstellen-Kontrakt; implementiert nie</td></tr>
+  <tr><td><code>build_agent</code></td><td>Opus 4.8 (<code>claude-opus-4-8</code>)</td><td>Read/Write/Edit + <b>sandboxed</b> Bash, Schreiben nur worktree-relativ</td><td>Workstream strikt gegen Kontrakt, TDD; <b>committet nicht</b>; darf von Fix-Plänen begründet abweichen</td></tr>
+  <tr><td><code>e2e_triage</code></td><td>Haiku (<code>claude-haiku-4-5-20251001</code>)</td><td>read-only</td><td>Playwright-Fehler → Lane-Zuordnung; fixt nichts; antwortet nur Schema-JSON</td></tr>
+  <tr><td><code>log_analyst</code></td><td>Haiku</td><td>read-only</td><td>CI-Logs → strukturierte Findings mit Lane; fixt nichts</td></tr>
+  <tr><td><code>final_reviewer</code></td><td>Fable 5</td><td>strikt read-only (kein Write/Edit/Bash)</td><td>Implementierung gegen Spec; nur Findings, Pflichtfeld <code>category</code></td></tr>
+</table>
+<p><b>Modell-Ökonomie:</b> das teuerste Urteilsvermögen (Fable) nur an den Hebelpunkten Spec/Plan/finaler Review; Opus baut; Haiku erledigt die Fließband-Triage. Die Pfad-Regeln sind <b>artefakt-exakt</b> (z.&nbsp;B. <code>Write(.adw/spec.md)</code> statt <code>Write(.adw/**)</code>) — ein pauschales <code>.adw/**</code> würde sonst auch <code>.adw/runs/&lt;id&gt;/state.json</code> beschreibbar machen. Zusätzlich sind die Run-Verzeichnisse für alle Agents deny-gelistet und parallele Lanes sehen einander per <code>deny_read_paths</code> nicht.</p>
+
+<h2 id="findings">4. Findings-Schema &amp; strikter Parser-Kontrakt</h2>
+<p>Alle Reviewer (Codex und Claude-Reviewer) antworten im selben JSON-Schema; die Instruktion dazu (<code>SCHEMA_INSTRUCTION</code>) ist <b>eine geteilte Konstante</b> in <code>findings.py</code> und wird in jeden Reviewer-Prompt eingebettet:</p>
+<pre><code>{
+  "verdict": "ok | needs_fixes",
+  "findings": [{
+    "severity": "P1 | P2 | P3",
+    "lane": "frontend | backend | unknown",
+    "file": "pfad/relativ/zum/repo",
+    "issue": "Beschreibung des Problems",
+    "remediation_plan": ["Schritt 1", "Schritt 2"],
+    "category": "scope_gap | implementation | trivial"   <span class="c">// nur finaler Reviewer</span>
+  }]
+}</code></pre>
+<p>Validierung strikt via pydantic: <code>extra="forbid"</code>, Verdict-Findings-Konsistenz (<code>ok</code> nur mit leerer Liste, <code>needs_fixes</code> braucht ≥ 1 Finding), Pflichtfelder. Der Parser <code>extract_review_result</code> akzeptiert <b>ausschließlich</b> (a) Output, der als Ganzes ein JSON-Objekt ist, oder (b) den Inhalt des <b>letzten</b> <code>```json</code>-Fence. Alles andere — Prosa um nacktes JSON, Entwürfe, abgeschnittene Antworten, unclosed Fences — ist ein <code>FindingsParseError</code> und damit Eskalationsfall. Adversariale Inputs (Duplicate Keys, Nesting &gt; 100, Integer &gt; 100 Stellen) failen geschlossen in linearer Zeit. In den Phasen wird zusätzlich <code>ValidationError</code> gefangen: schema-verletzendes, aber valides JSON eskaliert genauso sauber wie kaputtes.</p>
+
+<h2 id="state">5. State, Checkpoints &amp; Crash-Resume</h2>
+<p><code>RunState</code> (pydantic) ist die einzige Wahrheitsquelle für den Fortschritt eines Runs. Persistenz-Mechanik:</p>
+<ul>
+  <li><b>Atomar:</b> Snapshot in Temp-Datei + <code>os.replace</code> — es existiert nie ein halb geschriebener State.</li>
+  <li><b>Serialisiert:</b> exklusiver <code>flock</code> auf <code>.adw/runs/.seq</code> um jeden Write; <code>RunState.update()</code> bietet Load→Mutate→Write als Transaktion für parallele Lane-Threads.</li>
+  <li><b>Monoton:</b> eine Sequenznummer (statt Datei-mtime mit Kernel-Tick-Granularität) bestimmt <code>find_latest</code>; eine korrupte <code>.seq</code> wird aus den persistierten States rekonstruiert.</li>
+</ul>
+<details>
+  <summary>Die wichtigsten Checkpoint-Felder und ihr Zweck</summary>
+  <div class="inner">
+    <table>
+      <tr><th>Feld</th><th>Ebene</th><th>Überlebt damit</th></tr>
+      <tr><td><code>authoring_session / _pending_task / _last_findings</code></td><td>Run</td><td>Crash mitten im Spec-/Plan-Review-Zyklus: Session, offener Fix-Task und Circuit-Breaker-Basis</td></tr>
+      <tr><td><code>pending_task</code>, <code>last_failures</code></td><td>Lane</td><td>Crash zwischen Gate-Fail und Fix-Lauf</td></tr>
+      <tr><td><code>gates_passed</code> + <code>gates_tree</code></td><td>Lane</td><td>Crash zwischen „Gates grün" und Commit — der Beweis ist an den exakten Baum-Hash gebunden und damit nicht fälschbar</td></tr>
+      <tr><td><code>expected_head</code></td><td>Lane</td><td>Erkennung von Fremd-Commits über ein Crash-Fenster hinweg (Orchestrator-only-Commit-Invariante)</td></tr>
+      <tr><td><code>base_sha</code></td><td>Lane</td><td>Fork-Punkt der Lane — Restaurationen nutzen den unbeweglichen Stand, nicht den weiterrückenden Base-Branch</td></tr>
+      <tr><td><code>integration_rounds / review_rounds / fix_cycles / ci_reentries</code> (+ <code>*_last_failures</code>)</td><td>Run/Lane</td><td>Alle Loop-Budgets — ein Neustart verschafft keine Extra-Versuche; Limit-Checks stehen <i>vor</i> teurer Arbeit</td></tr>
+      <tr><td><code>dry_run</code>, <code>skip_approval</code>, <code>pinned_base_branch</code></td><td>Run</td><td>CLI-Entscheidungen, die der Resume-Aufruf nicht mehr kennt</td></tr>
+    </table>
+    <p>Durchgängiges Muster: <b>Budget-Inkremente werden atomar mit der Arbeit persistiert, die sie rechtfertigen</b> (via <code>mutate_staged</code>-Hook im Fix-Dispatch), und <b>Circuit-Breaker-Baselines erst <i>nach</i> dem Fix-Dispatch fortgeschrieben</b> — sonst würde ein Crash dazwischen beim Resume als „identische Runde" fehl-eskalieren.</p>
+  </div>
+</details>
+
+<h2 id="limits">6. Limits &amp; Circuit-Breaker</h2>
+<table>
+  <tr><th>Loop</th><th>Limit (Konstante)</th><th>Zusätzlich</th></tr>
+  <tr><td>Gate-Loop je Lane</td><td>10 (<code>MAX_GATE_ITERATIONS</code>) — pro Task, Reset bei neuem Fix-Task</td><td rowspan="5">Circuit-Breaker <code>check_progress</code>: exakt dieselbe Failure-/Finding-Menge wie in der Vorrunde → sofortige Eskalation statt Limit ausreizen</td></tr>
+  <tr><td>Integration/E2E</td><td>10 Runden (<code>MAX_E2E_ROUNDS</code>, run-weit)</td></tr>
+  <tr><td>Codex-Code-Review</td><td>10 Runden (<code>MAX_REVIEW_ROUNDS</code>)</td></tr>
+  <tr><td>Fix-Zyklen nach finalem Review</td><td>3 je Lane (<code>MAX_FIX_CYCLES</code>)</td></tr>
+  <tr><td>CI-Re-Entry</td><td>1 (<code>MAX_CI_REENTRIES</code>)</td></tr>
+  <tr><td>Gate-/Codex-/glab-Subprozesse</td><td>Timeout je Gate aus der Config; Codex 900 s; glab 120 s; CI-Budget 2700 s</td><td>Prozessgruppen-Kill (<code>start_new_session</code> + <code>killpg</code>) auf allen Exit-Pfaden — keine Zombie-Prozesse</td></tr>
+</table>
+
+<h2 id="sicherheit">7. Sicherheitsmodell</h2>
+<table>
+  <tr><th>Ebene</th><th>Mechanismus</th></tr>
+  <tr><td>Agent-Werkzeuge</td><td><code>tools=</code> <b>restringiert</b> die verfügbaren Tools (nicht nur Auto-Approve); <code>allowed_tools</code> mit artefakt-exakten Pfad-Regeln; Reviewer strikt read-only; Build-Bash sandboxed und auf den Worktree begrenzt.</td></tr>
+  <tr><td>Prozess-Umgebung</td><td><code>safe_env()</code>-Whitelist für <b>alle</b> Subprozesse (PATH, HOME, LANG, … — keine API-Keys/Cloud-Creds). Das SDK merged <code>os.environ</code>; Nicht-Whitelist-Variablen werden per <code>""</code>-Override geblankt. <code>SSH_AUTH_SOCK</code> nur dem Push-Subprozess, <code>CODEX_HOME</code> nur dem CodexRunner.</td></tr>
+  <tr><td>Auth</td><td>Nur gespeicherter Claude-CLI-Login (fail fast, bevor Tokens fließen); Codex mit isoliertem <code>CODEX_HOME</code> (nur <code>auth.json</code>, keine user-konfigurierten MCP-Server), Token-Rotation wird per CAS + flock zurückgesynct.</td></tr>
+  <tr><td>Git-Integrität</td><td>Orchestrator-Git immer mit <code>core.hooksPath=/dev/null</code> + Env-Whitelist. Commits nur durch den Orchestrator; Agent-Commits, Branch-Wechsel (symbolic-ref-Check) und HEAD-Bewegungen im Crash-Fenster werden erkannt und eskalieren.</td></tr>
+  <tr><td>Artefakt-Integrität</td><td>Spec/Plan/Kontrakt/Config sind für Agents effektiv unveränderlich: byte-genauer Restore nach jedem Agent-Lauf bzw. vor Gates/Commit; Symlink-/Verzeichnis-Ersetzungen werden erkannt und ersetzt, nie verfolgt (kein Schreiben außerhalb der Lane); eine eingeschleuste Config wird aus dem gepinnten Fork-Punkt restauriert oder — positiv verifiziert — gelöscht.</td></tr>
+  <tr><td>Lane-Isolation</td><td>Eigener Worktree je Lane; Nachbar-Lanes per <code>deny_read_paths</code> unlesbar; Ports deterministisch aus der run_id mit Bind-Check.</td></tr>
+</table>
+
+<h2 id="entscheidungen">8. Design-Entscheidungen (mit Begründung)</h2>
+
+<div class="decision"><b class="title">D1 — Kontrollfluss ist Code, nicht Prompt.</b>
+Loops, Limits, Dispatch, Merges, Polling als Python statt als Agenten-Anweisungen.
+<div class="why"><b>Warum:</b> Wiederholbares gehört in deterministischen Code — 0 Tokens, immer gleiches Verhalten, testbar. Agenten sind nur dort, wo Urteilsvermögen gebraucht wird. (Grundsatz aus der Video-Analyse „Forget Loop Engineering", validiert im Brainstorming.)</div></div>
+
+<div class="decision"><b class="title">D2 — Reviewer ≠ Fixer; jeder Fix nimmt den validierten Pfad.</b>
+Reviews liefern nur Findings; Fixes laufen ausnahmslos durch Build-Agents + alle Gates (+ E2E im Parallel-Modus).
+<div class="why"><b>Warum:</b> „Triviale" Direkt-Fixes umgehen genau die Prüfungen, die Fehler fangen sollen. Der Fix-Plan eines Reviewers ist Empfehlung — der Build-Agent darf begründet abweichen, denn er kennt Spec und Konventionen.</div></div>
+
+<div class="decision"><b class="title">D3 — Strikter Parser-Kontrakt statt Toleranz-Heuristiken.</b>
+Nur Ganz-JSON oder letzter <code>```json</code>-Fence; alles andere ist ein Fehler.
+<div class="why"><b>Warum:</b> Toleranz-Heuristiken sind gegen adversariale/verrauschte Outputs nicht abdichtbar — im Zweifel akzeptieren sie ein veraltetes oder erfundenes „ok". Ein Parse-Fehler ist safe (Retry/Eskalation), ein falsches „ok" nicht. Die Entscheidung fiel, nachdem eine tolerante Prosa-Extraktion im Review-Loop oszillierte.</div></div>
+
+<div class="decision"><b class="title">D4 — v1 = v2 mit einer Lane: ein Codepfad, ein Flag.</b>
+<code>--parallel</code> aktiviert Mehr-Lanen-Betrieb; keine getrennten Skripte.
+<div class="why"><b>Warum:</b> Zwei Codepfade divergieren zwangsläufig. Der Single-Lane-Modus ist der Parallel-Modus mit n=1 — dieselben Tests, dieselben Garantien.</div></div>
+
+<div class="decision"><b class="title">D5 — Config im Ziel-Repo, fail fast, keine geratenen Defaults.</b>
+<code>.adw/config.yaml</code> gehört dem Zielprojekt; der Orchestrator ist generisch.
+<div class="why"><b>Warum:</b> Gates/Branches/E2E sind Projektwissen. Stille Defaults erzeugen stilles Fehlverhalten — die einzigen Defaults sind die dokumentierten CI-Poll-Werte.</div></div>
+
+<div class="decision"><b class="title">D6 — Session-Resume statt Kontext-Neuaufbau.</b>
+Fix-Tasks gehen an dieselbe SDK-Session (<code>resume=session_id</code>); Session-IDs sind Teil des persistierten States.
+<div class="why"><b>Warum:</b> Der Agent, der den Code geschrieben hat, fixt ihn mit vollem Kontext schneller und konsistenter — und es spart die Tokens des Neuaufbaus.</div></div>
+
+<div class="decision"><b class="title">D7 — Verifizieren statt vertrauen: Beweise mit Baum-Hashes.</b>
+<code>gates_passed</code> gilt nur zusammen mit dem <code>gates_tree</code>-Hash des exakten Worktree-Inhalts; completed-Lanes werden beim Resume revalidiert.
+<div class="why"><b>Warum:</b> Commit-Messages oder Flags wären vom Agenten fälschbar bzw. könnten in Crash-Fenstern veralten. Der Inhalts-Hash bindet den Beweis an genau den geprüften Stand.</div></div>
+
+<div class="decision"><b class="title">D8 — Idempotente Rekonstruktion statt Zustands-Interpretation.</b>
+Integrations-Worktree je Runde frisch aufbauen; Review-Worktrees jederzeit wiederherstellbar.
+<div class="why"><b>Warum:</b> Einen halb-gemergten oder manipulieren Zustand korrekt zu <i>interpretieren</i> ist fehleranfällig; ihn wegzuwerfen und deterministisch neu zu erzeugen ist billig und beweisbar korrekt.</div></div>
+
+<div class="decision"><b class="title">D9 — Eskalation als First-Class-Ergebnis.</b>
+Jedes erschöpfte Limit, jeder Konflikt, jede unlesbare Reviewer-Antwort endet kontrolliert: Report + <code>phase=escalated</code> + Exit ≠ 0. Eskalierte Runs sind nicht fortsetzbar.
+<div class="why"><b>Warum:</b> Ein Orchestrator, der „irgendwie weitermacht", produziert teuren Müll. Der Mensch bekommt den erreichten Stand und den konkreten Grund — und entscheidet.</div></div>
+
+<div class="decision"><b class="title">D10 — Gepinnte Basis: <code>pinned_base_branch</code> (Run) + <code>base_sha</code> (Lane).</b>
+Der effektive Base-Branch wird beim Start persistiert; Lanes pinnen ihren Fork-SHA.
+<div class="why"><b>Warum:</b> Base-Branches rücken weiter und Configs ändern sich mid-run. Ohne Pinning würden Fortsetzungen gegen eine andere Historie integrieren, diffen oder pushen als die, von der die Lanes geforkt sind.</div></div>
+
+<div class="decision"><b class="title">D11 — Dry-Run als Produkt-Feature, nicht als Testtrick.</b>
+<code>--dry-run</code> injiziert die Mocks in denselben Produktions-Codepfad, inkl. kanonischer Fehl-Fixtures (synthetisches Gate, das erst der zweite Lauf grün macht; E2E-Rot, das ein triagierter Lane-Fix löst). Die Simulations-Stufe wird aus dem Worktree-Inhalt abgeleitet, damit auch ein Dry-Run-Resume korrekt fortsetzt.
+<div class="why"><b>Warum:</b> Config, Gates und der komplette Kontrollfluss lassen sich so ohne Tokens/Netz/Push abnehmen — und die Akzeptanztests (SPEC §8) fahren exakt diesen Pfad.</div></div>
+
+<div class="decision"><b class="title">D12 — Codex als CLI-Subprocess, nicht als zweites SDK.</b>
+<code>codex exec --sandbox read-only</code>, isoliertes <code>CODEX_HOME</code>, hartes Timeout.
+<div class="why"><b>Warum:</b> Ein unabhängiger Reviewer mit anderem Modell-Stack fängt andere Fehlerklassen; die CLI-Grenze hält die Kopplung minimal und die read-only-Sandbox verhindert Mutationen.</div></div>
+
+<h2 id="stack">9. Pakete, Frameworks &amp; externe Werkzeuge</h2>
+<h3>Python-Dependencies (pyproject.toml)</h3>
+<table>
+  <tr><th>Paket</th><th>Version</th><th>Rolle im ADW</th></tr>
+  <tr><td><code>pydantic</code></td><td>≥ 2</td><td>Alle Datenverträge: Config-Schema, <code>RunState</code>/<code>LaneState</code>, Findings (<code>extra="forbid"</code>, Cross-Validatoren)</td></tr>
+  <tr><td><code>typer</code></td><td>≥ 0.12</td><td>CLI (<code>run/resume/approve/status</code>, Annotated-Style), Test-Client <code>CliRunner</code></td></tr>
+  <tr><td><code>pyyaml</code></td><td>≥ 6</td><td>Config-Parsing mit eigenem StrictLoader (Duplikat-Keys → Fehler)</td></tr>
+  <tr><td><code>claude-agent-sdk</code></td><td>≥ 0.2.118</td><td>Claude-Agenten headless: <code>query()</code> + <code>ClaudeAgentOptions</code> (model, cwd, resume, tools/allowed_tools, permission_mode, sandbox, setting_sources). Untergrenze wegen <code>tools</code>/<code>strict_mcp_config</code>/<code>sandbox</code>.</td></tr>
+  <tr><td><code>anyio</code></td><td>≥ 4</td><td>Sync-Wrapper um den async SDK-Stream (<code>anyio.run</code>)</td></tr>
+  <tr><td><code>pytest</code> / <code>pytest-asyncio</code></td><td>≥ 8 / ≥ 0.24</td><td>Testsuite (331 Tests)</td></tr>
+  <tr><td><code>ruff</code></td><td>≥ 0.6</td><td>Lint (E,F,W,I,UP,B) + Formatter, line-length 100, target py312</td></tr>
+</table>
+<h3>Externe Werkzeuge (zur Laufzeit via Subprocess)</h3>
+<table>
+  <tr><th>Tool</th><th>Rolle</th><th>Absicherung</th></tr>
+  <tr><td><b>git</b></td><td>Worktrees, Branches, Merges, Tree-Hashes, Push</td><td>immer <code>core.hooksPath=/dev/null</code> + Env-Whitelist + Timeouts</td></tr>
+  <tr><td><b>codex</b> (CLI, geprüft mit 0.144.0)</td><td>Unabhängige Reviews (spec/plan/code)</td><td>read-only-Sandbox, <code>mcp_servers={}</code>, isoliertes <code>CODEX_HOME</code>, 900-s-Timeout, strikter Parser</td></tr>
+  <tr><td><b>glab</b> (geprüft mit 1.53.0)</td><td>Issue-Intake, Pipeline-/Job-Status, Job-Logs</td><td>injizierbar (<code>run_glab</code>-Seam), 120-s-Timeout, SHA-gebundene Pipeline-Abfrage</td></tr>
+  <tr><td><b>uv</b> (0.10.x)</td><td>Projekt-/Dependency-Management, Entry-Point <code>adw</code></td><td>—</td></tr>
+</table>
+
+<h2 id="testing">10. Test-Strategie</h2>
+<ul>
+  <li><b>331 Tests, TDD-first entwickelt</b> (jeder Task/Bugfix begann mit einem roten Test). Kein Test braucht Netz oder Tokens: SDK, Codex und glab sind an ihren Interfaces gemockt — <b>git ist echt</b> (Wegwerf-Repos in <code>tmp_path</code>).</li>
+  <li><b>Skriptbare Mocks als Test-Rückgrat:</b> <code>MockAgentRunner</code> (Antwort-Queues je Agent, simulierte Datei-Outputs statisch oder als <code>Callable(cwd)</code> für per-Lane-Verhalten, vollständige Aufruf-Aufzeichnung inkl. <code>resume</code>/<code>deny_read_paths</code>) und <code>MockCodexRunner</code>.</li>
+  <li><b>Schwerpunkt Crash-Fenster:</b> Ein großer Teil der Phasen-Tests simuliert gezielt Abbrüche zwischen zwei Checkpoints (State manipulieren, Prozess „sterben lassen", Resume) sowie Agent-Manipulation (Fremd-Commits, Symlink-Artefakte, umgeschriebene Configs, manipulierte Worktrees nach dem completed-Checkpoint).</li>
+  <li><b>Akzeptanzebene:</b> <code>tests/test_e2e_dry_run.py</code> bildet die DoD-Kriterien 1–5 aus <code>docs/SPEC.md</code> §8 ab — komplette CLI-Dry-Runs (single + parallel), Gate-Fail→Same-Session-Fix, Approval-Gate, Triage-Pfade, Crash-Resume.</li>
+  <li><b>Review-Gate im Entwicklungsprozess:</b> pro Task <code>uv run pytest</code> + <code>ruff check/format</code> + <code>codex review --uncommitted</code>; über die Tasks 10–13 wurden dabei 8 P1- und 19 P2-Findings gefunden und jeweils mit Regressionstest zuerst gefixt.</li>
+</ul>
+
+<h2 id="limitations">11. Known Limitations (dokumentiert, bewusst akzeptiert)</h2>
+<table>
+  <tr><th>Limitation</th><th>Einordnung</th></tr>
+  <tr><td>Die Git-Konfiguration des <b>Ziel-Repos</b> (clean-Filter, Signing-Programme) gilt als vertrauenswürdig.</td><td>Sie wird vom Nutzer kontrolliert und liegt außerhalb der Agent-Schreibpfade; konfigurierte Filter laufen wie bei jedem manuellen git-Aufruf.</td></tr>
+  <tr><td>Die Codex-read-only-Sandbox verhindert Mutationen, aber keine Reads außerhalb des cwd.</td><td>Gleiches Risiko wie bei jedem manuellen <code>codex review</code>; mitigiert durch Secret-freies Env und deaktivierte MCP-Server.</td></tr>
+  <tr><td>Codex-Token-Rücksync hält den Lock nicht über die gesamte Review-Dauer.</td><td>Bewusst — sonst würden parallele Reviews minutenlang serialisiert. Im Extremfall (zwei gleichzeitige Rotationen) einmalig <code>codex login</code>.</td></tr>
+  <tr><td>Ein Crash zwischen CI-Re-Entry-Checkpoint und erneutem Poll kann dazu führen, dass der Resume ohne zweiten Fix-Versuch eskaliert.</td><td>Bounded und safe-seitig: lieber ein Re-Entry zu wenig als ein unbudgetierter Loop.</td></tr>
+  <tr><td>Der Circuit-Breaker vergleicht exakte Fehlertexte — variierende Ausgaben (Timestamps, Zähler) umgehen ihn.</td><td>Dann greifen die harten Runden-Limits.</td></tr>
+</table>
+
+<h2 id="glossar">12. Glossar</h2>
+<table>
+  <tr><th>Begriff</th><th>Bedeutung</th></tr>
+  <tr><td><b>RunContext</b></td><td>Dataclass mit allen Abhängigkeiten einer Phase (Repo, Config, State, Runner, glab-/sleep-Seams, Lock) — die Dependency-Injection-Wurzel.</td></tr>
+  <tr><td><b>AgentRunner / CodexReviewer</b></td><td>Die zwei Protokolle (PEP-544), hinter denen alle Agent-Aufrufe liegen; Produktions- und Mock-Implementierung sind austauschbar.</td></tr>
+  <tr><td><b>Gate-Beweis (<code>gates_tree</code>)</b></td><td>Baum-Hash des kompletten Worktree-Inhalts (inkl. untracked) über einen temporären Git-Index — bindet „Gates grün" an exakt den geprüften Stand.</td></tr>
+  <tr><td><b>Circuit-Breaker</b></td><td><code>check_progress</code>: identische Failure-/Finding-Menge wie in der Vorrunde → sofortige Eskalation.</td></tr>
+  <tr><td><b>Dispatch (<code>_dispatch_lane_fixes</code>)</b></td><td>Zentrale Fix-Routing-Funktion: Findings je Lane gruppieren, Lane-State atomar stagen (optional mit Budget-Inkrement via <code>mutate_staged</code>), dann regulärer Lane-Loop.</td></tr>
+  <tr><td><b>Session-Resume</b></td><td>SDK-Feature: Folge-Task an eine bestehende Agent-Session (<code>resume=session_id</code>) — voller Kontext ohne Neuaufbau.</td></tr>
+  <tr><td><b>Worktree</b></td><td>Zweiter Checkout desselben Git-Repos (<code>git worktree add</code>); Grundlage der Lane-Isolation ohne Repo-Klone.</td></tr>
+  <tr><td><b>Eskalation</b></td><td>Kontrolliertes Run-Ende: <code>escalation.md</code> + <code>phase=escalated</code> + Exit ≠ 0.</td></tr>
+</table>
+
+<p class="top"><a href="#tldr">↑ nach oben</a></p>
+</main>
+<footer>
+  ADW Technische Spezifikation · generiert am 2026-07-15 · Quellen: Repo <code>agentic-developer-workflow</code> (Code unter <code>adw/</code>, <code>docs/SPEC.md</code>, <code>docs/PLAN.md</code>, <code>pyproject.toml</code>, Commit-Historie bis main <code>9b89dd6</code>) · Bedienung: <code>docs/handbuch/ADW-USER-HANDBUCH.html</code>
+</footer>
+</body>
+</html>
