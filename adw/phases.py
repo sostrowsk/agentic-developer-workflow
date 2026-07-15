@@ -21,6 +21,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from adw import ci
 from adw.agents import REGISTRY, AgentRunner
 from adw.codex import CodexReviewer
@@ -32,6 +34,7 @@ from adw.state import LaneState, RunState
 from adw.triage import (
     LimitExceededError,
     NoProgressError,
+    check_fix_cycles,
     check_gate_iterations,
     check_progress,
     triage_final_review,
@@ -308,7 +311,7 @@ def _reviewed_authoring_loop(
                 [f".adw/{name}" for name in (review_refs or artifacts)],
                 cwd=ctx.repo,
             )
-        except FindingsParseError as exc:
+        except (FindingsParseError, ValidationError) as exc:
             raise escalate(ctx, f"Codex-{review_kind}-Review unlesbar: {exc}") from exc
         if review.verdict == "ok":
             # Bewusst KEIN Save hier: Das Leeren des Authoring-Checkpoints
@@ -767,6 +770,18 @@ def run_integration_phase(ctx: RunContext) -> None:
     if ctx.state.phase != "integration":
         return
     lanes = _active_lanes(ctx)
+    _resume_pending_lanes(ctx, lanes)
+    _integration_loop(ctx, lanes)
+    with ctx.state_lock:
+        ctx.state.phase = "codex_review"
+        ctx.save()
+
+
+def _integration_loop(ctx: RunContext, lanes: list[str]) -> Path:
+    """Merge + E2E bis grün (Kern von Phase 4) — liefert den grünen
+    Integrations-Worktree. Auch die Review-Phasen laufen hier durch: JEDER
+    Review-Fix muss wieder durchs E2E-Gate, nicht nur durch die Lane-Gates.
+    Das Runden-Budget (integration_rounds) gilt run-weit."""
     previous: list[str] | None = ctx.state.integration_last_failures or None
     while True:
         # Limit VOR Merge/E2E prüfen: Ein Crash zwischen Runden-Save und
@@ -807,10 +822,11 @@ def run_integration_phase(ctx: RunContext) -> None:
             ctx.state.integration_last_failures = failures
             ctx.save()
         previous = failures
-    with ctx.state_lock:
-        ctx.state.integration_last_failures = []
-        ctx.state.phase = "codex_review"
-        ctx.save()
+    if ctx.state.integration_last_failures:
+        with ctx.state_lock:
+            ctx.state.integration_last_failures = []
+            ctx.save()
+    return worktree
 
 
 def _fresh_integration_worktree(ctx: RunContext, lanes: list[str]) -> Path:
@@ -892,44 +908,247 @@ def _triage_e2e(ctx: RunContext, worktree: Path, report: GateReport) -> ReviewRe
     result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
     try:
         return extract_review_result(result.text)
-    except FindingsParseError as exc:
+    except (FindingsParseError, ValidationError) as exc:
         raise escalate(ctx, f"E2E-Triage-Output unlesbar: {exc}") from exc
 
 
 def _dispatch_lane_fixes(
-    ctx: RunContext, findings: list[Finding], lanes: list[str], source: str
+    ctx: RunContext,
+    findings: list[Finding],
+    lanes: list[str],
+    source: str,
+    mutate_staged: Callable[[list[str]], None] | None = None,
 ) -> None:
     """Findings je Lane als Fix-Task in den regulären Lane-Loop geben —
-    jeder Fix nimmt den validierten Pfad (Gates, Commit, kein Sonderweg)."""
+    jeder Fix nimmt den validierten Pfad (Gates, Commit, kein Sonderweg).
+
+    ``mutate_staged`` läuft unter demselben Lock und wird mit demselben Save
+    persistiert wie das Staging — Zähler (z. B. fix_cycles) und gestagter
+    Fix-Task sind damit atomar; ein Crash kann keinen Zyklus verbrennen,
+    ohne dass der zugehörige Fix beim Resume nachgeholt wird."""
     decision = triage_final_review(
         ReviewResult(verdict="needs_fixes", findings=findings)
         if findings
         else ReviewResult(verdict="ok", findings=[]),
         active_lanes=lanes,
     )
-    for lane, items in decision.fix_tasks.items():
-        lane_state = ctx.state.lanes.get(lane)
-        if lane_state is None:
-            raise escalate(
-                ctx,
-                f"{source}-Finding für unbekannte Lane {lane!r} — aktive Lanes: {', '.join(lanes)}",
-            )
-        text = _findings_text(ReviewResult(verdict="needs_fixes", findings=items))
-        task = (
-            f"{source}-Findings für deine Lane. Fixe die Ursachen (kein Workaround "
-            f"an den Tests vorbei), TDD wo sinnvoll. Du committest nicht.\n\n{text}"
-        )
-        with ctx.state_lock:
+    with ctx.state_lock:
+        # Erst ALLE Lanes validieren, dann mutieren — escalate() persistiert
+        # den State und darf keinen halb gestagten Zustand mitschreiben.
+        for lane in decision.fix_tasks:
+            if ctx.state.lanes.get(lane) is None:
+                raise escalate(
+                    ctx,
+                    f"{source}-Finding für unbekannte Lane {lane!r} — "
+                    f"aktive Lanes: {', '.join(lanes)}",
+                )
+        if mutate_staged is not None:
+            mutate_staged(list(decision.fix_tasks))
+        for lane, items in decision.fix_tasks.items():
+            lane_state = ctx.state.lanes[lane]
+            text = _findings_text(ReviewResult(verdict="needs_fixes", findings=items))
             # Lane geht zurück in den Loop: neuer Fix-Task, frisches
             # Iterations-Budget (das Limit gilt pro Task, nicht pro Run).
             lane_state.completed = False
             lane_state.gates_passed = False
             lane_state.gates_tree = None
-            lane_state.pending_task = task
+            lane_state.pending_task = (
+                f"{source}-Findings für deine Lane. Fixe die Ursachen (kein Workaround "
+                f"an den Tests vorbei), TDD wo sinnvoll. Du committest nicht.\n\n{text}"
+            )
             lane_state.last_failures = []
             lane_state.gate_iterations = 0
-            ctx.save()
+        ctx.save()  # EIN Save: Staging aller Lanes + mutate_staged atomar
+    for lane in decision.fix_tasks:
         _run_lane(ctx, lane, lanes)
+
+
+# --- Phase 5+6: Codex-Code-Review, finaler Review + Triage --------------------
+
+MAX_REVIEW_ROUNDS = 10
+
+
+def _resume_pending_lanes(ctx: RunContext, lanes: list[str]) -> None:
+    """Vor Merge/Review JEDE Lane durch _run_lane schicken: Unfertige Lanes
+    (Crash nach Fix-Dispatch) holen Gates + Commit nach; fertige Lanes laufen
+    durch die Tree-Hash-Revalidierung und gehen bei Manipulation zurück in den
+    Loop statt ungegatete Änderungen ins Review zu geben."""
+    for lane in lanes:
+        if ctx.state.lanes.get(lane) is not None:
+            _run_lane(ctx, lane, lanes)
+
+
+def _review_worktree(ctx: RunContext, lanes: list[str]) -> Path:
+    """Worktree, gegen den Reviews laufen: parallel der Integrations-Branch
+    NACH grünem E2E-Gate (jeder Review-Fix muss wieder durch die komplette
+    Integrationsschleife), Single-Lane der Lane-Worktree — beides idempotent
+    wiederherstellbar, ein Crash-Resume braucht keinen alten Zustand."""
+    if ctx.state.parallel:
+        return _integration_loop(ctx, lanes)
+    return create_lane_worktree(ctx.repo, ctx.state.run_id, lanes[0], ctx.config.base_branch)
+
+
+def _changed_files(ctx: RunContext, worktree: Path) -> list[str]:
+    changed = _git(
+        ctx, worktree, "diff", "--name-only", f"{ctx.config.base_branch}...HEAD"
+    ).splitlines()
+    return [name for name in changed if name]
+
+
+def run_codex_review_phase(ctx: RunContext) -> None:
+    """Phase 5: Codex reviewt den integrierten Diff; Findings werden per
+    lane-Feld in die Build-Lanes geroutet, bis Verdict ok."""
+    if ctx.state.phase != "codex_review":
+        return
+    lanes = _active_lanes(ctx)
+    _resume_pending_lanes(ctx, lanes)
+    previous: list[str] | None = ctx.state.review_last_failures or None
+    while True:
+        # Limit VOR dem Review: Crash zwischen Runden-Save und Eskalation darf
+        # beim Resume keine weitere Runde starten.
+        if ctx.state.review_rounds >= MAX_REVIEW_ROUNDS:
+            raise escalate(
+                ctx,
+                f"Codex-Code-Review: {ctx.state.review_rounds} Runden erreicht "
+                f"(Limit {MAX_REVIEW_ROUNDS}) — Eskalation",
+            )
+        worktree = _review_worktree(ctx, lanes)
+        try:
+            review = ctx.codex.review("code", _changed_files(ctx, worktree), cwd=worktree)
+        except (FindingsParseError, ValidationError) as exc:
+            raise escalate(ctx, f"Codex-Code-Review unlesbar: {exc}") from exc
+        if review.verdict == "ok":
+            break
+        with ctx.state_lock:
+            ctx.state.review_rounds += 1
+            ctx.save()
+        if ctx.state.review_rounds >= MAX_REVIEW_ROUNDS:
+            # VOR dem Dispatch eskalieren: ein Fix, den nie wieder ein Review
+            # prüfen kann, ist verschwendete (teure) Arbeit.
+            raise escalate(
+                ctx,
+                f"Codex-Code-Review: {ctx.state.review_rounds} Runden erreicht "
+                f"(Limit {MAX_REVIEW_ROUNDS}) — Eskalation.\n\n{_findings_text(review)}",
+            )
+        failures = _finding_keys(review)
+        try:
+            check_progress(previous, failures)
+        except NoProgressError as exc:
+            raise escalate(
+                ctx,
+                f"Codex-Code-Review meldet unverändert dieselben Findings — "
+                f"Circuit-Breaker.\n\n{_findings_text(review)}",
+            ) from exc
+        _dispatch_lane_fixes(ctx, review.findings, lanes, source="Codex-Code-Review")
+        with ctx.state_lock:
+            # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4.
+            ctx.state.review_last_failures = failures
+            ctx.save()
+        previous = failures
+    with ctx.state_lock:
+        ctx.state.review_last_failures = []
+        ctx.state.phase = "final_review"
+        ctx.save()
+
+
+def run_final_review_phase(ctx: RunContext) -> None:
+    """Phase 6: Finaler Reviewer (read-only) prüft gegen die Spec; Triage in
+    Code: scope_gap → Follow-up-Report, Rest → Fix-Zyklus (max. 3 je Lane)."""
+    if ctx.state.phase != "final_review":
+        return
+    lanes = _active_lanes(ctx)
+    _resume_pending_lanes(ctx, lanes)
+    previous: list[str] | None = ctx.state.final_review_last_failures or None
+    while True:
+        worktree = _review_worktree(ctx, lanes)
+        spec = REGISTRY["final_reviewer"]
+        task = (
+            "Prüfe die Implementierung in diesem Worktree read-only gegen "
+            ".adw/spec.md (Akzeptanzkriterien, Definition of Done) und "
+            ".adw/contract.yaml. Antworte AUSSCHLIESSLICH mit dem Findings-JSON; "
+            "setze bei jedem Finding das category-Feld "
+            "(scope_gap | implementation | trivial)."
+        )
+        result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
+        try:
+            review = extract_review_result(result.text)
+        except (FindingsParseError, ValidationError) as exc:
+            raise escalate(ctx, f"Finaler Review unlesbar: {exc}") from exc
+        if review.verdict == "ok":
+            break
+        uncategorized = [f.file for f in review.findings if f.category is None]
+        if uncategorized:
+            # Ohne category ist keine Triage möglich — ein scope_gap würde
+            # sonst still als Implementierungs-Fix durchgehen.
+            raise escalate(
+                ctx,
+                f"Finaler Review ohne category-Feld bei: {', '.join(uncategorized)} — "
+                f"Findings sind nicht triagierbar",
+            )
+        decision = triage_final_review(review, active_lanes=lanes)
+        if decision.followups:
+            _write_followups(ctx, decision.followups)
+        if not decision.fix_tasks:
+            break  # nur scope_gaps: Report statt Auto-Restart (SPEC §4 Phase 6)
+        fixable = [f for f in review.findings if f.category != "scope_gap"]
+        failures = _finding_keys(ReviewResult(verdict="needs_fixes", findings=fixable))
+        try:
+            check_progress(previous, failures)
+        except NoProgressError as exc:
+            raise escalate(
+                ctx,
+                f"Finaler Review meldet unverändert dieselben Findings — "
+                f"Circuit-Breaker.\n\n{_findings_text(review)}",
+            ) from exc
+
+        def _bump_fix_cycles(fix_lanes: list[str]) -> None:
+            # Läuft im Dispatch unter dem State-Lock und wird mit dem Staging
+            # in EINEM Save persistiert — Zähler und Fix-Task sind atomar.
+            for lane in fix_lanes:
+                try:
+                    check_fix_cycles(ctx.state.lanes[lane])
+                except LimitExceededError as exc:
+                    raise escalate(ctx, f"Lane {lane}: {exc}") from exc
+            for lane in fix_lanes:
+                ctx.state.lanes[lane].fix_cycles += 1
+
+        _dispatch_lane_fixes(
+            ctx,
+            review.findings,
+            lanes,
+            source="Finaler-Review",
+            mutate_staged=_bump_fix_cycles,
+        )
+        with ctx.state_lock:
+            # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4/5.
+            ctx.state.final_review_last_failures = failures
+            ctx.save()
+        previous = failures
+    with ctx.state_lock:
+        ctx.state.final_review_last_failures = []
+        ctx.state.phase = "ci"
+        ctx.save()
+
+
+def _write_followups(ctx: RunContext, followups: list[Finding]) -> None:
+    """scope_gap-Findings als Follow-up-Report sammeln (kein Auto-Restart).
+
+    Dedupe über file+issue: ein bewusst nicht gefixtes scope_gap taucht in
+    jeder weiteren Review-Runde erneut auf und darf den Report nicht fluten."""
+    ctx.run_dir.mkdir(parents=True, exist_ok=True)
+    path = ctx.run_dir / "followups.md"
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    entries = []
+    for item in followups:
+        if f"{item.file}: {item.issue}" in existing:
+            continue
+        plan = "; ".join(item.remediation_plan)
+        entries.append(f"- [{item.severity}] {item.file}: {item.issue}\n  - Plan: {plan}")
+    if not entries:
+        return
+    header = "" if existing else f"# Follow-ups — Run {ctx.state.run_id}\n\n"
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(header + "\n".join(entries) + "\n")
 
 
 def _gate_failure_text(report: GateReport) -> str:

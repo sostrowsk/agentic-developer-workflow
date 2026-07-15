@@ -79,6 +79,11 @@ class RunState(BaseModel):
     # Circuit-Breaker-Basis (wird erst NACH dem Fix-Dispatch fortgeschrieben).
     integration_rounds: int = 0
     integration_last_failures: list[str] = Field(default_factory=list)
+    # Analog für den Codex-Code-Review-Loop (Phase 5) und den finalen
+    # Review (Phase 6, nur Circuit-Breaker — das Limit sind die fix_cycles).
+    review_rounds: int = 0
+    review_last_failures: list[str] = Field(default_factory=list)
+    final_review_last_failures: list[str] = Field(default_factory=list)
     # Checkpoint des Spec-/Plan-Authoring-Loops: Session, offener Fix-Task und
     # Findings-Basis überleben so einen Crash mitten im Review-Zyklus.
     authoring_session: str | None = None

@@ -12,6 +12,8 @@ from adw.phases import (
     EscalationError,
     RunContext,
     run_build_phase,
+    run_codex_review_phase,
+    run_final_review_phase,
     run_integration_phase,
     run_spec_and_plan,
 )
@@ -1615,3 +1617,424 @@ def test_merge_timeout_escalates_instead_of_crashing(pctx, monkeypatch):
         run_integration_phase(pctx)
     assert (pctx.run_dir / "escalation.md").is_file()
     assert RunState.load(pctx.repo, pctx.state.run_id).phase == "escalated"
+
+
+# --- 10e: Codex-Code-Review + finaler Review + Triage ------------------------
+
+
+def code_finding(lane: str, issue: str, category: str | None = None) -> ReviewResult:
+    return ReviewResult(
+        verdict="needs_fixes",
+        findings=[
+            Finding(
+                severity="P1",
+                lane=lane,
+                file="src_neu.py",
+                issue=issue,
+                remediation_plan=["Ursache beheben"],
+                category=category,
+            )
+        ],
+    )
+
+
+def final_review_json(verdict: str = "ok", findings: list[dict] | None = None) -> str:
+    return json.dumps({"verdict": verdict, "findings": findings or []})
+
+
+def finding_dict(lane: str, issue: str, category: str) -> dict:
+    return {
+        "severity": "P2",
+        "lane": lane,
+        "file": "src_neu.py",
+        "issue": issue,
+        "remediation_plan": ["fixen"],
+        "category": category,
+    }
+
+
+def prepare_reviewable(ctx):
+    """Single-Lane bis phase='codex_review' bringen (Build fertig committet)."""
+    prepare_approved(ctx)
+    ctx.agents.script_files("build_agent", {"src_neu.py": "print('v1')\n"})
+    ctx.agents.script("build_agent", "gebaut")
+    run_build_phase(ctx)
+    assert ctx.state.phase == "codex_review"
+
+
+def test_codex_code_review_ok_advances_to_final_review(ctx):
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    assert ctx.state.phase == "final_review"
+    code_calls = [c for c in ctx.codex.calls if c.kind == "code"]
+    assert len(code_calls) == 1
+    assert code_calls[0].cwd.name == "backend"  # Single-Lane: Review im Lane-Worktree
+    assert "src_neu.py" in code_calls[0].content_refs
+
+
+def test_codex_code_findings_route_to_lane_and_rereview(ctx):
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", "gefixt")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2, race gefixt')\n"}
+    ctx.codex.script(code_finding("backend", "Race Condition beim Speichern"), OK)
+    run_codex_review_phase(ctx)
+    assert ctx.state.phase == "final_review"
+    fix_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert len(fix_calls) == 2  # Build + Codex-Fix
+    assert "Race Condition" in fix_calls[1].task
+    code_calls = [c for c in ctx.codex.calls if c.kind == "code"]
+    assert len(code_calls) == 2  # Re-Review nach dem Fix
+
+
+def test_identical_codex_code_findings_escalate(ctx):
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", "angeblich gefixt")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2')\n"}
+    ctx.codex.script(
+        code_finding("backend", "immer dasselbe"),
+        code_finding("backend", "immer dasselbe"),
+    )
+    with pytest.raises(EscalationError, match="Circuit|unverändert"):
+        run_codex_review_phase(ctx)
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
+
+
+def test_parallel_codex_review_runs_on_integration_worktree(pctx):
+    prepare_built_parallel(pctx)
+    run_integration_phase(pctx)
+    pctx.codex.script(OK)
+    run_codex_review_phase(pctx)
+    code_calls = [c for c in pctx.codex.calls if c.kind == "code"]
+    assert len(code_calls) == 1
+    assert code_calls[0].cwd.name == "integration"
+    assert pctx.state.phase == "final_review"
+
+
+def test_final_review_ok_advances_to_ci(ctx):
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("final_reviewer", final_review_json("ok"))
+    run_final_review_phase(ctx)
+    assert ctx.state.phase == "ci"
+    reviewer_calls = [c for c in ctx.agents.calls if c.agent == "final_reviewer"]
+    assert len(reviewer_calls) == 1
+    assert "spec" in reviewer_calls[0].task.lower()
+
+
+def test_scope_gap_creates_followup_report_instead_of_fix_cycle(ctx):
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script(
+        "final_reviewer",
+        final_review_json(
+            "needs_fixes",
+            [finding_dict("backend", "Reporting-Export fehlt komplett", "scope_gap")],
+        ),
+    )
+    build_calls_before = len([c for c in ctx.agents.calls if c.agent == "build_agent"])
+    run_final_review_phase(ctx)
+    assert ctx.state.phase == "ci"  # kein Fix-Zyklus, Run läuft weiter
+    followups = ctx.run_dir / "followups.md"
+    assert followups.is_file()
+    assert "Reporting-Export" in followups.read_text()
+    build_calls_after = len([c for c in ctx.agents.calls if c.agent == "build_agent"])
+    assert build_calls_after == build_calls_before  # kein Build-Agent gelaufen
+
+
+def test_implementation_finding_triggers_lane_fix_cycle(ctx):
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("build_agent", "nachgebessert")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v3, validiert')\n"}
+    ctx.agents.script(
+        "final_reviewer",
+        final_review_json(
+            "needs_fixes",
+            [finding_dict("backend", "Input wird nicht validiert", "implementation")],
+        ),
+        final_review_json("ok"),
+    )
+    run_final_review_phase(ctx)
+    assert ctx.state.phase == "ci"
+    fix_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert "nicht validiert" in fix_calls[-1].task
+    assert ctx.state.lanes["backend"].fix_cycles == 1
+    reviewer_calls = [c for c in ctx.agents.calls if c.agent == "final_reviewer"]
+    assert len(reviewer_calls) == 2  # Re-Review nach dem Fix
+
+
+def test_three_fix_cycles_escalate(ctx):
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("build_agent", *["Fix-Versuch"] * 5)
+
+    def writes(cwd):
+        return {f"fix-{len(ctx.agents.calls)}.py": "pass\n"}
+
+    ctx.agents.file_writes["build_agent"] = writes
+    ctx.agents.script(
+        "final_reviewer",
+        *[
+            final_review_json(
+                "needs_fixes",
+                [finding_dict("backend", f"Problem Nummer {i}", "implementation")],
+            )
+            for i in range(5)
+        ],
+    )
+    with pytest.raises(EscalationError, match="Fix-Zyklen|[Ll]imit"):
+        run_final_review_phase(ctx)
+    assert ctx.state.lanes["backend"].fix_cycles == 3  # 3 Zyklen, der 4. eskaliert
+
+
+def test_unparseable_final_review_output_escalates(ctx):
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("final_reviewer", "Sieht insgesamt ganz gut aus! (kein JSON)")
+    with pytest.raises(EscalationError, match="unlesbar|[Rr]eview"):
+        run_final_review_phase(ctx)
+
+
+def test_pending_lane_fix_is_resumed_before_codex_review(ctx):
+    """Regression (Codex P1): Crash zwischen Fix-Dispatch und Gates/Commit darf
+    beim Resume keinen ungeprüften, uncommitteten Stand ins Review geben."""
+    from pathlib import Path
+
+    from tests.conftest import git
+
+    prepare_reviewable(ctx)
+    lane = ctx.state.lanes["backend"]
+    worktree = Path(lane.worktree)
+    # Crash-Fenster simulieren: Fix dispatcht, Agent hat geschrieben,
+    # Gates + Commit sind nie gelaufen.
+    (worktree / "halbfertig.py").write_text("print('unvalidiert')\n")
+    lane.completed = False
+    lane.gates_passed = False
+    lane.gates_tree = None
+    lane.pending_task = "Offenes Codex-Finding: Race fixen"
+    lane.gate_iterations = 0
+    ctx.save()
+    ctx.agents.script("build_agent", "Fix abgeschlossen")
+    ctx.agents.file_writes["build_agent"] = {"halbfertig.py": "print('validiert')\n"}
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    fix_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert "Offenes Codex-Finding" in fix_calls[-1].task
+    assert git(worktree, "status", "--porcelain") == ""  # committet VOR dem Review
+    assert ctx.state.phase == "final_review"
+
+
+def test_review_round_limit_escalates_without_terminal_fix_dispatch(ctx):
+    """Regression (Codex P2): Der 10. needs_fixes-Review darf keinen Fix mehr
+    dispatchen, den nie wieder ein Review prüfen kann."""
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", *["Fix"] * 12)
+
+    def writes(cwd):
+        return {f"fix-{len(ctx.agents.calls)}.py": "pass\n"}
+
+    ctx.agents.file_writes["build_agent"] = writes
+    ctx.codex.script(*[code_finding("backend", f"Problem {i}") for i in range(12)])
+    with pytest.raises(EscalationError, match="Runden|[Ll]imit"):
+        run_codex_review_phase(ctx)
+    code_calls = [c for c in ctx.codex.calls if c.kind == "code"]
+    build_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert len(code_calls) == 10
+    assert len(build_calls) == 1 + 9  # Build + 9 Fixes — kein 10. Terminal-Fix
+
+
+def test_final_review_finding_for_inactive_lane_escalates(ctx):
+    """Regression (Codex P2): lane='frontend' im Single-Lane-Run muss sauber
+    eskalieren (Report + State) statt mit KeyError durchzuschlagen."""
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script(
+        "final_reviewer",
+        final_review_json(
+            "needs_fixes", [finding_dict("frontend", "FE-Teil fehlt", "implementation")]
+        ),
+    )
+    with pytest.raises(EscalationError, match="frontend|[Ll]ane"):
+        run_final_review_phase(ctx)
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
+    assert (ctx.run_dir / "escalation.md").is_file()
+
+
+def test_identical_final_review_findings_trigger_circuit_breaker(ctx):
+    """Regression (Codex P2): identisches Finding nach einem Fix-Zyklus muss den
+    Circuit-Breaker auslösen statt alle 3 Zyklen auszureizen."""
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("build_agent", "Fix")
+
+    def writes(cwd):
+        return {f"fix-{len(ctx.agents.calls)}.py": "pass\n"}
+
+    ctx.agents.file_writes["build_agent"] = writes
+    same = finding_dict("backend", "genau dasselbe Problem", "implementation")
+    ctx.agents.script(
+        "final_reviewer",
+        final_review_json("needs_fixes", [same]),
+        final_review_json("needs_fixes", [same]),
+    )
+    with pytest.raises(EscalationError, match="Circuit|unverändert"):
+        run_final_review_phase(ctx)
+    assert ctx.state.lanes["backend"].fix_cycles == 1  # nicht bis 3 ausgereizt
+
+
+def test_tampered_completed_lane_is_revalidated_before_review(ctx):
+    """Regression (Codex P1): Auch 'completed'-Lanes müssen vor dem Review durch
+    die Tree-Hash-Revalidierung — sonst konsumiert das Review ungegatete Änderungen."""
+    from pathlib import Path
+
+    from tests.conftest import git
+
+    prepare_reviewable(ctx)
+    lane = ctx.state.lanes["backend"]
+    worktree = Path(lane.worktree)
+    # Manipulation NACH dem completed-Checkpoint (z. B. Crash-Fenster/Fremdprozess)
+    (worktree / "eingeschleust.py").write_text("print('ungated')\n")
+    ctx.agents.script("build_agent", "neu gebaut")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2')\n"}
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    build_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert len(build_calls) == 2  # Lane ging zurück in den Loop (Gates + Commit)
+    assert git(worktree, "status", "--porcelain") == ""  # nichts Uncommittetes im Review
+
+
+def test_fix_cycle_increment_is_persisted_with_the_staged_fix(ctx, monkeypatch):
+    """Regression (Codex P2): Zähler-Inkrement und gestagter Fix-Task müssen im
+    SELBEN Save landen — sonst verbrennt ein Crash dazwischen einen Fix-Zyklus."""
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("build_agent", "Fix")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2')\n"}
+    ctx.agents.script(
+        "final_reviewer",
+        final_review_json("needs_fixes", [finding_dict("backend", "Problem", "implementation")]),
+        final_review_json("ok"),
+    )
+    snapshots = []
+    real_save = RunState.save
+
+    def spy(self, repo):
+        real_save(self, repo)
+        snapshots.append(self.model_dump())
+
+    monkeypatch.setattr(RunState, "save", spy)
+    run_final_review_phase(ctx)
+    first = next(s for s in snapshots if s["lanes"]["backend"]["fix_cycles"] == 1)
+    assert first["lanes"]["backend"]["pending_task"]  # im selben Save gestaged
+    assert first["lanes"]["backend"]["completed"] is False
+
+
+def test_followups_are_not_duplicated_across_review_rounds(ctx):
+    """Regression (Codex P2): Ein scope_gap, das bewusst nicht gefixt wird, darf
+    im Follow-up-Report nicht pro Review-Runde erneut auftauchen."""
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("build_agent", "Fix")
+
+    def writes(cwd):
+        return {f"fix-{len(ctx.agents.calls)}.py": "pass\n"}
+
+    ctx.agents.file_writes["build_agent"] = writes
+    gap = finding_dict("backend", "Export-Feature fehlt", "scope_gap")
+    ctx.agents.script(
+        "final_reviewer",
+        final_review_json("needs_fixes", [gap, finding_dict("backend", "Bug A", "implementation")]),
+        final_review_json("needs_fixes", [gap]),
+    )
+    run_final_review_phase(ctx)
+    assert ctx.state.phase == "ci"
+    text = (ctx.run_dir / "followups.md").read_text()
+    assert text.count("Export-Feature fehlt") == 1
+
+
+def test_review_fix_in_parallel_run_goes_back_through_e2e(pctx, target_repo):
+    """Regression (Codex P1): Ein Review-Fix im Parallel-Run muss wieder durchs
+    E2E-Gate — nicht nur durch die Lane-Gates + Re-Merge."""
+    write_config(
+        target_repo,
+        PARALLEL_CONFIG.replace(
+            'cmd: "true"\n  timeout: 60',
+            "cmd: \"sh -c 'test ! -f kaputt || { echo E2E-BRICHT; exit 1; }'\"\n  timeout: 60",
+        ),
+    )
+    pctx.config = AdwConfig.load(target_repo)
+    prepare_built_parallel(pctx, build_responses=6)
+    run_integration_phase(pctx)  # E2E grün: 'kaputt' existiert noch nicht
+    assert pctx.state.phase == "codex_review"
+    # Codex-Fix bricht das Cross-Lane-Verhalten: die Lane-Gates bleiben grün,
+    # aber E2E würde rot — das MUSS auffallen.
+    pctx.agents.file_writes["build_agent"] = lambda cwd: {
+        "kaputt": "bricht e2e\n",
+        f"fix-{len(pctx.agents.calls)}.py": "pass\n",
+    }
+    pctx.codex.script(code_finding("backend", "Race beim Speichern"))
+    pctx.agents.script("e2e_triage", triage_json("backend", "kaputt eingebaut"))
+    with pytest.raises(EscalationError):
+        run_codex_review_phase(pctx)
+    triage_calls = [c for c in pctx.agents.calls if c.agent == "e2e_triage"]
+    assert len(triage_calls) >= 1  # E2E lief nach dem Review-Fix und schlug an
+    assert "E2E-BRICHT" in triage_calls[0].task
+
+
+def test_final_review_finding_without_category_escalates(ctx):
+    """Regression (Codex P2): Fehlendes category-Feld darf nicht still als
+    'implementation' durchgehen — der Reviewer muss triagierbar antworten."""
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    incomplete = {
+        "severity": "P2",
+        "lane": "backend",
+        "file": "src_neu.py",
+        "issue": "irgendwas",
+        "remediation_plan": ["fixen"],
+    }
+    ctx.agents.script("final_reviewer", final_review_json("needs_fixes", [incomplete]))
+    with pytest.raises(EscalationError, match="category"):
+        run_final_review_phase(ctx)
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
+
+
+def test_schema_invalid_final_review_output_escalates(ctx):
+    """Regression (Codex P2): Valides JSON mit Schema-Verstoß (ValidationError)
+    muss genauso eskalieren wie kaputtes JSON — kein roher Traceback."""
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    broken = {
+        "severity": "P9",  # ungültig
+        "lane": "backend",
+        "file": "src_neu.py",
+        "issue": "x",
+        "remediation_plan": ["y"],
+        "category": "implementation",
+    }
+    ctx.agents.script("final_reviewer", final_review_json("needs_fixes", [broken]))
+    with pytest.raises(EscalationError, match="unlesbar|[Rr]eview"):
+        run_final_review_phase(ctx)
+    assert (ctx.run_dir / "escalation.md").is_file()
+
+
+def test_schema_invalid_e2e_triage_output_escalates(pctx, target_repo):
+    write_config(target_repo, E2E_MARKER_CONFIG)
+    pctx.config = AdwConfig.load(target_repo)
+    prepare_built_parallel(pctx)
+    broken = json.dumps({"verdict": "needs_fixes", "findings": [{"severity": "P9"}]})
+    pctx.agents.script("e2e_triage", broken)
+    with pytest.raises(EscalationError, match="[Tt]riage"):
+        run_integration_phase(pctx)
