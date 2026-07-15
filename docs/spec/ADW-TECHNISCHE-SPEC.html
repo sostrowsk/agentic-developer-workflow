@@ -74,7 +74,7 @@
     <li><b>Aufbau:</b> Package <code>adw/</code> mit deterministischem Kern (config, state, findings, gates, worktrees, triage, ci), zwei Agent-Adaptern (Claude Agent SDK, Codex CLI), Phasen-Orchestrierung (<code>phases.py</code>, ~1.300 Zeilen) und typer-CLI.</li>
     <li><b>Verlässlichkeit:</b> Jeder Übergang und jedes offene Feedback wird atomar in <code>state.json</code> checkpointed (flock + tmp/rename); Gate-Beweise sind an Baum-Hashes gebunden; alle Loops haben harte Limits + Circuit-Breaker.</li>
     <li><b>Sicherheit:</b> Tool- und Pfad-Whitelists je Agent, sandboxed Bash im Worktree, Env-Whitelist für alle Subprozesse, Commits nur durch den Orchestrator, unveränderliche Artefakte (Restore nach jedem Agent-Lauf).</li>
-    <li><b>Stack:</b> Python ≥ 3.12, uv, pydantic v2, typer, PyYAML, claude-agent-sdk (≥ 0.2.118), anyio; extern: codex-CLI, glab (GitLab), gh (GitHub), git. 331 pytest-Tests, mocks-only (kein Netz, keine Tokens), echtes git.</li>
+    <li><b>Stack:</b> Python ≥ 3.12, uv, pydantic v2, typer, PyYAML, claude-agent-sdk (≥ 0.2.118, spawnt die <b>Claude-Code-CLI</b> headless — Auth/Abrechnung über den Plan-Login, kein API-Token-Payment), anyio; extern: codex-CLI, glab (GitLab), gh (GitHub), git. 350 pytest-Tests, mocks-only (kein Netz, keine Tokens), echtes git.</li>
   </ul>
 </section>
 
@@ -266,7 +266,7 @@
   <tr><th>Ebene</th><th>Mechanismus</th></tr>
   <tr><td>Agent-Werkzeuge</td><td><code>tools=</code> <b>restringiert</b> die verfügbaren Tools (nicht nur Auto-Approve); <code>allowed_tools</code> mit artefakt-exakten Pfad-Regeln; Reviewer strikt read-only; Build-Bash sandboxed und auf den Worktree begrenzt.</td></tr>
   <tr><td>Prozess-Umgebung</td><td><code>safe_env()</code>-Whitelist für <b>alle</b> Subprozesse (PATH, HOME, LANG, … — keine API-Keys/Cloud-Creds). Das SDK merged <code>os.environ</code>; Nicht-Whitelist-Variablen werden per <code>""</code>-Override geblankt. <code>SSH_AUTH_SOCK</code> nur dem Push-Subprozess, <code>CODEX_HOME</code> nur dem CodexRunner.</td></tr>
-  <tr><td>Auth</td><td>Nur gespeicherter Claude-CLI-Login (fail fast, bevor Tokens fließen); Codex mit isoliertem <code>CODEX_HOME</code> (nur <code>auth.json</code>, keine user-konfigurierten MCP-Server), Token-Rotation wird per CAS + flock zurückgesynct.</td></tr>
+  <tr><td>Auth &amp; Abrechnung</td><td>Nur gespeicherter Claude-CLI-Login (<code>_require_stored_login()</code>, fail fast bevor Tokens fließen) — Verbrauch läuft damit über den Claude-Plan, nie token-by-token gegen die API: <code>ANTHROPIC_API_KEY</code> &amp; Co. werden per <code>""</code>-Override geblankt. Codex mit isoliertem <code>CODEX_HOME</code> (nur <code>auth.json</code>, keine user-konfigurierten MCP-Server), Token-Rotation wird per CAS + flock zurückgesynct.</td></tr>
   <tr><td>Git-Integrität</td><td>Orchestrator-Git immer mit <code>core.hooksPath=/dev/null</code> + Env-Whitelist. Commits nur durch den Orchestrator; Agent-Commits, Branch-Wechsel (symbolic-ref-Check) und HEAD-Bewegungen im Crash-Fenster werden erkannt und eskalieren.</td></tr>
   <tr><td>Artefakt-Integrität</td><td>Spec/Plan/Kontrakt/Config sind für Agents effektiv unveränderlich: byte-genauer Restore nach jedem Agent-Lauf bzw. vor Gates/Commit; Symlink-/Verzeichnis-Ersetzungen werden erkannt und ersetzt, nie verfolgt (kein Schreiben außerhalb der Lane); eine eingeschleuste Config wird aus dem gepinnten Fork-Punkt restauriert oder — positiv verifiziert — gelöscht.</td></tr>
   <tr><td>Lane-Isolation</td><td>Eigener Worktree je Lane; Nachbar-Lanes per <code>deny_read_paths</code> unlesbar; Ports deterministisch aus der run_id mit Bind-Check.</td></tr>
@@ -322,6 +322,10 @@ Der effektive Base-Branch wird beim Start persistiert; Lanes pinnen ihren Fork-S
 <code>codex exec --sandbox read-only</code>, isoliertes <code>CODEX_HOME</code>, hartes Timeout.
 <div class="why"><b>Warum:</b> Ein unabhängiger Reviewer mit anderem Modell-Stack fängt andere Fehlerklassen; die CLI-Grenze hält die Kopplung minimal und die read-only-Sandbox verhindert Mutationen.</div></div>
 
+<div class="decision"><b class="title">D13 — Plan-Abrechnung: Claude-Code-CLI unter der Haube, stored-login-only.</b>
+Das Agent SDK spawnt die Claude-Code-CLI als headless Subprocess; ADW erzwingt den gespeicherten CLI-Login (<code>_require_stored_login()</code>) und blankt API-Key-Umgebungsvariablen aktiv — es existiert kein token-by-token-API-Pfad. Schlägt ein Agent-Aufruf fehl (typisch: Abo-Fenster erschöpft), fängt die CLI den <code>AgentRunError</code>, beendet mit Exit 1 + Resume-Hinweis und lässt den Run am Checkpoint stehen — bewusst KEINE Eskalation, denn <code>phase=escalated</code> wäre endgültig und der Zustand ist transient: <code>adw resume</code> setzt nach dem Limit-Reset fort.
+<div class="why"><b>Warum:</b> Kostenkontrolle strukturell statt disziplinarisch — Verbrauch zählt gegen die Plan-Kontingente (5-h-Fenster/Wochenlimit), ein versehentlicher API-Budget-Abfluss ist technisch unmöglich. Der Preis ist ein Verfügbarkeitsrisiko, das das Crash-Resume-Engineering ohnehin abdeckt.</div></div>
+
 <h2 id="stack">9. Pakete, Frameworks &amp; externe Werkzeuge</h2>
 <h3>Python-Dependencies (pyproject.toml)</h3>
 <table>
@@ -329,7 +333,7 @@ Der effektive Base-Branch wird beim Start persistiert; Lanes pinnen ihren Fork-S
   <tr><td><code>pydantic</code></td><td>≥ 2</td><td>Alle Datenverträge: Config-Schema, <code>RunState</code>/<code>LaneState</code>, Findings (<code>extra="forbid"</code>, Cross-Validatoren)</td></tr>
   <tr><td><code>typer</code></td><td>≥ 0.12</td><td>CLI (<code>run/resume/approve/status</code>, Annotated-Style), Test-Client <code>CliRunner</code></td></tr>
   <tr><td><code>pyyaml</code></td><td>≥ 6</td><td>Config-Parsing mit eigenem StrictLoader (Duplikat-Keys → Fehler)</td></tr>
-  <tr><td><code>claude-agent-sdk</code></td><td>≥ 0.2.118</td><td>Claude-Agenten headless: <code>query()</code> + <code>ClaudeAgentOptions</code> (model, cwd, resume, tools/allowed_tools, permission_mode, sandbox, setting_sources). Untergrenze wegen <code>tools</code>/<code>strict_mcp_config</code>/<code>sandbox</code>.</td></tr>
+  <tr><td><code>claude-agent-sdk</code></td><td>≥ 0.2.118</td><td>Claude-Agenten headless: <code>query()</code> + <code>ClaudeAgentOptions</code> (model, cwd, resume, tools/allowed_tools, permission_mode, sandbox, setting_sources). <b>Das SDK ist ein Wrapper um die Claude-Code-CLI</b> — es spawnt <code>claude</code> als headless Subprocess (verifiziert im SDK-Quellcode, <code>subprocess_cli.py</code>); Auth und Abrechnung laufen deshalb über den CLI-Login/Plan. Untergrenze wegen <code>tools</code>/<code>strict_mcp_config</code>/<code>sandbox</code>.</td></tr>
   <tr><td><code>anyio</code></td><td>≥ 4</td><td>Sync-Wrapper um den async SDK-Stream (<code>anyio.run</code>)</td></tr>
   <tr><td><code>pytest</code> / <code>pytest-asyncio</code></td><td>≥ 8 / ≥ 0.24</td><td>Testsuite (331 Tests)</td></tr>
   <tr><td><code>ruff</code></td><td>≥ 0.6</td><td>Lint (E,F,W,I,UP,B) + Formatter, line-length 100, target py312</td></tr>

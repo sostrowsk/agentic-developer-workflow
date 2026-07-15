@@ -168,7 +168,12 @@ ein Parse-Fehler ist safe, ein falsches „ok" nicht. Validierung strikt via Pyd
 
 - Python ≥ 3.12, **uv** (pyproject.toml + uv.lock), Package `adw/`, Entry-Point `adw` (typer).
 - `claude-agent-sdk` (query + ClaudeAgentOptions: model, cwd, resume, allowed_tools,
-  system_prompt-preset `claude_code` + append, permission_mode).
+  system_prompt-preset `claude_code` + append, permission_mode). Das SDK spawnt die
+  **Claude-Code-CLI** als headless Subprocess — Auth/Abrechnung laufen über den
+  gespeicherten CLI-Login (Plan-Kontingente), erzwungen via stored-login-only +
+  Blanking der API-Key-Env-Variablen; kein token-by-token-API-Pfad. Fehlgeschlagene
+  Agent-Aufrufe (z. B. Limit erschöpft) beenden den Run kontrolliert OHNE Eskalation
+  — `adw resume` setzt nach dem Reset am Checkpoint fort.
 - Codex als CLI-Subprocess (`codex exec --sandbox read-only`), kein zweites SDK.
 - `glab` für GitLab bzw. `gh` für GitHub (Issue lesen, Pipeline-/Actions-Status),
   `git worktree` für Lanes,

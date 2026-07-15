@@ -13,7 +13,7 @@ import typer
 from pydantic import ValidationError
 
 from adw import ci, github
-from adw.agents import SdkAgentRunner
+from adw.agents import AgentRunError, SdkAgentRunner
 from adw.codex import CodexRunner
 from adw.config import AdwConfig, ConfigError
 from adw.findings import Finding, ReviewResult
@@ -186,6 +186,19 @@ def _execute(ctx: RunContext) -> None:
     except EscalationError as exc:
         typer.echo(
             f"Eskalation: {exc}\nReport: .adw/runs/{ctx.state.run_id}/escalation.md",
+            err=True,
+        )
+        raise typer.Exit(1) from None
+    except AgentRunError as exc:
+        # Bewusst KEINE Eskalation: Ein fehlgeschlagener SDK-/CLI-Aufruf
+        # (typisch: Abo-Fenster erschöpft) ist ein transienter Zustand.
+        # Der Run bleibt am persistierten Checkpoint stehen und ist nach
+        # dem Limit-Reset per `adw resume` exakt dort fortsetzbar —
+        # phase=escalated wäre endgültig und würde das verhindern.
+        typer.echo(
+            f"Agent-Lauf abgebrochen (z. B. Plan-Limit erschöpft): {exc}\n"
+            f"Der Run {ctx.state.run_id} bleibt in Phase '{ctx.state.phase}' — "
+            f"später fortsetzen mit: adw resume {ctx.state.run_id}",
             err=True,
         )
         raise typer.Exit(1) from None

@@ -10,6 +10,12 @@ Agenten (Claude Agent SDK + Codex CLI) laufen nur dort, wo Urteilsvermögen
 gebraucht wird — und Reviewer fixen nie: jeder Fix läuft durch die Build-Agents
 und erneut durch alle Gates.
 
+**Abrechnung:** ADW spricht Claude ausschließlich über die **Claude-Code-CLI**
+(das Agent SDK spawnt sie headless) mit gespeichertem Login — Verbrauch läuft
+über den Claude-Plan, nie token-by-token gegen die API (API-Key-Env-Variablen
+werden aktiv geblankt). Erschöpftes Plan-Limit stoppt den Run am Checkpoint;
+`adw resume` setzt nach dem Reset fort.
+
 Referenzen: [`docs/SPEC.md`](docs/SPEC.md) (Soll-Verhalten, Schnittstellen, DoD)
 und [`docs/PLAN.md`](docs/PLAN.md) (Implementierungsplan).
 

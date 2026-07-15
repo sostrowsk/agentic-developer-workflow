@@ -502,3 +502,44 @@ def test_issue_sources_are_mutually_exclusive_all_pairs(target_repo):
     for extra in pairs:
         result = runner.invoke(app, ["run", "--repo", str(target_repo), "--dry-run", *extra])
         assert result.exit_code == 1, extra
+
+
+def test_agent_run_error_stops_cleanly_and_stays_resumable(target_repo, monkeypatch):
+    """Plan-Betrieb: Ein fehlgeschlagener SDK-Call (z. B. Abo-Fenster erschöpft)
+    beendet den Run kontrolliert mit Resume-Hinweis — er eskaliert NICHT
+    (phase=escalated wäre nicht fortsetzbar) und crasht nicht mit Traceback."""
+    import adw.cli as cli_mod
+    from adw.agents import AgentRunError
+
+    real = cli_mod._dry_run_runners
+
+    def limit_exhausted_on_build():
+        agents, codex = real()
+
+        original_run = agents.run
+
+        def run(agent, task, cwd, resume=None, deny_read_paths=None):
+            if agent.name == "build_agent":
+                raise AgentRunError("Claude-CLI: usage limit reached — resets 14:00")
+            return original_run(agent, task, cwd, resume, deny_read_paths)
+
+        agents.run = run
+        return agents, codex
+
+    with monkeypatch.context() as m:  # nur der ERSTE Lauf trifft das Limit
+        m.setattr(cli_mod, "_dry_run_runners", limit_exhausted_on_build)
+        result = runner.invoke(
+            app,
+            ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--no-approval"],
+        )
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(result.exception, SystemExit)  # kein Traceback
+    assert "resume" in result.output.lower()
+    state = RunState.find_latest(target_repo)
+    assert state.phase == "build"  # am Checkpoint stehen geblieben, NICHT escalated
+    assert state.run_id in result.output
+    assert not (state.run_dir(target_repo) / "escalation.md").exists()
+    # Nach "Limit-Reset": derselbe Run läuft per resume bis zum Ende durch.
+    resumed = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert resumed.exit_code == 0, resumed.output
+    assert RunState.load(target_repo, state.run_id).phase == "done"

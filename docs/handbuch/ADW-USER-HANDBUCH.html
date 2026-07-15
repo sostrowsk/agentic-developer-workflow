@@ -124,6 +124,16 @@ uv sync</code></pre>
 
 <div class="hint">Ohne gespeicherten Claude-Login bricht ADW <b>vor</b> dem ersten Agent-Lauf mit einer klaren Meldung ab (fail fast) — es wird nie stillschweigend ein API-Key aus der Umgebung benutzt.</div>
 
+<h3 id="abrechnung">Abrechnung: läuft über deinen Claude-Plan, nicht über API-Tokens</h3>
+<p>ADW spricht Claude <b>ausschließlich über die Claude-Code-CLI</b> an — das Claude Agent SDK startet sie unter der Haube als headless Subprocess. Es gibt keinen separaten API-Pfad:</p>
+<ul>
+  <li><b>Stored-Login-only, erzwungen:</b> ADW verlangt die gespeicherte CLI-Anmeldung (<code>~/.claude/.credentials.json</code> bzw. macOS-Keychain). Umgebungsvariablen wie <code>ANTHROPIC_API_KEY</code> werden für alle Agent-Prozesse aktiv geleert — ein API-Key wird selbst dann nie benutzt, wenn einer gesetzt ist. Versehentliches token-by-token-Payment ist damit ausgeschlossen.</li>
+  <li><b>Verbrauch = Abo-Limits:</b> Läufe zählen gegen die Plan-Kontingente (5-Stunden-Fenster + Wochenlimits), nicht gegen ein Dollar-Budget. Kostenrisiko null, dafür Verfügbarkeitsrisiko. Die Registry nutzt Fable 5, Opus 4.8 und Sonnet 5 — der Plan muss diese Modelle hergeben (praktisch: Max-Plan).</li>
+  <li><b>Limit erschöpft ≠ Datenverlust:</b> Schlägt ein Agent-Aufruf fehl (typisch: Fenster leer), stoppt der Run kontrolliert mit Exit 1 und Resume-Hinweis — er eskaliert <i>nicht</i> und bleibt am persistierten Checkpoint stehen. Nach dem Fenster-Reset: <code>adw resume &lt;run_id&gt;</code> macht exakt dort weiter (Sessions, offene Fix-Tasks und Zähler sind gespeichert). Ein automatisches „warten bis Reset" gibt es bewusst nicht.</li>
+  <li><b><code>--parallel</code> verbraucht schneller:</b> Zwei gleichzeitige Opus-Build-Sessions plus Reviews schöpfen ein 5-Stunden-Fenster deutlich zügiger aus — im Plan-Betrieb ist Single-Lane das entspanntere Profil.</li>
+  <li><b>Codex ist ein eigenes Abo:</b> Die Codex-Reviews laufen über deinen ChatGPT/Codex-Login (isoliertes <code>CODEX_HOME</code>) — ebenfalls kein Token-Payment, aber ein separates Kontingent.</li>
+</ul>
+
 <h2 id="zielrepo">2. Das Ziel-Repo vorbereiten</h2>
 <p>ADW arbeitet <b>gegen ein beliebiges Git-Repo</b> („Ziel-Repo"). Die gesamte projektspezifische Konfiguration lebt dort in <b>einer Datei</b>: <code>.adw/config.yaml</code>. Eine Vorlage liegt unter <code>examples/config.yaml</code>.</p>
 
@@ -320,7 +330,11 @@ Run 3f9a12c4 wird fortgesetzt (Phase: build)</code></pre>
 </details>
 <details>
   <summary>Was kostet ein Lauf?</summary>
-  <div class="inner"><p>Dry-Run: nichts (0 Tokens). Echter Lauf: modellökonomisch verteilt — Fable 5 nur für Spec/Plan/finalen Review, Opus 4.8 baut, Sonnet 5 triagiert, Codex läuft über dein Codex-Abo. Die Limits (Abschnitt 9) deckeln den Worst Case strukturell.</p></div>
+  <div class="inner"><p>Dry-Run: nichts (0 Tokens). Echter Lauf: <b>keine API-Kosten</b> — alles läuft über deinen Claude-Plan (siehe <a href="#abrechnung">Abrechnung</a>), modellökonomisch verteilt: Fable 5 nur für Spec/Plan/finalen Review, Opus 4.8 baut, Sonnet 5 triagiert, Codex läuft über dein Codex-Abo. Die Limits (Abschnitt 9) deckeln den Worst Case strukturell.</p></div>
+</details>
+<details>
+  <summary><code>Agent-Lauf abgebrochen (z. B. Plan-Limit erschöpft) …</code></summary>
+  <div class="inner"><p>Das Abo-Fenster ist leer oder die Claude-CLI konnte nicht antworten. Kein Handlungsbedarf am Run selbst: Er steht am letzten Checkpoint (Phase unverändert, kein <code>escalation.md</code>). Nach dem Limit-Reset einfach <code>adw resume &lt;run_id&gt;</code> — der Run setzt mit denselben Agent-Sessions fort.</p></div>
 </details>
 
 <h2 id="glossar">11. Glossar</h2>
