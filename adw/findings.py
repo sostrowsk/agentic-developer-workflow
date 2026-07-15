@@ -20,6 +20,22 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+SCHEMA_INSTRUCTION = """\
+Antworte AUSSCHLIESSLICH mit einem JSON-Objekt nach exakt diesem Schema
+(keine Prosa davor oder danach, optional in einem ```json-Fence):
+{
+  "verdict": "ok | needs_fixes",
+  "findings": [{
+    "severity": "P1 | P2 | P3",
+    "lane": "frontend | backend | unknown",
+    "file": "pfad/relativ/zum/repo",
+    "issue": "Beschreibung des Problems",
+    "remediation_plan": ["Schritt 1", "Schritt 2"]
+  }]
+}
+Regeln: verdict "ok" nur mit leerem findings-Array; "needs_fixes" braucht
+mindestens ein Finding; alle Felder sind Pflicht."""
+
 
 class FindingsParseError(Exception):
     """Agent-/Codex-Output entsprach nicht dem strikten Review-JSON-Kontrakt."""

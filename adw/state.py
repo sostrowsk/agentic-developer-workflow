@@ -84,6 +84,8 @@ class RunState(BaseModel):
     review_rounds: int = 0
     review_last_failures: list[str] = Field(default_factory=list)
     final_review_last_failures: list[str] = Field(default_factory=list)
+    # Phase 7: rote Pipeline → Log-Analyst → EIN Re-Entry, dann Eskalation.
+    ci_reentries: int = 0
     # Checkpoint des Spec-/Plan-Authoring-Loops: Session, offener Fix-Task und
     # Findings-Basis überleben so einen Crash mitten im Review-Zyklus.
     authoring_session: str | None = None

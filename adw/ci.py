@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 from adw.config import CiConfig
 from adw.env import safe_env
@@ -58,18 +59,25 @@ def poll_pipeline(
     cfg: CiConfig,
     run_glab: RunGlab = run_glab,
     sleep: Callable[[float], None] = time.sleep,
+    sha: str | None = None,
 ) -> CiResult:
     """Pollt die neueste Pipeline des Branches bis zum finalen Status.
 
     Erfolg heißt: Pipeline `success` UND (falls konfiguriert) der
     Staging-Job ist grün. Bei Rot kommen die Logs der fehlgeschlagenen
     Jobs als Excerpt mit — Futter für den Log-Analyst.
+
+    ``sha`` bindet den Poll an einen konkreten Push: direkt nach einem
+    Re-Entry-Push kann GitLab noch die terminale Pipeline des VORHERIGEN
+    Push liefern — die darf das frische Ergebnis nicht bewerten.
     """
     # Budget als Restzeit führen und den Sleep darauf kappen — sonst schläft
     # ein 61s-Budget bei 60s-Intervall bis 120s.
     remaining = float(cfg.timeout)
     while True:
-        pipeline = _latest_pipeline(repo, branch, run_glab)
+        pipeline = _latest_pipeline(repo, branch, run_glab, sha=sha)
+        if pipeline is not None and sha is not None and pipeline.get("sha") != sha:
+            pipeline = None  # Defense in depth — der Server filtert bereits
         if pipeline is not None and pipeline["status"] in _TERMINAL_STATUSES:
             return _evaluate(repo, pipeline, cfg, run_glab)
         if remaining <= 0:
@@ -82,8 +90,23 @@ def poll_pipeline(
         remaining -= nap
 
 
-def _latest_pipeline(repo: Path, branch: str, run_glab: RunGlab) -> dict | None:
-    raw = run_glab(["ci", "list", "--ref", branch, "--per-page", "1", "--output", "json"], repo)
+def _latest_pipeline(
+    repo: Path, branch: str, run_glab: RunGlab, sha: str | None = None
+) -> dict | None:
+    if sha is None:
+        raw = run_glab(["ci", "list", "--ref", branch, "--per-page", "1", "--output", "json"], repo)
+    else:
+        # SHA-Filter SERVER-seitig: eine neuere fremde Pipeline auf demselben
+        # Branch (Schedule, manueller Push) darf die gesuchte weder bewerten
+        # noch verdecken — `ci list --per-page 1` sähe nur die neueste Zeile.
+        raw = run_glab(
+            [
+                "api",
+                f"projects/:id/pipelines?ref={quote(branch, safe='')}"
+                f"&sha={sha}&per_page=1&order_by=id&sort=desc",
+            ],
+            repo,
+        )
     pipelines = _parse_json(raw, "ci list")
     if not isinstance(pipelines, list):
         raise CiError(f"glab ci list: unerwartetes JSON — {raw[:200]}")

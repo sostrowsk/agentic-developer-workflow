@@ -28,7 +28,13 @@ from adw.agents import REGISTRY, AgentRunner
 from adw.codex import CodexReviewer
 from adw.config import AdwConfig, Gate
 from adw.env import safe_env
-from adw.findings import Finding, FindingsParseError, ReviewResult, extract_review_result
+from adw.findings import (
+    SCHEMA_INSTRUCTION,
+    Finding,
+    FindingsParseError,
+    ReviewResult,
+    extract_review_result,
+)
 from adw.gates import GateReport, run_gates
 from adw.state import LaneState, RunState
 from adw.triage import (
@@ -901,9 +907,8 @@ def _triage_e2e(ctx: RunContext, worktree: Path, report: GateReport) -> ReviewRe
     spec = REGISTRY["e2e_triage"]
     task = (
         "Die E2E-Tests auf dem Integrations-Branch sind rot. Ordne jeden Fehler "
-        "einer Lane zu (frontend/backend/unknown) und antworte AUSSCHLIESSLICH "
-        "mit dem Findings-JSON (verdict/findings, siehe Schema-Konvention):\n\n"
-        f"{_gate_failure_text(report)}"
+        "einer Lane zu (frontend/backend/unknown).\n\n"
+        f"{SCHEMA_INSTRUCTION}\n\nE2E-Ausgabe:\n{_gate_failure_text(report)}"
     )
     result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
     try:
@@ -1065,9 +1070,11 @@ def run_final_review_phase(ctx: RunContext) -> None:
         task = (
             "Prüfe die Implementierung in diesem Worktree read-only gegen "
             ".adw/spec.md (Akzeptanzkriterien, Definition of Done) und "
-            ".adw/contract.yaml. Antworte AUSSCHLIESSLICH mit dem Findings-JSON; "
-            "setze bei jedem Finding das category-Feld "
-            "(scope_gap | implementation | trivial)."
+            ".adw/contract.yaml.\n\n"
+            f"{SCHEMA_INSTRUCTION}\n\n"
+            'Zusätzlich PFLICHT bei jedem Finding: das Feld "category" mit '
+            "einem der Werte scope_gap | implementation | trivial "
+            "(Triage-Grundlage)."
         )
         result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
         try:
@@ -1128,6 +1135,129 @@ def run_final_review_phase(ctx: RunContext) -> None:
         ctx.state.final_review_last_failures = []
         ctx.state.phase = "ci"
         ctx.save()
+
+
+# --- Phase 7: Push + CI + Log-Analyst -----------------------------------------
+
+MAX_CI_REENTRIES = 1
+
+
+def run_ci_phase(ctx: RunContext) -> None:
+    """Phase 7: Feature-Branch pushen, Pipeline via glab pollen. Bei Rot liest
+    der Log-Analyst die Logs, EIN Re-Entry über die Lane-Loops — danach Mensch."""
+    if ctx.state.phase != "ci":
+        return
+    lanes = _active_lanes(ctx)
+    _resume_pending_lanes(ctx, lanes)
+    while True:
+        if ctx.state.parallel:
+            worktree = _integration_loop(ctx, lanes)
+            branch = lane_branch(ctx.state.run_id, INTEGRATION_LANE)
+        else:
+            worktree = create_lane_worktree(
+                ctx.repo, ctx.state.run_id, lanes[0], ctx.config.base_branch
+            )
+            branch = lane_branch(ctx.state.run_id, lanes[0])
+        _push_branch(ctx, worktree, branch)
+        pushed_sha = _git(ctx, worktree, "rev-parse", "HEAD").strip()
+        try:
+            result = ci.poll_pipeline(
+                ctx.repo,
+                branch,
+                ctx.config.ci,
+                run_glab=ctx.run_glab,
+                sleep=ctx.sleep,
+                # An den Push binden: die terminale Pipeline eines FRÜHEREN
+                # Push darf das frische Ergebnis nicht bewerten.
+                sha=pushed_sha,
+            )
+        except ci.CiTimeoutError as exc:
+            raise escalate(ctx, f"CI-Timeout: {exc}") from exc
+        except ci.CiError as exc:
+            raise escalate(ctx, f"CI-Monitoring fehlgeschlagen: {exc}") from exc
+        if result.passed:
+            break
+        if ctx.state.ci_reentries >= MAX_CI_REENTRIES:
+            raise escalate(
+                ctx,
+                f"Pipeline erneut rot nach {ctx.state.ci_reentries} Re-Entry — "
+                f"Eskalation an den Menschen.\n\n{result.log_excerpt}",
+            )
+        if not result.log_excerpt.strip():
+            # canceled/skipped oder YAML-Fehler: keine Job-Logs — ein Analyst
+            # ohne Evidenz würde nur halluzinieren und das Re-Entry verbrennen.
+            raise escalate(
+                ctx,
+                f"Pipeline rot ohne verwertbare Job-Logs "
+                f"(Pipeline {result.pipeline_id}) — Mensch übernimmt",
+            )
+        review = _analyze_ci_logs(ctx, worktree, result.log_excerpt)
+
+        def _bump_ci_reentries(fix_lanes: list[str]) -> None:
+            # Läuft im Dispatch unter dem State-Lock und wird mit dem Staging
+            # in EINEM Save persistiert — ein Crash kann das Re-Entry-Budget
+            # nicht verbrennen, ohne dass der Fix beim Resume nachgeholt wird.
+            ctx.state.ci_reentries += 1
+
+        _dispatch_lane_fixes(
+            ctx, review.findings, lanes, source="CI", mutate_staged=_bump_ci_reentries
+        )
+    with ctx.state_lock:
+        ctx.state.phase = "done"
+        ctx.save()
+
+
+def _push_branch(ctx: RunContext, worktree: Path, branch: str) -> None:
+    """Push durch den Orchestrator. --force-with-lease: der Integrations-Branch
+    wird je Runde neu ab Base aufgebaut (non-fast-forward ist erwartet), aber
+    fremde Remote-Änderungen werden nie überschrieben."""
+    extra = dict(ctx.git_env)
+    # SSH-Agent nur dem Push durchreichen (bewusst nicht global in safe_env):
+    # Gates/Agents sollen den Agenten-Socket nicht orten können.
+    if "SSH_AUTH_SOCK" in os.environ:
+        extra.setdefault("SSH_AUTH_SOCK", os.environ["SSH_AUTH_SOCK"])
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(worktree),
+                "-c",
+                "core.hooksPath=/dev/null",
+                "push",
+                "--force-with-lease",
+                "-u",
+                "origin",
+                branch,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,
+            env=safe_env(extra),
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise escalate(ctx, f"Push von {branch} hat das Timeout überschritten") from exc
+    if result.returncode != 0:
+        raise escalate(
+            ctx,
+            f"Push von {branch} nach origin fehlgeschlagen:\n{result.stderr.strip()}",
+        )
+
+
+def _analyze_ci_logs(ctx: RunContext, worktree: Path, log_excerpt: str) -> ReviewResult:
+    spec = REGISTRY["log_analyst"]
+    task = (
+        "Die CI-Pipeline ist rot. Analysiere die Logs und ordne jeden Fehler "
+        "einer Lane zu (frontend/backend/unknown).\n\n"
+        f"{SCHEMA_INSTRUCTION}\n\nCI-Logs:\n{log_excerpt}"
+    )
+    # cwd = der GEPUSHTE Worktree: der Analyst liest die Quellen, die die CI
+    # getestet hat — nicht den Base-Checkout des Haupt-Repos.
+    result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
+    try:
+        return extract_review_result(result.text)
+    except (FindingsParseError, ValidationError) as exc:
+        raise escalate(ctx, f"Log-Analyst-Output unlesbar: {exc}") from exc
 
 
 def _write_followups(ctx: RunContext, followups: list[Finding]) -> None:

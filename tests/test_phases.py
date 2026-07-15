@@ -1,6 +1,7 @@
 """Tests der Phasen-Orchestrierung — komplett mit Mocks, 0 Tokens, echtes git."""
 
 import json
+import re
 
 import pytest
 
@@ -12,6 +13,7 @@ from adw.phases import (
     EscalationError,
     RunContext,
     run_build_phase,
+    run_ci_phase,
     run_codex_review_phase,
     run_final_review_phase,
     run_integration_phase,
@@ -2038,3 +2040,256 @@ def test_schema_invalid_e2e_triage_output_escalates(pctx, target_repo):
     pctx.agents.script("e2e_triage", broken)
     with pytest.raises(EscalationError, match="[Tt]riage"):
         run_integration_phase(pctx)
+
+
+# --- 10f: Push + CI + Log-Analyst ---------------------------------------------
+
+
+class FakeGlab:
+    """Skriptbare glab-Antworten: eine Pipeline-Outcome-Sequenz, je Poll eine.
+
+    Outcome "stale:<status>" simuliert eine terminale Pipeline eines FRÜHEREN
+    Push (falsche SHA); alle anderen Outcomes tragen die echte Branch-SHA."""
+
+    def __init__(self, *outcomes: str, staging_job: str = "deploy-staging"):
+        self.outcomes = list(outcomes)
+        self.polls = 0
+        self.staging_job = staging_job
+        self.calls: list[list[str]] = []
+        self.current = outcomes[0]
+
+    def __call__(self, argv: list[str], cwd) -> str:
+        self.calls.append(list(argv))
+        if argv[0] == "api" and "/pipelines?" in argv[1]:
+            outcome = self.outcomes[min(self.polls, len(self.outcomes) - 1)]
+            self.polls += 1
+            if outcome.startswith("stale:"):
+                # Server-seitiger sha-Filter: für die frische SHA existiert
+                # (noch) keine Pipeline — die alte wird gar nicht geliefert.
+                self.current = outcome.removeprefix("stale:")
+                return json.dumps([])
+            self.current = outcome
+            sha = re.search(r"sha=([0-9a-f]+)", argv[1]).group(1)
+            return json.dumps([{"id": self.polls, "status": self.current, "sha": sha}])
+        if argv[0] == "api":
+            if self.current == "failed":
+                return json.dumps([{"id": 5, "name": "pytest", "status": "failed"}])
+            return json.dumps([{"id": 6, "name": self.staging_job, "status": "success"}])
+        if argv[:2] == ["ci", "trace"]:
+            return "CI-LOG: ImportError in backend/app.py"
+        raise AssertionError(f"Unerwarteter glab-Aufruf: {argv}")
+
+
+def add_bare_origin(repo):
+    """Bare-Remote als origin — Push-Ziel für Tests."""
+    from tests.conftest import git
+
+    bare = repo.parent / "origin.git"
+    subprocess_run = __import__("subprocess").run
+    subprocess_run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+    git(repo, "remote", "add", "origin", str(bare))
+    return bare
+
+
+def analyst_json(lane: str, issue: str = "ImportError in app.py") -> str:
+    return triage_json(lane, issue)
+
+
+def prepare_ci_ready(ctx):
+    """Single-Lane bis phase='ci' bringen."""
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("final_reviewer", final_review_json("ok"))
+    run_final_review_phase(ctx)
+    assert ctx.state.phase == "ci"
+
+
+def test_ci_green_completes_run(ctx, target_repo):
+    from tests.conftest import git
+
+    bare = add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.run_glab = FakeGlab("success")
+    ctx.sleep = lambda s: None
+    run_ci_phase(ctx)
+    assert ctx.state.phase == "done"
+    branches = git(bare, "branch", "--list")
+    assert f"adw/{ctx.state.run_id}/backend" in branches  # Branch wurde gepusht
+
+
+def test_ci_red_triggers_log_analyst_and_one_reentry(ctx, target_repo):
+    bare = add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.agents.script("build_agent", "CI-Fix")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('ci-fix')\n"}
+    ctx.agents.script("log_analyst", analyst_json("backend"))
+    ctx.run_glab = FakeGlab("failed", "success")
+    ctx.sleep = lambda s: None
+    run_ci_phase(ctx)
+    assert ctx.state.phase == "done"
+    assert ctx.state.ci_reentries == 1
+    analyst_calls = [c for c in ctx.agents.calls if c.agent == "log_analyst"]
+    assert len(analyst_calls) == 1
+    assert "CI-LOG" in analyst_calls[0].task  # Log-Excerpt ging an den Analyst
+    fix_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert "ImportError" in fix_calls[-1].task
+    assert bare.exists()
+
+
+def test_second_ci_failure_escalates(ctx, target_repo):
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.agents.script("build_agent", "CI-Fix")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2')\n"}
+    ctx.agents.script("log_analyst", analyst_json("backend"))
+    ctx.run_glab = FakeGlab("failed", "failed")
+    ctx.sleep = lambda s: None
+    with pytest.raises(EscalationError, match="CI|Pipeline"):
+        run_ci_phase(ctx)
+    analyst_calls = [c for c in ctx.agents.calls if c.agent == "log_analyst"]
+    assert len(analyst_calls) == 1  # genau EIN Re-Entry, dann Mensch
+    assert (ctx.run_dir / "escalation.md").is_file()
+
+
+def test_push_failure_escalates(ctx):
+    prepare_ci_ready(ctx)  # KEIN origin-Remote angelegt
+    ctx.run_glab = FakeGlab("success")
+    ctx.sleep = lambda s: None
+    with pytest.raises(EscalationError, match="[Pp]ush"):
+        run_ci_phase(ctx)
+
+
+def test_ci_timeout_escalates(ctx, target_repo):
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.run_glab = FakeGlab("running")
+    ctx.sleep = lambda s: None
+    with pytest.raises(EscalationError, match="[Tt]imeout|nicht abgeschlossen"):
+        run_ci_phase(ctx)
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
+
+
+def test_parallel_ci_pushes_integration_branch(pctx, target_repo):
+    from tests.conftest import git
+
+    bare = add_bare_origin(target_repo)
+    prepare_built_parallel(pctx)
+    run_integration_phase(pctx)
+    pctx.codex.script(OK)
+    run_codex_review_phase(pctx)
+    pctx.agents.script("final_reviewer", final_review_json("ok"))
+    run_final_review_phase(pctx)
+    assert pctx.state.phase == "ci"
+    pctx.run_glab = FakeGlab("success")
+    pctx.sleep = lambda s: None
+    run_ci_phase(pctx)
+    assert pctx.state.phase == "done"
+    branches = git(bare, "branch", "--list")
+    assert f"adw/{pctx.state.run_id}/integration" in branches
+
+
+def test_unparseable_log_analyst_output_escalates(ctx, target_repo):
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.agents.script("log_analyst", "Die Pipeline sieht kaputt aus (kein JSON)")
+    ctx.run_glab = FakeGlab("failed", "failed")
+    ctx.sleep = lambda s: None
+    with pytest.raises(EscalationError, match="Log-Analyst"):
+        run_ci_phase(ctx)
+
+
+def test_ci_poll_ignores_stale_pipeline_from_previous_push(ctx, target_repo):
+    """Regression (Codex P1): Eine terminale Pipeline des vorherigen Push (andere
+    SHA) darf das Ergebnis des frischen Push nicht bewerten."""
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.run_glab = FakeGlab("stale:failed", "success")
+    ctx.sleep = lambda s: None
+    run_ci_phase(ctx)
+    assert ctx.state.phase == "done"
+    analyst_calls = [c for c in ctx.agents.calls if c.agent == "log_analyst"]
+    assert analyst_calls == []  # stale Fail wurde ignoriert, kein Re-Entry verbrannt
+    assert ctx.state.ci_reentries == 0
+
+
+def test_ci_reentry_counter_is_persisted_with_the_staged_fix(ctx, target_repo, monkeypatch):
+    """Regression (Codex P2): ci_reentries-Inkrement und gestagter CI-Fix müssen
+    im SELBEN Save landen — sonst verbrennt ein Crash das einzige Re-Entry."""
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.agents.script("build_agent", "CI-Fix")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('ci-fix')\n"}
+    ctx.agents.script("log_analyst", analyst_json("backend"))
+    ctx.run_glab = FakeGlab("failed", "success")
+    ctx.sleep = lambda s: None
+    snapshots = []
+    real_save = RunState.save
+
+    def spy(self, repo):
+        real_save(self, repo)
+        snapshots.append(self.model_dump())
+
+    monkeypatch.setattr(RunState, "save", spy)
+    run_ci_phase(ctx)
+    first = next(s for s in snapshots if s["ci_reentries"] == 1)
+    assert first["lanes"]["backend"]["pending_task"]  # im selben Save gestaged
+    assert first["lanes"]["backend"]["completed"] is False
+
+
+def test_log_analyst_gets_schema_and_pushed_worktree(ctx, target_repo):
+    """Regression (Codex P1+P2): Der Log-Analyst braucht das exakte
+    Findings-Schema im Prompt und den GEPUSHTEN Worktree als cwd — nicht den
+    Base-Checkout des Haupt-Repos."""
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.agents.script("build_agent", "CI-Fix")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('ci-fix')\n"}
+    ctx.agents.script("log_analyst", analyst_json("backend"))
+    ctx.run_glab = FakeGlab("failed", "success")
+    ctx.sleep = lambda s: None
+    run_ci_phase(ctx)
+    analyst_call = next(c for c in ctx.agents.calls if c.agent == "log_analyst")
+    assert '"remediation_plan"' in analyst_call.task  # exaktes Schema im Prompt
+    assert '"verdict"' in analyst_call.task
+    assert analyst_call.cwd.name == "backend"  # der gepushte Lane-Worktree
+
+
+def test_triage_and_final_review_prompts_contain_schema(pctx, target_repo):
+    write_config(target_repo, E2E_MARKER_CONFIG)
+    pctx.config = AdwConfig.load(target_repo)
+
+    def writes(cwd):
+        if cwd.name != "frontend":
+            return {"backend.py": "pass\n"}
+        fix_runs = [c for c in pctx.agents.calls if c.agent == "build_agent" and c.cwd == cwd]
+        if len(fix_runs) >= 2:
+            return {"e2e-fixed": "ok\n"}
+        return {"frontend.js": "v1\n"}
+
+    prepare_built_parallel(pctx, lane_files=writes, build_responses=3)
+    pctx.agents.script("e2e_triage", triage_json("frontend"))
+    run_integration_phase(pctx)
+    triage_call = next(c for c in pctx.agents.calls if c.agent == "e2e_triage")
+    assert '"remediation_plan"' in triage_call.task
+    pctx.codex.script(OK)
+    run_codex_review_phase(pctx)
+    pctx.agents.script("final_reviewer", final_review_json("ok"))
+    run_final_review_phase(pctx)
+    reviewer_call = next(c for c in pctx.agents.calls if c.agent == "final_reviewer")
+    assert '"remediation_plan"' in reviewer_call.task
+    assert "category" in reviewer_call.task
+
+
+def test_ci_failure_without_logs_escalates_directly(ctx, target_repo):
+    """Regression (Codex P2): Rote Pipeline OHNE verwertbare Logs (canceled,
+    YAML-Fehler) darf keinen Analyst-Lauf auf Null-Evidenz auslösen."""
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.run_glab = FakeGlab("canceled")
+    ctx.sleep = lambda s: None
+    with pytest.raises(EscalationError, match="[Ll]og|rot"):
+        run_ci_phase(ctx)
+    analyst_calls = [c for c in ctx.agents.calls if c.agent == "log_analyst"]
+    assert analyst_calls == []  # kein Fix auf Basis von nichts
+    assert ctx.state.ci_reentries == 0  # Re-Entry-Budget nicht verbrannt

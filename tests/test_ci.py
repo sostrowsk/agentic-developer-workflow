@@ -166,3 +166,28 @@ def test_ci_result_is_dataclass_with_pipeline_id(tmp_path):
     result = poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=FakeSleep())
     assert isinstance(result, CiResult)
     assert result.pipeline_id == 123
+
+
+def test_poll_queries_pipelines_by_the_given_sha(tmp_path):
+    """Regression (Codex P1+P2): Poll bindet an die SHA des frischen Push — und
+    zwar SERVER-seitig (sha-Param in der API-Query), damit eine neuere fremde
+    Pipeline auf demselben Branch das Ergebnis weder bewertet noch verdeckt."""
+    cfg = CiConfig(poll_interval=60, timeout=2700, staging_job="deploy-staging")
+    glab = FakeGlab(
+        [
+            json.dumps([]),  # Pipeline zum frischen Push existiert noch nicht
+            json.dumps([{"id": 2, "status": "success", "sha": "neuesha"}]),
+            jobs_json(("deploy-staging", "success")),
+        ]
+    )
+    sleep = FakeSleep()
+    result = poll_pipeline(
+        tmp_path, "adw/x/backend", cfg, run_glab=glab, sleep=sleep, sha="neuesha"
+    )
+    assert result.passed is True
+    assert result.pipeline_id == 2
+    assert sleep.calls  # leere Antwort terminierte den Poll nicht
+    first = glab.calls[0]
+    assert first[0] == "api"
+    assert "sha=neuesha" in first[1]
+    assert "ref=adw%2Fx%2Fbackend" in first[1]  # Branch URL-encodiert
