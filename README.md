@@ -19,6 +19,10 @@ werden aktiv geblankt). Erschöpftes Plan-Limit stoppt den Run am Checkpoint;
 Referenzen: [`docs/SPEC.md`](docs/SPEC.md) (Soll-Verhalten, Schnittstellen, DoD)
 und [`docs/PLAN.md`](docs/PLAN.md) (Implementierungsplan).
 
+**Claude-Skill:** [agentic-developer-workflow-skill](https://github.com/sostrowsk/agentic-developer-workflow-skill)
+— verpackt die Bedienung dieses Orchestrators als installierbaren Claude-Skill
+(Preflight-Check, Workflow-Anleitung, Config-Template, Troubleshooting).
+
 ## Quickstart
 
 ```bash
