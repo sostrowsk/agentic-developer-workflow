@@ -37,8 +37,8 @@ von Git-Worktrees.
 | Plan-Agent | Fable 5 | Read/Grep/Glob + Write (nur `.adw/`) | `.adw/plan.md` (Workstreams FE/BE) + `.adw/contract.yaml` |
 | Build-Agent (je Lane) | Opus 4.8 | Read/Write/Edit/Bash, `cwd` = Lane-Worktree | Workstream strikt gegen Kontrakt; Fix-Pläne = Empfehlung |
 | Codex-Reviewer | Codex (CLI) | `codex exec --sandbox read-only` | Reviews von Spec, Plan, Code; Findings + `remediation_plan` als JSON |
-| E2E-Triage | Haiku (Workhorse) | Read | Playwright-Fehler einer Lane zuordnen; fixt nichts |
-| Log-Analyst | Haiku (Workhorse) | Read | CI-Logs → strukturierte Findings mit Lane-Zuordnung |
+| E2E-Triage | Sonnet 5 (Workhorse) | Read | Playwright-Fehler einer Lane zuordnen; fixt nichts |
+| Log-Analyst | Sonnet 5 (Workhorse) | Read | CI-Logs → strukturierte Findings mit Lane-Zuordnung |
 | Finaler Reviewer | Fable 5 | Read/Grep/Glob (strikt read-only) | Implementierung gegen Spec prüfen; nur Findings |
 
 Grundregeln: **Reviewer fixen nie.** Jeder Fix läuft durch die Build-Agents und erneut durch
@@ -156,7 +156,7 @@ ein Parse-Fehler ist safe, ein falsches „ok" nicht. Validierung strikt via Pyd
 2. **Reviewer ≠ Fixer.**
 3. **Jeder Fix nimmt den validierten Pfad** (alle Gates, keine Ausnahme).
 4. **Strukturierte Übergaben:** JSON/Pydantic zwischen allen Nodes, kein Freitext-Parsing.
-5. **Modell-Ökonomie:** Fable 5 nur Spec/Plan/finaler Review; Opus baut; Haiku triagiert.
+5. **Modell-Ökonomie:** Fable 5 nur Spec/Plan/finaler Review; Opus baut; Sonnet 5 triagiert.
 6. **Sicherheit:** `allowed_tools` pro Agent aus der Registry; Build-Agents via `cwd` auf ihren
    Worktree begrenzt; Env-Whitelist für alle Subprozesse (kein Secret-Leakage);
    niemals pauschales Permission-Skipping.

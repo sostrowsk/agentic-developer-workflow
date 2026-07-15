@@ -220,7 +220,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;pfad&gt;]   <span class="c"># Runs + Ph
 <details>
   <summary>Phase 4: Integration + E2E (nur --parallel)</summary>
   <div class="inner">
-    <p>Der Orchestrator mergt beide Lane-Branches auf einen frischen Integrations-Branch <code>adw/&lt;run_id&gt;/integration</code> und fährt dein E2E-Kommando. Bei Rot ordnet der <b>E2E-Triage-Agent</b> (Haiku, read-only) jeden Fehler einer Lane zu; der Fix läuft durch den regulären Lane-Loop (Gates!, Commit) und es wird neu integriert. Maximal 10 Runden. Ein Merge-Konflikt eskaliert sofort an dich — Konflikte löst kein Agent.</p>
+    <p>Der Orchestrator mergt beide Lane-Branches auf einen frischen Integrations-Branch <code>adw/&lt;run_id&gt;/integration</code> und fährt dein E2E-Kommando. Bei Rot ordnet der <b>E2E-Triage-Agent</b> (Sonnet 5, read-only) jeden Fehler einer Lane zu; der Fix läuft durch den regulären Lane-Loop (Gates!, Commit) und es wird neu integriert. Maximal 10 Runden. Ein Merge-Konflikt eskaliert sofort an dich — Konflikte löst kein Agent.</p>
   </div>
 </details>
 <details>
@@ -232,7 +232,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;pfad&gt;]   <span class="c"># Runs + Ph
 <details>
   <summary>Phase 7: Push + CI-Überwachung</summary>
   <div class="inner">
-    <p>Der Feature-Branch (Single-Lane: der Lane-Branch; parallel: der Integrations-Branch) wird gepusht. ADW pollt die GitLab-Pipeline <b>dieses konkreten Pushes</b> (SHA-gebunden — eine alte oder fremde Pipeline kann das Ergebnis nicht verfälschen) bis Pipeline und konfigurierter Staging-Job grün sind. Bei Rot liest der <b>Log-Analyst</b> (Haiku) die Job-Logs und routet Findings in die Lanes — <b>genau ein</b> automatischer Re-Entry, danach eskaliert der Run mit den Logs im Report.</p>
+    <p>Der Feature-Branch (Single-Lane: der Lane-Branch; parallel: der Integrations-Branch) wird gepusht. ADW pollt die GitLab-Pipeline <b>dieses konkreten Pushes</b> (SHA-gebunden — eine alte oder fremde Pipeline kann das Ergebnis nicht verfälschen) bis Pipeline und konfigurierter Staging-Job grün sind. Bei Rot liest der <b>Log-Analyst</b> (Sonnet 5) die Job-Logs und routet Findings in die Lanes — <b>genau ein</b> automatischer Re-Entry, danach eskaliert der Run mit den Logs im Report.</p>
   </div>
 </details>
 
@@ -317,7 +317,7 @@ Run 3f9a12c4 wird fortgesetzt (Phase: build)</code></pre>
 </details>
 <details>
   <summary>Was kostet ein Lauf?</summary>
-  <div class="inner"><p>Dry-Run: nichts (0 Tokens). Echter Lauf: modellökonomisch verteilt — Fable 5 nur für Spec/Plan/finalen Review, Opus 4.8 baut, Haiku triagiert, Codex läuft über dein Codex-Abo. Die Limits (Abschnitt 9) deckeln den Worst Case strukturell.</p></div>
+  <div class="inner"><p>Dry-Run: nichts (0 Tokens). Echter Lauf: modellökonomisch verteilt — Fable 5 nur für Spec/Plan/finalen Review, Opus 4.8 baut, Sonnet 5 triagiert, Codex läuft über dein Codex-Abo. Die Limits (Abschnitt 9) deckeln den Worst Case strukturell.</p></div>
 </details>
 
 <h2 id="glossar">11. Glossar</h2>

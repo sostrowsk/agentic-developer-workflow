@@ -383,8 +383,8 @@ def test_registry_models_match_spec():
     assert REGISTRY["spec_agent"].model == "claude-fable-5"
     assert REGISTRY["final_reviewer"].model == "claude-fable-5"
     assert REGISTRY["build_agent"].model == "claude-opus-4-8"
-    assert REGISTRY["e2e_triage"].model.startswith("claude-haiku")
-    assert REGISTRY["log_analyst"].model.startswith("claude-haiku")
+    assert REGISTRY["e2e_triage"].model == "claude-sonnet-5"
+    assert REGISTRY["log_analyst"].model == "claude-sonnet-5"
 
 
 def test_mock_runner_returns_scripted_responses_in_order(tmp_path):

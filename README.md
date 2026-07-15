@@ -70,7 +70,7 @@ Fehlende oder kaputte Config bricht sofort mit klarer Meldung ab (fail fast).
 adw/
   cli.py        typer-Eingang: run/resume/approve/status, Dry-Run-Verdrahtung
   phases.py     die 7 Phasen über einem RunContext — Loops, Limits, Dispatch
-  agents.py     Agent-Registry (Fable 5 / Opus 4.8 / Haiku) + SDK-Runner
+  agents.py     Agent-Registry (Fable 5 / Opus 4.8 / Sonnet 5) + SDK-Runner
   codex.py      Codex-CLI als read-only-Subprocess, striktes Findings-Parsing
   findings.py   Findings-Schema (pydantic) + strikter Parser-Kontrakt
   config.py     .adw/config.yaml-Loader (fail fast)

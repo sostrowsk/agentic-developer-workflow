@@ -13,7 +13,7 @@ from adw.env import safe_env
 
 FABLE = "claude-fable-5"
 OPUS = "claude-opus-4-8"
-HAIKU = "claude-haiku-4-5-20251001"
+SONNET = "claude-sonnet-5"
 
 _IS_MACOS = sys.platform == "darwin"
 
@@ -155,7 +155,7 @@ REGISTRY: dict[str, AgentSpec] = {
     ),
     "e2e_triage": AgentSpec(
         name="e2e_triage",
-        model=HAIKU,
+        model=SONNET,
         tools=READ_ONLY_TOOLS,
         allowed_tools=SCOPED_READ_RULES,
         system_append=(
@@ -167,7 +167,7 @@ REGISTRY: dict[str, AgentSpec] = {
     ),
     "log_analyst": AgentSpec(
         name="log_analyst",
-        model=HAIKU,
+        model=SONNET,
         tools=READ_ONLY_TOOLS,
         allowed_tools=SCOPED_READ_RULES,
         system_append=(
