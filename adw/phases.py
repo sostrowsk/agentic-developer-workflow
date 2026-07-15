@@ -75,6 +75,9 @@ class RunContext:
     run_glab: ci.RunGlab = ci.run_glab
     sleep: Callable[[float], None] = time.sleep
     skip_approval: bool = False
+    # Dry-Run: Agents/Codex/glab sind Mocks; zusätzlich entfällt der echte
+    # Push (externe Seiteneffekte gehören nicht in einen Dry-Run).
+    dry_run: bool = False
     git_env: dict[str, str] = field(default_factory=dict)
     # Serialisiert State-Mutationen + Snapshot-Saves über parallele Lane-Threads —
     # sonst kann ein Save einen halb mutierten Zustand persistieren. RLock:
@@ -1158,7 +1161,8 @@ def run_ci_phase(ctx: RunContext) -> None:
                 ctx.repo, ctx.state.run_id, lanes[0], ctx.config.base_branch
             )
             branch = lane_branch(ctx.state.run_id, lanes[0])
-        _push_branch(ctx, worktree, branch)
+        if not ctx.dry_run:
+            _push_branch(ctx, worktree, branch)
         pushed_sha = _git(ctx, worktree, "rev-parse", "HEAD").strip()
         try:
             result = ci.poll_pipeline(

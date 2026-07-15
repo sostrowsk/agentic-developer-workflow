@@ -69,6 +69,13 @@ class RunState(BaseModel):
     issue: str
     phase: Phase
     parallel: bool
+    # Dry-Run muss Resume/Approve überleben — sonst würde ein pausierter
+    # Dry-Run beim Fortsetzen echte Agents (Tokens!) verdrahten.
+    dry_run: bool = False
+    # Effektiver Base-Branch, gepinnt beim Run-Start (config.yaml oder
+    # --base-branch). Fortsetzungen benutzen IMMER diesen Wert — eine
+    # mid-run geänderte config.yaml darf bestehende Lanes nicht verschieben.
+    pinned_base_branch: str | None = None
     lanes: dict[str, LaneState] = Field(default_factory=dict)
     approval_granted: bool = False
     # --no-approval muss den Crash überleben — der Resume-Aufruf kennt das
