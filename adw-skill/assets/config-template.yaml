@@ -1,0 +1,26 @@
+# .adw/config.yaml — Workflow-Konfiguration im ZIEL-Repo (Beispiel).
+# Kopieren nach <ziel-repo>/.adw/config.yaml und an das Projekt anpassen.
+
+base_branch: staging
+
+lanes:
+  backend:
+    gates: # Reihenfolge = Ausführungsreihenfolge; fail fast beim ersten Rot
+      - { name: black, cmd: "black --check .", timeout: 120 }
+      - { name: isort, cmd: "isort --check-only .", timeout: 120 }
+      - { name: pytest, cmd: "pytest -x -q", timeout: 1800 }
+  frontend: # optional — fehlt die Lane, läuft v1-Single-Lane
+    gates:
+      - { name: eslint, cmd: "npm run lint", timeout: 300 }
+      - { name: vitest, cmd: "npm test -- --run", timeout: 900 }
+
+e2e: # optional; nur mit --parallel relevant
+  cmd: "npx playwright test"
+  timeout: 1800
+
+ci:
+  # provider: github          # optional: gitlab | github — ohne Angabe erkennt
+  #                           # ADW das Hosting an der origin-Remote-URL
+  poll_interval: 60 # Sekunden zwischen glab-Polls (Default 60)
+  timeout: 2700 # Gesamt-Budget fürs CI-Warten (Default 2700 = 45 min)
+  staging_job: deploy-staging # Job, der zusätzlich grün sein muss (optional)
