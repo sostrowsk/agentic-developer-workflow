@@ -129,3 +129,7 @@ uv run pytest          # komplette Suite (~330 Tests, mocks-only, echtes git)
 uv run ruff check .    # Lint
 uv run ruff format .   # Formatierung
 ```
+
+## Lizenz
+
+MIT — siehe [LICENSE](LICENSE).
