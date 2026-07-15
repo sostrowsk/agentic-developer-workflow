@@ -23,7 +23,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from adw import ci
+from adw import ci, github
 from adw.agents import REGISTRY, AgentRunner
 from adw.codex import CodexReviewer
 from adw.config import AdwConfig, Gate
@@ -35,6 +35,7 @@ from adw.findings import (
     ReviewResult,
     extract_review_result,
 )
+from adw.forge import Forge, ForgeError, detect_forge
 from adw.gates import GateReport, run_gates
 from adw.state import LaneState, RunState
 from adw.triage import (
@@ -73,6 +74,7 @@ class RunContext:
     agents: AgentRunner
     codex: CodexReviewer
     run_glab: ci.RunGlab = ci.run_glab
+    run_gh: github.RunGh = github.run_gh
     sleep: Callable[[float], None] = time.sleep
     skip_approval: bool = False
     # Dry-Run: Agents/Codex/glab sind Mocks; zusätzlich entfällt der echte
@@ -1152,6 +1154,7 @@ def run_ci_phase(ctx: RunContext) -> None:
         return
     lanes = _active_lanes(ctx)
     _resume_pending_lanes(ctx, lanes)
+    forge = _ci_forge(ctx)
     while True:
         if ctx.state.parallel:
             worktree = _integration_loop(ctx, lanes)
@@ -1165,16 +1168,26 @@ def run_ci_phase(ctx: RunContext) -> None:
             _push_branch(ctx, worktree, branch)
         pushed_sha = _git(ctx, worktree, "rev-parse", "HEAD").strip()
         try:
-            result = ci.poll_pipeline(
-                ctx.repo,
-                branch,
-                ctx.config.ci,
-                run_glab=ctx.run_glab,
-                sleep=ctx.sleep,
-                # An den Push binden: die terminale Pipeline eines FRÜHEREN
-                # Push darf das frische Ergebnis nicht bewerten.
-                sha=pushed_sha,
-            )
+            # An den Push binden (sha): die terminale Pipeline eines FRÜHEREN
+            # Push darf das frische Ergebnis nicht bewerten.
+            if forge == "github":
+                result = github.poll_ci(
+                    ctx.repo,
+                    branch,
+                    ctx.config.ci,
+                    run_gh=ctx.run_gh,
+                    sleep=ctx.sleep,
+                    sha=pushed_sha,
+                )
+            else:
+                result = ci.poll_pipeline(
+                    ctx.repo,
+                    branch,
+                    ctx.config.ci,
+                    run_glab=ctx.run_glab,
+                    sleep=ctx.sleep,
+                    sha=pushed_sha,
+                )
         except ci.CiTimeoutError as exc:
             raise escalate(ctx, f"CI-Timeout: {exc}") from exc
         except ci.CiError as exc:
@@ -1209,6 +1222,20 @@ def run_ci_phase(ctx: RunContext) -> None:
     with ctx.state_lock:
         ctx.state.phase = "done"
         ctx.save()
+
+
+def _ci_forge(ctx: RunContext) -> Forge:
+    """GitLab oder GitHub? Config-Override gewinnt, sonst origin-Erkennung.
+
+    Im Dry-Run fällt ein unerkennbarer Host auf 'gitlab' zurück — dort ist
+    das Monitoring ohnehin gemockt und ein Wegwerf-Repo hat oft gar kein
+    origin. Im echten Lauf gilt fail fast: kein Poll gegen die falsche API."""
+    try:
+        return detect_forge(ctx.repo, ctx.config.ci.provider)
+    except ForgeError as exc:
+        if ctx.dry_run:
+            return "gitlab"
+        raise escalate(ctx, str(exc)) from exc
 
 
 def _push_branch(ctx: RunContext, worktree: Path, branch: str) -> None:

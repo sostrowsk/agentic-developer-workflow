@@ -40,6 +40,7 @@ e2e:
   cmd: "true"
   timeout: 60
 ci:
+  provider: gitlab
   staging_job: deploy-staging
 """
 

@@ -113,7 +113,7 @@
   <tr><td>Python ≥ 3.12 + <b>uv</b></td><td>Laufzeitumgebung des Orchestrators</td><td><code>uv --version</code></td></tr>
   <tr><td><b>Claude-CLI-Login</b></td><td>Die Claude-Agenten (Spec, Plan, Build, Reviews) laufen über das Agent SDK mit deinem gespeicherten Login</td><td><code>claude</code> einmal interaktiv anmelden</td></tr>
   <tr><td><b>codex</b> (CLI)</td><td>Unabhängiger Reviewer für Spec, Plan und Code</td><td><code>codex login</code> einmalig</td></tr>
-  <tr><td><b>glab</b> (CLI)</td><td>GitLab-Issue lesen, CI-Pipeline überwachen</td><td><code>glab auth status</code></td></tr>
+  <tr><td><b>glab</b> / <b>gh</b> (CLI)</td><td>Issue lesen und CI überwachen — glab für GitLab-Projekte, gh für GitHub-Projekte (nur das passende wird gebraucht)</td><td><code>glab auth status</code> bzw. <code>gh auth status</code></td></tr>
   <tr><td><b>git</b></td><td>Worktrees, Branches, Merges, Push</td><td>—</td></tr>
 </table>
 
@@ -151,6 +151,7 @@ lanes:
       <tr><td><code>ci.poll_interval</code></td><td>optional (60)</td><td>Sekunden zwischen zwei Pipeline-Abfragen.</td></tr>
       <tr><td><code>ci.timeout</code></td><td>optional (2700)</td><td>Gesamtbudget fürs CI-Warten (45 min Default).</td></tr>
       <tr><td><code>ci.staging_job</code></td><td>optional</td><td>Name eines Jobs (z.&nbsp;B. <code>deploy-staging</code>), der zusätzlich grün sein muss.</td></tr>
+      <tr><td><code>ci.provider</code></td><td>optional</td><td><code>gitlab</code> oder <code>github</code>. Ohne Angabe erkennt ADW das Hosting an der origin-Remote-URL; bei unbekanntem Host (z.&nbsp;B. Self-Hosted mit eigenem Domainnamen) ist der Key Pflicht.</td></tr>
     </table>
     <p>Fehlende oder kaputte Config (unbekannte Schlüssel, Lane ohne Gates, Gate ohne Timeout, doppelte Schlüssel) bricht <b>sofort</b> mit einer klaren Meldung ab — es werden keine Defaults geraten, außer den beiden dokumentierten (<code>poll_interval</code>, <code>timeout</code>).</p>
   </div>
@@ -166,11 +167,12 @@ uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --no-appro
 <p>Danach der echte Lauf:</p>
 <pre><code><span class="c"># Issue-Text direkt …</span>
 uv run adw run --repo /pfad/zum/repo --issue "Bug: Login bricht ab, wenn …"
-<span class="c"># … oder aus GitLab ziehen (Titel + Beschreibung via glab)</span>
-uv run adw run --repo /pfad/zum/repo --gitlab-issue 42 --parallel</code></pre>
+<span class="c"># … oder aus GitLab/GitHub ziehen (Titel + Beschreibung via glab/gh)</span>
+uv run adw run --repo /pfad/zum/repo --gitlab-issue 42 --parallel
+uv run adw run --repo /pfad/zum/repo --github-issue 42 --parallel</code></pre>
 
 <h2 id="cli">4. CLI-Referenz</h2>
-<pre><code>adw run --repo &lt;pfad&gt; (--issue "Text" | --gitlab-issue &lt;id&gt;)
+<pre><code>adw run --repo &lt;pfad&gt; (--issue "Text" | --gitlab-issue &lt;id&gt; | --github-issue &lt;nr&gt;)
         [--parallel] [--dry-run] [--no-approval] [--base-branch &lt;name&gt;]
 adw resume  &lt;run_id&gt; [--repo &lt;pfad&gt;]     <span class="c"># nach Crash; bei Approval-Pause → approve</span>
 adw approve &lt;run_id&gt; [--repo &lt;pfad&gt;]     <span class="c"># Plan-Approval erteilen + fortsetzen</span>
@@ -180,6 +182,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;pfad&gt;]   <span class="c"># Runs + Ph
   <tr><th>Option</th><th>Bedeutung</th></tr>
   <tr><td><code>--issue "Text"</code></td><td>Issue-Beschreibung direkt auf der Kommandozeile. Genau <b>eine</b> Issue-Quelle ist Pflicht.</td></tr>
   <tr><td><code>--gitlab-issue &lt;id&gt;</code></td><td>Holt Titel + Beschreibung des Issues via <code>glab issue view</code> aus dem GitLab-Projekt des Ziel-Repos.</td></tr>
+  <tr><td><code>--github-issue &lt;nr&gt;</code></td><td>Holt Titel + Beschreibung des Issues via <code>gh issue view</code> aus dem GitHub-Projekt des Ziel-Repos.</td></tr>
   <tr><td><code>--parallel</code></td><td>Baut Frontend- und Backend-Workstream in <b>zwei parallelen Lanes</b> (eigene Worktrees, Sessions, Ports) und aktiviert Integration + E2E-Gate. Verlangt beide Lanes in der Config.</td></tr>
   <tr><td><code>--dry-run</code></td><td>Mocks statt Agenten, Fake-CI statt glab, kein Push. Der Modus wird im Run-State gespeichert — auch ein <code>resume</code>/<code>approve</code> eines Dry-Runs bleibt tokenfrei.</td></tr>
   <tr><td><code>--no-approval</code></td><td>Überspringt die Plan-Approval-Pause. Gilt für den ganzen Run (überlebt Crash + Resume).</td></tr>
@@ -202,7 +205,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;pfad&gt;]   <span class="c"># Runs + Ph
   <span class="ph">4 Integration + E2E<small>nur --parallel</small></span><span class="arrow">→</span>
   <span class="ph">5 Codex-Review<small>Code-Diff</small></span><span class="arrow">→</span>
   <span class="ph">6 Finaler Review<small>Fable 5 + Triage</small></span><span class="arrow">→</span>
-  <span class="ph">7 Push + CI<small>glab-Polling</small></span>
+  <span class="ph">7 Push + CI<small>glab-/gh-Polling</small></span>
 </div>
 
 <details open>
@@ -232,7 +235,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;pfad&gt;]   <span class="c"># Runs + Ph
 <details>
   <summary>Phase 7: Push + CI-Überwachung</summary>
   <div class="inner">
-    <p>Der Feature-Branch (Single-Lane: der Lane-Branch; parallel: der Integrations-Branch) wird gepusht. ADW pollt die GitLab-Pipeline <b>dieses konkreten Pushes</b> (SHA-gebunden — eine alte oder fremde Pipeline kann das Ergebnis nicht verfälschen) bis Pipeline und konfigurierter Staging-Job grün sind. Bei Rot liest der <b>Log-Analyst</b> (Sonnet 5) die Job-Logs und routet Findings in die Lanes — <b>genau ein</b> automatischer Re-Entry, danach eskaliert der Run mit den Logs im Report.</p>
+    <p>Der Feature-Branch (Single-Lane: der Lane-Branch; parallel: der Integrations-Branch) wird gepusht. ADW pollt die CI <b>dieses konkreten Pushes</b> — GitLab-Pipelines via glab oder GitHub Actions via gh, je nach Hosting des Ziel-Repos (SHA-gebunden — eine alte oder fremde Pipeline kann das Ergebnis nicht verfälschen) bis Pipeline und konfigurierter Staging-Job grün sind. Bei Rot liest der <b>Log-Analyst</b> (Sonnet 5) die Job-Logs und routet Findings in die Lanes — <b>genau ein</b> automatischer Re-Entry, danach eskaliert der Run mit den Logs im Report.</p>
   </div>
 </details>
 

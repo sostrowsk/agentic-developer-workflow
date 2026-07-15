@@ -27,15 +27,16 @@ cp examples/config.yaml /pfad/zum/repo/.adw/config.yaml   # und anpassen
 uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --no-approval
 uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --parallel --no-approval
 
-# Echter Lauf (Tokens!): Issue-Text direkt oder GitLab-Issue via glab
+# Echter Lauf (Tokens!): Issue-Text direkt, GitLab-Issue (glab) oder GitHub-Issue (gh)
 uv run adw run --repo /pfad/zum/repo --issue "Bug: Login bricht ab, wenn ..."
 uv run adw run --repo /pfad/zum/repo --gitlab-issue 42 --parallel
+uv run adw run --repo /pfad/zum/repo --github-issue 42 --parallel
 ```
 
 ### CLI
 
 ```
-adw run --repo <pfad> (--issue "Text" | --gitlab-issue <id>)
+adw run --repo <pfad> (--issue "Text" | --gitlab-issue <id> | --github-issue <nr>)
         [--parallel] [--dry-run] [--no-approval] [--base-branch <name>]
 adw resume <run_id> [--repo <pfad>]      # nach Crash; bei Approval-Pause → approve
 adw approve <run_id> [--repo <pfad>]     # Plan-Approval erteilen + fortsetzen
@@ -60,6 +61,7 @@ Vollständiges Beispiel: [`examples/config.yaml`](examples/config.yaml).
 | `ci.poll_interval` | optional (60) | Sekunden zwischen Pipeline-Polls |
 | `ci.timeout` | optional (2700) | Gesamt-Budget fürs CI-Warten |
 | `ci.staging_job` | optional | Job-Name, der zusätzlich grün sein muss |
+| `ci.provider` | optional | `gitlab` oder `github`; ohne Angabe Auto-Erkennung aus der origin-URL (fail fast bei unbekanntem Host) |
 
 Fehlende oder kaputte Config bricht sofort mit klarer Meldung ab (fail fast).
 `--parallel` verlangt eine `backend`- **und** `frontend`-Lane.
@@ -78,7 +80,9 @@ adw/
   gates.py      Gate-Runner: subprocess mit echtem Timeout, Env-Whitelist
   worktrees.py  Lane-Worktrees + deterministische Ports
   triage.py     Triage-Regeln, Iterations-Limits, Circuit-Breaker
-  ci.py         glab-Polling bis Staging grün, Log-Abruf für den Log-Analyst
+  ci.py         GitLab-Polling (glab) bis Staging grün, Log-Abruf
+  github.py     GitHub-Actions-Polling (gh) — gleiches Interface wie ci.py
+  forge.py      GitLab-oder-GitHub-Erkennung (origin-URL, ci.provider-Override)
   mock.py       skriptbare Mock-Runner für --dry-run und Tests
 ```
 

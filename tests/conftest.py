@@ -12,6 +12,7 @@ lanes:
     gates:
       - {name: pass-gate, cmd: "true", timeout: 10}
 ci:
+  provider: gitlab
   staging_job: deploy-staging
 """
 

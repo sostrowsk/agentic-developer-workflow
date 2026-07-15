@@ -46,7 +46,7 @@ alle Gates — kein Sonderweg für „triviale" Fixes.
 
 ## 4. Die sieben Phasen (Soll-Verhalten)
 
-1. **Spec:** Issue (CLI-Text oder GitLab-Issue via `glab`) → Spec-Agent schreibt `.adw/spec.md`
+1. **Spec:** Issue (CLI-Text, GitLab-Issue via `glab` oder GitHub-Issue via `gh`) → Spec-Agent schreibt `.adw/spec.md`
    (Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, Definition of Done). Codex reviewt; Findings
    gehen an den Spec-Agent zurück (Session-Resume) bis Verdict `ok`.
 2. **Plan + Kontrakt:** Plan-Agent erzeugt `.adw/plan.md` + `.adw/contract.yaml`
@@ -67,9 +67,10 @@ alle Gates — kein Sonderweg für „triviale" Fixes.
 6. **Finaler Review + Triage:** Fable 5 prüft read-only gegen `.adw/spec.md`. Triage (Code):
    `scope_gap` → Follow-up-Issue (Report, kein Auto-Restart); `implementation`/`trivial` →
    Fix-Zyklus in die Lane. Max. 3 Fix-Zyklen.
-7. **Push + CI:** Merge/Push des Feature-Branches, dann `glab`-Polling (60-s-Intervall,
-   45-min-Timeout) bis Pipeline + Staging-Deploy grün. Bei roter Pipeline: Log-Analyst liest
-   Logs → Findings → zurück in Phase 3/4.
+7. **Push + CI:** Merge/Push des Feature-Branches, dann CI-Polling (60-s-Intervall,
+   45-min-Timeout) bis Pipeline + Staging-Deploy grün — GitLab via `glab`, GitHub
+   Actions via `gh` (Forge aus `ci.provider` bzw. origin-URL). Bei roter Pipeline:
+   Log-Analyst liest Logs → Findings → zurück in Phase 3/4.
 
 **Eskalation:** Jedes erschöpfte Limit und der Circuit-Breaker (eine Fix-Iteration löst
 **nichts** auf → sofort abbrechen) beendet den Run mit Exit-Code ≠ 0 und einem
@@ -80,7 +81,7 @@ Eskalations-Report (`.adw/runs/<run_id>/escalation.md`): was erreicht, was offen
 ### CLI
 
 ```
-adw run --repo <pfad> (--issue "Text" | --gitlab-issue <id>)
+adw run --repo <pfad> (--issue "Text" | --gitlab-issue <id> | --github-issue <nr>)
         [--parallel] [--dry-run] [--no-approval] [--base-branch <name>]
 adw resume <run_id> [--repo <pfad>]      # nach Crash oder Approval-Pause
 adw approve <run_id>                     # Plan-Approval erteilen + fortsetzen
@@ -107,6 +108,7 @@ ci:
   poll_interval: 60
   timeout: 2700
   staging_job: deploy-staging  # Job-Name, der grün sein muss
+  provider: gitlab             # optional: gitlab | github; sonst Auto-Erkennung via origin-URL
 ```
 
 Fehlende/kaputte Config → sofortiger, klarer Fehler (fail fast), kein Raten von Defaults
@@ -168,7 +170,8 @@ ein Parse-Fehler ist safe, ein falsches „ok" nicht. Validierung strikt via Pyd
 - `claude-agent-sdk` (query + ClaudeAgentOptions: model, cwd, resume, allowed_tools,
   system_prompt-preset `claude_code` + append, permission_mode).
 - Codex als CLI-Subprocess (`codex exec --sandbox read-only`), kein zweites SDK.
-- `glab` für GitLab (Issue lesen, Push, Pipeline-Status), `git worktree` für Lanes,
+- `glab` für GitLab bzw. `gh` für GitHub (Issue lesen, Pipeline-/Actions-Status),
+  `git worktree` für Lanes,
   Ports deterministisch aus run_id (Basis-Port + Hash-Offset, Socket-Bind-Check als Fallback).
 - Agent- und Codex-Aufrufe hinter je einem Interface (`AgentRunner`, `CodexRunner`);
   `--dry-run` injiziert Mocks mit kanonischen Fixtures (simulierte Gate-Fails,

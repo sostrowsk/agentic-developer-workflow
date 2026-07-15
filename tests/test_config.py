@@ -1,7 +1,7 @@
 import pytest
 
 from adw.config import AdwConfig, ConfigError
-from tests.conftest import write_config
+from tests.conftest import DEFAULT_CONFIG, write_config
 
 
 def test_valid_config_loads(target_repo):
@@ -264,4 +264,22 @@ lanes:
 """,
     )
     with pytest.raises(ConfigError, match="middleware"):
+        AdwConfig.load(target_repo)
+
+
+def test_ci_provider_accepts_gitlab_and_github(target_repo):
+    write_config(
+        target_repo,
+        DEFAULT_CONFIG.replace("provider: gitlab", "provider: github"),
+    )
+    cfg = AdwConfig.load(target_repo)
+    assert cfg.ci.provider == "github"
+
+
+def test_ci_provider_rejects_unknown_value(target_repo):
+    write_config(
+        target_repo,
+        DEFAULT_CONFIG.replace("provider: gitlab", "provider: bitbucket"),
+    )
+    with pytest.raises(ConfigError, match="provider|bitbucket"):
         AdwConfig.load(target_repo)

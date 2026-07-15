@@ -20,7 +20,7 @@ from adw.phases import (
     run_spec_and_plan,
 )
 from adw.state import RunState
-from tests.conftest import write_config
+from tests.conftest import DEFAULT_CONFIG, write_config
 
 OK = ReviewResult(verdict="ok", findings=[])
 
@@ -283,6 +283,7 @@ e2e:
   cmd: "true"
   timeout: 60
 ci:
+  provider: gitlab
   staging_job: deploy-staging
 """
 
@@ -1410,6 +1411,7 @@ e2e:
   cmd: "sh -c 'test -f e2e-fixed || { echo E2E-KAPUTT; exit 1; }'"
   timeout: 60
 ci:
+  provider: gitlab
   staging_job: deploy-staging
 """
 
@@ -2293,3 +2295,70 @@ def test_ci_failure_without_logs_escalates_directly(ctx, target_repo):
     analyst_calls = [c for c in ctx.agents.calls if c.agent == "log_analyst"]
     assert analyst_calls == []  # kein Fix auf Basis von nichts
     assert ctx.state.ci_reentries == 0  # Re-Entry-Budget nicht verbrannt
+
+
+# --- Forge-Dispatch: GitHub-Projekte ------------------------------------------
+
+
+class FakeGhPhases:
+    """gh-Fake auf Phasen-Ebene: grüne Workflow-Runs + Staging-Job."""
+
+    def __init__(self, staging_job: str = "deploy-staging"):
+        self.staging_job = staging_job
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str], cwd) -> str:
+        self.calls.append(list(argv))
+        if argv[0] == "api" and "/actions/runs?" in argv[1]:
+            return json.dumps(
+                {
+                    "total_count": 1,
+                    "workflow_runs": [{"id": 1, "status": "completed", "conclusion": "success"}],
+                }
+            )
+        if argv[0] == "api" and "/jobs" in argv[1]:
+            return json.dumps(
+                {"jobs": [{"id": 2, "name": self.staging_job, "conclusion": "success"}]}
+            )
+        raise AssertionError(f"Unerwarteter gh-Aufruf: {argv}")
+
+
+def test_ci_phase_uses_github_actions_when_provider_is_github(ctx, target_repo):
+    write_config(
+        target_repo,
+        DEFAULT_CONFIG.replace("provider: gitlab", "provider: github"),
+    )
+    from tests.conftest import git
+
+    git(target_repo, "add", ".adw/config.yaml")
+    git(target_repo, "commit", "-m", "github provider")
+    ctx.config = AdwConfig.load(target_repo)
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    gh = FakeGhPhases()
+    ctx.run_gh = gh
+    ctx.sleep = lambda s: None
+    run_ci_phase(ctx)
+    assert ctx.state.phase == "done"
+    runs_call = next(c for c in gh.calls if "/actions/runs?" in c[1])
+    assert "head_sha=" in runs_call[1]  # an den Push gebunden, wie beim GitLab-Poll
+
+
+def test_ci_phase_escalates_when_forge_is_undetectable(ctx, target_repo):
+    """Lokaler bare-origin ohne ci.provider: weder GitLab noch GitHub erkennbar —
+    klare Eskalation mit Handlungsanweisung statt Poll gegen die falsche API."""
+    write_config(
+        target_repo,
+        DEFAULT_CONFIG.replace("  provider: gitlab\n", ""),  # KEIN Override
+    )
+    from tests.conftest import git
+
+    git(target_repo, "add", ".adw/config.yaml")
+    git(target_repo, "commit", "-m", "ohne provider")
+    ctx.config = AdwConfig.load(target_repo)
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.run_glab = FakeGlab("success")
+    ctx.sleep = lambda s: None
+    with pytest.raises(EscalationError, match="ci.provider"):
+        run_ci_phase(ctx)

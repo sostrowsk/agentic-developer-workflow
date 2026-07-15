@@ -78,6 +78,9 @@ class CiConfig(BaseModel):
     poll_interval: PositiveSeconds = 60
     timeout: PositiveSeconds = 2700
     staging_job: NonBlankStr | None = None
+    # Explizites Hosting (gitlab | github). None = Auto-Erkennung aus der
+    # origin-Remote-URL; bei nicht erkennbarem Host ist der Key Pflicht.
+    provider: Literal["gitlab", "github"] | None = None
 
 
 class AdwConfig(BaseModel):

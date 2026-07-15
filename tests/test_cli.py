@@ -23,6 +23,7 @@ e2e:
   cmd: "true"
   timeout: 60
 ci:
+  provider: gitlab
   staging_job: deploy-staging
 """
 
@@ -163,6 +164,7 @@ lanes:
     gates:
       - {name: immer-rot, cmd: "sh -c 'echo GATE-ROT; exit 1'", timeout: 10}
 ci:
+  provider: gitlab
   staging_job: deploy-staging
 """,
     )
@@ -462,3 +464,41 @@ def test_config_base_branch_change_mid_run_does_not_move_existing_lanes(target_r
     assert resumed.exit_code == 0, resumed.output
     integration = target_repo / ".adw" / "runs" / state.run_id / "trees" / "integration"
     assert not (integration / "develop_marker.txt").exists()  # weiterhin ab staging
+
+
+def test_github_issue_is_fetched_via_gh(target_repo, monkeypatch):
+    import adw.cli as cli_mod
+
+    def fake_gh(argv, cwd):
+        assert argv[:2] == ["issue", "view"]
+        assert "9" in argv
+        return json.dumps({"number": 9, "title": "Checkout hängt", "body": "Repro: Warenkorb ..."})
+
+    monkeypatch.setattr(cli_mod, "_run_gh", fake_gh)
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--repo",
+            str(target_repo),
+            "--github-issue",
+            "9",
+            "--dry-run",
+            "--no-approval",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    state = RunState.find_latest(target_repo)
+    assert "Checkout hängt" in state.issue
+    assert "Warenkorb" in state.issue
+
+
+def test_issue_sources_are_mutually_exclusive_all_pairs(target_repo):
+    pairs = [
+        ["--issue", "x", "--github-issue", "9"],
+        ["--gitlab-issue", "7", "--github-issue", "9"],
+        ["--issue", "x", "--gitlab-issue", "7", "--github-issue", "9"],
+    ]
+    for extra in pairs:
+        result = runner.invoke(app, ["run", "--repo", str(target_repo), "--dry-run", *extra])
+        assert result.exit_code == 1, extra

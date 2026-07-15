@@ -19,6 +19,8 @@ e2e: # optional; nur mit --parallel relevant
   timeout: 1800
 
 ci:
+  # provider: github          # optional: gitlab | github — ohne Angabe erkennt
+  #                           # ADW das Hosting an der origin-Remote-URL
   poll_interval: 60 # Sekunden zwischen glab-Polls (Default 60)
   timeout: 2700 # Gesamt-Budget fürs CI-Warten (Default 2700 = 45 min)
   staging_job: deploy-staging # Job, der zusätzlich grün sein muss (optional)

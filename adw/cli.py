@@ -12,7 +12,7 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 
-from adw import ci
+from adw import ci, github
 from adw.agents import SdkAgentRunner
 from adw.codex import CodexRunner
 from adw.config import AdwConfig, ConfigError
@@ -36,8 +36,9 @@ app = typer.Typer(add_completion=False, help="Agentic Developer Workflow — 7-P
 
 EXIT_AWAITING_APPROVAL = 2
 
-# Modul-Attribut statt Direkt-Import: Tests ersetzen den glab-Aufruf hier.
+# Modul-Attribute statt Direkt-Import: Tests ersetzen die CLI-Aufrufe hier.
 _run_glab = ci.run_glab
+_run_gh = github.run_gh
 
 
 def _fail(message: str) -> typer.Exit:
@@ -52,6 +53,9 @@ def run(
     gitlab_issue: Annotated[
         int | None, typer.Option("--gitlab-issue", help="GitLab-Issue-ID (via glab)")
     ] = None,
+    github_issue: Annotated[
+        int | None, typer.Option("--github-issue", help="GitHub-Issue-Nummer (via gh)")
+    ] = None,
     parallel: Annotated[bool, typer.Option("--parallel", help="FE-/BE-Lanes parallel")] = False,
     dry_run: Annotated[
         bool, typer.Option("--dry-run", help="Mocks statt Agents, 0 Tokens")
@@ -65,13 +69,19 @@ def run(
     ] = None,
 ) -> None:
     """Einen neuen Run durch alle sieben Phasen starten."""
-    if (issue is None) == (gitlab_issue is None):
-        raise _fail("genau EINE Issue-Quelle angeben: --issue ODER --gitlab-issue")
+    sources = [s for s in (issue, gitlab_issue, github_issue) if s is not None]
+    if len(sources) != 1:
+        raise _fail("genau EINE Issue-Quelle angeben: --issue, --gitlab-issue ODER --github-issue")
     repo = repo.resolve()
-    # Config ZUERST validieren (fail fast) — kein glab-Netzaufruf für ein
+    # Config ZUERST validieren (fail fast) — kein Forge-Netzaufruf für ein
     # Repo, das ohnehin keine gültige .adw/config.yaml hat.
     config = _load_config(repo, base_branch)
-    issue_text = issue if issue is not None else _fetch_gitlab_issue(repo, gitlab_issue)
+    if issue is not None:
+        issue_text = issue
+    elif gitlab_issue is not None:
+        issue_text = _fetch_gitlab_issue(repo, gitlab_issue)
+    else:
+        issue_text = _fetch_github_issue(repo, github_issue)
     state = RunState.new(issue=issue_text, parallel=parallel)
     state.dry_run = dry_run
     # Effektiven Base-Branch pinnen (Config ODER Override): Fortsetzungen
@@ -224,6 +234,17 @@ def _load_state(repo: Path, run_id: str) -> RunState:
         raise _fail(str(exc)) from exc
 
 
+def _fetch_github_issue(repo: Path, issue_number: int) -> str:
+    try:
+        raw = _run_gh(["issue", "view", str(issue_number), "--json", "number,title,body"], repo)
+        data = json.loads(raw)
+    except (ci.CiError, json.JSONDecodeError) as exc:
+        raise _fail(f"GitHub-Issue {issue_number} nicht lesbar: {exc}") from exc
+    title = data.get("title") or f"Issue {issue_number}"
+    body = data.get("body") or ""
+    return f"#{data.get('number', issue_number)}: {title}\n\n{body}".strip()
+
+
 def _fetch_gitlab_issue(repo: Path, issue_id: int) -> str:
     try:
         raw = _run_glab(["issue", "view", str(issue_id), "--output", "json"], repo)
@@ -248,6 +269,7 @@ def _build_context(
             agents=agents,
             codex=codex,
             run_glab=_dry_run_glab(config),
+            run_gh=_dry_run_gh(config),
             sleep=lambda seconds: None,
             skip_approval=skip_approval,
             dry_run=True,
@@ -336,6 +358,27 @@ def _dry_run_runners() -> tuple[MockAgentRunner, MockCodexRunner]:
     codex = MockCodexRunner()
     codex.script(*[_OK] * 8)  # Spec-, Plan-, Code-Reviews — alle grün
     return agents, codex
+
+
+def _dry_run_gh(config: AdwConfig) -> github.RunGh:
+    """Simulierte grüne GitHub-Actions inkl. Staging-Job — kein Netz."""
+    staging = config.ci.staging_job or "deploy-staging"
+
+    def fake(argv: list[str], cwd: Path) -> str:
+        if argv[0] == "api" and "/actions/runs?" in argv[1]:
+            return json.dumps(
+                {
+                    "total_count": 1,
+                    "workflow_runs": [{"id": 1, "status": "completed", "conclusion": "success"}],
+                }
+            )
+        if argv[0] == "api" and "/jobs" in argv[1]:
+            return json.dumps({"jobs": [{"id": 2, "name": staging, "conclusion": "success"}]})
+        if argv[:2] == ["run", "view"]:
+            return ""
+        raise ci.CiError(f"Dry-Run: unerwarteter gh-Aufruf {argv}")
+
+    return fake
 
 
 def _dry_run_glab(config: AdwConfig) -> ci.RunGlab:

@@ -74,7 +74,7 @@
     <li><b>Aufbau:</b> Package <code>adw/</code> mit deterministischem Kern (config, state, findings, gates, worktrees, triage, ci), zwei Agent-Adaptern (Claude Agent SDK, Codex CLI), Phasen-Orchestrierung (<code>phases.py</code>, ~1.300 Zeilen) und typer-CLI.</li>
     <li><b>Verlässlichkeit:</b> Jeder Übergang und jedes offene Feedback wird atomar in <code>state.json</code> checkpointed (flock + tmp/rename); Gate-Beweise sind an Baum-Hashes gebunden; alle Loops haben harte Limits + Circuit-Breaker.</li>
     <li><b>Sicherheit:</b> Tool- und Pfad-Whitelists je Agent, sandboxed Bash im Worktree, Env-Whitelist für alle Subprozesse, Commits nur durch den Orchestrator, unveränderliche Artefakte (Restore nach jedem Agent-Lauf).</li>
-    <li><b>Stack:</b> Python ≥ 3.12, uv, pydantic v2, typer, PyYAML, claude-agent-sdk (≥ 0.2.118), anyio; extern: codex-CLI, glab, git. 331 pytest-Tests, mocks-only (kein Netz, keine Tokens), echtes git.</li>
+    <li><b>Stack:</b> Python ≥ 3.12, uv, pydantic v2, typer, PyYAML, claude-agent-sdk (≥ 0.2.118), anyio; extern: codex-CLI, glab (GitLab), gh (GitHub), git. 331 pytest-Tests, mocks-only (kein Netz, keine Tokens), echtes git.</li>
   </ul>
 </section>
 
@@ -138,6 +138,8 @@
   <tr><td><code>adw/worktrees.py</code></td><td>Lane-Worktrees (idempotent, Ready-Marker, Recovery von Partial-Adds) + deterministische Ports mit Bind-Check</td><td><code>create_lane_worktree</code>, <code>remove_lane_worktree</code>, <code>ports_for</code>, <code>lane_branch</code></td></tr>
   <tr><td><code>adw/triage.py</code></td><td>Reine Funktionen: Finding-Routing, Iterations-Limits, Circuit-Breaker</td><td><code>triage_final_review</code>, <code>check_gate_iterations/fix_cycles/progress</code></td></tr>
   <tr><td><code>adw/ci.py</code></td><td>GitLab-Polling über glab (SHA-gebunden), Job-Log-Abruf, injizierbare Zeit</td><td><code>poll_pipeline(…, sha=…)</code>, <code>fetch_failed_job_logs</code></td></tr>
+  <tr><td><code>adw/github.py</code></td><td>GitHub-Actions-Polling über gh — gleiches Ergebnis (<code>CiResult</code>) und gleiche Fehlerklassen wie ci.py; „grün" = alle Workflow-Runs der Push-SHA completed und keiner rot</td><td><code>poll_ci(…, run_gh, sha=…)</code></td></tr>
+  <tr><td><code>adw/forge.py</code></td><td>Hosting-Erkennung GitLab/GitHub: <code>ci.provider</code>-Override gewinnt, sonst Hostname der origin-URL; unbekannter Host → fail fast</td><td><code>detect_forge(repo, override)</code></td></tr>
   <tr><td><code>adw/env.py</code></td><td>Env-Whitelist für alle Subprozesse (kein Secret-Leakage)</td><td><code>safe_env(extra)</code></td></tr>
   <tr><td><code>adw/mock.py</code></td><td>Skriptbare Mock-Runner: Antwort-Queues je Agent, simulierte Datei-Outputs (statisch oder als <code>Callable(cwd)</code>), Aufruf-Aufzeichnung</td><td><code>MockAgentRunner</code>, <code>MockCodexRunner</code></td></tr>
 </table>
@@ -192,7 +194,7 @@
 <details>
   <summary>Phase 7 — <code>run_ci_phase</code>: Push + Pipeline-Überwachung</summary>
   <div class="inner">
-    <p>Push per <code>git push --force-with-lease -u origin &lt;branch&gt;</code> (der Integrations-Branch wird je Runde neu aufgebaut, non-fast-forward ist also erwartet; fremde Remote-Änderungen werden trotzdem nie überschrieben). <code>poll_pipeline</code> fragt die Pipeline <b>server-seitig SHA-gefiltert</b> ab (<code>glab api projects/:id/pipelines?ref=…&amp;sha=…</code>): weder bewertet die terminale Pipeline des vorherigen Pushes das neue Ergebnis, noch kann eine fremde neuere Pipeline die gesuchte verdecken. Das Zeitbudget wird als Restzeit geführt und der Sleep darauf gekappt. Rot mit Logs → Log-Analyst (Sonnet 5, cwd = gepushter Worktree) → ein Re-Entry über die Lane-Loops; rot <i>ohne</i> Logs (canceled/YAML-Fehler) → direkte Eskalation statt Analyse auf Null-Evidenz.</p>
+    <p>Push per <code>git push --force-with-lease -u origin &lt;branch&gt;</code> (der Integrations-Branch wird je Runde neu aufgebaut, non-fast-forward ist also erwartet; fremde Remote-Änderungen werden trotzdem nie überschrieben). Die Forge wird per <code>ci.provider</code> bzw. origin-URL bestimmt (<code>forge.py</code>; im Dry-Run Fallback gitlab, sonst fail fast). GitLab: <code>poll_pipeline</code> fragt die Pipeline <b>server-seitig SHA-gefiltert</b> ab (<code>glab api projects/:id/pipelines?ref=…&amp;sha=…</code>); GitHub: <code>github.poll_ci</code> pollt alle Workflow-Runs der Push-SHA (<code>gh api …/actions/runs?head_sha=…</code>) bis alle completed sind, rote Runs liefern <code>gh run view --log-failed</code>-Excerpts: weder bewertet die terminale Pipeline des vorherigen Pushes das neue Ergebnis, noch kann eine fremde neuere Pipeline die gesuchte verdecken. Das Zeitbudget wird als Restzeit geführt und der Sleep darauf gekappt. Rot mit Logs → Log-Analyst (Sonnet 5, cwd = gepushter Worktree) → ein Re-Entry über die Lane-Loops; rot <i>ohne</i> Logs (canceled/YAML-Fehler) → direkte Eskalation statt Analyse auf Null-Evidenz.</p>
   </div>
 </details>
 
@@ -337,7 +339,8 @@ Der effektive Base-Branch wird beim Start persistiert; Lanes pinnen ihren Fork-S
   <tr><th>Tool</th><th>Rolle</th><th>Absicherung</th></tr>
   <tr><td><b>git</b></td><td>Worktrees, Branches, Merges, Tree-Hashes, Push</td><td>immer <code>core.hooksPath=/dev/null</code> + Env-Whitelist + Timeouts</td></tr>
   <tr><td><b>codex</b> (CLI, geprüft mit 0.144.0)</td><td>Unabhängige Reviews (spec/plan/code)</td><td>read-only-Sandbox, <code>mcp_servers={}</code>, isoliertes <code>CODEX_HOME</code>, 900-s-Timeout, strikter Parser</td></tr>
-  <tr><td><b>glab</b> (geprüft mit 1.53.0)</td><td>Issue-Intake, Pipeline-/Job-Status, Job-Logs</td><td>injizierbar (<code>run_glab</code>-Seam), 120-s-Timeout, SHA-gebundene Pipeline-Abfrage</td></tr>
+  <tr><td><b>glab</b> (geprüft mit 1.53.0)</td><td>GitLab: Issue-Intake, Pipeline-/Job-Status, Job-Logs</td><td>injizierbar (<code>run_glab</code>-Seam), 120-s-Timeout, SHA-gebundene Pipeline-Abfrage</td></tr>
+  <tr><td><b>gh</b> (geprüft mit 2.95.0)</td><td>GitHub: Issue-Intake, Actions-Runs/Jobs, <code>--log-failed</code>-Logs</td><td>injizierbar (<code>run_gh</code>-Seam), 120-s-Timeout, head_sha-gebundene Run-Abfrage</td></tr>
   <tr><td><b>uv</b> (0.10.x)</td><td>Projekt-/Dependency-Management, Entry-Point <code>adw</code></td><td>—</td></tr>
 </table>
 
