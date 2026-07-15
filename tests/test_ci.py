@@ -131,9 +131,7 @@ def test_sleep_never_exceeds_remaining_budget(tmp_path):
 
 def test_jobs_are_paginated_beyond_100(tmp_path):
     """Regression: Staging-Job auf Seite 2 darf nicht als 'fehlt' gelten."""
-    page1 = json.dumps(
-        [{"id": i, "name": f"job-{i}", "status": "success"} for i in range(1, 101)]
-    )
+    page1 = json.dumps([{"id": i, "name": f"job-{i}", "status": "success"} for i in range(1, 101)])
     page2 = json.dumps([{"id": 101, "name": "deploy-staging", "status": "success"}])
     cfg = CiConfig(staging_job="deploy-staging")
     glab = FakeGlab([pipeline_json("success"), page1, page2])

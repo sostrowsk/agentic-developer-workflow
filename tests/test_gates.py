@@ -120,9 +120,7 @@ def test_interrupt_during_wait_kills_process_group(tmp_path, monkeypatch):
     monkeypatch.setattr(subprocess.Popen, "wait", wait_with_interrupt)
     try:
         with pytest.raises(KeyboardInterrupt):
-            run_gates(
-                [gate("g", f"sh -c 'sleep {needle} & sleep 30'", timeout=30)], cwd=tmp_path
-            )
+            run_gates([gate("g", f"sh -c 'sleep {needle} & sleep 30'", timeout=30)], cwd=tmp_path)
         monkeypatch.undo()
         for _ in range(20):
             alive = subprocess.run(

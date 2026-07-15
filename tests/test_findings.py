@@ -158,11 +158,7 @@ def test_unicode_line_separator_in_string_survives_fence_parsing():
 
 def test_outer_fence_with_spaced_info_string_is_recognized():
     """Kontrakt: ```markdown title=x ist ein Fence-Opener — sein ```json-Inhalt ist Beispiel."""
-    text = (
-        "```markdown title=x\n"
-        '```json\n{"verdict": "ok", "findings": []}\n```\n'
-        "```\n"
-    )
+    text = '```markdown title=x\n```json\n{"verdict": "ok", "findings": []}\n```\n```\n'
     with pytest.raises(FindingsParseError):
         extract_review_result(text)
 

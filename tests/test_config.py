@@ -195,7 +195,7 @@ def test_oversized_yaml_integer_raises_config_error(target_repo):
     write_config(
         target_repo,
         "base_branch: staging\nlanes:\n  backend:\n    gates:\n"
-        "      - {name: g, cmd: \"true\", timeout: " + "9" * 5000 + "}\n",
+        '      - {name: g, cmd: "true", timeout: ' + "9" * 5000 + "}\n",
     )
     with pytest.raises(ConfigError):
         AdwConfig.load(target_repo)

@@ -282,9 +282,7 @@ def test_deny_read_paths_become_both_rule_forms(captured_query, tmp_path):
     assert "Read(/repo/.adw/runs/x/trees/frontend)" in denied
 
 
-def test_relative_config_dir_is_normalized_for_the_cli(
-    captured_query, monkeypatch, tmp_path
-):
+def test_relative_config_dir_is_normalized_for_the_cli(captured_query, monkeypatch, tmp_path):
     rel = tmp_path / "rel-config"
     rel.mkdir()
     (rel / ".credentials.json").write_text("{}")

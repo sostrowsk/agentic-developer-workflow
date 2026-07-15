@@ -42,12 +42,9 @@ def _git_effect(repo: Path, *args: str) -> None:
     RAM-bounded Tail für die Fehlermeldung, eine laute Hook kann den
     Orchestrator nicht fluten."""
     quoted = " ".join(
-        shlex.quote(a)
-        for a in ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", *args]
+        shlex.quote(a) for a in ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", *args]
     )
-    report = run_gates(
-        [Gate(name=f"git-{args[0]}", cmd=quoted, timeout=_GIT_TIMEOUT)], cwd=repo
-    )
+    report = run_gates([Gate(name=f"git-{args[0]}", cmd=quoted, timeout=_GIT_TIMEOUT)], cwd=repo)
     if not report.passed:
         failure = report.failures[0]
         raise WorktreeError(f"git {' '.join(args)}: {failure.output}")
@@ -164,10 +161,7 @@ def _worktree_registered(repo: Path, path: Path) -> bool:
     # -z: NUL-getrennt und ungequotet — C-Quoting bei Nicht-ASCII-Pfaden
     # (core.quotePath) würde den Vergleich sonst brechen.
     listing = _git(repo, "worktree", "list", "--porcelain", "-z")
-    return any(
-        record == f"worktree {path.resolve()}"
-        for record in listing.split("\0")
-    )
+    return any(record == f"worktree {path.resolve()}" for record in listing.split("\0"))
 
 
 _LANE_PORT_BASE = {"backend": 9100, "frontend": 9200}

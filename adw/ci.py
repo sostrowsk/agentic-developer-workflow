@@ -128,8 +128,7 @@ def _jobs(repo: Path, pipeline_id: int | None, run_glab: RunGlab) -> list[dict]:
         raw = run_glab(
             [
                 "api",
-                f"projects/:id/pipelines/{pipeline_id}/jobs"
-                f"?per_page={_JOBS_PER_PAGE}&page={page}",
+                f"projects/:id/pipelines/{pipeline_id}/jobs?per_page={_JOBS_PER_PAGE}&page={page}",
             ],
             repo,
         )
