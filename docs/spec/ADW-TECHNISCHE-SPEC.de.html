@@ -353,7 +353,7 @@ Das Agent SDK spawnt die Claude-Code-CLI als headless Subprocess; ADW erzwingt d
   <li><b>331 Tests, TDD-first entwickelt</b> (jeder Task/Bugfix begann mit einem roten Test). Kein Test braucht Netz oder Tokens: SDK, Codex und glab sind an ihren Interfaces gemockt — <b>git ist echt</b> (Wegwerf-Repos in <code>tmp_path</code>).</li>
   <li><b>Skriptbare Mocks als Test-Rückgrat:</b> <code>MockAgentRunner</code> (Antwort-Queues je Agent, simulierte Datei-Outputs statisch oder als <code>Callable(cwd)</code> für per-Lane-Verhalten, vollständige Aufruf-Aufzeichnung inkl. <code>resume</code>/<code>deny_read_paths</code>) und <code>MockCodexRunner</code>.</li>
   <li><b>Schwerpunkt Crash-Fenster:</b> Ein großer Teil der Phasen-Tests simuliert gezielt Abbrüche zwischen zwei Checkpoints (State manipulieren, Prozess „sterben lassen", Resume) sowie Agent-Manipulation (Fremd-Commits, Symlink-Artefakte, umgeschriebene Configs, manipulierte Worktrees nach dem completed-Checkpoint).</li>
-  <li><b>Akzeptanzebene:</b> <code>tests/test_e2e_dry_run.py</code> bildet die DoD-Kriterien 1–5 aus <code>docs/SPEC.md</code> §8 ab — komplette CLI-Dry-Runs (single + parallel), Gate-Fail→Same-Session-Fix, Approval-Gate, Triage-Pfade, Crash-Resume.</li>
+  <li><b>Akzeptanzebene:</b> <code>tests/test_e2e_dry_run.py</code> bildet die DoD-Kriterien 1–5 aus <code>docs/SPEC.de.md</code> §8 ab — komplette CLI-Dry-Runs (single + parallel), Gate-Fail→Same-Session-Fix, Approval-Gate, Triage-Pfade, Crash-Resume.</li>
   <li><b>Review-Gate im Entwicklungsprozess:</b> pro Task <code>uv run pytest</code> + <code>ruff check/format</code> + <code>codex review --uncommitted</code>; über die Tasks 10–13 wurden dabei 8 P1- und 19 P2-Findings gefunden und jeweils mit Regressionstest zuerst gefixt.</li>
 </ul>
 
@@ -383,7 +383,7 @@ Das Agent SDK spawnt die Claude-Code-CLI als headless Subprocess; ADW erzwingt d
 <p class="top"><a href="#tldr">↑ nach oben</a></p>
 </main>
 <footer>
-  ADW Technische Spezifikation · generiert am 2026-07-15 · Quellen: Repo <code>agentic-developer-workflow</code> (Code unter <code>adw/</code>, <code>docs/SPEC.md</code>, <code>docs/PLAN.md</code>, <code>pyproject.toml</code>, Commit-Historie bis main <code>9b89dd6</code>) · Bedienung: <code>docs/handbuch/ADW-USER-HANDBUCH.html</code>
+  ADW Technische Spezifikation · generiert am 2026-07-15 · Quellen: Repo <code>agentic-developer-workflow</code> (Code unter <code>adw/</code>, <code>docs/SPEC.de.md</code>, <code>docs/PLAN.de.md</code>, <code>pyproject.toml</code>, Commit-Historie bis main <code>9b89dd6</code>) · Bedienung: <code>docs/handbuch/ADW-USER-HANDBUCH.de.html</code>
 </footer>
 </body>
 </html>

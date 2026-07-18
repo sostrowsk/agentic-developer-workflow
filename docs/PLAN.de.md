@@ -1,8 +1,10 @@
 # ADW-Orchestrator — Implementierungsplan
 
+[English](PLAN.md) | **Deutsch**
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Den in `docs/SPEC.md` spezifizierten 7-Phasen-ADW-Orchestrator als uv-Python-Projekt bauen — TDD, ein Task = ein Zyklus = ein Commit.
+**Goal:** Den in `docs/SPEC.de.md` spezifizierten 7-Phasen-ADW-Orchestrator als uv-Python-Projekt bauen — TDD, ein Task = ein Zyklus = ein Commit.
 
 **Architecture:** Package `adw/` mit deterministischem Kern (config, state, findings, gates, worktrees, triage, ci) und zwei gekapselten Agent-Schnittstellen (`AgentRunner` via Claude Agent SDK, `CodexRunner` via `codex exec`). `phases.py` orchestriert die 7 Phasen, `cli.py` (typer) ist der Eingang. `--dry-run` injiziert Mocks — der komplette Kontrollfluss ist ohne Tokens testbar.
 

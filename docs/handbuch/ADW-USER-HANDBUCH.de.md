@@ -391,4 +391,4 @@ Das Abo-Fenster ist leer oder die Claude-CLI konnte nicht antworten. Kein Handlu
 
 </div>
 
-ADW User-Handbuch · generiert am 2026-07-15 · Quelle: Repo `agentic-developer-workflow` (README.md, docs/SPEC.md, docs/PLAN.md, Stand main `9b89dd6`) · Technische Details: `docs/spec/ADW-TECHNISCHE-SPEC.html`
+ADW User-Handbuch · generiert am 2026-07-15 · Quelle: Repo `agentic-developer-workflow` (README.de.md, docs/SPEC.de.md, docs/PLAN.de.md, Stand main `9b89dd6`) · Technische Details: `docs/spec/ADW-TECHNISCHE-SPEC.de.html`

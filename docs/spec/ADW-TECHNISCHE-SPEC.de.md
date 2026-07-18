@@ -444,7 +444,7 @@ Durchgängiges Muster: **Budget-Inkremente werden atomar mit der Arbeit persisti
 - **331 Tests, TDD-first entwickelt** (jeder Task/Bugfix begann mit einem roten Test). Kein Test braucht Netz oder Tokens: SDK, Codex und glab sind an ihren Interfaces gemockt — **git ist echt** (Wegwerf-Repos in `tmp_path`).
 - **Skriptbare Mocks als Test-Rückgrat:** `MockAgentRunner` (Antwort-Queues je Agent, simulierte Datei-Outputs statisch oder als `Callable(cwd)` für per-Lane-Verhalten, vollständige Aufruf-Aufzeichnung inkl. `resume`/`deny_read_paths`) und `MockCodexRunner`.
 - **Schwerpunkt Crash-Fenster:** Ein großer Teil der Phasen-Tests simuliert gezielt Abbrüche zwischen zwei Checkpoints (State manipulieren, Prozess „sterben lassen", Resume) sowie Agent-Manipulation (Fremd-Commits, Symlink-Artefakte, umgeschriebene Configs, manipulierte Worktrees nach dem completed-Checkpoint).
-- **Akzeptanzebene:** `tests/test_e2e_dry_run.py` bildet die DoD-Kriterien 1–5 aus `docs/SPEC.md` §8 ab — komplette CLI-Dry-Runs (single + parallel), Gate-Fail→Same-Session-Fix, Approval-Gate, Triage-Pfade, Crash-Resume.
+- **Akzeptanzebene:** `tests/test_e2e_dry_run.py` bildet die DoD-Kriterien 1–5 aus `docs/SPEC.de.md` §8 ab — komplette CLI-Dry-Runs (single + parallel), Gate-Fail→Same-Session-Fix, Approval-Gate, Triage-Pfade, Crash-Resume.
 - **Review-Gate im Entwicklungsprozess:** pro Task `uv run pytest` + `ruff check/format` + `codex review --uncommitted`; über die Tasks 10–13 wurden dabei 8 P1- und 19 P2-Findings gefunden und jeweils mit Regressionstest zuerst gefixt.
 
 ## 11. Known Limitations (dokumentiert, bewusst akzeptiert)
@@ -474,4 +474,4 @@ Durchgängiges Muster: **Budget-Inkremente werden atomar mit der Arbeit persisti
 
 </div>
 
-ADW Technische Spezifikation · generiert am 2026-07-15 · Quellen: Repo `agentic-developer-workflow` (Code unter `adw/`, `docs/SPEC.md`, `docs/PLAN.md`, `pyproject.toml`, Commit-Historie bis main `9b89dd6`) · Bedienung: `docs/handbuch/ADW-USER-HANDBUCH.html`
+ADW Technische Spezifikation · generiert am 2026-07-15 · Quellen: Repo `agentic-developer-workflow` (Code unter `adw/`, `docs/SPEC.de.md`, `docs/PLAN.de.md`, `pyproject.toml`, Commit-Historie bis main `9b89dd6`) · Bedienung: `docs/handbuch/ADW-USER-HANDBUCH.de.html`

@@ -1,7 +1,7 @@
 # ADW-Kontrollfluss — Die sieben Phasen einfach erklärt
 
 > Zielgruppe: Einsteiger ohne Programmierkenntnisse.
-> Quelle: `docs/SPEC.md` (Stand 2026-07-14).
+> Quelle: `docs/SPEC.de.md` (Stand 2026-07-14).
 
 ## Worum geht es überhaupt?
 

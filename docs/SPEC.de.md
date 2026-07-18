@@ -1,5 +1,7 @@
 # SPEC — Agentic Developer Workflow (ADW)
 
+[English](SPEC.md) | **Deutsch**
+
 Stand: 2026-07-14 · validiert im Brainstorming (Stefan + Fable 5) · Referenz: `Handout_AgenticDeveloperWorkflow.html` (v2)
 
 ## 1. Ziel
