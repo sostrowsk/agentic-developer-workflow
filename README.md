@@ -1,135 +1,137 @@
 # Agentic Developer Workflow (ADW)
 
-Ein Python-Orchestrator, der ein Issue vollautomatisch durch **sieben Phasen** führt:
+**English** | [Deutsch](README.de.md)
 
-> Spec → Plan + Kontrakt → Build (Lanes) → Integration/E2E → Codex-Review → finaler Review + Triage → Push/CI/Staging
+A Python orchestrator that takes an issue fully automatically through **seven phases**:
 
-Leitsatz: **Kontrollfluss ist Code, nicht Prompt.** Loops, Gates, Merges, Dispatch,
-Triage, Limits und CI-Polling sind deterministischer Python-Code (0 Tokens).
-Agenten (Claude Agent SDK + Codex CLI) laufen nur dort, wo Urteilsvermögen
-gebraucht wird — und Reviewer fixen nie: jeder Fix läuft durch die Build-Agents
-und erneut durch alle Gates.
+> Spec → Plan + Contract → Build (Lanes) → Integration/E2E → Codex Review → final Review + Triage → Push/CI/Staging
 
-**Abrechnung:** ADW spricht Claude ausschließlich über die **Claude-Code-CLI**
-(das Agent SDK spawnt sie headless) mit gespeichertem Login — Verbrauch läuft
-über den Claude-Plan, nie token-by-token gegen die API (API-Key-Env-Variablen
-werden aktiv geblankt). Erschöpftes Plan-Limit stoppt den Run am Checkpoint;
-`adw resume` setzt nach dem Reset fort.
+Guiding principle: **Control flow is code, not prompt.** Loops, Gates, merges, dispatch,
+triage, limits, and CI polling are deterministic Python code (0 tokens).
+Agents (Claude Agent SDK + Codex CLI) run only where judgment is
+needed — and reviewers never fix: every fix goes through the build agents
+and again through all Gates.
 
-Referenzen: [`docs/SPEC.md`](docs/SPEC.md) (Soll-Verhalten, Schnittstellen, DoD)
-und [`docs/PLAN.md`](docs/PLAN.md) (Implementierungsplan).
+**Billing:** ADW talks to Claude exclusively via the **Claude Code CLI**
+(the Agent SDK spawns it headless) with stored login — usage runs
+against the Claude plan, never token-by-token against the API (API key env variables
+are actively blanked). An exhausted plan limit stops the run at the checkpoint;
+`adw resume` continues after the reset.
 
-**Claude-Skill:** [agentic-developer-workflow-skill](https://github.com/sostrowsk/agentic-developer-workflow-skill)
-— verpackt die Bedienung dieses Orchestrators als installierbaren Claude-Skill
-(Preflight-Check, Workflow-Anleitung, Config-Template, Troubleshooting).
+References: [`docs/SPEC.md`](docs/SPEC.md) (target behavior, interfaces, DoD)
+and [`docs/PLAN.md`](docs/PLAN.md) (implementation plan).
+
+**Claude skill:** [agentic-developer-workflow-skill](https://github.com/sostrowsk/agentic-developer-workflow-skill)
+— packages the operation of this orchestrator as an installable Claude skill
+(preflight check, workflow guide, config template, troubleshooting).
 
 ## Quickstart
 
 ```bash
-# Abhängigkeiten (uv, Python >= 3.12)
+# Dependencies (uv, Python >= 3.12)
 uv sync
 
-# Ziel-Repo vorbereiten: .adw/config.yaml anlegen (siehe examples/config.yaml)
-mkdir -p /pfad/zum/repo/.adw
-cp examples/config.yaml /pfad/zum/repo/.adw/config.yaml   # und anpassen
+# Prepare the target repo: create .adw/config.yaml (see examples/config.yaml)
+mkdir -p /path/to/repo/.adw
+cp examples/config.yaml /path/to/repo/.adw/config.yaml   # and adjust
 
-# Trockenlauf: kompletter Kontrollfluss mit Mocks — 0 Tokens, kein Netz
-uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --no-approval
-uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --parallel --no-approval
+# Dry run: complete control flow with mocks — 0 tokens, no network
+uv run adw run --repo /path/to/repo --issue "Demo feature" --dry-run --no-approval
+uv run adw run --repo /path/to/repo --issue "Demo feature" --dry-run --parallel --no-approval
 
-# Echter Lauf (Tokens!): Issue-Text direkt, GitLab-Issue (glab) oder GitHub-Issue (gh)
-uv run adw run --repo /pfad/zum/repo --issue "Bug: Login bricht ab, wenn ..."
-uv run adw run --repo /pfad/zum/repo --gitlab-issue 42 --parallel
-uv run adw run --repo /pfad/zum/repo --github-issue 42 --parallel
+# Real run (tokens!): issue text directly, GitLab issue (glab) or GitHub issue (gh)
+uv run adw run --repo /path/to/repo --issue "Bug: login aborts when ..."
+uv run adw run --repo /path/to/repo --gitlab-issue 42 --parallel
+uv run adw run --repo /path/to/repo --github-issue 42 --parallel
 ```
 
 ### CLI
 
 ```
-adw run --repo <pfad> (--issue "Text" | --gitlab-issue <id> | --github-issue <nr>)
+adw run --repo <path> (--issue "Text" | --gitlab-issue <id> | --github-issue <nr>)
         [--parallel] [--dry-run] [--no-approval] [--base-branch <name>]
-adw resume <run_id> [--repo <pfad>]      # nach Crash; bei Approval-Pause → approve
-adw approve <run_id> [--repo <pfad>]     # Plan-Approval erteilen + fortsetzen
-adw status [<run_id>] [--repo <pfad>]    # Runs + Phase anzeigen
+adw resume <run_id> [--repo <path>]      # after a crash; on approval pause → approve
+adw approve <run_id> [--repo <path>]     # grant plan approval + continue
+adw status [<run_id>] [--repo <path>]    # show runs + phase
 ```
 
-Exit-Codes: `0` done · `2` awaiting_approval (Plan-Approval-Pause) · `1` Eskalation/Fehler.
+Exit codes: `0` done · `2` awaiting_approval (plan approval pause) · `1` escalation/error.
 
-**Plan-Approval-Gate:** Nach Phase 2 pausiert der Run (Exit 2). Plan und
-Kontrakt liegen unter `.adw/runs/<run_id>/plan.md` bzw. `contract.yaml` —
-lesen, dann `adw approve <run_id>`. Mit `--no-approval` entfällt die Pause.
+**Plan approval gate:** After phase 2 the run pauses (exit 2). Plan and
+contract are located at `.adw/runs/<run_id>/plan.md` and `contract.yaml` —
+read them, then `adw approve <run_id>`. With `--no-approval` the pause is skipped.
 
-## Config-Referenz (`.adw/config.yaml` im Ziel-Repo)
+## Config reference (`.adw/config.yaml` in the target repo)
 
-Vollständiges Beispiel: [`examples/config.yaml`](examples/config.yaml).
+Complete example: [`examples/config.yaml`](examples/config.yaml).
 
-| Schlüssel | Pflicht | Bedeutung |
+| Key | Required | Meaning |
 | --- | --- | --- |
-| `base_branch` | ja | Branch, von dem Lanes forken und gegen den diffs laufen |
-| `lanes.<name>.gates[]` | ja (>= 1 Lane) | Gate-Liste je Lane: `name`, `cmd`, `timeout` (Sekunden). Reihenfolge = Ausführungsreihenfolge, fail fast |
-| `e2e.cmd` / `e2e.timeout` | optional | E2E-Kommando (Playwright o. ä.) — nur mit `--parallel` relevant |
-| `ci.poll_interval` | optional (60) | Sekunden zwischen Pipeline-Polls |
-| `ci.timeout` | optional (2700) | Gesamt-Budget fürs CI-Warten |
-| `ci.staging_job` | optional | Job-Name, der zusätzlich grün sein muss |
-| `ci.provider` | optional | `gitlab` oder `github`; ohne Angabe Auto-Erkennung aus der origin-URL (fail fast bei unbekanntem Host) |
+| `base_branch` | yes | Branch that Lanes fork from and that diffs run against |
+| `lanes.<name>.gates[]` | yes (>= 1 Lane) | Gate list per Lane: `name`, `cmd`, `timeout` (seconds). Order = execution order, fail fast |
+| `e2e.cmd` / `e2e.timeout` | optional | E2E command (Playwright or similar) — only relevant with `--parallel` |
+| `ci.poll_interval` | optional (60) | Seconds between pipeline polls |
+| `ci.timeout` | optional (2700) | Total budget for waiting on CI |
+| `ci.staging_job` | optional | Job name that must additionally be green |
+| `ci.provider` | optional | `gitlab` or `github`; if unset, auto-detection from the origin URL (fail fast on unknown host) |
 
-Fehlende oder kaputte Config bricht sofort mit klarer Meldung ab (fail fast).
-`--parallel` verlangt eine `backend`- **und** `frontend`-Lane.
+A missing or broken config aborts immediately with a clear message (fail fast).
+`--parallel` requires a `backend` **and** a `frontend` Lane.
 
-## Architektur in 60 Sekunden
+## Architecture in 60 seconds
 
 ```
 adw/
-  cli.py        typer-Eingang: run/resume/approve/status, Dry-Run-Verdrahtung
-  phases.py     die 7 Phasen über einem RunContext — Loops, Limits, Dispatch
-  agents.py     Agent-Registry (Fable 5 / Opus 4.8 / Sonnet 5) + SDK-Runner
-  codex.py      Codex-CLI als read-only-Subprocess, striktes Findings-Parsing
-  findings.py   Findings-Schema (pydantic) + strikter Parser-Kontrakt
-  config.py     .adw/config.yaml-Loader (fail fast)
-  state.py      RunState: atomar persistiert, Grundlage für `adw resume`
-  gates.py      Gate-Runner: subprocess mit echtem Timeout, Env-Whitelist
-  worktrees.py  Lane-Worktrees + deterministische Ports
-  triage.py     Triage-Regeln, Iterations-Limits, Circuit-Breaker
-  ci.py         GitLab-Polling (glab) bis Staging grün, Log-Abruf
-  github.py     GitHub-Actions-Polling (gh) — gleiches Interface wie ci.py
-  forge.py      GitLab-oder-GitHub-Erkennung (origin-URL, ci.provider-Override)
-  mock.py       skriptbare Mock-Runner für --dry-run und Tests
+  cli.py        typer entry point: run/resume/approve/status, dry-run wiring
+  phases.py     the 7 phases over a RunContext — loops, limits, dispatch
+  agents.py     agent registry (Fable 5 / Opus 4.8 / Sonnet 5) + SDK runner
+  codex.py      Codex CLI as a read-only subprocess, strict findings parsing
+  findings.py   Findings schema (pydantic) + strict parser contract
+  config.py     .adw/config.yaml loader (fail fast)
+  state.py      RunState: atomically persisted, basis for `adw resume`
+  gates.py      Gate runner: subprocess with real timeout, env whitelist
+  worktrees.py  Lane worktrees + deterministic ports
+  triage.py     triage rules, iteration limits, circuit breaker
+  ci.py         GitLab polling (glab) until staging is green, log retrieval
+  github.py     GitHub Actions polling (gh) — same interface as ci.py
+  forge.py      GitLab-or-GitHub detection (origin URL, ci.provider override)
+  mock.py       scriptable mock runners for --dry-run and tests
 ```
 
-- **Lanes:** je Workstream ein eigener Git-Worktree (`.adw/runs/<id>/trees/<lane>`),
-  eigene SDK-Session, eigene Ports. Commits macht ausschließlich der Orchestrator.
-- **Limits:** 10 Gate-Iterationen je Task, 10 E2E-/Review-Runden, 3 Fix-Zyklen,
-  1 CI-Re-Entry — plus Circuit-Breaker (identische Fehler zweimal → sofort Schluss).
-- **Resume:** jeder Übergang und jedes offene Feedback ist in
-  `.adw/runs/<run_id>/state.json` checkpointed; `adw resume` setzt exakt dort fort.
-- **Sicherheit:** Agenten arbeiten mit Tool-Whitelists und Pfad-Regeln; Subprozesse
-  laufen mit Env-Whitelist (keine Secrets); Spec/Plan/Kontrakt und die Config sind
-  für Agents effektiv unveränderlich (Orchestrator restauriert sie).
+- **Lanes:** one dedicated git worktree per workstream (`.adw/runs/<id>/trees/<lane>`),
+  its own SDK session, its own ports. Commits are made exclusively by the orchestrator.
+- **Limits:** 10 Gate iterations per task, 10 E2E/review rounds, 3 fix cycles,
+  1 CI re-entry — plus circuit breaker (identical errors twice → immediate stop).
+- **Resume:** every transition and every open feedback is checkpointed in
+  `.adw/runs/<run_id>/state.json`; `adw resume` continues exactly there.
+- **Safety:** agents work with tool whitelists and path rules; subprocesses
+  run with an env whitelist (no secrets); spec/plan/contract and the config are
+  effectively immutable for agents (the orchestrator restores them).
 
 ## Troubleshooting
 
-- **Run bricht ab (Exit 1):** `.adw/runs/<run_id>/escalation.md` lesen — dort
-  stehen erreichter Stand, Phase und der konkrete Grund (Gate-Output,
-  Merge-Konflikt, Limit, Circuit-Breaker). Nach manueller Klärung neuen Run
-  starten; eskalierte Runs sind bewusst nicht fortsetzbar.
-- **Run hängt in `awaiting_approval`:** `adw status`, dann
-  `adw approve <run_id>` — oder künftig `--no-approval`.
-- **`scope_gap`-Findings:** landen in `.adw/runs/<run_id>/followups.md` als
-  Follow-up-Issues (kein Auto-Restart) — der Run läuft regulär weiter.
-- **CI rot trotz Fix:** genau ein automatischer Log-Analyst-Re-Entry ist
-  vorgesehen; danach eskaliert der Run mit den Job-Logs im Report.
-- **Dry-Run zum Verifizieren der Config:** `--dry-run` fährt den kompletten
-  Kontrollfluss inklusive simuliertem Gate-Fail und (mit `--parallel`)
-  E2E-Triage-Pfad — ohne Tokens, ohne Push, ohne GitLab.
+- **Run aborts (exit 1):** read `.adw/runs/<run_id>/escalation.md` — it
+  contains the state reached, the phase, and the concrete reason (Gate output,
+  merge conflict, limit, circuit breaker). After manual clarification, start a new
+  run; escalated runs are deliberately not resumable.
+- **Run stuck in `awaiting_approval`:** `adw status`, then
+  `adw approve <run_id>` — or in the future `--no-approval`.
+- **`scope_gap` Findings:** end up in `.adw/runs/<run_id>/followups.md` as
+  follow-up issues (no auto-restart) — the run continues normally.
+- **CI red despite fix:** exactly one automatic log-analyst re-entry is
+  provided; after that the run escalates with the job logs in the report.
+- **Dry run to verify the config:** `--dry-run` drives the complete
+  control flow including a simulated Gate fail and (with `--parallel`)
+  the E2E triage path — without tokens, without push, without GitLab.
 
-## Entwicklung
+## Development
 
 ```bash
-uv run pytest          # komplette Suite (~330 Tests, mocks-only, echtes git)
-uv run ruff check .    # Lint
-uv run ruff format .   # Formatierung
+uv run pytest          # complete suite (~330 tests, mocks-only, real git)
+uv run ruff check .    # lint
+uv run ruff format .   # formatting
 ```
 
-## Lizenz
+## License
 
-MIT — siehe [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
