@@ -18,7 +18,7 @@ import json
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 SCHEMA_INSTRUCTION = """\
 Antworte AUSSCHLIESSLICH mit einem JSON-Objekt nach exakt diesem Schema
@@ -50,6 +50,17 @@ class Finding(BaseModel):
 
     severity: Literal["P1", "P2", "P3"]
     lane: Literal["frontend", "backend", "unknown"]
+
+    @field_validator("lane", mode="before")
+    @classmethod
+    def _coerce_unrecognized_lane(cls, value: object) -> object:
+        # Reviewer erfinden gelegentlich Lane-Labels ("ios", …). Kein Finding
+        # wird verworfen — unbekannte STRING-Labels werden wie "unknown"
+        # behandelt; Nicht-Strings bleiben Schema-Verletzung (ValidationError).
+        if isinstance(value, str) and value not in ("frontend", "backend", "unknown"):
+            return "unknown"
+        return value
+
     file: str
     issue: str
     remediation_plan: list[str]

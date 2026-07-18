@@ -1853,22 +1853,27 @@ def test_review_round_limit_escalates_without_terminal_fix_dispatch(ctx):
     assert len(build_calls) == 1 + 9  # Build + 9 Fixes — kein 10. Terminal-Fix
 
 
-def test_final_review_finding_for_inactive_lane_escalates(ctx):
-    """Regression (Codex P2): lane='frontend' im Single-Lane-Run muss sauber
-    eskalieren (Report + State) statt mit KeyError durchzuschlagen."""
+def test_final_review_finding_for_inactive_lane_routes_to_active_lanes(ctx):
+    """lane='frontend' im Single-Lane-Run wird wie 'unknown' behandelt und in
+    die aktiven Lanes geroutet — kein KeyError, keine Eskalation, kein
+    verworfenes Finding."""
     prepare_reviewable(ctx)
     ctx.codex.script(OK)
     run_codex_review_phase(ctx)
+    ctx.agents.script("build_agent", "Fix")
+    ctx.agents.file_writes["build_agent"] = {"fix.py": "pass\n"}
     ctx.agents.script(
         "final_reviewer",
         final_review_json(
             "needs_fixes", [finding_dict("frontend", "FE-Teil fehlt", "implementation")]
         ),
+        final_review_json("ok"),
     )
-    with pytest.raises(EscalationError, match="frontend|[Ll]ane"):
-        run_final_review_phase(ctx)
-    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
-    assert (ctx.run_dir / "escalation.md").is_file()
+    run_final_review_phase(ctx)
+    build_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert len(build_calls) == 2  # Fix lief über die backend-Lane
+    assert "FE-Teil fehlt" in build_calls[-1].task
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase != "escalated"
 
 
 def test_identical_final_review_findings_trigger_circuit_breaker(ctx):

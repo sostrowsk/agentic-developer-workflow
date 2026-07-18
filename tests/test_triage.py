@@ -118,3 +118,13 @@ def test_progress_with_different_failures_passes():
 
 def test_first_iteration_has_no_previous_and_passes():
     check_progress(previous=None, current=["a"])
+
+
+def test_inactive_lane_finding_routes_to_all_active_lanes():
+    result = ReviewResult(
+        verdict="needs_fixes",
+        findings=[finding(lane="frontend", issue="Swift-Quelle kaputt")],
+    )
+    decision = triage_final_review(result, active_lanes=["backend"])
+    assert [f.issue for f in decision.fix_tasks["backend"]] == ["Swift-Quelle kaputt"]
+    assert "frontend" not in decision.fix_tasks

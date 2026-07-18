@@ -1,4 +1,5 @@
 .adw/runs/
+.idea
 .venv/
 __pycache__/
 *.pyc

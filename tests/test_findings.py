@@ -259,3 +259,18 @@ def test_huge_adversarial_input_parses_in_linear_time():
     with pytest.raises(FindingsParseError):
         extract_review_result(text)
     assert time.monotonic() - started < 2.0
+
+
+def test_unrecognized_lane_label_normalizes_to_unknown():
+    raw = VALID.replace('"lane": "backend"', '"lane": "ios"')
+    result = extract_review_result(raw)
+    assert result.findings[0].lane == "unknown"
+
+
+@pytest.mark.parametrize("bad_lane", ["null", "3", "[]", "{}", "true"])
+def test_non_string_lane_raises_validation_error(bad_lane):
+    """Regression (Codex P2): nur unbekannte String-Labels werden normalisiert —
+    Nicht-String-Werte bleiben Schema-Verletzung."""
+    raw = VALID.replace('"lane": "backend"', f'"lane": {bad_lane}')
+    with pytest.raises(ValidationError):
+        extract_review_result(raw)

@@ -41,7 +41,10 @@ def triage_final_review(
         if item.category == "scope_gap":
             followups.append(item)
             continue
-        targets = lanes if item.lane == "unknown" else [item.lane]
+        # Inaktive Lane-Zuordnung (z. B. "frontend" bei Single-Lane-Run) wird
+        # wie "unknown" behandelt — kein Finding wird verworfen.
+        known = item.lane != "unknown" and (active_lanes is None or item.lane in lanes)
+        targets = [item.lane] if known else lanes
         for lane in targets:
             fix_tasks.setdefault(lane, []).append(item)
     return TriageDecision(followups=followups, fix_tasks=fix_tasks)
