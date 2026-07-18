@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADW-Kontrollfluss — Die sieben Phasen (Handout)</title>
+<style>
+  :root {
+    --ink: #1c2733;
+    --ink-soft: #46586b;
+    --paper: #fbfaf7;
+    --card: #ffffff;
+    --line: #dde4ea;
+    --blue: #2563a8;
+    --blue-soft: #e8f0f9;
+    --amber: #b97a10;
+    --amber-soft: #fdf3e0;
+    --green: #2f7d4f;
+    --green-soft: #e7f4ec;
+    --red: #b3403a;
+    --red-soft: #faeae9;
+    --violet: #6d5aa8;
+    --violet-soft: #efecf8;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.65;
+    font-size: 17px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 20px 80px; }
+
+  header.hero {
+    background: linear-gradient(135deg, #1d3a5f 0%, #2563a8 70%, #3a7bc0 100%);
+    color: #fff;
+    padding: 48px 20px 40px;
+  }
+  header.hero .wrap { padding-bottom: 0; }
+  header.hero h1 { margin: 0 0 8px; font-size: 2rem; line-height: 1.25; }
+  header.hero p.sub { margin: 0; opacity: .92; font-size: 1.05rem; max-width: 46em; }
+  header.hero p.meta { margin: 18px 0 0; font-size: .85rem; opacity: .75; }
+
+  h2 {
+    font-size: 1.45rem; margin: 56px 0 14px; padding-bottom: 8px;
+    border-bottom: 3px solid var(--blue);
+  }
+  h3 { font-size: 1.12rem; margin: 30px 0 8px; }
+  p { margin: 10px 0; }
+  a { color: var(--blue); }
+
+  .tldr {
+    background: var(--card); border: 1px solid var(--line); border-top: 5px solid var(--blue);
+    border-radius: 10px; padding: 22px 26px; margin-top: 32px;
+    box-shadow: 0 2px 10px rgba(28,39,51,.06);
+  }
+  .tldr h2 { margin: 0 0 12px; border: none; padding: 0; font-size: 1.25rem; }
+  .tldr ul { margin: 0; padding-left: 22px; }
+  .tldr li { margin: 7px 0; }
+
+  .kern {
+    background: var(--blue-soft); border-radius: 10px; padding: 20px 26px; margin: 24px 0;
+  }
+  .kern h2 { margin: 0 0 10px; border: none; padding: 0; font-size: 1.2rem; }
+  .kern ol { margin: 0; padding-left: 22px; }
+  .kern li { margin: 8px 0; }
+
+  nav.toc {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 24px; margin: 28px 0; font-size: .95rem;
+  }
+  nav.toc strong { display: block; margin-bottom: 8px; font-size: 1rem; }
+  nav.toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 40px; }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+  @media (max-width: 640px) { nav.toc ol { columns: 1; } }
+
+  table {
+    border-collapse: collapse; width: 100%; margin: 16px 0; font-size: .93rem;
+    background: var(--card);
+  }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: var(--blue-soft); }
+  .table-scroll { overflow-x: auto; }
+
+  .callout {
+    border-left: 4px solid var(--blue); background: var(--card);
+    padding: 12px 18px; margin: 18px 0; border-radius: 0 8px 8px 0;
+    border-top: 1px solid var(--line); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .callout.amber { border-left-color: var(--amber); background: var(--amber-soft); }
+  .callout.red { border-left-color: var(--red); background: var(--red-soft); }
+  .callout.green { border-left-color: var(--green); background: var(--green-soft); }
+  .callout .label { font-weight: 700; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: 4px; color: var(--ink-soft); }
+
+  .phase {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 24px 28px; margin: 26px 0; box-shadow: 0 2px 8px rgba(28,39,51,.05);
+  }
+  .phase h3 { margin-top: 0; display: flex; align-items: center; gap: 12px; font-size: 1.2rem; }
+  .phase-num {
+    flex: 0 0 auto; width: 38px; height: 38px; border-radius: 50%;
+    background: var(--blue); color: #fff; display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 1.1rem;
+  }
+  .phase .frage { color: var(--ink-soft); font-style: italic; margin-top: -4px; }
+
+  details {
+    background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 16px; margin: 14px 0;
+  }
+  details summary { cursor: pointer; font-weight: 600; color: var(--blue); }
+  details[open] summary { margin-bottom: 8px; }
+  details pre { background: #f0f3f6; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: .82rem; line-height: 1.5; }
+  code { background: #eef1f4; padding: 1px 6px; border-radius: 4px; font-size: .88em; }
+  pre code { background: none; padding: 0; }
+
+  figure { margin: 22px 0; }
+  figure .svgbox {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; overflow-x: auto;
+  }
+  figure svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  figcaption { font-size: .87rem; color: var(--ink-soft); margin-top: 8px; text-align: center; }
+
+  dl.glossar dt { font-weight: 700; margin-top: 14px; }
+  dl.glossar dd { margin: 2px 0 0 0; padding-left: 0; }
+
+  .satz {
+    background: linear-gradient(135deg, #1d3a5f, #2563a8); color: #fff;
+    border-radius: 12px; padding: 26px 30px; margin: 40px 0 20px;
+    font-size: 1.08rem; line-height: 1.7;
+  }
+  .satz .label { font-weight: 700; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; opacity: .8; display: block; margin-bottom: 8px; }
+
+  .btn-row { text-align: right; margin: 6px 0 -10px; }
+  .btn-row button {
+    font: inherit; font-size: .82rem; padding: 5px 12px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--card); color: var(--blue); cursor: pointer;
+  }
+  .btn-row button:hover { background: var(--blue-soft); }
+  .top-link { display: inline-block; margin-top: 30px; font-size: .88rem; }
+
+  /* SVG text defaults */
+  svg text { font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>ADW-Kontrollfluss — Die sieben Phasen</h1>
+    <p class="sub">Wie der Agentic Developer Workflow eine Aufgabe vollautomatisch in fertigen, geprüften Code verwandelt — erklärt ohne Programmierkenntnisse, mit Diagrammen.</p>
+    <p class="meta">Quellen: <code>docs/handbuch/ADW-CONTROL-FLOW.md</code> · <code>docs/SPEC.md</code> (Stand 2026-07-14) · Handout erstellt 2026-07-18</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ============ TL;DR ============ -->
+<section class="tldr" id="tldr">
+  <h2>⚡ Auf einen Blick</h2>
+  <ul>
+    <li>Der <strong>ADW</strong> führt eine Entwicklungsaufgabe (ein „Issue") <strong>vollautomatisch durch sieben Phasen</strong>: Beschreiben → Planen → Bauen → Zusammenfügen → zweimal unabhängig Prüfen → Ausliefern.</li>
+    <li><strong>Leitsatz: Kontrollfluss ist Code, nicht Prompt.</strong> Wer wann drankommt, entscheidet ein festes Programm — KI arbeitet nur dort, wo Urteilsvermögen nötig ist.</li>
+    <li><strong>Prüfer reparieren nie.</strong> Jeder Fehler geht an die Bau-Agenten zurück, und jede Reparatur muss erneut durch <em>alle</em> Prüfungen — keine Abkürzungen.</li>
+    <li><strong>Ein einziger geplanter Stopp für den Menschen:</strong> Nach Phase 2 wird der Bauplan von einem Menschen freigegeben, bevor die teure Bauphase startet.</li>
+    <li><strong>Jede Schleife hat ein Limit</strong> (10 / 10 / 3 Runden, 45 min Warten). Erschöpfte Limits oder Null-Fortschritt führen zu einem kontrollierten Abbruch mit Eskalations-Bericht — nie zu endlosem Weiterdrehen.</li>
+    <li><strong>Nichts geht verloren:</strong> Nach jedem Phasenübergang wird der Zustand gespeichert; <code>adw resume</code> setzt exakt dort fort — wie ein Spielstand im Videospiel.</li>
+  </ul>
+</section>
+
+<!-- ============ Kernaussagen ============ -->
+<section class="kern" id="kernaussagen">
+  <h2>🎯 Kernaussagen</h2>
+  <ol>
+    <li><strong>Drei Akteure, klar getrennt:</strong> ein festes Programm als Bauleiter (Orchestrator), KI-Agenten als Architekten und Handwerker, unabhängige KI-Prüfer als TÜV — jeder mit genau den Werkzeugen seiner Rolle.</li>
+    <li><strong>Qualität durch Schleifen, nicht durch Vertrauen:</strong> Jedes Dokument und jeder Code wird so lange geprüft und nachgebessert, bis ein unabhängiger Prüfer „ok" sagt.</li>
+    <li><strong>Zwei verschiedene Prüf-Fragen:</strong> Phase 5 fragt „Ist der Code <em>gut gemacht</em>?", Phase 6 fragt „Wurde das <em>Richtige</em> gebaut?" — beides gegen die Spezifikation aus Phase 1.</li>
+    <li><strong>Sicherheitsnetze überall:</strong> Limits, Circuit-Breaker, Eskalations-Berichte und Speicherpunkte sorgen dafür, dass der Lauf niemals unkontrolliert entgleist.</li>
+  </ol>
+</section>
+
+<!-- ============ Navigation ============ -->
+<nav class="toc" id="inhalt">
+  <strong>📑 Inhalt</strong>
+  <ol>
+    <li><a href="#grundidee">Worum geht es? Die Baustellen-Analogie</a></li>
+    <li><a href="#ueberblick">Der Weg im Überblick (Diagramm)</a></li>
+    <li><a href="#pruefschleife">Das Grundmuster: die Prüf-Schleife</a></li>
+    <li><a href="#phase1">Phase 1 — Spec</a></li>
+    <li><a href="#phase2">Phase 2 — Plan + Kontrakt</a></li>
+    <li><a href="#phase3">Phase 3 — Build</a></li>
+    <li><a href="#phase4">Phase 4 — Integration + E2E</a></li>
+    <li><a href="#phase5">Phase 5 — Codex-Code-Review</a></li>
+    <li><a href="#phase6">Phase 6 — Finaler Review + Triage</a></li>
+    <li><a href="#phase7">Phase 7 — Push + CI</a></li>
+    <li><a href="#sicherheitsnetze">Die Sicherheitsnetze</a></li>
+    <li><a href="#anhang">Technischer Anhang</a></li>
+    <li><a href="#glossar">Glossar</a></li>
+  </ol>
+</nav>
+
+<div class="btn-row"><button onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">Alle Details aufklappen</button></div>
+
+<!-- ============ 1 Grundidee ============ -->
+<h2 id="grundidee">1 · Worum geht es? Die Baustellen-Analogie</h2>
+
+<p>Der <strong>Agentic Developer Workflow (ADW)</strong> ist ein Programm, das eine Aufgabe — ein <strong>„Issue"</strong>, z.&nbsp;B. <em>„Baue eine Suchfunktion in die App ein"</em> — <strong>vollautomatisch</strong> in fertigen, geprüften Code verwandelt: von der ersten Beschreibung bis zur Auslieferung auf einen Testserver.</p>
+
+<p>Man kann sich das wie eine <strong>Baustelle</strong> vorstellen:</p>
+
+<div class="table-scroll">
+<table>
+  <tr><th>Rolle auf der Baustelle</th><th>Rolle im ADW</th><th>Wer macht das?</th></tr>
+  <tr><td>Bauleiter — organisiert alles, entscheidet nichts Fachliches</td><td>Der <strong>Orchestrator</strong> — festes Programm</td><td>Deterministischer Code</td></tr>
+  <tr><td>Architekt — schreibt den Bauplan</td><td>Spec-Agent &amp; Plan-Agent</td><td>KI (Fable&nbsp;5)</td></tr>
+  <tr><td>Handwerker — bauen tatsächlich</td><td>Build-Agents</td><td>KI (Opus&nbsp;4.8)</td></tr>
+  <tr><td>Bauprüfer / TÜV — kontrollieren, bauen aber nie selbst</td><td>Codex-Reviewer &amp; finaler Reviewer</td><td>KI (Codex / Fable&nbsp;5)</td></tr>
+  <tr><td>Checklisten &amp; Messgeräte — immer gleiche Prüfungen</td><td><strong>Gates</strong> (automatische Tests)</td><td>Deterministischer Code</td></tr>
+</table>
+</div>
+
+<div class="callout">
+  <span class="label">Der wichtigste Grundsatz</span>
+  <strong>„Kontrollfluss ist Code, nicht Prompt."</strong> Das heißt: <strong>Wer wann drankommt, entscheidet ein festes Programm</strong> — nicht die KI. Die KI wird nur dort eingesetzt, wo Urteilsvermögen nötig ist (schreiben, bauen, bewerten). Alles Wiederholbare — Tests starten, Ergebnisse weiterreichen, Schleifen zählen — läuft als normaler Programmcode: 0&nbsp;Tokens, deterministisch, immer gleich.
+</div>
+
+<h3>Zwei eiserne Regeln</h3>
+<p><strong>1. Prüfer reparieren nie.</strong> Wer einen Fehler findet, meldet ihn nur. Repariert wird immer von den Bau-Agenten — und jede Reparatur muss danach <strong>erneut durch alle Prüfungen</strong>. Keine Abkürzung, auch nicht für „Kleinigkeiten".</p>
+<p><strong>2. Alles hat ein Limit.</strong> Jede Schleife darf nur begrenzt oft wiederholt werden. Ist das Limit erschöpft — oder bringt eine Reparatur-Runde <em>gar nichts</em> mehr (<strong>„Circuit-Breaker"</strong>, wie eine Sicherung im Stromkasten) — bricht der Lauf kontrolliert ab und schreibt einen <strong>Eskalations-Bericht</strong>: was wurde geschafft, was ist offen, woran lag es. Ein Mensch übernimmt dann.</p>
+
+<!-- ============ 2 Überblick ============ -->
+<h2 id="ueberblick">2 · Der Weg im Überblick</h2>
+
+<p>So läuft ein Issue durch die sieben Phasen. Blaue Kästen sind die Phasen, der gelbe Kasten ist der einzige geplante Stopp für den Menschen, die kreisenden Pfeile rechts sind die eingebauten Nachbesserungs-Schleifen — jede mit Limit:</p>
+
+<figure>
+<div class="svgbox">
+<svg viewBox="0 0 880 1080" width="880" role="img" aria-label="Flussdiagramm der sieben ADW-Phasen mit Schleifen und Rücksprüngen">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#46586b"/>
+    </marker>
+    <marker id="arr-red" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#b3403a"/>
+    </marker>
+    <marker id="arr-blue" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0,0 L7,4 L0,8 z" fill="#2563a8"/>
+    </marker>
+  </defs>
+
+  <!-- Issue -->
+  <rect x="330" y="14" width="220" height="44" rx="22" fill="#eef1f4" stroke="#46586b" stroke-width="1.5"/>
+  <text x="440" y="41" text-anchor="middle" font-size="16" font-weight="700" fill="#1c2733">📋 Issue (Aufgabe)</text>
+  <line x1="440" y1="58" x2="440" y2="92" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P1 -->
+  <rect x="260" y="96" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="120" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">1 · Spec</text>
+  <text x="440" y="140" text-anchor="middle" font-size="12.5" fill="#46586b">Was soll gebaut werden? → .adw/spec.md</text>
+  <path d="M 624 112 C 668 100, 668 150, 624 138" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="122" font-size="11.5" fill="#2563a8">Codex prüft,</text>
+  <text x="682" y="137" font-size="11.5" fill="#2563a8">bis „ok"</text>
+  <line x1="440" y1="154" x2="440" y2="188" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P2 -->
+  <rect x="260" y="192" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="216" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">2 · Plan + Kontrakt</text>
+  <text x="440" y="236" text-anchor="middle" font-size="12.5" fill="#46586b">Wie wird gebaut? → plan.md + contract.yaml</text>
+  <path d="M 624 208 C 668 196, 668 246, 624 234" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="218" font-size="11.5" fill="#2563a8">Codex prüft,</text>
+  <text x="682" y="233" font-size="11.5" fill="#2563a8">bis „ok"</text>
+  <line x1="440" y1="250" x2="440" y2="284" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Approval gate -->
+  <rect x="260" y="288" width="360" height="58" rx="10" fill="#fdf3e0" stroke="#b97a10" stroke-width="2" stroke-dasharray="7 4"/>
+  <text x="440" y="312" text-anchor="middle" font-size="15" font-weight="700" fill="#7a5309">⏸ STOPP: Plan-Approval-Gate</text>
+  <text x="440" y="332" text-anchor="middle" font-size="12.5" fill="#7a5309">Mensch liest Plan → adw approve (abschaltbar: --no-approval)</text>
+  <line x1="440" y1="346" x2="440" y2="380" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P3 -->
+  <rect x="260" y="384" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="408" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">3 · Build</text>
+  <text x="440" y="428" text-anchor="middle" font-size="12.5" fill="#46586b">Lanes bauen Code · Gates prüfen jede Änderung</text>
+  <path d="M 624 400 C 668 388, 668 438, 624 426" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="410" font-size="11.5" fill="#2563a8">Fix-Loop,</text>
+  <text x="682" y="425" font-size="11.5" fill="#2563a8">max. 10×</text>
+  <line x1="440" y1="442" x2="440" y2="476" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P4 -->
+  <rect x="260" y="480" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="504" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">4 · Integration + E2E <tspan font-weight="400" font-size="12">(nur --parallel)</tspan></text>
+  <text x="440" y="524" text-anchor="middle" font-size="12.5" fill="#46586b">Lanes zusammenführen · Klick-Roboter testet die App</text>
+  <path d="M 624 496 C 668 484, 668 534, 624 522" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="506" font-size="11.5" fill="#2563a8">Triage → Lane-Fix,</text>
+  <text x="682" y="521" font-size="11.5" fill="#2563a8">max. 10 Runden</text>
+  <line x1="440" y1="538" x2="440" y2="572" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P5 -->
+  <rect x="260" y="576" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="600" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">5 · Codex-Code-Review</text>
+  <text x="440" y="620" text-anchor="middle" font-size="12.5" fill="#46586b">Ist der Code gut gemacht? Findings → Lanes fixen</text>
+  <path d="M 624 592 C 668 580, 668 630, 624 618" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="602" font-size="11.5" fill="#2563a8">Review-Loop,</text>
+  <text x="682" y="617" font-size="11.5" fill="#2563a8">bis „ok"</text>
+  <line x1="440" y1="634" x2="440" y2="668" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P6 -->
+  <rect x="260" y="672" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="696" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">6 · Finaler Review + Triage</text>
+  <text x="440" y="716" text-anchor="middle" font-size="12.5" fill="#46586b">Wurde das Richtige gebaut? Abgleich mit der Spec</text>
+  <path d="M 624 688 C 668 676, 668 726, 624 714" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="698" font-size="11.5" fill="#2563a8">Fix-Zyklen,</text>
+  <text x="682" y="713" font-size="11.5" fill="#2563a8">max. 3×</text>
+  <line x1="440" y1="730" x2="440" y2="764" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P7 -->
+  <rect x="260" y="768" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="792" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">7 · Push + CI</text>
+  <text x="440" y="812" text-anchor="middle" font-size="12.5" fill="#46586b">Hochladen · Pipeline beobachten (60-s-Takt, max. 45 min)</text>
+  <line x1="440" y1="826" x2="440" y2="860" stroke="#2f7d4f" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="452" y="848" font-size="11.5" fill="#2f7d4f">grün</text>
+
+  <!-- CI red feedback -->
+  <path d="M 260 800 L 150 800 L 150 460 L 254 460" fill="none" stroke="#b3403a" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arr-red)"/>
+  <text x="142" y="640" text-anchor="end" font-size="11.5" fill="#b3403a">Pipeline rot:</text>
+  <text x="142" y="656" text-anchor="end" font-size="11.5" fill="#b3403a">Log-Analyst liest Logs</text>
+  <text x="142" y="672" text-anchor="end" font-size="11.5" fill="#b3403a">→ zurück zu Phase 3/4</text>
+
+  <!-- Success -->
+  <rect x="300" y="864" width="280" height="46" rx="23" fill="#e7f4ec" stroke="#2f7d4f" stroke-width="2"/>
+  <text x="440" y="892" text-anchor="middle" font-size="15" font-weight="700" fill="#2f7d4f">✔ Pipeline + Staging grün = fertig</text>
+
+  <!-- Escalation note -->
+  <rect x="180" y="950" width="520" height="96" rx="10" fill="#faeae9" stroke="#b3403a" stroke-width="1.5"/>
+  <text x="440" y="978" text-anchor="middle" font-size="13.5" font-weight="700" fill="#b3403a">🔌 Sicherung: Eskalation statt Endlosschleife</text>
+  <text x="440" y="1000" text-anchor="middle" font-size="12" fill="#7a2e2a">Jedes erschöpfte Limit und der Circuit-Breaker (eine Fix-Runde löst nichts auf)</text>
+  <text x="440" y="1018" text-anchor="middle" font-size="12" fill="#7a2e2a">beenden den Lauf kontrolliert: Eskalations-Bericht (escalation.md) + Exit-Code ≠ 0.</text>
+  <text x="440" y="1036" text-anchor="middle" font-size="12" fill="#7a2e2a">Ein Mensch übernimmt — nichts dreht endlos weiter.</text>
+</svg>
+</div>
+<figcaption>Abb. 1 — Die sieben Phasen von Issue bis „Staging grün". Rechts: Nachbesserungs-Schleifen mit Limits, links gestrichelt: der Rücksprung bei roter CI-Pipeline.</figcaption>
+</figure>
+
+<!-- ============ 3 Prüf-Schleife ============ -->
+<h2 id="pruefschleife">3 · Das Grundmuster: die Prüf-Schleife</h2>
+
+<p>Ein Muster kehrt im ADW immer wieder — in Phase&nbsp;1 (Spec), Phase&nbsp;2 (Plan) und Phase&nbsp;5 (Code-Review): Ein Agent <em>erstellt</em> etwas, ein unabhängiger Prüfer <em>bewertet</em> es, und Mängel gehen so lange zurück, bis das Urteil <strong>„ok"</strong> lautet. Entscheidend: Der Agent behält dabei sein „Gedächtnis" aus den vorherigen Runden (<strong>Session-Resume</strong>) — er muss sich nicht jedes Mal neu einarbeiten.</p>
+
+<figure>
+<div class="svgbox">
+<svg viewBox="0 0 820 300" width="820" role="img" aria-label="Diagramm der Prüf-Schleife: Agent erstellt, Codex prüft, Findings gehen zurück bis ok">
+  <defs>
+    <marker id="arr2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#46586b"/>
+    </marker>
+    <marker id="arr2-red" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#b3403a"/>
+    </marker>
+    <marker id="arr2-green" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#2f7d4f"/>
+    </marker>
+  </defs>
+
+  <rect x="40" y="90" width="250" height="76" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="165" y="121" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1c2733">✍️ Agent erstellt</text>
+  <text x="165" y="142" text-anchor="middle" font-size="12" fill="#46586b">Spec / Plan / Code-Fix</text>
+
+  <line x1="290" y1="118" x2="382" y2="118" stroke="#46586b" stroke-width="2" marker-end="url(#arr2)"/>
+  <text x="336" y="108" text-anchor="middle" font-size="11.5" fill="#46586b">Ergebnis</text>
+
+  <rect x="388" y="90" width="250" height="76" rx="10" fill="#efecf8" stroke="#6d5aa8" stroke-width="2"/>
+  <text x="513" y="121" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1c2733">🔍 Codex prüft</text>
+  <text x="513" y="142" text-anchor="middle" font-size="12" fill="#46586b">unabhängig, nur lesend</text>
+
+  <line x1="638" y1="118" x2="730" y2="118" stroke="#2f7d4f" stroke-width="2" marker-end="url(#arr2-green)"/>
+  <text x="684" y="106" text-anchor="middle" font-size="12" font-weight="700" fill="#2f7d4f">„ok"</text>
+
+  <rect x="736" y="92" width="66" height="52" rx="10" fill="#e7f4ec" stroke="#2f7d4f" stroke-width="2"/>
+  <text x="769" y="115" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2f7d4f">weiter ➜</text>
+  <text x="769" y="132" text-anchor="middle" font-size="10.5" fill="#2f7d4f">n. Phase</text>
+
+  <path d="M 513 166 L 513 226 L 165 226 L 165 170" fill="none" stroke="#b3403a" stroke-width="2" marker-end="url(#arr2-red)"/>
+  <text x="339" y="218" text-anchor="middle" font-size="12" font-weight="700" fill="#b3403a">„needs_fixes": Findings gehen zurück</text>
+  <text x="339" y="248" text-anchor="middle" font-size="11.5" fill="#b3403a">an dieselbe Sitzung — der Agent erinnert sich (Session-Resume)</text>
+
+  <text x="410" y="40" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1c2733">Wie ein Aufsatz, den der Lektor so lange zurückgibt, bis er sauber ist —</text>
+  <text x="410" y="60" text-anchor="middle" font-size="13.5" fill="#1c2733">aber der Lektor schreibt nie selbst am Aufsatz mit.</text>
+</svg>
+</div>
+<figcaption>Abb. 2 — Das Grundmuster „Erstellen → Prüfen → Nachbessern", das in den Phasen 1, 2 und 5 identisch arbeitet.</figcaption>
+</figure>
+
+<!-- ============ Phase 1 ============ -->
+<h2 id="phase1">4 · Phase 1 — Spec</h2>
+<div class="phase">
+  <h3><span class="phase-num">1</span> Spec</h3>
+  <p class="frage">„Was soll überhaupt gebaut werden?"</p>
+  <p><strong>Eingabe:</strong> das Issue — ein Text, entweder direkt eingetippt oder aus GitLab/GitHub geholt.</p>
+  <ol>
+    <li>Der <strong>Spec-Agent</strong> (KI) liest das Issue und das Projekt und schreibt eine <strong>Spezifikation</strong> (<code>.adw/spec.md</code>): Ziel, was dazugehört, was ausdrücklich <em>nicht</em> dazugehört, und woran man erkennt, dass es fertig ist („Akzeptanzkriterien", „Definition of Done"). Er darf dabei <strong>nur lesen und diese eine Datei schreiben</strong> — bauen darf er nichts.</li>
+    <li>Der <strong>Codex-Reviewer</strong> (eine zweite, unabhängige KI) prüft die Spezifikation.</li>
+    <li>Findet er Mängel, gehen sie <strong>an denselben Spec-Agenten zurück</strong> — der behält sein Gedächtnis aus der ersten Runde (Session-Resume) und bessert nach.</li>
+    <li>Das wiederholt sich, bis der Prüfer <strong>„ok"</strong> sagt (Prüf-Schleife, siehe Abb.&nbsp;2).</li>
+  </ol>
+  <details>
+    <summary>Mehr Details (aus der SPEC)</summary>
+    <p>Der Spec-Agent läuft auf <strong>Fable&nbsp;5</strong> und hat nur die Werkzeuge Read/Grep/Glob plus Write — Letzteres beschränkt auf das Verzeichnis <code>.adw/</code>. Das Issue kommt wahlweise als CLI-Text (<code>--issue "…"</code>), als GitLab-Issue via <code>glab</code> (<code>--gitlab-issue &lt;id&gt;</code>) oder als GitHub-Issue via <code>gh</code> (<code>--github-issue &lt;nr&gt;</code>). Die Spec wird später auf dem Feature-Branch <strong>mitcommittet</strong> — so bleibt nachvollziehbar, wogegen gebaut und geprüft wurde (Traceability).</p>
+  </details>
+</div>
+
+<!-- ============ Phase 2 ============ -->
+<h2 id="phase2">5 · Phase 2 — Plan + Kontrakt</h2>
+<div class="phase">
+  <h3><span class="phase-num">2</span> Plan + Kontrakt</h3>
+  <p class="frage">„Wie wird es gebaut?"</p>
+  <ol>
+    <li>Der <strong>Plan-Agent</strong> (KI) verwandelt die Spezifikation in einen <strong>Schritt-für-Schritt-Bauplan</strong> (<code>.adw/plan.md</code>) und einen <strong>Kontrakt</strong> (<code>.adw/contract.yaml</code>). Der Kontrakt ist wie eine verbindliche <strong>Steckdosen-Norm</strong>: Er legt exakt fest, wie die Teile (z.&nbsp;B. Oberfläche und Server-Logik) später zusammenpassen müssen — damit zwei getrennt arbeitende Teams am Ende keine inkompatiblen Teile abliefern.</li>
+    <li>Der Codex-Reviewer prüft Plan und Kontrakt <strong>gemeinsam</strong>, wieder in der Schleife bis „ok".</li>
+    <li><strong>Plan-Approval-Gate — der eingebaute STOPP:</strong> Der Workflow <strong>hält an</strong>, speichert seinen kompletten Zustand und beendet sich. Jetzt liest ein <strong>Mensch</strong> den Plan und entscheidet. Erst der Befehl <code>adw approve</code> (bzw. <code>adw resume</code>) lässt den Lauf exakt an dieser Stelle weiterlaufen.</li>
+  </ol>
+  <div class="callout amber">
+    <span class="label">Der einzige geplante Stopp</span>
+    Das Plan-Approval-Gate ist der einzige Punkt, an dem der Mensch <em>mitten im</em> Ablauf gefragt wird — bewusst platziert, <strong>bevor die teure Bauphase beginnt</strong>. Wer der Automatik voll vertraut, kann den Stopp mit <code>--no-approval</code> abschalten.
+  </div>
+  <details>
+    <summary>Mehr Details (aus der SPEC)</summary>
+    <p>Auch der Plan-Agent läuft auf <strong>Fable&nbsp;5</strong> mit Read/Grep/Glob + Write (nur <code>.adw/</code>). Der Plan gliedert die Arbeit in <strong>Workstreams</strong> (z.&nbsp;B. Frontend/Backend); der Kontrakt enthält OpenAPI-Definitionen, Typen und Events. Beim Pausieren wird der <code>RunState</code> persistiert und der Prozess beendet sich mit Exit — der Lauf „schläft", bis <code>adw approve &lt;run_id&gt;</code> oder <code>adw resume &lt;run_id&gt;</code> ihn weckt.</p>
+  </details>
+</div>
+
+<!-- ============ Phase 3 ============ -->
+<h2 id="phase3">6 · Phase 3 — Build</h2>
+<div class="phase">
+  <h3><span class="phase-num">3</span> Build</h3>
+  <p class="frage">„Jetzt wird gebaut."</p>
+  <ol>
+    <li>Der <strong>Dispatch</strong> (festes Programm, keine KI) zerlegt den Plan in <strong>Arbeitspakete</strong> — z.&nbsp;B. „Frontend" (das Sichtbare) und „Backend" (die Logik dahinter). Jedes Paket bekommt eine eigene <strong>Lane</strong> (Spur): einen eigenen Arbeitsordner (Git-Worktree), eine eigene KI-Sitzung und eigene Netzwerk-Ports. Die Lanes können sich so <strong>nicht gegenseitig in die Quere kommen</strong>. Ohne <code>--parallel</code> gibt es einfach nur eine Lane — gleicher Ablauf, eine Spur.</li>
+    <li>In jeder Lane läuft der <strong>Lane-Loop</strong> (Abb.&nbsp;3): Der <strong>Build-Agent</strong> (KI) schreibt Code — strikt nach Plan und Kontrakt. Danach laufen die <strong>Gates</strong>: automatische Prüfungen (Formatierung, Code-Stil, Tests), fest im Projekt konfiguriert — wie Kontrollstationen am Fließband. Bei <strong>Rot</strong> gehen die Fehlermeldungen als neue Aufgabe <strong>an dieselbe KI-Sitzung</strong> zurück; sie kennt ihren eigenen Code noch und bessert nach. Maximal <strong>10 Iterationen</strong> — danach Eskalations-Bericht, Abbruch, Mensch übernimmt.</li>
+  </ol>
+
+  <figure>
+  <div class="svgbox">
+  <svg viewBox="0 0 820 330" width="820" role="img" aria-label="Diagramm des Lane-Loops: Build-Agent schreibt Code, Gates prüfen, bei Rot zurück an dieselbe Session, maximal zehnmal">
+    <defs>
+      <marker id="arr3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#46586b"/>
+      </marker>
+      <marker id="arr3-red" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#b3403a"/>
+      </marker>
+      <marker id="arr3-green" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#2f7d4f"/>
+      </marker>
+    </defs>
+
+    <text x="410" y="30" text-anchor="middle" font-size="14" font-weight="700" fill="#1c2733">Eine Lane = eigener Ordner + eigene KI-Sitzung + eigene Ports</text>
+
+    <rect x="40" y="70" width="250" height="80" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+    <text x="165" y="102" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1c2733">🔨 Build-Agent</text>
+    <text x="165" y="124" text-anchor="middle" font-size="12" fill="#46586b">schreibt Code nach Plan + Kontrakt</text>
+
+    <line x1="290" y1="110" x2="382" y2="110" stroke="#46586b" stroke-width="2" marker-end="url(#arr3)"/>
+
+    <rect x="388" y="70" width="250" height="80" rx="10" fill="#eef1f4" stroke="#46586b" stroke-width="2"/>
+    <text x="513" y="102" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1c2733">🚦 Gates laufen</text>
+    <text x="513" y="124" text-anchor="middle" font-size="12" fill="#46586b">Formatierung · Stil · Tests (Code, keine KI)</text>
+
+    <line x1="638" y1="110" x2="726" y2="110" stroke="#2f7d4f" stroke-width="2" marker-end="url(#arr3-green)"/>
+    <text x="682" y="98" text-anchor="middle" font-size="12" font-weight="700" fill="#2f7d4f">alle grün</text>
+
+    <rect x="732" y="82" width="70" height="56" rx="10" fill="#e7f4ec" stroke="#2f7d4f" stroke-width="2"/>
+    <text x="767" y="107" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2f7d4f">Lane</text>
+    <text x="767" y="124" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2f7d4f">fertig ✔</text>
+
+    <path d="M 513 150 L 513 212 L 165 212 L 165 154" fill="none" stroke="#b3403a" stroke-width="2" marker-end="url(#arr3-red)"/>
+    <text x="339" y="204" text-anchor="middle" font-size="12" font-weight="700" fill="#b3403a">rot: Fehlerausgaben als Folge-Aufgabe zurück</text>
+    <text x="339" y="234" text-anchor="middle" font-size="11.5" fill="#b3403a">an dieselbe Sitzung — sie kennt ihren Code noch</text>
+
+    <rect x="250" y="262" width="330" height="48" rx="8" fill="#faeae9" stroke="#b3403a" stroke-width="1.5"/>
+    <text x="415" y="282" text-anchor="middle" font-size="12" font-weight="700" fill="#b3403a">⏱ max. 10 Iterationen</text>
+    <text x="415" y="300" text-anchor="middle" font-size="11.5" fill="#7a2e2a">danach: escalation.md + Abbruch → Mensch übernimmt</text>
+  </svg>
+  </div>
+  <figcaption>Abb. 3 — Der Lane-Loop in Phase 3: bauen, prüfen, nachbessern — mit hartem Limit.</figcaption>
+  </figure>
+
+  <details>
+    <summary>Mehr Details (aus der SPEC)</summary>
+    <p>Build-Agents laufen auf <strong>Opus&nbsp;4.8</strong> mit vollen Werkzeugen (Read/Write/Edit/Bash), sind aber per Arbeitsverzeichnis (<code>cwd</code>) auf ihren eigenen Worktree begrenzt. Jede Lane bekommt einen eigenen Branch vom Base-Branch. Die Gates (Name, Kommando, Timeout) stammen aus der Config des Ziel-Repos (<code>.adw/config.yaml</code>) und laufen in konfigurierter Reihenfolge als Subprozesse mit echtem Timeout. Ports werden deterministisch aus der Run-ID berechnet (Basis-Port + Hash-Offset, Socket-Bind-Check als Fallback).</p>
+  </details>
+</div>
+
+<!-- ============ Phase 4 ============ -->
+<h2 id="phase4">7 · Phase 4 — Integration + E2E</h2>
+<div class="phase">
+  <h3><span class="phase-num">4</span> Integration + E2E</h3>
+  <p class="frage">„Passen die Teile zusammen?" (nur bei <code>--parallel</code>)</p>
+  <ol>
+    <li>Ein festes Programm <strong>verschmilzt</strong> die Ergebnisse aller Lanes auf einen gemeinsamen Integrations-Zweig (Merge).</li>
+    <li>Dann läuft ein <strong>End-to-End-Test</strong> (Playwright): Ein Roboter klickt sich wie ein echter Benutzer durch die fertige Anwendung.</li>
+    <li>Schlägt etwas fehl, sortiert der <strong>E2E-Triage-Agent</strong> (KI, nur lesend) jeden Fehler der <strong>verantwortlichen Lane</strong> zu — wie ein Arzt, der nur diagnostiziert, aber nicht operiert.</li>
+    <li>Die betroffene Lane repariert — wieder über ihren normalen Lane-Loop aus Phase&nbsp;3, inklusive aller Gates —, dann wird <strong>neu integriert und neu getestet</strong>. Maximal <strong>10 Runden</strong>.</li>
+  </ol>
+  <details>
+    <summary>Mehr Details (aus der SPEC)</summary>
+    <p>Der E2E-Triage-Agent läuft auf <strong>Sonnet&nbsp;5</strong> (Workhorse-Modell) und hat nur Lese-Werkzeuge — er fixt nichts, er ordnet nur zu. Das E2E-Kommando (z.&nbsp;B. <code>npx playwright test</code>) und sein Timeout stehen in der Config des Ziel-Repos. Ohne <code>--parallel</code> entfällt diese Phase; v1 und v2 sind derselbe Codepfad, das Flag aktiviert lediglich den Mehr-Lanen-Betrieb.</p>
+  </details>
+</div>
+
+<!-- ============ Phase 5 ============ -->
+<h2 id="phase5">8 · Phase 5 — Codex-Code-Review</h2>
+<div class="phase">
+  <h3><span class="phase-num">5</span> Codex-Code-Review</h3>
+  <p class="frage">„Ist der Code gut gemacht?" — unabhängige Qualitätskontrolle</p>
+  <ol>
+    <li>Der <strong>Codex-Reviewer</strong> liest den gesamten neuen Code (nur lesend!) und liefert eine strukturierte Mängelliste: Was ist das Problem, wie schwer ist es (<strong>P1</strong>&nbsp;=&nbsp;kritisch … <strong>P3</strong>&nbsp;=&nbsp;klein), welche Lane ist zuständig — und einen <strong>Reparatur-Vorschlag</strong> (<code>remediation_plan</code>).</li>
+    <li>Ein festes Programm <strong>verteilt</strong> die Mängel anhand der Lane-Angabe an die richtigen Build-Agents.</li>
+    <li>Wichtig: Der Reparatur-Vorschlag ist eine <strong>Empfehlung, kein Befehl</strong>. Der Build-Agent prüft ihn gegen Spezifikation und Projektregeln und darf <strong>begründet anders</strong> reparieren — der Prüfer sieht den Code ja nur von außen.</li>
+    <li>Nach jeder Reparatur: alle Gates, dann erneutes Review — <strong>bis „ok"</strong>.</li>
+  </ol>
+  <details>
+    <summary>Mehr Details (aus der SPEC)</summary>
+    <p>Codex läuft als CLI-Subprozess (<code>codex exec --sandbox read-only</code>) — die Sandbox garantiert technisch, dass der Prüfer nichts verändern kann. Seine Antwort muss dem festen <strong>Findings-Schema</strong> (JSON) entsprechen; der Parser ist bewusst streng: Akzeptiert wird nur ein reines JSON-Objekt oder der letzte <code>```json</code>-Block. Alles andere gilt als Fehler — ein Parse-Fehler ist ungefährlich, ein fälschlich durchgewinktes „ok" wäre es nicht.</p>
+  </details>
+</div>
+
+<!-- ============ Phase 6 ============ -->
+<h2 id="phase6">9 · Phase 6 — Finaler Review + Triage</h2>
+<div class="phase">
+  <h3><span class="phase-num">6</span> Finaler Review + Triage</h3>
+  <p class="frage">„Wurde wirklich das Richtige gebaut?"</p>
+  <p>Phase&nbsp;5 fragte: <em>Ist der Code gut gemacht?</em> Phase&nbsp;6 fragt: <em>Tut er das, was in der Spezifikation steht?</em></p>
+  <ol>
+    <li>Der <strong>finale Reviewer</strong> (KI, strikt nur lesend) vergleicht die fertige Implementierung mit der Spezifikation aus Phase&nbsp;1 und meldet Abweichungen — jede mit einer <strong>Kategorie</strong>.</li>
+    <li>Die <strong>Triage</strong> (festes Programm) sortiert nach Kategorie (Abb.&nbsp;4).</li>
+    <li>Maximal <strong>3 Reparatur-Zyklen</strong>, dann Eskalation.</li>
+  </ol>
+
+  <figure>
+  <div class="svgbox">
+  <svg viewBox="0 0 820 320" width="820" role="img" aria-label="Diagramm der Triage in Phase 6: scope_gap wird Follow-up-Issue, implementation und trivial gehen in den Fix-Zyklus">
+    <defs>
+      <marker id="arr4" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#46586b"/>
+      </marker>
+    </defs>
+
+    <rect x="285" y="20" width="250" height="66" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+    <text x="410" y="47" text-anchor="middle" font-size="14" font-weight="700" fill="#1c2733">🔍 Befund des finalen Reviewers</text>
+    <text x="410" y="68" text-anchor="middle" font-size="12" fill="#46586b">Abgleich Implementierung ↔ Spec</text>
+
+    <line x1="410" y1="86" x2="410" y2="122" stroke="#46586b" stroke-width="2" marker-end="url(#arr4)"/>
+
+    <polygon points="410,126 520,164 410,202 300,164" fill="#eef1f4" stroke="#46586b" stroke-width="2"/>
+    <text x="410" y="158" text-anchor="middle" font-size="13" font-weight="700" fill="#1c2733">Triage (Code):</text>
+    <text x="410" y="177" text-anchor="middle" font-size="12.5" fill="#46586b">Welche Kategorie?</text>
+
+    <path d="M 300 164 L 170 164 L 170 212" fill="none" stroke="#46586b" stroke-width="2" marker-end="url(#arr4)"/>
+    <text x="228" y="152" text-anchor="middle" font-size="11.5" font-weight="700" fill="#6d5aa8">scope_gap</text>
+    <text x="228" y="186" text-anchor="middle" font-size="10.5" fill="#46586b">„fehlt, war aber nie geplant"</text>
+
+    <path d="M 520 164 L 650 164 L 650 212" fill="none" stroke="#46586b" stroke-width="2" marker-end="url(#arr4)"/>
+    <text x="588" y="152" text-anchor="middle" font-size="11.5" font-weight="700" fill="#b97a10">implementation / trivial</text>
+    <text x="588" y="186" text-anchor="middle" font-size="10.5" fill="#46586b">„gebaut, aber falsch/unsauber"</text>
+
+    <rect x="45" y="216" width="250" height="80" rx="10" fill="#efecf8" stroke="#6d5aa8" stroke-width="2"/>
+    <text x="170" y="245" text-anchor="middle" font-size="13" font-weight="700" fill="#1c2733">📄 Follow-up-Issue</text>
+    <text x="170" y="266" text-anchor="middle" font-size="11.5" fill="#46586b">Bericht für später — kein Auto-Restart,</text>
+    <text x="170" y="283" text-anchor="middle" font-size="11.5" fill="#46586b">sonst wüchse der Lauf endlos</text>
+
+    <rect x="525" y="216" width="250" height="80" rx="10" fill="#fdf3e0" stroke="#b97a10" stroke-width="2"/>
+    <text x="650" y="245" text-anchor="middle" font-size="13" font-weight="700" fill="#1c2733">🔧 Fix-Zyklus in der Lane</text>
+    <text x="650" y="266" text-anchor="middle" font-size="11.5" fill="#46586b">normaler Weg: alle Gates, erneuter Review</text>
+    <text x="650" y="283" text-anchor="middle" font-size="11.5" font-weight="700" fill="#b3403a">max. 3 Zyklen, dann Eskalation</text>
+  </svg>
+  </div>
+  <figcaption>Abb. 4 — Die Triage sortiert Befunde: Neues wird notiert, Falsches wird repariert — auf dem normalen, geprüften Weg.</figcaption>
+  </figure>
+
+  <details>
+    <summary>Mehr Details (aus der SPEC)</summary>
+    <p>Der finale Reviewer läuft auf <strong>Fable&nbsp;5</strong> mit Read/Grep/Glob — strikt read-only, er liefert nur Findings. Das Feld <code>category</code> im Findings-Schema befüllt ausschließlich dieser Reviewer; es ist die Grundlage der Triage-Entscheidung. <code>scope_gap</code> erzeugt einen Follow-up-Report statt eines Fix-Zyklus; <code>implementation</code>-Findings werden über das <code>lane</code>-Feld in die richtige Lane geroutet.</p>
+  </details>
+</div>
+
+<!-- ============ Phase 7 ============ -->
+<h2 id="phase7">10 · Phase 7 — Push + CI</h2>
+<div class="phase">
+  <h3><span class="phase-num">7</span> Push + CI</h3>
+  <p class="frage">„Ausliefern und beobachten."</p>
+  <ol>
+    <li>Der fertige Zweig wird ins zentrale Repository <strong>gepusht</strong> (hochgeladen).</li>
+    <li>Dort startet automatisch die <strong>CI-Pipeline</strong> des Projekts (GitLab oder GitHub): Sie baut alles noch einmal neutral zusammen, testet und spielt das Ergebnis auf den <strong>Staging-Server</strong> (die Testumgebung) auf.</li>
+    <li>Der ADW <strong>fragt alle 60 Sekunden nach dem Status</strong> — bis alles grün ist, höchstens aber <strong>45 Minuten</strong>.</li>
+    <li>Wird die Pipeline <strong>rot</strong>, liest der <strong>Log-Analyst</strong> (KI, nur lesend) die Fehlerprotokolle, macht daraus strukturierte Befunde mit Lane-Zuordnung — und der Ablauf springt <strong>zurück in Phase&nbsp;3/4</strong>: reparieren, prüfen, erneut pushen.</li>
+  </ol>
+  <div class="callout green">
+    <span class="label">Ziel erreicht</span>
+    <strong>Pipeline grün + Staging-Deploy grün → der Lauf ist erfolgreich beendet.</strong>
+  </div>
+  <details>
+    <summary>Mehr Details (aus der SPEC)</summary>
+    <p>Die Forge (GitLab/GitHub) wird aus <code>ci.provider</code> in der Config bzw. automatisch aus der origin-URL erkannt; abgefragt wird via <code>glab</code> (GitLab) oder <code>gh</code> (GitHub Actions). Poll-Intervall (60&nbsp;s) und Timeout (45&nbsp;min = 2700&nbsp;s) sind die dokumentierten Config-Defaults; welcher Job als „Staging grün" zählt, bestimmt <code>ci.staging_job</code> (z.&nbsp;B. <code>deploy-staging</code>). Der Log-Analyst läuft auf <strong>Sonnet&nbsp;5</strong>, nur lesend.</p>
+  </details>
+</div>
+
+<!-- ============ Sicherheitsnetze ============ -->
+<h2 id="sicherheitsnetze">11 · Die Sicherheitsnetze (gelten überall)</h2>
+
+<div class="table-scroll">
+<table>
+  <tr><th>Mechanismus</th><th>Was er bedeutet</th></tr>
+  <tr><td><strong>Limits</strong></td><td>Phase 3: max. 10 Fix-Iterationen · Phase 4: max. 10 Runden · Phase 6: max. 3 Zyklen · Phase 7: max. 45 min Warten</td></tr>
+  <tr><td><strong>Circuit-Breaker</strong></td><td>Löst eine Reparatur-Runde <em>nichts</em> auf → sofortiger Abbruch statt sinnlosem Weiterdrehen — wie eine Sicherung im Stromkasten</td></tr>
+  <tr><td><strong>Eskalations-Bericht</strong></td><td>Bei jedem Abbruch entsteht <code>escalation.md</code>: was erreicht, was offen, warum — die Übergabe an den Menschen</td></tr>
+  <tr><td><strong>Speicherpunkte</strong></td><td>Nach <strong>jedem Phasenübergang</strong> wird der komplette Zustand gespeichert. <code>adw resume</code> setzt nach Absturz, Pause oder erschöpftem KI-Kontingent <strong>exakt dort</strong> fort — wie ein Spielstand im Videospiel</td></tr>
+  <tr><td><strong>Strukturierte Übergaben</strong></td><td>Alle Prüfer melden Befunde in einem festen Datenformat (JSON). Lässt sich eine Antwort nicht sauber lesen, gilt sie als <strong>Fehler</strong> — lieber einmal zu viel nachfragen als ein falsches „ok" durchwinken</td></tr>
+  <tr><td><strong>Berechtigungen</strong></td><td>Jede KI bekommt nur die Werkzeuge, die ihre Rolle braucht: Prüfer dürfen nur lesen, Bau-Agenten nur in ihrem eigenen Ordner schreiben; Subprozesse sehen nur freigegebene Umgebungsvariablen (keine Geheimnisse)</td></tr>
+</table>
+</div>
+
+<div class="satz">
+  <span class="label">Das Ganze in einem Satz</span>
+  Ein festes Programm führt eine Aufgabe durch sieben Stationen — Beschreiben, Planen (mit menschlicher Freigabe), Bauen, Zusammenfügen, zweimal unabhängig Prüfen, Ausliefern — und lässt KI nur dort arbeiten, wo Urteilsvermögen gebraucht wird, während jede Schleife ein Limit, jeder Befund einen festen Rückweg und jeder Abbruch einen Bericht hat.
+</div>
+
+<!-- ============ Technischer Anhang ============ -->
+<h2 id="anhang">12 · Technischer Anhang (für Neugierige)</h2>
+<p>Dieser Abschnitt geht über das Schüler-Niveau hinaus und zeigt die Original-Festlegungen aus der SPEC — zum Nachschlagen, nicht zum Auswendiglernen.</p>
+
+<details>
+  <summary>Agent-Registry: Wer läuft auf welchem Modell mit welchen Werkzeugen?</summary>
+  <div class="table-scroll">
+  <table>
+    <tr><th>Agent</th><th>Modell</th><th>Werkzeuge</th><th>Auftrag</th></tr>
+    <tr><td>Spec-Agent</td><td>Fable 5</td><td>Read/Grep/Glob + Write (nur <code>.adw/</code>)</td><td><code>.adw/spec.md</code> nach Vorlage; implementiert nie</td></tr>
+    <tr><td>Plan-Agent</td><td>Fable 5</td><td>Read/Grep/Glob + Write (nur <code>.adw/</code>)</td><td><code>.adw/plan.md</code> (Workstreams FE/BE) + <code>.adw/contract.yaml</code></td></tr>
+    <tr><td>Build-Agent (je Lane)</td><td>Opus 4.8</td><td>Read/Write/Edit/Bash, <code>cwd</code> = Lane-Worktree</td><td>Workstream strikt gegen Kontrakt; Fix-Pläne = Empfehlung</td></tr>
+    <tr><td>Codex-Reviewer</td><td>Codex (CLI)</td><td><code>codex exec --sandbox read-only</code></td><td>Reviews von Spec, Plan, Code; Findings + <code>remediation_plan</code> als JSON</td></tr>
+    <tr><td>E2E-Triage</td><td>Sonnet 5</td><td>Read</td><td>Playwright-Fehler einer Lane zuordnen; fixt nichts</td></tr>
+    <tr><td>Log-Analyst</td><td>Sonnet 5</td><td>Read</td><td>CI-Logs → strukturierte Findings mit Lane-Zuordnung</td></tr>
+    <tr><td>Finaler Reviewer</td><td>Fable 5</td><td>Read/Grep/Glob (strikt read-only)</td><td>Implementierung gegen Spec prüfen; nur Findings</td></tr>
+  </table>
+  </div>
+  <p><strong>Modell-Ökonomie:</strong> Fable&nbsp;5 nur für Spec/Plan/finalen Review (denken, breit); Opus baut (tief); Sonnet&nbsp;5 triagiert (Workhorse).</p>
+</details>
+
+<details>
+  <summary>Die Kommandos (CLI)</summary>
+<pre><code>adw run --repo &lt;pfad&gt; (--issue "Text" | --gitlab-issue &lt;id&gt; | --github-issue &lt;nr&gt;)
+        [--parallel] [--dry-run] [--no-approval] [--base-branch &lt;name&gt;]
+adw resume &lt;run_id&gt; [--repo &lt;pfad&gt;]      # nach Crash oder Approval-Pause
+adw approve &lt;run_id&gt;                     # Plan-Approval erteilen + fortsetzen
+adw status [&lt;run_id&gt;]                    # Runs + Phase anzeigen</code></pre>
+  <p><code>--dry-run</code> ersetzt alle KI-Aufrufe durch vorbereitete Mock-Antworten — der komplette Kontrollfluss lässt sich so ohne Token-Kosten durchspielen und testen.</p>
+</details>
+
+<details>
+  <summary>Config im Ziel-Repo (<code>.adw/config.yaml</code>)</summary>
+<pre><code>base_branch: staging
+lanes:
+  backend:
+    gates:                     # Reihenfolge = Ausführungsreihenfolge
+      - {name: black,  cmd: "black --check .", timeout: 120}
+      - {name: isort,  cmd: "isort --check-only .", timeout: 120}
+      - {name: pytest, cmd: "pytest -x -q", timeout: 1800}
+  frontend:                    # optional; fehlt die Lane, läuft v1-Single-Lane
+    gates:
+      - {name: eslint, cmd: "npm run lint", timeout: 300}
+e2e:                           # optional; nur mit --parallel relevant
+  cmd: "npx playwright test"
+  timeout: 1800
+ci:
+  poll_interval: 60
+  timeout: 2700
+  staging_job: deploy-staging
+  provider: gitlab             # optional: gitlab | github; sonst Auto-Erkennung</code></pre>
+  <p>Fehlende oder kaputte Config → sofortiger, klarer Fehler (fail fast) — kein Raten von Defaults außer den dokumentierten (<code>poll_interval</code>, <code>timeout</code>).</p>
+</details>
+
+<details>
+  <summary>Das Findings-Schema (JSON, überall identisch)</summary>
+<pre><code>{
+  "verdict": "ok | needs_fixes",
+  "findings": [{
+    "severity": "P1 | P2 | P3",
+    "lane": "frontend | backend | unknown",
+    "file": "pfad/relativ/zum/repo.py",
+    "issue": "Beschreibung des Problems",
+    "remediation_plan": ["Schritt 1", "Schritt 2"],
+    "category": "scope_gap | implementation | trivial"
+  }]
+}</code></pre>
+  <p><strong>Parser-Kontrakt (strikt, bewusste Design-Entscheidung):</strong> Akzeptiert wird ausschließlich (a) Output, der als Ganzes ein JSON-Objekt ist, oder (b) der Inhalt des letzten <code>```json</code>-Fence. Alles andere → <code>FindingsParseError</code> = Retry-/Eskalationsfall. Toleranz-Heuristiken sind gegen adversariale Outputs nicht abdichtbar; ein Parse-Fehler ist safe, ein falsches „ok" nicht. Validierung strikt via Pydantic (<code>extra="forbid"</code>, Verdict-Findings-Konsistenz, Pflichtfelder außer <code>category</code> — das befüllt nur der finale Reviewer).</p>
+</details>
+
+<details>
+  <summary>Artefakte, Zustand &amp; Wiederaufnahme</summary>
+  <ul>
+    <li><code>.adw/spec.md</code>, <code>.adw/plan.md</code>, <code>.adw/contract.yaml</code> — liegen im Ziel-Repo und werden auf dem Feature-Branch <strong>mitcommittet</strong> (Traceability).</li>
+    <li><code>.adw/runs/&lt;run_id&gt;/</code> — gitignored: <code>state.json</code> (RunState), Agent-Transkripte, Gate-Outputs, <code>escalation.md</code>.</li>
+    <li><strong>RunState</strong> (Pydantic): run_id, issue, phase, lanes (worktree, branch, session_id, ports, iterations), approval-Status, ci-Status. Nach jedem Phasenübergang persistiert → <code>adw resume</code> setzt exakt dort fort.</li>
+    <li>Fehlgeschlagene Agent-Aufrufe (z.&nbsp;B. Plan-Kontingent erschöpft) beenden den Run kontrolliert <strong>ohne</strong> Eskalation — <code>adw resume</code> setzt nach dem Reset am Checkpoint fort.</li>
+  </ul>
+</details>
+
+<!-- ============ Glossar ============ -->
+<h2 id="glossar">13 · Glossar</h2>
+<dl class="glossar">
+  <dt>Issue</dt><dd>Die Aufgabenbeschreibung, mit der alles beginnt — z. B. „Baue eine Suchfunktion ein". Kommt als Text oder aus GitLab/GitHub.</dd>
+  <dt>Orchestrator</dt><dd>Das feste Programm, das den gesamten Ablauf steuert — der „Bauleiter". Entscheidet, wer wann drankommt, aber baut nichts selbst.</dd>
+  <dt>Agent</dt><dd>Eine KI mit einem klar umrissenen Auftrag und begrenzten Werkzeugen (z. B. Spec-Agent, Build-Agent).</dd>
+  <dt>Spec (Spezifikation)</dt><dd>Das Dokument, das festhält, <em>was</em> gebaut werden soll — inklusive dem, was ausdrücklich nicht dazugehört.</dd>
+  <dt>Kontrakt</dt><dd>Die verbindliche „Steckdosen-Norm": legt fest, wie die getrennt gebauten Teile (Frontend/Backend) exakt zusammenpassen müssen.</dd>
+  <dt>Lane</dt><dd>Eine eigenständige Arbeitsspur mit eigenem Ordner (Git-Worktree), eigener KI-Sitzung und eigenen Ports — Lanes stören sich nicht gegenseitig.</dd>
+  <dt>Git-Worktree</dt><dd>Ein zusätzlicher, unabhängiger Arbeitsordner desselben Projekts — jede Lane arbeitet in ihrem eigenen.</dd>
+  <dt>Gate</dt><dd>Eine automatische Prüf-Station (Formatierung, Stil, Tests), die Code passieren muss — immer gleich, ohne KI.</dd>
+  <dt>Session / Session-Resume</dt><dd>Die „Sitzung" einer KI mit ihrem Gedächtnis. Resume = dieselbe Sitzung fortsetzen, statt bei null anzufangen.</dd>
+  <dt>E2E (End-to-End)</dt><dd>Test der kompletten Anwendung aus Benutzersicht — ein Roboter (Playwright) klickt sich durch die App.</dd>
+  <dt>Triage</dt><dd>Das Einsortieren von Befunden: Was ist es, wer ist zuständig, was passiert damit? (Wie in der Notaufnahme.)</dd>
+  <dt>Finding</dt><dd>Ein einzelner, strukturiert gemeldeter Befund eines Prüfers — mit Schweregrad (P1 kritisch … P3 klein), Ort und Reparatur-Vorschlag.</dd>
+  <dt>Push</dt><dd>Das Hochladen des fertigen Codes ins zentrale Repository (GitLab/GitHub).</dd>
+  <dt>CI / Pipeline</dt><dd>„Continuous Integration": die automatische Prüf- und Auslieferungsstraße des zentralen Repositories.</dd>
+  <dt>Staging</dt><dd>Die Testumgebung — eine Kopie der echten Anwendung, auf der das Ergebnis zuerst landet.</dd>
+  <dt>Circuit-Breaker</dt><dd>Die „Sicherung": bringt eine Reparatur-Runde gar nichts, wird sofort abgebrochen statt weitergedreht.</dd>
+  <dt>Eskalation</dt><dd>Der kontrollierte Abbruch mit Bericht (<code>escalation.md</code>): was erreicht, was offen, warum — Übergabe an den Menschen.</dd>
+  <dt>Dry-Run</dt><dd>Ein Probelauf, bei dem alle KI-Aufrufe durch vorbereitete Antworten ersetzt werden — der Ablauf lässt sich ohne Kosten testen.</dd>
+</dl>
+
+<a class="top-link" href="#tldr">↑ Nach oben</a>
+
+</div>
+</body>
+</html>
