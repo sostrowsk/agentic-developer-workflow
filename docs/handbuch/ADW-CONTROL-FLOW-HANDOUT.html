@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ADW Control Flow — The Seven Phases (Handout)</title>
+<style>
+  :root {
+    --ink: #1c2733;
+    --ink-soft: #46586b;
+    --paper: #fbfaf7;
+    --card: #ffffff;
+    --line: #dde4ea;
+    --blue: #2563a8;
+    --blue-soft: #e8f0f9;
+    --amber: #b97a10;
+    --amber-soft: #fdf3e0;
+    --green: #2f7d4f;
+    --green-soft: #e7f4ec;
+    --red: #b3403a;
+    --red-soft: #faeae9;
+    --violet: #6d5aa8;
+    --violet-soft: #efecf8;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    line-height: 1.65;
+    font-size: 17px;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 20px 80px; }
+
+  header.hero {
+    background: linear-gradient(135deg, #1d3a5f 0%, #2563a8 70%, #3a7bc0 100%);
+    color: #fff;
+    padding: 48px 20px 40px;
+  }
+  header.hero .wrap { padding-bottom: 0; }
+  header.hero h1 { margin: 0 0 8px; font-size: 2rem; line-height: 1.25; }
+  header.hero p.sub { margin: 0; opacity: .92; font-size: 1.05rem; max-width: 46em; }
+  header.hero p.meta { margin: 18px 0 0; font-size: .85rem; opacity: .75; }
+
+  h2 {
+    font-size: 1.45rem; margin: 56px 0 14px; padding-bottom: 8px;
+    border-bottom: 3px solid var(--blue);
+  }
+  h3 { font-size: 1.12rem; margin: 30px 0 8px; }
+  p { margin: 10px 0; }
+  a { color: var(--blue); }
+
+  .tldr {
+    background: var(--card); border: 1px solid var(--line); border-top: 5px solid var(--blue);
+    border-radius: 10px; padding: 22px 26px; margin-top: 32px;
+    box-shadow: 0 2px 10px rgba(28,39,51,.06);
+  }
+  .tldr h2 { margin: 0 0 12px; border: none; padding: 0; font-size: 1.25rem; }
+  .tldr ul { margin: 0; padding-left: 22px; }
+  .tldr li { margin: 7px 0; }
+
+  .kern {
+    background: var(--blue-soft); border-radius: 10px; padding: 20px 26px; margin: 24px 0;
+  }
+  .kern h2 { margin: 0 0 10px; border: none; padding: 0; font-size: 1.2rem; }
+  .kern ol { margin: 0; padding-left: 22px; }
+  .kern li { margin: 8px 0; }
+
+  nav.toc {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 18px 24px; margin: 28px 0; font-size: .95rem;
+  }
+  nav.toc strong { display: block; margin-bottom: 8px; font-size: 1rem; }
+  nav.toc ol { margin: 0; padding-left: 22px; columns: 2; column-gap: 40px; }
+  nav.toc li { margin: 4px 0; break-inside: avoid; }
+  nav.toc a { text-decoration: none; }
+  nav.toc a:hover { text-decoration: underline; }
+  @media (max-width: 640px) { nav.toc ol { columns: 1; } }
+
+  table {
+    border-collapse: collapse; width: 100%; margin: 16px 0; font-size: .93rem;
+    background: var(--card);
+  }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: var(--blue-soft); }
+  .table-scroll { overflow-x: auto; }
+
+  .callout {
+    border-left: 4px solid var(--blue); background: var(--card);
+    padding: 12px 18px; margin: 18px 0; border-radius: 0 8px 8px 0;
+    border-top: 1px solid var(--line); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .callout.amber { border-left-color: var(--amber); background: var(--amber-soft); }
+  .callout.red { border-left-color: var(--red); background: var(--red-soft); }
+  .callout.green { border-left-color: var(--green); background: var(--green-soft); }
+  .callout .label { font-weight: 700; font-size: .8rem; text-transform: uppercase; letter-spacing: .06em; display: block; margin-bottom: 4px; color: var(--ink-soft); }
+
+  .phase {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 24px 28px; margin: 26px 0; box-shadow: 0 2px 8px rgba(28,39,51,.05);
+  }
+  .phase h3 { margin-top: 0; display: flex; align-items: center; gap: 12px; font-size: 1.2rem; }
+  .phase-num {
+    flex: 0 0 auto; width: 38px; height: 38px; border-radius: 50%;
+    background: var(--blue); color: #fff; display: inline-flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 1.1rem;
+  }
+  .phase .frage { color: var(--ink-soft); font-style: italic; margin-top: -4px; }
+
+  details {
+    background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 16px; margin: 14px 0;
+  }
+  details summary { cursor: pointer; font-weight: 600; color: var(--blue); }
+  details[open] summary { margin-bottom: 8px; }
+  details pre { background: #f0f3f6; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: .82rem; line-height: 1.5; }
+  code { background: #eef1f4; padding: 1px 6px; border-radius: 4px; font-size: .88em; }
+  pre code { background: none; padding: 0; }
+
+  figure { margin: 22px 0; }
+  figure .svgbox {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 14px; overflow-x: auto;
+  }
+  figure svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+  figcaption { font-size: .87rem; color: var(--ink-soft); margin-top: 8px; text-align: center; }
+
+  dl.glossar dt { font-weight: 700; margin-top: 14px; }
+  dl.glossar dd { margin: 2px 0 0 0; padding-left: 0; }
+
+  .satz {
+    background: linear-gradient(135deg, #1d3a5f, #2563a8); color: #fff;
+    border-radius: 12px; padding: 26px 30px; margin: 40px 0 20px;
+    font-size: 1.08rem; line-height: 1.7;
+  }
+  .satz .label { font-weight: 700; font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; opacity: .8; display: block; margin-bottom: 8px; }
+
+  .btn-row { text-align: right; margin: 6px 0 -10px; }
+  .btn-row button {
+    font: inherit; font-size: .82rem; padding: 5px 12px; border-radius: 6px;
+    border: 1px solid var(--line); background: var(--card); color: var(--blue); cursor: pointer;
+  }
+  .btn-row button:hover { background: var(--blue-soft); }
+  .top-link { display: inline-block; margin-top: 30px; font-size: .88rem; }
+
+  /* SVG text defaults */
+  svg text { font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <h1>ADW Control Flow — The Seven Phases</h1>
+    <p class="sub">How the Agentic Developer Workflow turns a task fully automatically into finished, reviewed code — explained without programming knowledge, with diagrams.</p>
+    <p class="meta">Sources: <code>docs/handbuch/ADW-CONTROL-FLOW.md</code> · <code>docs/SPEC.md</code> (as of 2026-07-14) · Handout created 2026-07-18</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+<!-- ============ TL;DR ============ -->
+<section class="tldr" id="tldr">
+  <h2>⚡ At a Glance</h2>
+  <ul>
+    <li>The <strong>ADW</strong> takes a development task (an "issue") <strong>fully automatically through seven phases</strong>: describe → plan → build → integrate → two independent reviews → deliver.</li>
+    <li><strong>Guiding principle: Control flow is code, not prompt.</strong> Who acts when is decided by a fixed program — AI works only where judgment is needed.</li>
+    <li><strong>Reviewers never repair.</strong> Every defect goes back to the build agents, and every repair must pass through <em>all</em> checks again — no shortcuts.</li>
+    <li><strong>A single planned stop for the human:</strong> After Phase 2, the blueprint is approved by a human before the expensive build phase starts.</li>
+    <li><strong>Every loop has a limit</strong> (10 / 10 / 3 rounds, 45 min waiting). Exhausted limits or zero progress lead to a controlled abort with an escalation report — never to endless spinning.</li>
+    <li><strong>Nothing gets lost:</strong> After every phase transition the state is saved; <code>adw resume</code> continues exactly there — like a save point in a video game.</li>
+  </ul>
+</section>
+
+<!-- ============ Kernaussagen ============ -->
+<section class="kern" id="kernaussagen">
+  <h2>🎯 Key Statements</h2>
+  <ol>
+    <li><strong>Three actors, clearly separated:</strong> a fixed program as site manager (Orchestrator), AI agents as architects and construction workers, independent AI reviewers as inspectors — each with exactly the tools of its role.</li>
+    <li><strong>Quality through loops, not through trust:</strong> Every document and every piece of code is checked and reworked until an independent reviewer says "ok".</li>
+    <li><strong>Two different review questions:</strong> Phase 5 asks "Is the code <em>well made</em>?", Phase 6 asks "Was the <em>right thing</em> built?" — both against the specification from Phase 1.</li>
+    <li><strong>Safety nets everywhere:</strong> Limits, circuit breakers, escalation reports and checkpoints ensure that the run never derails uncontrolled.</li>
+  </ol>
+</section>
+
+<!-- ============ Navigation ============ -->
+<nav class="toc" id="inhalt">
+  <strong>📑 Contents</strong>
+  <ol>
+    <li><a href="#grundidee">What is it about? The construction-site analogy</a></li>
+    <li><a href="#ueberblick">The path at a glance (diagram)</a></li>
+    <li><a href="#pruefschleife">The basic pattern: the review loop</a></li>
+    <li><a href="#phase1">Phase 1 — Spec</a></li>
+    <li><a href="#phase2">Phase 2 — Plan + Contract</a></li>
+    <li><a href="#phase3">Phase 3 — Build</a></li>
+    <li><a href="#phase4">Phase 4 — Integration + E2E</a></li>
+    <li><a href="#phase5">Phase 5 — Codex Code Review</a></li>
+    <li><a href="#phase6">Phase 6 — Final Review + Triage</a></li>
+    <li><a href="#phase7">Phase 7 — Push + CI</a></li>
+    <li><a href="#sicherheitsnetze">The safety nets</a></li>
+    <li><a href="#anhang">Technical appendix</a></li>
+    <li><a href="#glossar">Glossary</a></li>
+  </ol>
+</nav>
+
+<div class="btn-row"><button onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">Expand all details</button></div>
+
+<!-- ============ 1 Grundidee ============ -->
+<h2 id="grundidee">1 · What is it about? The construction-site analogy</h2>
+
+<p>The <strong>Agentic Developer Workflow (ADW)</strong> is a program that turns a task — an <strong>"issue"</strong>, e.g.&nbsp;<em>"Add a search feature to the app"</em> — <strong>fully automatically</strong> into finished, reviewed code: from the first description all the way to delivery on a test server.</p>
+
+<p>You can think of it like a <strong>construction site</strong>:</p>
+
+<div class="table-scroll">
+<table>
+  <tr><th>Role on the construction site</th><th>Role in the ADW</th><th>Who does it?</th></tr>
+  <tr><td>Site manager — organizes everything, makes no technical decisions</td><td>The <strong>Orchestrator</strong> — a fixed program</td><td>Deterministic code</td></tr>
+  <tr><td>Architect — writes the blueprint</td><td>Spec agent &amp; Plan agent</td><td>AI (Fable&nbsp;5)</td></tr>
+  <tr><td>Construction workers — actually build</td><td>Build agents</td><td>AI (Opus&nbsp;4.8)</td></tr>
+  <tr><td>Building inspectors — inspect, but never build themselves</td><td>Codex reviewer &amp; final reviewer</td><td>AI (Codex / Fable&nbsp;5)</td></tr>
+  <tr><td>Checklists &amp; measuring devices — always the same checks</td><td><strong>Gates</strong> (automated tests)</td><td>Deterministic code</td></tr>
+</table>
+</div>
+
+<div class="callout">
+  <span class="label">The most important principle</span>
+  <strong>"Control flow is code, not prompt."</strong> That means: <strong>who acts when is decided by a fixed program</strong> — not the AI. The AI is used only where judgment is needed (writing, building, evaluating). Everything repeatable — running tests, passing results along, counting loops — runs as ordinary program code: 0&nbsp;tokens, deterministic, always the same.
+</div>
+
+<h3>Two iron rules</h3>
+<p><strong>1. Reviewers never repair.</strong> Whoever finds a defect only reports it. Repairs are always done by the build agents — and every repair must afterwards go <strong>through all checks again</strong>. No shortcuts, not even for "small things".</p>
+<p><strong>2. Everything has a limit.</strong> Every loop may only repeat a limited number of times. If the limit is exhausted — or a repair round achieves <em>nothing at all</em> anymore (<strong>"circuit breaker"</strong>, like a fuse in the fuse box) — the run aborts in a controlled way and writes an <strong>escalation report</strong>: what was accomplished, what is open, what went wrong. A human then takes over.</p>
+
+<!-- ============ 2 Überblick ============ -->
+<h2 id="ueberblick">2 · The path at a glance</h2>
+
+<p>This is how an issue travels through the seven phases. Blue boxes are the phases, the yellow box is the only planned stop for the human, the circling arrows on the right are the built-in rework loops — each with a limit:</p>
+
+<figure>
+<div class="svgbox">
+<svg viewBox="0 0 880 1080" width="880" role="img" aria-label="Flowchart of the seven ADW phases with loops and jump-backs">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#46586b"/>
+    </marker>
+    <marker id="arr-red" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#b3403a"/>
+    </marker>
+    <marker id="arr-blue" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+      <path d="M0,0 L7,4 L0,8 z" fill="#2563a8"/>
+    </marker>
+  </defs>
+
+  <!-- Issue -->
+  <rect x="330" y="14" width="220" height="44" rx="22" fill="#eef1f4" stroke="#46586b" stroke-width="1.5"/>
+  <text x="440" y="41" text-anchor="middle" font-size="16" font-weight="700" fill="#1c2733">📋 Issue (task)</text>
+  <line x1="440" y1="58" x2="440" y2="92" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P1 -->
+  <rect x="260" y="96" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="120" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">1 · Spec</text>
+  <text x="440" y="140" text-anchor="middle" font-size="12.5" fill="#46586b">What should be built? → .adw/spec.md</text>
+  <path d="M 624 112 C 668 100, 668 150, 624 138" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="122" font-size="11.5" fill="#2563a8">Codex checks,</text>
+  <text x="682" y="137" font-size="11.5" fill="#2563a8">until "ok"</text>
+  <line x1="440" y1="154" x2="440" y2="188" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P2 -->
+  <rect x="260" y="192" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="216" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">2 · Plan + Contract</text>
+  <text x="440" y="236" text-anchor="middle" font-size="12.5" fill="#46586b">How is it built? → plan.md + contract.yaml</text>
+  <path d="M 624 208 C 668 196, 668 246, 624 234" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="218" font-size="11.5" fill="#2563a8">Codex checks,</text>
+  <text x="682" y="233" font-size="11.5" fill="#2563a8">until "ok"</text>
+  <line x1="440" y1="250" x2="440" y2="284" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- Approval gate -->
+  <rect x="260" y="288" width="360" height="58" rx="10" fill="#fdf3e0" stroke="#b97a10" stroke-width="2" stroke-dasharray="7 4"/>
+  <text x="440" y="312" text-anchor="middle" font-size="15" font-weight="700" fill="#7a5309">⏸ STOP: Plan approval gate</text>
+  <text x="440" y="332" text-anchor="middle" font-size="12.5" fill="#7a5309">Human reads plan → adw approve (disable: --no-approval)</text>
+  <line x1="440" y1="346" x2="440" y2="380" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P3 -->
+  <rect x="260" y="384" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="408" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">3 · Build</text>
+  <text x="440" y="428" text-anchor="middle" font-size="12.5" fill="#46586b">Lanes build code · Gates check every change</text>
+  <path d="M 624 400 C 668 388, 668 438, 624 426" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="410" font-size="11.5" fill="#2563a8">Fix loop,</text>
+  <text x="682" y="425" font-size="11.5" fill="#2563a8">max. 10×</text>
+  <line x1="440" y1="442" x2="440" y2="476" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P4 -->
+  <rect x="260" y="480" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="504" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">4 · Integration + E2E <tspan font-weight="400" font-size="12">(only --parallel)</tspan></text>
+  <text x="440" y="524" text-anchor="middle" font-size="12.5" fill="#46586b">Merge the lanes · click robot tests the app</text>
+  <path d="M 624 496 C 668 484, 668 534, 624 522" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="506" font-size="11.5" fill="#2563a8">Triage → lane fix,</text>
+  <text x="682" y="521" font-size="11.5" fill="#2563a8">max. 10 rounds</text>
+  <line x1="440" y1="538" x2="440" y2="572" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P5 -->
+  <rect x="260" y="576" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="600" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">5 · Codex Code Review</text>
+  <text x="440" y="620" text-anchor="middle" font-size="12.5" fill="#46586b">Is the code well made? Findings → lanes fix</text>
+  <path d="M 624 592 C 668 580, 668 630, 624 618" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="602" font-size="11.5" fill="#2563a8">Review loop,</text>
+  <text x="682" y="617" font-size="11.5" fill="#2563a8">until "ok"</text>
+  <line x1="440" y1="634" x2="440" y2="668" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P6 -->
+  <rect x="260" y="672" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="696" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">6 · Final Review + Triage</text>
+  <text x="440" y="716" text-anchor="middle" font-size="12.5" fill="#46586b">Was the right thing built? Compared with the spec</text>
+  <path d="M 624 688 C 668 676, 668 726, 624 714" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
+  <text x="682" y="698" font-size="11.5" fill="#2563a8">Fix cycles,</text>
+  <text x="682" y="713" font-size="11.5" fill="#2563a8">max. 3×</text>
+  <line x1="440" y1="730" x2="440" y2="764" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
+
+  <!-- P7 -->
+  <rect x="260" y="768" width="360" height="58" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="440" y="792" text-anchor="middle" font-size="15" font-weight="700" fill="#1c2733">7 · Push + CI</text>
+  <text x="440" y="812" text-anchor="middle" font-size="12.5" fill="#46586b">Upload · watch the pipeline (every 60 s, max. 45 min)</text>
+  <line x1="440" y1="826" x2="440" y2="860" stroke="#2f7d4f" stroke-width="2" marker-end="url(#arr)"/>
+  <text x="452" y="848" font-size="11.5" fill="#2f7d4f">green</text>
+
+  <!-- CI red feedback -->
+  <path d="M 260 800 L 150 800 L 150 460 L 254 460" fill="none" stroke="#b3403a" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arr-red)"/>
+  <text x="142" y="640" text-anchor="end" font-size="11.5" fill="#b3403a">Pipeline red:</text>
+  <text x="142" y="656" text-anchor="end" font-size="11.5" fill="#b3403a">log analyst reads logs</text>
+  <text x="142" y="672" text-anchor="end" font-size="11.5" fill="#b3403a">→ back to Phase 3/4</text>
+
+  <!-- Success -->
+  <rect x="300" y="864" width="280" height="46" rx="23" fill="#e7f4ec" stroke="#2f7d4f" stroke-width="2"/>
+  <text x="440" y="892" text-anchor="middle" font-size="15" font-weight="700" fill="#2f7d4f">✔ Pipeline + staging green = done</text>
+
+  <!-- Escalation note -->
+  <rect x="180" y="950" width="520" height="96" rx="10" fill="#faeae9" stroke="#b3403a" stroke-width="1.5"/>
+  <text x="440" y="978" text-anchor="middle" font-size="13.5" font-weight="700" fill="#b3403a">🔌 Fuse: escalation instead of an endless loop</text>
+  <text x="440" y="1000" text-anchor="middle" font-size="12" fill="#7a2e2a">Every exhausted limit and the circuit breaker (a fix round resolves nothing)</text>
+  <text x="440" y="1018" text-anchor="middle" font-size="12" fill="#7a2e2a">end the run in a controlled way: escalation report (escalation.md) + exit code ≠ 0.</text>
+  <text x="440" y="1036" text-anchor="middle" font-size="12" fill="#7a2e2a">A human takes over — nothing keeps spinning endlessly.</text>
+</svg>
+</div>
+<figcaption>Fig. 1 — The seven phases from issue to "staging green". Right: rework loops with limits; dashed on the left: the jump back when the CI pipeline turns red.</figcaption>
+</figure>
+
+<!-- ============ 3 Prüf-Schleife ============ -->
+<h2 id="pruefschleife">3 · The basic pattern: the review loop</h2>
+
+<p>One pattern recurs throughout the ADW — in Phase&nbsp;1 (Spec), Phase&nbsp;2 (Plan) and Phase&nbsp;5 (Code Review): an agent <em>creates</em> something, an independent reviewer <em>evaluates</em> it, and defects go back until the verdict is <strong>"ok"</strong>. Crucially, the agent keeps its "memory" from the previous rounds (<strong>session resume</strong>) — it does not have to familiarize itself from scratch each time.</p>
+
+<figure>
+<div class="svgbox">
+<svg viewBox="0 0 820 300" width="820" role="img" aria-label="Diagram of the review loop: agent creates, Codex checks, findings go back until ok">
+  <defs>
+    <marker id="arr2" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#46586b"/>
+    </marker>
+    <marker id="arr2-red" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#b3403a"/>
+    </marker>
+    <marker id="arr2-green" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+      <path d="M0,0 L8,4.5 L0,9 z" fill="#2f7d4f"/>
+    </marker>
+  </defs>
+
+  <rect x="40" y="90" width="250" height="76" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+  <text x="165" y="121" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1c2733">✍️ Agent creates</text>
+  <text x="165" y="142" text-anchor="middle" font-size="12" fill="#46586b">Spec / plan / code fix</text>
+
+  <line x1="290" y1="118" x2="382" y2="118" stroke="#46586b" stroke-width="2" marker-end="url(#arr2)"/>
+  <text x="336" y="108" text-anchor="middle" font-size="11.5" fill="#46586b">Result</text>
+
+  <rect x="388" y="90" width="250" height="76" rx="10" fill="#efecf8" stroke="#6d5aa8" stroke-width="2"/>
+  <text x="513" y="121" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1c2733">🔍 Codex checks</text>
+  <text x="513" y="142" text-anchor="middle" font-size="12" fill="#46586b">independent, read-only</text>
+
+  <line x1="638" y1="118" x2="730" y2="118" stroke="#2f7d4f" stroke-width="2" marker-end="url(#arr2-green)"/>
+  <text x="684" y="106" text-anchor="middle" font-size="12" font-weight="700" fill="#2f7d4f">"ok"</text>
+
+  <rect x="736" y="92" width="66" height="52" rx="10" fill="#e7f4ec" stroke="#2f7d4f" stroke-width="2"/>
+  <text x="769" y="115" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2f7d4f">go on ➜</text>
+  <text x="769" y="132" text-anchor="middle" font-size="10.5" fill="#2f7d4f">next phase</text>
+
+  <path d="M 513 166 L 513 226 L 165 226 L 165 170" fill="none" stroke="#b3403a" stroke-width="2" marker-end="url(#arr2-red)"/>
+  <text x="339" y="218" text-anchor="middle" font-size="12" font-weight="700" fill="#b3403a">"needs_fixes": findings go back</text>
+  <text x="339" y="248" text-anchor="middle" font-size="11.5" fill="#b3403a">to the same session — the agent remembers (session resume)</text>
+
+  <text x="410" y="40" text-anchor="middle" font-size="13.5" font-weight="700" fill="#1c2733">Like an essay the editor keeps handing back until it is clean —</text>
+  <text x="410" y="60" text-anchor="middle" font-size="13.5" fill="#1c2733">but the editor never writes on the essay himself.</text>
+</svg>
+</div>
+<figcaption>Fig. 2 — The basic pattern "create → check → rework", which works identically in phases 1, 2 and 5.</figcaption>
+</figure>
+
+<!-- ============ Phase 1 ============ -->
+<h2 id="phase1">4 · Phase 1 — Spec</h2>
+<div class="phase">
+  <h3><span class="phase-num">1</span> Spec</h3>
+  <p class="frage">"What should be built in the first place?"</p>
+  <p><strong>Input:</strong> the issue — a text, either typed in directly or fetched from GitLab/GitHub.</p>
+  <ol>
+    <li>The <strong>Spec agent</strong> (AI) reads the issue and the project and writes a <strong>specification</strong> (<code>.adw/spec.md</code>): the goal, what is in scope, what is explicitly <em>not</em> in scope, and how you can tell it is done ("acceptance criteria", "definition of done"). It may <strong>only read and write this one file</strong> — it is not allowed to build anything.</li>
+    <li>The <strong>Codex reviewer</strong> (a second, independent AI) checks the specification.</li>
+    <li>If it finds defects, they go <strong>back to the same Spec agent</strong> — which keeps its memory from the first round (session resume) and reworks.</li>
+    <li>This repeats until the reviewer says <strong>"ok"</strong> (review loop, see Fig.&nbsp;2).</li>
+  </ol>
+  <details>
+    <summary>More details (from the SPEC)</summary>
+    <p>The Spec agent runs on <strong>Fable&nbsp;5</strong> and has only the tools Read/Grep/Glob plus Write — the latter restricted to the directory <code>.adw/</code>. The issue arrives either as CLI text (<code>--issue "…"</code>), as a GitLab issue via <code>glab</code> (<code>--gitlab-issue &lt;id&gt;</code>) or as a GitHub issue via <code>gh</code> (<code>--github-issue &lt;nr&gt;</code>). The spec is later <strong>committed along</strong> on the feature branch — so it remains traceable what was built and reviewed against (traceability).</p>
+  </details>
+</div>
+
+<!-- ============ Phase 2 ============ -->
+<h2 id="phase2">5 · Phase 2 — Plan + Contract</h2>
+<div class="phase">
+  <h3><span class="phase-num">2</span> Plan + Contract</h3>
+  <p class="frage">"How will it be built?"</p>
+  <ol>
+    <li>The <strong>Plan agent</strong> (AI) turns the specification into a <strong>step-by-step blueprint</strong> (<code>.adw/plan.md</code>) and a <strong>contract</strong> (<code>.adw/contract.yaml</code>). The contract is like a binding <strong>power-socket standard</strong>: it defines exactly how the parts (e.g.&nbsp;the interface and the server logic) must fit together later — so that two teams working separately don't deliver incompatible parts in the end.</li>
+    <li>The Codex reviewer checks plan and contract <strong>together</strong>, again in the loop until "ok".</li>
+    <li><strong>Plan approval gate — the built-in STOP:</strong> The workflow <strong>halts</strong>, saves its complete state and exits. Now a <strong>human</strong> reads the plan and decides. Only the command <code>adw approve</code> (or <code>adw resume</code>) lets the run continue at exactly this point.</li>
+  </ol>
+  <div class="callout amber">
+    <span class="label">The only planned stop</span>
+    The plan approval gate is the only point where the human is asked <em>in the middle of</em> the process — deliberately placed <strong>before the expensive build phase begins</strong>. Anyone who fully trusts the automation can disable the stop with <code>--no-approval</code>.
+  </div>
+  <details>
+    <summary>More details (from the SPEC)</summary>
+    <p>The Plan agent also runs on <strong>Fable&nbsp;5</strong> with Read/Grep/Glob + Write (only <code>.adw/</code>). The plan structures the work into <strong>workstreams</strong> (e.g.&nbsp;frontend/backend); the contract contains OpenAPI definitions, types and events. When pausing, the <code>RunState</code> is persisted and the process terminates with an exit — the run "sleeps" until <code>adw approve &lt;run_id&gt;</code> or <code>adw resume &lt;run_id&gt;</code> wakes it up.</p>
+  </details>
+</div>
+
+<!-- ============ Phase 3 ============ -->
+<h2 id="phase3">6 · Phase 3 — Build</h2>
+<div class="phase">
+  <h3><span class="phase-num">3</span> Build</h3>
+  <p class="frage">"Now it gets built."</p>
+  <ol>
+    <li>The <strong>Dispatch</strong> (fixed program, no AI) breaks the plan down into <strong>work packages</strong> — e.g.&nbsp;"frontend" (the visible part) and "backend" (the logic behind it). Each package gets its own <strong>Lane</strong>: its own working folder (Git worktree), its own AI session and its own network ports. This way the lanes <strong>cannot get in each other's way</strong>. Without <code>--parallel</code> there is simply just one lane — same process, one track.</li>
+    <li>In each lane, the <strong>lane loop</strong> runs (Fig.&nbsp;3): The <strong>Build agent</strong> (AI) writes code — strictly following plan and contract. Then the <strong>Gates</strong> run: automated checks (formatting, code style, tests), configured firmly in the project — like inspection stations on an assembly line. On <strong>red</strong>, the error messages go back <strong>to the same AI session</strong> as a new task; it still knows its own code and reworks. At most <strong>10 iterations</strong> — after that, escalation report, abort, human takes over.</li>
+  </ol>
+
+  <figure>
+  <div class="svgbox">
+  <svg viewBox="0 0 820 330" width="820" role="img" aria-label="Diagram of the lane loop: build agent writes code, gates check, on red back to the same session, at most ten times">
+    <defs>
+      <marker id="arr3" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#46586b"/>
+      </marker>
+      <marker id="arr3-red" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#b3403a"/>
+      </marker>
+      <marker id="arr3-green" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#2f7d4f"/>
+      </marker>
+    </defs>
+
+    <text x="410" y="30" text-anchor="middle" font-size="14" font-weight="700" fill="#1c2733">One lane = own folder + own AI session + own ports</text>
+
+    <rect x="40" y="70" width="250" height="80" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+    <text x="165" y="102" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1c2733">🔨 Build agent</text>
+    <text x="165" y="124" text-anchor="middle" font-size="12" fill="#46586b">writes code per plan + contract</text>
+
+    <line x1="290" y1="110" x2="382" y2="110" stroke="#46586b" stroke-width="2" marker-end="url(#arr3)"/>
+
+    <rect x="388" y="70" width="250" height="80" rx="10" fill="#eef1f4" stroke="#46586b" stroke-width="2"/>
+    <text x="513" y="102" text-anchor="middle" font-size="14.5" font-weight="700" fill="#1c2733">🚦 Gates run</text>
+    <text x="513" y="124" text-anchor="middle" font-size="12" fill="#46586b">Formatting · style · tests (code, no AI)</text>
+
+    <line x1="638" y1="110" x2="726" y2="110" stroke="#2f7d4f" stroke-width="2" marker-end="url(#arr3-green)"/>
+    <text x="682" y="98" text-anchor="middle" font-size="12" font-weight="700" fill="#2f7d4f">all green</text>
+
+    <rect x="732" y="82" width="70" height="56" rx="10" fill="#e7f4ec" stroke="#2f7d4f" stroke-width="2"/>
+    <text x="767" y="107" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2f7d4f">Lane</text>
+    <text x="767" y="124" text-anchor="middle" font-size="12.5" font-weight="700" fill="#2f7d4f">done ✔</text>
+
+    <path d="M 513 150 L 513 212 L 165 212 L 165 154" fill="none" stroke="#b3403a" stroke-width="2" marker-end="url(#arr3-red)"/>
+    <text x="339" y="204" text-anchor="middle" font-size="12" font-weight="700" fill="#b3403a">red: error output goes back as a follow-up task</text>
+    <text x="339" y="234" text-anchor="middle" font-size="11.5" fill="#b3403a">to the same session — it still knows its code</text>
+
+    <rect x="250" y="262" width="330" height="48" rx="8" fill="#faeae9" stroke="#b3403a" stroke-width="1.5"/>
+    <text x="415" y="282" text-anchor="middle" font-size="12" font-weight="700" fill="#b3403a">⏱ max. 10 iterations</text>
+    <text x="415" y="300" text-anchor="middle" font-size="11.5" fill="#7a2e2a">then: escalation.md + abort → human takes over</text>
+  </svg>
+  </div>
+  <figcaption>Fig. 3 — The lane loop in Phase 3: build, check, rework — with a hard limit.</figcaption>
+  </figure>
+
+  <details>
+    <summary>More details (from the SPEC)</summary>
+    <p>Build agents run on <strong>Opus&nbsp;4.8</strong> with full tools (Read/Write/Edit/Bash), but are confined to their own worktree via the working directory (<code>cwd</code>). Each lane gets its own branch off the base branch. The gates (name, command, timeout) come from the target repo's config (<code>.adw/config.yaml</code>) and run in configured order as subprocesses with a real timeout. Ports are computed deterministically from the run ID (base port + hash offset, socket bind check as fallback).</p>
+  </details>
+</div>
+
+<!-- ============ Phase 4 ============ -->
+<h2 id="phase4">7 · Phase 4 — Integration + E2E</h2>
+<div class="phase">
+  <h3><span class="phase-num">4</span> Integration + E2E</h3>
+  <p class="frage">"Do the parts fit together?" (only with <code>--parallel</code>)</p>
+  <ol>
+    <li>A fixed program <strong>merges</strong> the results of all lanes onto a shared integration branch (merge).</li>
+    <li>Then an <strong>end-to-end test</strong> (Playwright) runs: a robot clicks its way through the finished application like a real user.</li>
+    <li>If something fails, the <strong>E2E triage agent</strong> (AI, read-only) assigns each failure to the <strong>responsible lane</strong> — like a doctor who only diagnoses but does not operate.</li>
+    <li>The affected lane repairs — again via its normal lane loop from Phase&nbsp;3, including all gates — then everything is <strong>re-integrated and re-tested</strong>. At most <strong>10 rounds</strong>.</li>
+  </ol>
+  <details>
+    <summary>More details (from the SPEC)</summary>
+    <p>The E2E triage agent runs on <strong>Sonnet&nbsp;5</strong> (workhorse model) and has only read tools — it fixes nothing, it only assigns. The E2E command (e.g.&nbsp;<code>npx playwright test</code>) and its timeout come from the target repo's config. Without <code>--parallel</code> this phase is skipped; v1 and v2 are the same code path, the flag merely activates multi-lane operation.</p>
+  </details>
+</div>
+
+<!-- ============ Phase 5 ============ -->
+<h2 id="phase5">8 · Phase 5 — Codex Code Review</h2>
+<div class="phase">
+  <h3><span class="phase-num">5</span> Codex Code Review</h3>
+  <p class="frage">"Is the code well made?" — independent quality control</p>
+  <ol>
+    <li>The <strong>Codex reviewer</strong> reads all the new code (read-only!) and delivers a structured defect list: what is the problem, how severe is it (<strong>P1</strong>&nbsp;=&nbsp;critical … <strong>P3</strong>&nbsp;=&nbsp;minor), which lane is responsible — and a <strong>repair suggestion</strong> (<code>remediation_plan</code>).</li>
+    <li>A fixed program <strong>distributes</strong> the defects to the right build agents based on the lane field.</li>
+    <li>Important: the repair suggestion is a <strong>recommendation, not an order</strong>. The build agent checks it against the specification and project rules and may repair <strong>differently, with justification</strong> — after all, the reviewer only sees the code from the outside.</li>
+    <li>After each repair: all gates, then another review — <strong>until "ok"</strong>.</li>
+  </ol>
+  <details>
+    <summary>More details (from the SPEC)</summary>
+    <p>Codex runs as a CLI subprocess (<code>codex exec --sandbox read-only</code>) — the sandbox technically guarantees that the reviewer cannot change anything. Its response must conform to the fixed <strong>findings schema</strong> (JSON); the parser is deliberately strict: only a pure JSON object or the last <code>```json</code> block is accepted. Anything else counts as an error — a parse error is harmless, a wrongly waved-through "ok" would not be.</p>
+  </details>
+</div>
+
+<!-- ============ Phase 6 ============ -->
+<h2 id="phase6">9 · Phase 6 — Final Review + Triage</h2>
+<div class="phase">
+  <h3><span class="phase-num">6</span> Final Review + Triage</h3>
+  <p class="frage">"Was the right thing actually built?"</p>
+  <p>Phase&nbsp;5 asked: <em>Is the code well made?</em> Phase&nbsp;6 asks: <em>Does it do what the specification says?</em></p>
+  <ol>
+    <li>The <strong>final reviewer</strong> (AI, strictly read-only) compares the finished implementation with the specification from Phase&nbsp;1 and reports deviations — each with a <strong>category</strong>.</li>
+    <li>The <strong>Triage</strong> (fixed program) sorts by category (Fig.&nbsp;4).</li>
+    <li>At most <strong>3 repair cycles</strong>, then escalation.</li>
+  </ol>
+
+  <figure>
+  <div class="svgbox">
+  <svg viewBox="0 0 820 320" width="820" role="img" aria-label="Diagram of the triage in Phase 6: scope_gap becomes a follow-up issue, implementation and trivial go into the fix cycle">
+    <defs>
+      <marker id="arr4" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+        <path d="M0,0 L8,4.5 L0,9 z" fill="#46586b"/>
+      </marker>
+    </defs>
+
+    <rect x="285" y="20" width="250" height="66" rx="10" fill="#e8f0f9" stroke="#2563a8" stroke-width="2"/>
+    <text x="410" y="47" text-anchor="middle" font-size="14" font-weight="700" fill="#1c2733">🔍 Finding of the final reviewer</text>
+    <text x="410" y="68" text-anchor="middle" font-size="12" fill="#46586b">Comparing implementation ↔ spec</text>
+
+    <line x1="410" y1="86" x2="410" y2="122" stroke="#46586b" stroke-width="2" marker-end="url(#arr4)"/>
+
+    <polygon points="410,126 520,164 410,202 300,164" fill="#eef1f4" stroke="#46586b" stroke-width="2"/>
+    <text x="410" y="158" text-anchor="middle" font-size="13" font-weight="700" fill="#1c2733">Triage (code):</text>
+    <text x="410" y="177" text-anchor="middle" font-size="12.5" fill="#46586b">Which category?</text>
+
+    <path d="M 300 164 L 170 164 L 170 212" fill="none" stroke="#46586b" stroke-width="2" marker-end="url(#arr4)"/>
+    <text x="228" y="152" text-anchor="middle" font-size="11.5" font-weight="700" fill="#6d5aa8">scope_gap</text>
+    <text x="228" y="186" text-anchor="middle" font-size="10.5" fill="#46586b">"missing, but never planned"</text>
+
+    <path d="M 520 164 L 650 164 L 650 212" fill="none" stroke="#46586b" stroke-width="2" marker-end="url(#arr4)"/>
+    <text x="588" y="152" text-anchor="middle" font-size="11.5" font-weight="700" fill="#b97a10">implementation / trivial</text>
+    <text x="588" y="186" text-anchor="middle" font-size="10.5" fill="#46586b">"built, but wrong/sloppy"</text>
+
+    <rect x="45" y="216" width="250" height="80" rx="10" fill="#efecf8" stroke="#6d5aa8" stroke-width="2"/>
+    <text x="170" y="245" text-anchor="middle" font-size="13" font-weight="700" fill="#1c2733">📄 Follow-up issue</text>
+    <text x="170" y="266" text-anchor="middle" font-size="11.5" fill="#46586b">Report for later — no auto-restart,</text>
+    <text x="170" y="283" text-anchor="middle" font-size="11.5" fill="#46586b">or the run would grow endlessly</text>
+
+    <rect x="525" y="216" width="250" height="80" rx="10" fill="#fdf3e0" stroke="#b97a10" stroke-width="2"/>
+    <text x="650" y="245" text-anchor="middle" font-size="13" font-weight="700" fill="#1c2733">🔧 Fix cycle in the lane</text>
+    <text x="650" y="266" text-anchor="middle" font-size="11.5" fill="#46586b">normal path: all gates, another review</text>
+    <text x="650" y="283" text-anchor="middle" font-size="11.5" font-weight="700" fill="#b3403a">max. 3 cycles, then escalation</text>
+  </svg>
+  </div>
+  <figcaption>Fig. 4 — The triage sorts findings: new things are noted, wrong things are repaired — via the normal, checked path.</figcaption>
+  </figure>
+
+  <details>
+    <summary>More details (from the SPEC)</summary>
+    <p>The final reviewer runs on <strong>Fable&nbsp;5</strong> with Read/Grep/Glob — strictly read-only, it delivers only findings. The <code>category</code> field in the findings schema is filled exclusively by this reviewer; it is the basis of the triage decision. <code>scope_gap</code> produces a follow-up report instead of a fix cycle; <code>implementation</code> findings are routed to the right lane via the <code>lane</code> field.</p>
+  </details>
+</div>
+
+<!-- ============ Phase 7 ============ -->
+<h2 id="phase7">10 · Phase 7 — Push + CI</h2>
+<div class="phase">
+  <h3><span class="phase-num">7</span> Push + CI</h3>
+  <p class="frage">"Deliver and observe."</p>
+  <ol>
+    <li>The finished branch is <strong>pushed</strong> (uploaded) to the central repository.</li>
+    <li>There, the project's <strong>CI pipeline</strong> (GitLab or GitHub) starts automatically: it builds everything again neutrally, tests, and deploys the result to the <strong>staging server</strong> (the test environment).</li>
+    <li>The ADW <strong>polls the status every 60 seconds</strong> — until everything is green, but at most for <strong>45 minutes</strong>.</li>
+    <li>If the pipeline turns <strong>red</strong>, the <strong>log analyst</strong> (AI, read-only) reads the error logs, turns them into structured findings with lane assignment — and the process jumps <strong>back to Phase&nbsp;3/4</strong>: repair, check, push again.</li>
+  </ol>
+  <div class="callout green">
+    <span class="label">Goal reached</span>
+    <strong>Pipeline green + staging deploy green → the run has finished successfully.</strong>
+  </div>
+  <details>
+    <summary>More details (from the SPEC)</summary>
+    <p>The forge (GitLab/GitHub) is detected from <code>ci.provider</code> in the config or automatically from the origin URL; polling happens via <code>glab</code> (GitLab) or <code>gh</code> (GitHub Actions). Poll interval (60&nbsp;s) and timeout (45&nbsp;min = 2700&nbsp;s) are the documented config defaults; which job counts as "staging green" is determined by <code>ci.staging_job</code> (e.g.&nbsp;<code>deploy-staging</code>). The log analyst runs on <strong>Sonnet&nbsp;5</strong>, read-only.</p>
+  </details>
+</div>
+
+<!-- ============ Sicherheitsnetze ============ -->
+<h2 id="sicherheitsnetze">11 · The safety nets (apply everywhere)</h2>
+
+<div class="table-scroll">
+<table>
+  <tr><th>Mechanism</th><th>What it means</th></tr>
+  <tr><td><strong>Limits</strong></td><td>Phase 3: max. 10 fix iterations · Phase 4: max. 10 rounds · Phase 6: max. 3 cycles · Phase 7: max. 45 min waiting</td></tr>
+  <tr><td><strong>Circuit breaker</strong></td><td>If a repair round resolves <em>nothing</em> → immediate abort instead of pointless spinning — like a fuse in the fuse box</td></tr>
+  <tr><td><strong>Escalation report</strong></td><td>Every abort produces <code>escalation.md</code>: what was achieved, what is open, why — the handover to the human</td></tr>
+  <tr><td><strong>Checkpoints</strong></td><td>After <strong>every phase transition</strong> the complete state is saved. <code>adw resume</code> continues <strong>exactly there</strong> after a crash, a pause or an exhausted AI quota — like a save point in a video game</td></tr>
+  <tr><td><strong>Structured handovers</strong></td><td>All reviewers report findings in a fixed data format (JSON). If a response cannot be parsed cleanly, it counts as an <strong>error</strong> — better to ask once too often than to wave through a false "ok"</td></tr>
+  <tr><td><strong>Permissions</strong></td><td>Every AI gets only the tools its role needs: reviewers may only read, build agents may only write in their own folder; subprocesses see only approved environment variables (no secrets)</td></tr>
+</table>
+</div>
+
+<div class="satz">
+  <span class="label">The whole thing in one sentence</span>
+  A fixed program takes a task through seven stations — describing, planning (with human approval), building, integrating, two independent reviews, delivering — and lets AI work only where judgment is needed, while every loop has a limit, every finding has a fixed way back, and every abort has a report.
+</div>
+
+<!-- ============ Technischer Anhang ============ -->
+<h2 id="anhang">12 · Technical appendix (for the curious)</h2>
+<p>This section goes beyond the beginner level and shows the original definitions from the SPEC — for looking things up, not for memorizing.</p>
+
+<details>
+  <summary>Agent registry: who runs on which model with which tools?</summary>
+  <div class="table-scroll">
+  <table>
+    <tr><th>Agent</th><th>Model</th><th>Tools</th><th>Mission</th></tr>
+    <tr><td>Spec agent</td><td>Fable 5</td><td>Read/Grep/Glob + Write (only <code>.adw/</code>)</td><td><code>.adw/spec.md</code> per template; never implements</td></tr>
+    <tr><td>Plan agent</td><td>Fable 5</td><td>Read/Grep/Glob + Write (only <code>.adw/</code>)</td><td><code>.adw/plan.md</code> (workstreams FE/BE) + <code>.adw/contract.yaml</code></td></tr>
+    <tr><td>Build agent (per lane)</td><td>Opus 4.8</td><td>Read/Write/Edit/Bash, <code>cwd</code> = lane worktree</td><td>Workstream strictly against the contract; fix plans = recommendation</td></tr>
+    <tr><td>Codex reviewer</td><td>Codex (CLI)</td><td><code>codex exec --sandbox read-only</code></td><td>Reviews of spec, plan, code; findings + <code>remediation_plan</code> as JSON</td></tr>
+    <tr><td>E2E triage</td><td>Sonnet 5</td><td>Read</td><td>Assign Playwright failures to a lane; fixes nothing</td></tr>
+    <tr><td>Log analyst</td><td>Sonnet 5</td><td>Read</td><td>CI logs → structured findings with lane assignment</td></tr>
+    <tr><td>Final reviewer</td><td>Fable 5</td><td>Read/Grep/Glob (strictly read-only)</td><td>Check implementation against the spec; findings only</td></tr>
+  </table>
+  </div>
+  <p><strong>Model economics:</strong> Fable&nbsp;5 only for spec/plan/final review (thinking, broad); Opus builds (deep); Sonnet&nbsp;5 triages (workhorse).</p>
+</details>
+
+<details>
+  <summary>The commands (CLI)</summary>
+<pre><code>adw run --repo &lt;path&gt; (--issue "text" | --gitlab-issue &lt;id&gt; | --github-issue &lt;nr&gt;)
+        [--parallel] [--dry-run] [--no-approval] [--base-branch &lt;name&gt;]
+adw resume &lt;run_id&gt; [--repo &lt;path&gt;]      # after crash or approval pause
+adw approve &lt;run_id&gt;                     # grant plan approval + continue
+adw status [&lt;run_id&gt;]                    # show runs + phase</code></pre>
+  <p><code>--dry-run</code> replaces all AI calls with prepared mock responses — the complete control flow can thus be played through and tested without token costs.</p>
+</details>
+
+<details>
+  <summary>Config in the target repo (<code>.adw/config.yaml</code>)</summary>
+<pre><code>base_branch: staging
+lanes:
+  backend:
+    gates:                     # order = execution order
+      - {name: black,  cmd: "black --check .", timeout: 120}
+      - {name: isort,  cmd: "isort --check-only .", timeout: 120}
+      - {name: pytest, cmd: "pytest -x -q", timeout: 1800}
+  frontend:                    # optional; if the lane is missing, v1 single-lane runs
+    gates:
+      - {name: eslint, cmd: "npm run lint", timeout: 300}
+e2e:                           # optional; only relevant with --parallel
+  cmd: "npx playwright test"
+  timeout: 1800
+ci:
+  poll_interval: 60
+  timeout: 2700
+  staging_job: deploy-staging
+  provider: gitlab             # optional: gitlab | github; otherwise auto-detection</code></pre>
+  <p>Missing or broken config → immediate, clear error (fail fast) — no guessing of defaults beyond the documented ones (<code>poll_interval</code>, <code>timeout</code>).</p>
+</details>
+
+<details>
+  <summary>The findings schema (JSON, identical everywhere)</summary>
+<pre><code>{
+  "verdict": "ok | needs_fixes",
+  "findings": [{
+    "severity": "P1 | P2 | P3",
+    "lane": "frontend | backend | unknown",
+    "file": "path/relative/to/repo.py",
+    "issue": "Description of the problem",
+    "remediation_plan": ["Step 1", "Step 2"],
+    "category": "scope_gap | implementation | trivial"
+  }]
+}</code></pre>
+  <p><strong>Parser contract (strict, deliberate design decision):</strong> Accepted is exclusively (a) output that is a JSON object as a whole, or (b) the content of the last <code>```json</code> fence. Anything else → <code>FindingsParseError</code> = retry/escalation case. Tolerance heuristics cannot be sealed against adversarial outputs; a parse error is safe, a false "ok" is not. Validation strictly via Pydantic (<code>extra="forbid"</code>, verdict-findings consistency, required fields except <code>category</code> — which only the final reviewer fills).</p>
+</details>
+
+<details>
+  <summary>Artifacts, state &amp; resumption</summary>
+  <ul>
+    <li><code>.adw/spec.md</code>, <code>.adw/plan.md</code>, <code>.adw/contract.yaml</code> — live in the target repo and are <strong>committed along</strong> on the feature branch (traceability).</li>
+    <li><code>.adw/runs/&lt;run_id&gt;/</code> — gitignored: <code>state.json</code> (RunState), agent transcripts, gate outputs, <code>escalation.md</code>.</li>
+    <li><strong>RunState</strong> (Pydantic): run_id, issue, phase, lanes (worktree, branch, session_id, ports, iterations), approval status, ci status. Persisted after every phase transition → <code>adw resume</code> continues exactly there.</li>
+    <li>Failed agent calls (e.g.&nbsp;plan quota exhausted) end the run in a controlled way <strong>without</strong> escalation — <code>adw resume</code> continues at the checkpoint after the reset.</li>
+  </ul>
+</details>
+
+<!-- ============ Glossar ============ -->
+<h2 id="glossar">13 · Glossary</h2>
+<dl class="glossar">
+  <dt>Issue</dt><dd>The task description everything starts with — e.g. "Add a search feature". Arrives as text or from GitLab/GitHub.</dd>
+  <dt>Orchestrator</dt><dd>The fixed program that controls the entire process — the "site manager". Decides who acts when, but builds nothing itself.</dd>
+  <dt>Agent</dt><dd>An AI with a clearly defined mission and limited tools (e.g. Spec agent, Build agent).</dd>
+  <dt>Spec (specification)</dt><dd>The document that records <em>what</em> should be built — including what is explicitly not in scope.</dd>
+  <dt>Contract</dt><dd>The binding "power-socket standard": defines how the separately built parts (frontend/backend) must fit together exactly.</dd>
+  <dt>Lane</dt><dd>An independent work track with its own folder (Git worktree), its own AI session and its own ports — lanes don't interfere with each other.</dd>
+  <dt>Git worktree</dt><dd>An additional, independent working folder of the same project — each lane works in its own.</dd>
+  <dt>Gate</dt><dd>An automated checking station (formatting, style, tests) that code must pass — always the same, without AI.</dd>
+  <dt>Session / session resume</dt><dd>The "session" of an AI with its memory. Resume = continuing the same session instead of starting from zero.</dd>
+  <dt>E2E (end-to-end)</dt><dd>Test of the complete application from the user's perspective — a robot (Playwright) clicks through the app.</dd>
+  <dt>Triage</dt><dd>The sorting of findings: what is it, who is responsible, what happens with it? (Like in an emergency room.)</dd>
+  <dt>Finding</dt><dd>A single, structurally reported defect from a reviewer — with severity (P1 critical … P3 minor), location and repair suggestion.</dd>
+  <dt>Push</dt><dd>Uploading the finished code to the central repository (GitLab/GitHub).</dd>
+  <dt>CI / pipeline</dt><dd>"Continuous Integration": the automatic checking and delivery line of the central repository.</dd>
+  <dt>Staging</dt><dd>The test environment — a copy of the real application where the result lands first.</dd>
+  <dt>Circuit breaker</dt><dd>The "fuse": if a repair round achieves nothing at all, the run is aborted immediately instead of kept spinning.</dd>
+  <dt>Escalation</dt><dd>The controlled abort with a report (<code>escalation.md</code>): what was achieved, what is open, why — handover to the human.</dd>
+  <dt>Dry run</dt><dd>A trial run in which all AI calls are replaced by prepared responses — the process can be tested without costs.</dd>
+</dl>
+
+<a class="top-link" href="#tldr">↑ Back to top</a>
+
+</div>
+</body>
+</html>
