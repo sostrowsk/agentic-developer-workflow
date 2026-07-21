@@ -1,4 +1,4 @@
-"""GitHub-Actions-Monitoring: gh-Polling analog zum GitLab-Modul (adw/ci.py)."""
+"""GitHub Actions monitoring: gh polling analogous to the GitLab module (adw/ci.py)."""
 
 import json
 
@@ -10,7 +10,7 @@ from adw.github import poll_ci
 
 
 class FakeGh:
-    """Skriptbare gh-Antworten pro Aufruf-Sequenz + Aufzeichnung."""
+    """Scriptable gh responses per call sequence + recording."""
 
     def __init__(self, responses):
         self.responses = list(responses)

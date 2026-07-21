@@ -45,7 +45,7 @@ def test_last_of_multiple_json_fences_wins():
 
 
 def test_prose_around_bare_json_is_rejected():
-    """Kontrakt: nacktes JSON mit Prosa drumherum ist kein gültiger Reviewer-Output."""
+    """Contract: bare JSON surrounded by prose is not valid reviewer output."""
     with pytest.raises(FindingsParseError):
         extract_review_result('Analyse: {"verdict": "ok", "findings": []} — fertig!')
 
@@ -74,7 +74,7 @@ def test_fence_with_non_object_body_is_rejected():
 
 
 def test_unclosed_fence_is_rejected():
-    """Kontrakt: Fence ohne schließendes ``` = abgeschnittene Antwort, auch bei validem JSON."""
+    """Contract: a fence without a closing ``` = truncated answer, even with valid JSON."""
     with pytest.raises(FindingsParseError):
         extract_review_result('```json\n{"verdict": "ok", "findings": []}')
 
@@ -89,7 +89,7 @@ def test_unclosed_fence_after_closed_fence_is_rejected():
 
 
 def test_json_fence_inside_outer_backtick_fence_is_not_authoritative():
-    """Kontrakt: ```json in einem äußeren ````-Fence ist Beispiel-Content, kein Ergebnis."""
+    """Contract: ```json inside an outer ```` fence is example content, not a result."""
     text = '````markdown\n```json\n{"verdict": "ok", "findings": []}\n```\n````\n'
     with pytest.raises(FindingsParseError):
         extract_review_result(text)
@@ -102,27 +102,27 @@ def test_json_fence_inside_tilde_fence_is_not_authoritative():
 
 
 def test_fence_line_with_info_string_does_not_close_json_fence():
-    """Kontrakt: ```python schließt keinen offenen ```json-Fence — Fence bleibt unclosed."""
+    """Contract: ```python does not close an open ```json fence — the fence stays unclosed."""
     text = '```json\n{"verdict": "ok", "findings": []}\n```python'
     with pytest.raises(FindingsParseError):
         extract_review_result(text)
 
 
 def test_json_fence_indented_up_to_three_spaces_is_recognized():
-    """CommonMark: bis zu 3 Leerzeichen Einrückung sind für Fences erlaubt (z. B. in Listen)."""
+    """CommonMark: up to 3 spaces of indentation are allowed for fences (e.g. in lists)."""
     text = '  ```json\n  {"verdict": "ok", "findings": []}\n  ```\n'
     assert extract_review_result(text).verdict == "ok"
 
 
 def test_backtick_opener_with_tilde_info_swallows_nested_json_fence():
-    """CommonMark: ```~~~ ist ein Backtick-Opener mit Info '~~~' — Inhalt ist nie autoritativ."""
+    """CommonMark: ```~~~ is a backtick opener with info '~~~' — content is never authoritative."""
     text = '```~~~\n```json\n{"verdict": "ok", "findings": []}\n```\n'
     with pytest.raises(FindingsParseError):
         extract_review_result(text)
 
 
 def test_tilde_opener_with_backtick_info_is_linear_and_not_authoritative():
-    """CommonMark: ~~~-Info darf Backticks enthalten; Scan bleibt linear, Inhalt Beispiel."""
+    """CommonMark: ~~~ info may contain backticks; scan stays linear, content is example."""
     text = "~" * 100_000 + " `x\n" + '```json\n{"verdict": "ok", "findings": []}\n```\n~~~\n'
     started = time.monotonic()
     with pytest.raises(FindingsParseError):
@@ -131,13 +131,13 @@ def test_tilde_opener_with_backtick_info_is_linear_and_not_authoritative():
 
 
 def test_crlf_fenced_review_is_parsed():
-    """Windows-Zeilenenden dürfen einen validen Fence nicht unlesbar machen."""
+    """Windows line endings must not make a valid fence unreadable."""
     text = '```json\r\n{"verdict": "ok", "findings": []}\r\n```\r\n'
     assert extract_review_result(text).verdict == "ok"
 
 
 def test_trailing_unclosed_foreign_fence_fails_closed():
-    """Kontrakt: JEDER unclosed Fence am Ende = abgeschnittene Antwort, kein Stale-Draft."""
+    """Contract: ANY unclosed fence at the end = truncated answer, no stale draft."""
     text = (
         '```json\n{"verdict": "ok", "findings": []}\n```\n'
         "Weiter im Text:\n```python\nprint('abgeschnitten"
@@ -147,7 +147,7 @@ def test_trailing_unclosed_foreign_fence_fails_closed():
 
 
 def test_unicode_line_separator_in_string_survives_fence_parsing():
-    """U+2028 ist in JSON-Strings erlaubt und darf nicht als Zeilenumbruch zerschnitten werden."""
+    """U+2028 is allowed in JSON strings and must not be cut apart as a line break."""
     text = (
         '```json\n{"verdict": "needs_fixes", "findings": [{"severity": "P2", '
         '"lane": "backend", "file": "x.py", "issue": "Zeile1 Zeile2", '
@@ -157,21 +157,21 @@ def test_unicode_line_separator_in_string_survives_fence_parsing():
 
 
 def test_outer_fence_with_spaced_info_string_is_recognized():
-    """Kontrakt: ```markdown title=x ist ein Fence-Opener — sein ```json-Inhalt ist Beispiel."""
+    """Contract: ```markdown title=x is a fence opener — its ```json content is example."""
     text = '```markdown title=x\n```json\n{"verdict": "ok", "findings": []}\n```\n```\n'
     with pytest.raises(FindingsParseError):
         extract_review_result(text)
 
 
 def test_tilde_json_fence_is_not_authoritative():
-    """Kontrakt: nur Backtick-```json ist autoritativ, ~~~json nicht."""
+    """Contract: only backtick ```json is authoritative, ~~~json is not."""
     text = '~~~json\n{"verdict": "ok", "findings": []}\n~~~\n'
     with pytest.raises(FindingsParseError):
         extract_review_result(text)
 
 
 def test_backtick_line_with_many_spaces_is_prose_in_linear_time():
-    """Regression: ``` + Leerzeichenflut + ` darf kein Regex-Backtracking auslösen."""
+    """Regression: ``` + a flood of spaces + ` must not trigger regex backtracking."""
     text = "```" + " " * 3000 + "`\n" + '{"verdict": "ok", "findings": []}'
     started = time.monotonic()
     with pytest.raises(FindingsParseError):
@@ -180,7 +180,8 @@ def test_backtick_line_with_many_spaces_is_prose_in_linear_time():
 
 
 def test_integers_are_bounded_independent_of_interpreter_limit():
-    """Regression: Integer-Grenze gilt per parse_int-Hook, nicht nur via Python-Digit-Limit."""
+    """Regression: the integer bound applies via the parse_int hook, not only via
+    Python's digit limit."""
     text = '{"verdict": "ok", "findings": [], "n": ' + "9" * 200 + "}"
     with pytest.raises(FindingsParseError):
         extract_review_result(text)
@@ -269,8 +270,8 @@ def test_unrecognized_lane_label_normalizes_to_unknown():
 
 @pytest.mark.parametrize("bad_lane", ["null", "3", "[]", "{}", "true"])
 def test_non_string_lane_raises_validation_error(bad_lane):
-    """Regression (Codex P2): nur unbekannte String-Labels werden normalisiert —
-    Nicht-String-Werte bleiben Schema-Verletzung."""
+    """Regression (Codex P2): only unknown string labels are normalized —
+    non-string values remain a schema violation."""
     raw = VALID.replace('"lane": "backend"', f'"lane": {bad_lane}')
     with pytest.raises(ValidationError):
         extract_review_result(raw)

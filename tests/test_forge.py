@@ -1,4 +1,4 @@
-"""Forge-Erkennung: Ist das Ziel-Repo ein GitLab- oder GitHub-Projekt?"""
+"""Forge detection: is the target repo a GitLab or GitHub project?"""
 
 import pytest
 

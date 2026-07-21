@@ -1,4 +1,4 @@
-"""Lane-Isolation: Git-Worktrees unter .adw/runs/<run_id>/trees/<lane> + Ports."""
+"""Lane isolation: Git Worktrees under .adw/runs/<run_id>/trees/<lane> + ports."""
 
 import shlex
 import socket
@@ -14,11 +14,11 @@ _GIT_TIMEOUT = 60
 
 
 class WorktreeError(Exception):
-    """Git-Worktree-Operation fehlgeschlagen."""
+    """Git Worktree operation failed."""
 
 
 def _git(repo: Path, *args: str) -> str:
-    """Git-Query mit parsebarem stdout — nur für Kommandos OHNE Hook-Ausführung."""
+    """Git query with parseable stdout — only for commands WITHOUT hook execution."""
     try:
         result = subprocess.run(
             # Repo-Hooks deaktiviert: worktree add/remove führt sonst
@@ -38,9 +38,9 @@ def _git(repo: Path, *args: str) -> str:
 
 
 def _git_effect(repo: Path, *args: str) -> None:
-    """Git-Kommando mit Seiteneffekt (kann Hooks ausführen) — Output nur als
-    RAM-bounded Tail für die Fehlermeldung, eine laute Hook kann den
-    Orchestrator nicht fluten."""
+    """Git command with side effect (may execute hooks) — output only as a
+    RAM-bounded tail for the error message, a noisy hook cannot flood the
+    orchestrator."""
     quoted = " ".join(
         shlex.quote(a) for a in ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", *args]
     )
@@ -51,7 +51,7 @@ def _git_effect(repo: Path, *args: str) -> None:
 
 
 def ensure_runs_gitignored(repo: Path) -> None:
-    """Selbst-ignorierendes .gitignore — Run-Artefakte tauchen nie in git status auf."""
+    """Self-ignoring .gitignore — run artifacts never show up in git status."""
     runs_dir = repo / RUNS_RELPATH
     runs_dir.mkdir(parents=True, exist_ok=True)
     gitignore = runs_dir / ".gitignore"
@@ -72,7 +72,7 @@ def lane_branch(run_id: str, lane: str) -> str:
 
 
 def create_lane_worktree(repo: Path, run_id: str, lane: str, base_branch: str) -> Path:
-    """Worktree auf eigenem Lane-Branch ab base_branch; idempotent."""
+    """Worktree on its own Lane branch from base_branch; idempotent."""
     repo = repo.resolve()  # relative Pfade + `git -C` + cwd vertragen sich nicht
     ensure_runs_gitignored(repo)
     path = lane_worktree_path(repo, run_id, lane)
@@ -169,7 +169,7 @@ _PORT_RANGE = 50
 
 
 def ports_for(run_id: str, lane: str) -> dict[str, int]:
-    """Deterministischer Port aus run_id + Lane, mit Bind-Check-Ausweichen."""
+    """Deterministic port from run_id + Lane, with bind-check fallback."""
     base = _LANE_PORT_BASE.get(lane, 9300)
     offset = int(run_id, 16) % _PORT_RANGE
     for attempt in range(_PORT_RANGE):

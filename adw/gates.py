@@ -1,4 +1,4 @@
-"""Deterministische Gates: Lint/Test/E2E-Kommandos mit echten Timeouts."""
+"""Deterministic Gates: lint/test/E2E commands with real timeouts."""
 
 import collections
 import contextlib
@@ -31,9 +31,9 @@ class GateReport:
 
 
 class _LineTail:
-    """Zeilenbasierter Rolling-Tail: exakt die letzten MAX_OUTPUT_LINES Zeilen,
-    jede auf _MAX_LINE_BYTES gekappt — RAM-bounded unabhängig von Zeilenlänge
-    und Gesamtvolumen."""
+    """Line-based rolling tail: exactly the last MAX_OUTPUT_LINES lines,
+    each capped at _MAX_LINE_BYTES — RAM-bounded regardless of line length
+    and total volume."""
 
     def __init__(self) -> None:
         self.lines: collections.deque[bytes] = collections.deque(maxlen=MAX_OUTPUT_LINES)
@@ -56,10 +56,10 @@ def run_gates(
     cwd: Path,
     extra_env: dict[str, str] | None = None,
 ) -> GateReport:
-    """Führt Gates der Reihe nach aus, stoppt beim ersten Fail (fail fast).
+    """Runs Gates in order, stops at the first fail (fail fast).
 
-    Jeder Aufruf läuft mit Env-Whitelist und dem in der Config verlangten
-    Timeout — es gibt keinen Gate-Lauf ohne Zeitlimit.
+    Every invocation runs with the env whitelist and the timeout required
+    by the config — there is no Gate run without a time limit.
     """
     env = safe_env(extra_env)
     for gate in gates:

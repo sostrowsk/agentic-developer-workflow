@@ -1,4 +1,4 @@
-"""GitLab-CI-Monitoring: reines glab-Polling (Code, 0 Tokens) bis Staging grün."""
+"""GitLab CI monitoring: pure glab polling (code, 0 tokens) until staging is green."""
 
 import json
 import subprocess
@@ -19,11 +19,11 @@ RunGlab = Callable[[list[str], Path], str]
 
 
 class CiError(Exception):
-    """glab-Aufruf oder -Output ist kaputt."""
+    """glab invocation or output is broken."""
 
 
 class CiTimeoutError(CiError):
-    """Pipeline wurde innerhalb des Budgets nicht fertig — Eskalation."""
+    """Pipeline did not finish within the budget — escalation."""
 
 
 @dataclass(frozen=True)
@@ -34,7 +34,7 @@ class CiResult:
 
 
 def run_glab(argv: list[str], cwd: Path) -> str:
-    """Echter glab-Aufruf — in Tests durch FakeGlab ersetzt."""
+    """Real glab invocation — replaced by FakeGlab in tests."""
     try:
         result = subprocess.run(
             ["glab", *argv],
@@ -61,15 +61,15 @@ def poll_pipeline(
     sleep: Callable[[float], None] = time.sleep,
     sha: str | None = None,
 ) -> CiResult:
-    """Pollt die neueste Pipeline des Branches bis zum finalen Status.
+    """Polls the branch's latest pipeline until it reaches a final status.
 
-    Erfolg heißt: Pipeline `success` UND (falls konfiguriert) der
-    Staging-Job ist grün. Bei Rot kommen die Logs der fehlgeschlagenen
-    Jobs als Excerpt mit — Futter für den Log-Analyst.
+    Success means: pipeline `success` AND (if configured) the
+    staging job is green. On red, the logs of the failed
+    jobs come along as an excerpt — food for the log analyst.
 
-    ``sha`` bindet den Poll an einen konkreten Push: direkt nach einem
-    Re-Entry-Push kann GitLab noch die terminale Pipeline des VORHERIGEN
-    Push liefern — die darf das frische Ergebnis nicht bewerten.
+    ``sha`` binds the poll to a specific push: right after a
+    re-entry push, GitLab may still deliver the terminal pipeline of the
+    PREVIOUS push — which must not judge the fresh result.
     """
     # Budget als Restzeit führen und den Sleep darauf kappen — sonst schläft
     # ein 61s-Budget bei 60s-Intervall bis 120s.
@@ -135,7 +135,7 @@ def _evaluate(repo: Path, pipeline: dict, cfg: CiConfig, run_glab: RunGlab) -> C
 
 
 def fetch_failed_job_logs(repo: Path, pipeline_id: int, run_glab: RunGlab = run_glab) -> str:
-    """Logs aller fehlgeschlagenen Jobs einer Pipeline — Futter für den Log-Analyst."""
+    """Logs of all failed jobs of a pipeline — food for the log analyst."""
     jobs = _jobs(repo, pipeline_id, run_glab)
     failed = [job for job in jobs if job.get("status") == "failed"]
     return _logs_for(repo, failed, run_glab)

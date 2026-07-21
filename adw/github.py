@@ -1,11 +1,11 @@
-"""GitHub-Actions-Monitoring: reines gh-Polling (Code, 0 Tokens) — das
-GitHub-Gegenstück zu adw/ci.py (GitLab). Gleiche Fehlerklassen (CiError,
-CiTimeoutError) und gleiches Ergebnis (CiResult), damit Phase 7 beide
-Forges über einen Codepfad behandeln kann.
+"""GitHub Actions monitoring: pure gh polling (code, 0 tokens) — the
+GitHub counterpart to adw/ci.py (GitLab). Same error classes (CiError,
+CiTimeoutError) and same result (CiResult), so that phase 7 can handle both
+forges through one code path.
 
-Abweichung zum GitLab-Modell: Ein Push kann MEHRERE Workflow-Runs starten
-(ein Run je Workflow-Datei). "Grün" heißt deshalb: alle Runs zur SHA sind
-completed und keiner davon rot.
+Deviation from the GitLab model: a push can start MULTIPLE workflow runs
+(one run per workflow file). "Green" therefore means: all runs for the SHA are
+completed and none of them is red.
 """
 
 import json
@@ -32,8 +32,8 @@ _GH_TIMEOUT = 120
 
 
 def run_gh(argv: list[str], cwd: Path) -> str:
-    """Echter gh-Aufruf — in Tests durch FakeGh ersetzt. Gleiche gehärtete
-    Subprocess-Mechanik wie run_glab (Timeout, safe_env, klare Fehlertexte)."""
+    """Real gh invocation — replaced by FakeGh in tests. Same hardened
+    subprocess mechanics as run_glab (timeout, safe_env, clear error texts)."""
     try:
         result = subprocess.run(
             ["gh", *argv],
@@ -60,11 +60,11 @@ def poll_ci(
     sleep: Callable[[float], None] = time.sleep,
     sha: str | None = None,
 ) -> CiResult:
-    """Pollt alle Workflow-Runs des Pushes bis zum finalen Status.
+    """Polls all workflow runs of the push until they reach a final status.
 
-    ``sha`` bindet den Poll an einen konkreten Push (head_sha-Filter der
-    Actions-API) — die Runs eines früheren Pushes oder fremder Commits
-    können das Ergebnis weder bewerten noch verdecken.
+    ``sha`` binds the poll to a specific push (head_sha filter of the
+    Actions API) — the runs of an earlier push or foreign commits
+    can neither judge nor obscure the result.
     """
     remaining = float(cfg.timeout)
     while True:
@@ -130,7 +130,7 @@ def _jobs(repo: Path, run_id: int | None, run_gh: RunGh) -> list[dict]:
 
 
 def _failed_logs(repo: Path, runs: list[dict], run_gh: RunGh) -> str:
-    """`gh run view --log-failed` je rotem Run — Futter für den Log-Analyst."""
+    """`gh run view --log-failed` per red run — food for the log analyst."""
     excerpts = []
     for run in runs:
         raw = run_gh(["run", "view", str(run.get("id")), "--log-failed"], repo)

@@ -1,4 +1,4 @@
-"""Env-Whitelist für alle Subprozesse — kein Secret-Leakage in Gates/Agents."""
+"""Env whitelist for all subprocesses — no secret leakage into Gates/Agents."""
 
 import os
 
@@ -28,7 +28,7 @@ _ALLOWED_PREFIXES = ("LC_",)
 
 
 def safe_env(extra: dict[str, str] | None = None) -> dict[str, str]:
-    """Gefilterte Umgebung: Whitelist + explizit übergebene Zusatzvariablen."""
+    """Filtered environment: whitelist + explicitly passed extra variables."""
     env = {
         key: value
         for key, value in os.environ.items()

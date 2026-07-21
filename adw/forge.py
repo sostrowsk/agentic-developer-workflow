@@ -1,11 +1,11 @@
-"""Forge-Erkennung: GitLab- oder GitHub-Projekt?
+"""Forge detection: GitLab or GitHub project?
 
-Explizite Config (`ci.provider`) gewinnt immer. Ohne Override wird der
-Hostname der origin-Remote-URL geprüft — nur die EINDEUTIGEN Fälle
-("github" bzw. "gitlab" im Hostnamen, deckt gitlab.com/github.com und
-Self-Hosted-Instanzen mit sprechendem Hostnamen ab) werden erkannt.
-Alles andere ist fail fast: lieber eine klare Rückfrage nach
-`ci.provider` als ein Poll gegen die falsche API.
+Explicit config (`ci.provider`) always wins. Without an override, the
+hostname of the origin remote URL is checked — only the UNAMBIGUOUS cases
+("github" or "gitlab" in the hostname, covering gitlab.com/github.com and
+self-hosted instances with a descriptive hostname) are recognized.
+Everything else is fail fast: better a clear request for
+`ci.provider` than a poll against the wrong API.
 """
 
 import re
@@ -21,7 +21,7 @@ _GIT_TIMEOUT = 30
 
 
 class ForgeError(Exception):
-    """Hosting nicht bestimmbar — ci.provider in .adw/config.yaml setzen."""
+    """Hosting cannot be determined — set ci.provider in .adw/config.yaml."""
 
 
 def detect_forge(repo: Path, override: Forge | None) -> Forge:
@@ -72,7 +72,7 @@ def _origin_url(repo: Path) -> str | None:
 
 
 def _hostname(url: str) -> str:
-    """Hostname aus https-, ssh- und scp-artigen Git-URLs ziehen."""
+    """Extract the hostname from https-, ssh- and scp-style Git URLs."""
     match = re.match(r"^[a-z+]+://(?:[^/@]+@)?([^/:]+)", url)  # https://, ssh://
     if match:
         return match.group(1).lower()

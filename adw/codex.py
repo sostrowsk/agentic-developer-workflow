@@ -1,16 +1,16 @@
-"""Codex-Reviewer: unabhängiges Review via `codex exec` (read-only Sandbox).
+"""Codex reviewer: independent review via `codex exec` (read-only sandbox).
 
 Known Limitations:
-- Die read-only-Sandbox der Codex-CLI verhindert Mutationen, aber keine Reads
-  außerhalb des cwd. Ein Review-Input mit Prompt-Injection könnte den Reviewer
-  also Dateien lesen lassen — dasselbe Risiko wie bei jedem manuellen
-  `codex review`. Mitigiert: kein Secret-Env (safe_env), keine
-  user-konfigurierten MCP-Server (isoliertes CODEX_HOME nur mit auth.json).
-- Der Token-Rücksync ist CAS + flock über Check+Write, hält den Lock aber
-  bewusst NICHT über die gesamte Review-Ausführung (das würde alle parallelen
-  Reviews auf Minuten serialisieren). Rotieren zwei Prozesse gleichzeitig,
-  kann im Extremfall ein frisches Token verworfen werden — selten und
-  recoverbar (einmalig `codex login`).
+- The read-only sandbox of the Codex CLI prevents mutations, but not reads
+  outside the cwd. A review input with prompt injection could therefore make
+  the reviewer read files — the same risk as with any manual
+  `codex review`. Mitigated: no secret env (safe_env), no
+  user-configured MCP servers (isolated CODEX_HOME with auth.json only).
+- The token back-sync is CAS + flock over check+write, but deliberately does
+  NOT hold the lock across the entire review execution (that would serialize
+  all parallel reviews for minutes). If two processes rotate simultaneously,
+  a fresh token may be discarded in the extreme case — rare and
+  recoverable (one-time `codex login`).
 """
 
 import collections
@@ -35,17 +35,17 @@ ReviewKind = Literal["spec", "plan", "code"]
 
 _KIND_INSTRUCTIONS: dict[ReviewKind, str] = {
     "spec": (
-        "Reviewe die Spezifikation kritisch: Ist das Ziel klar, der Scope "
-        "vollständig, sind Akzeptanzkriterien testbar, fehlen Randfälle?"
+        "Review the specification critically: Is the goal clear, the scope "
+        "complete, are the acceptance criteria testable, are edge cases missing?"
     ),
     "plan": (
-        "Reviewe Implementierungsplan UND Schnittstellen-Kontrakt gemeinsam: "
-        "Sind die Workstreams konsistent zum Kontrakt, ist der Kontrakt "
-        "vollständig genug, dass beide Lanes unabhängig bauen können?"
+        "Review the implementation plan AND the interface contract together: "
+        "Are the Workstreams consistent with the contract, is the contract "
+        "complete enough for both Lanes to build independently?"
     ),
     "code": (
-        "Reviewe die Code-Änderungen auf Korrektheit, stille Datenverluste, "
-        "Concurrency-Probleme und Abweichungen von Spec/Plan/Kontrakt."
+        "Review the code changes for correctness, silent data loss, "
+        "concurrency problems and deviations from spec/plan/contract."
     ),
 }
 
@@ -53,7 +53,7 @@ _SCHEMA_INSTRUCTION = SCHEMA_INSTRUCTION
 
 
 class CodexError(Exception):
-    """codex exec ist fehlgeschlagen (Exit-Code, Timeout, nicht installiert)."""
+    """codex exec failed (exit code, timeout, not installed)."""
 
 
 class CodexReviewer(Protocol):
@@ -78,10 +78,10 @@ def _pump(stream, tail: collections.deque) -> None:
 
 
 def _isolated_codex_home() -> tuple[Path, Path, bytes | None]:
-    """Frisches CODEX_HOME nur mit auth.json aus dem echten Home ($CODEX_HOME
-    oder ~/.codex) — Konfiguration (inkl. MCP-Registrierungen) bleibt draußen.
-    Liefert zusätzlich den Original-Snapshot der auth.json für die
-    Konflikt-Erkennung beim Rücksync."""
+    """Fresh CODEX_HOME with only auth.json from the real home ($CODEX_HOME
+    or ~/.codex) — configuration (incl. MCP registrations) stays out.
+    Additionally returns the original snapshot of auth.json for
+    conflict detection during the back-sync."""
     source = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex").resolve()
     isolated = Path(tempfile.mkdtemp(prefix="adw-codex-home-"))
     original: bytes | None = None
@@ -98,13 +98,13 @@ def _isolated_codex_home() -> tuple[Path, Path, bytes | None]:
 
 
 def _sync_rotated_auth(isolated: Path, source: Path, original: bytes | None) -> bool:
-    """codex kann auth.json refreshen — Rotation atomar ins echte Home spiegeln.
+    """codex may refresh auth.json — mirror the rotation atomically into the real home.
 
-    Compare-and-swap-Semantik: Geschrieben wird nur, wenn die Quelle noch dem
-    Original-Snapshot entspricht. Hat ein PARALLELER Prozess die Quelle bereits
-    rotiert, gewinnt die Quelle (unsere Kopie wäre die veraltete). Rückgabe
-    False nur, wenn ein nötiger Sync fehlschlug — der Aufrufer behält dann die
-    Token-Kopie."""
+    Compare-and-swap semantics: writing happens only if the source still matches
+    the original snapshot. If a PARALLEL process has already rotated the source,
+    the source wins (our copy would be the stale one). Returns
+    False only if a required sync failed — the caller then keeps the
+    token copy."""
     rotated = isolated / "auth.json"
     if not rotated.is_file():
         return True
@@ -140,7 +140,7 @@ def _sync_rotated_auth(isolated: Path, source: Path, original: bytes | None) -> 
 
 
 class CodexRunner:
-    """Ruft die Codex-CLI als read-only Subprocess auf und parst strikt."""
+    """Invokes the Codex CLI as a read-only subprocess and parses strictly."""
 
     def review(self, kind: ReviewKind, content_refs: list[str], cwd: Path) -> ReviewResult:
         prompt = self._build_prompt(kind, content_refs)
@@ -224,7 +224,7 @@ class CodexRunner:
     def _build_prompt(kind: ReviewKind, content_refs: list[str]) -> str:
         refs = "\n".join(f"- {ref}" for ref in content_refs)
         return (
-            f"Du bist unabhängiger Reviewer in einem Agentic Developer Workflow "
-            f"(Review-Art: {kind}).\n{_KIND_INSTRUCTIONS[kind]}\n\n"
-            f"Zu reviewen:\n{refs}\n\n{_SCHEMA_INSTRUCTION}"
+            f"You are an independent reviewer in an Agentic Developer Workflow "
+            f"(review kind: {kind}).\n{_KIND_INSTRUCTIONS[kind]}\n\n"
+            f"To review:\n{refs}\n\n{_SCHEMA_INSTRUCTION}"
         )

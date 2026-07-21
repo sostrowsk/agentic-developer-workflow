@@ -159,7 +159,7 @@ def test_failing_gate_leaves_no_background_descendants(tmp_path):
 
 
 def test_all_last_200_lines_survive_even_with_large_lines(tmp_path):
-    """Regression: 200 × 1-KB-Zeilen sind >128 KiB — der Tail muss zeilenbasiert sein."""
+    """Regression: 200 × 1-KB lines are >128 KiB — the tail must be line-based."""
     awk = 'awk \'BEGIN{s=sprintf("%01000d",0);for(i=1;i<=500;i++)print i" "s;exit 1}\''
     report = run_gates([gate("big", awk)], cwd=tmp_path)
     output = report.failures[0].output
@@ -170,7 +170,7 @@ def test_all_last_200_lines_survive_even_with_large_lines(tmp_path):
 
 
 def test_single_giant_line_yields_one_capped_tail_entry(tmp_path):
-    """Regression: eine newline-freie Riesenzeile darf nicht zu vielen Tail-Zeilen werden."""
+    """Regression: a newline-free giant line must not turn into many tail lines."""
     cmd = "sh -c 'yes x | tr -d \"\\n\" | head -c 1000000; echo; echo END; exit 1'"
     report = run_gates([gate("giant", cmd)], cwd=tmp_path)
     output = report.failures[0].output

@@ -1,4 +1,4 @@
-"""RunState: persistierter Zustand eines ADW-Runs — Grundlage für Resume."""
+"""RunState: persisted state of an ADW run — the foundation for resume."""
 
 import contextlib
 import fcntl
@@ -30,7 +30,7 @@ Phase = Literal[
 
 
 class StateNotFoundError(Exception):
-    """Kein (lesbarer) State für diese run_id."""
+    """No (readable) state for this run_id."""
 
 
 class LaneState(BaseModel):
@@ -115,11 +115,11 @@ class RunState(BaseModel):
         return repo / RUNS_RELPATH / self.run_id
 
     def save(self, repo: Path) -> None:
-        """Vollen Snapshot atomar speichern (tmp + rename, repo-weiter flock).
+        """Save a full snapshot atomically (tmp + rename, repo-wide flock).
 
-        Für konkurrierende Mutationen desselben Runs (parallele Lanes)
-        stattdessen :meth:`update` benutzen — save() überschreibt den ganzen
-        Snapshot und würde fremde Zwischenstände verlieren.
+        For concurrent mutations of the same run (parallel Lanes) use
+        :meth:`update` instead — save() overwrites the whole
+        snapshot and would lose foreign intermediate states.
         """
         with _repo_lock(repo) as seq_fh:
             self.seq = _next_seq_locked(seq_fh, repo / RUNS_RELPATH)
@@ -127,10 +127,10 @@ class RunState(BaseModel):
 
     @classmethod
     def update(cls, repo: Path, run_id: str, mutate) -> "RunState":
-        """Load → mutate → write als EINE Transaktion unter dem Repo-Lock.
+        """Load → mutate → write as ONE transaction under the repo lock.
 
-        Der einzige verlustfreie Weg, einen Run aus mehreren Threads/Prozessen
-        zu verändern (z. B. Lane-Zähler in parallelen Build-Lanes).
+        The only loss-free way to modify a run from multiple threads/processes
+        (e.g. Lane counters in parallel build Lanes).
         """
         with _repo_lock(repo) as seq_fh:
             state = cls.load(repo, run_id)
@@ -188,7 +188,7 @@ class RunState(BaseModel):
 
 @contextlib.contextmanager
 def _repo_lock(repo: Path):
-    """Exklusiver flock auf .adw/runs/.seq — serialisiert alle State-Writes."""
+    """Exclusive flock on .adw/runs/.seq — serializes all state writes."""
     runs_dir = repo / RUNS_RELPATH
     runs_dir.mkdir(parents=True, exist_ok=True)
     with open(runs_dir / ".seq", "a+", encoding="utf-8") as seq_fh:
@@ -197,10 +197,10 @@ def _repo_lock(repo: Path):
 
 
 def _next_seq_locked(seq_fh, runs_dir: Path) -> int:
-    """Nächste monotone Sequenz — Aufrufer hält den flock auf .seq.
+    """Next monotonic sequence — the caller holds the flock on .seq.
 
-    Ist .seq leer/korrupt (z. B. Crash zwischen truncate und flush), wird die
-    Sequenz aus den persistierten States rekonstruiert statt auf 0 zu fallen.
+    If .seq is empty/corrupt (e.g. crash between truncate and flush), the
+    sequence is reconstructed from the persisted states instead of falling to 0.
     """
     seq_fh.seek(0)
     raw = seq_fh.read().strip()

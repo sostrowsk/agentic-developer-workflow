@@ -1,4 +1,4 @@
-"""Ziel-Repo-Konfiguration: .adw/config.yaml — fail fast bei jedem Fehler."""
+"""Target-repo configuration: .adw/config.yaml — fail fast on any error."""
 
 from pathlib import Path
 from typing import Annotated, Literal
@@ -12,7 +12,7 @@ PositiveSeconds = Annotated[int, Field(gt=0, strict=True)]
 
 
 class _StrictLoader(yaml.SafeLoader):
-    """SafeLoader, der doppelte Mapping-Keys ablehnt statt still zu überschreiben."""
+    """SafeLoader that rejects duplicate mapping keys instead of silently overwriting them."""
 
 
 def _construct_mapping_rejecting_duplicates(loader: _StrictLoader, node, deep=False):
@@ -48,7 +48,7 @@ LaneName = Literal["backend", "frontend"]
 
 
 class ConfigError(Exception):
-    """Config fehlt oder ist ungültig — der Run darf gar nicht erst starten."""
+    """Config is missing or invalid — the run must not even start."""
 
 
 class Gate(BaseModel):

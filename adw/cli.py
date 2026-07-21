@@ -1,7 +1,7 @@
-"""adw-CLI (typer): run / resume / approve / status — SPEC §5.
+"""adw CLI (typer): run / resume / approve / status — SPEC §5.
 
-Exit-Codes: 0 = done, 2 = awaiting_approval (Plan-Approval-Pause),
-1 = Eskalation oder Fehler.
+Exit codes: 0 = done, 2 = awaiting_approval (plan-approval pause),
+1 = escalation or error.
 """
 
 import json
@@ -68,7 +68,7 @@ def run(
         typer.Option("--base-branch", help="Base-Branch-Override gegenüber .adw/config.yaml"),
     ] = None,
 ) -> None:
-    """Einen neuen Run durch alle sieben Phasen starten."""
+    """Start a new run through all seven phases."""
     sources = [s for s in (issue, gitlab_issue, github_issue) if s is not None]
     if len(sources) != 1:
         raise _fail("genau EINE Issue-Quelle angeben: --issue, --gitlab-issue ODER --github-issue")
@@ -102,7 +102,7 @@ def resume(
     repo: Annotated[Path, typer.Option("--repo")] = Path("."),
     base_branch: Annotated[str | None, typer.Option("--base-branch")] = None,
 ) -> None:
-    """Einen Run nach Crash oder Approval-Pause in derselben Phase fortsetzen."""
+    """Continue a run in the same phase after a crash or approval pause."""
     repo = repo.resolve()
     state = _load_state(repo, run_id)
     if state.phase == "escalated":
@@ -122,7 +122,7 @@ def approve(
     repo: Annotated[Path, typer.Option("--repo")] = Path("."),
     base_branch: Annotated[str | None, typer.Option("--base-branch")] = None,
 ) -> None:
-    """Plan-Approval erteilen und den Run fortsetzen."""
+    """Grant plan approval and continue the run."""
     repo = repo.resolve()
     state = _load_state(repo, run_id)
     if state.phase != "awaiting_approval":
@@ -143,7 +143,7 @@ def status(
     run_id: Annotated[str | None, typer.Argument(help="Nur diesen Run anzeigen")] = None,
     repo: Annotated[Path, typer.Option("--repo")] = Path("."),
 ) -> None:
-    """Runs und ihre Phase anzeigen."""
+    """Show runs and their phase."""
     repo = repo.resolve()
     runs_dir = repo / RUNS_RELPATH
     states: list[RunState] = []
@@ -169,7 +169,7 @@ def status(
 
 
 def _execute(ctx: RunContext) -> None:
-    """Alle Phasen der Reihe nach — jede Funktion prüft selbst, ob sie dran ist."""
+    """All phases in order — each function checks for itself whether it is up."""
     try:
         run_spec_and_plan(ctx)
         run_build_phase(ctx)
@@ -221,12 +221,12 @@ def _load_config(repo: Path, base_branch: str | None) -> AdwConfig:
 
 
 def _config_for_continuation(repo: Path, state: RunState, cli_override: str | None) -> AdwConfig:
-    """Config für resume/approve: CLI-Flag gewinnt, sonst der Override des Runs.
+    """Config for resume/approve: the CLI flag wins, otherwise the run's override.
 
-    Erst validieren, DANN persistieren — ein abgelehnter Override darf den
-    State nicht vergiften. Nach dem Anlegen der Lanes ist der Base-Branch
-    fix: die Lanes sind vom alten Base geforkt, ein Wechsel ergäbe
-    inkonsistente Diffs und Merges."""
+    Validate first, THEN persist — a rejected override must not poison the
+    state. Once the Lanes have been created the base branch is
+    fixed: the Lanes are forked from the old base, a switch would yield
+    inconsistent diffs and merges."""
     candidate = cli_override if cli_override is not None else state.pinned_base_branch
     config = _load_config(repo, candidate)
     if cli_override is not None and cli_override != state.pinned_base_branch:
@@ -306,10 +306,10 @@ _OK = ReviewResult(verdict="ok", findings=[])
 
 
 def _dry_run_config(config: AdwConfig) -> AdwConfig:
-    """Kanonische Fixtures (PLAN Task 11 / SPEC DoD 1): jede Lane bekommt ein
-    synthetisches Gate, das erst der zweite Build-Lauf grün macht (simulierter
-    Gate-Fail → Fix-Task an dieselbe Session); das E2E-Gate wird analog erst
-    durch einen triagierten Lane-Fix grün (E2E-Triage-Pfad)."""
+    """Canonical fixtures (PLAN task 11 / SPEC DoD 1): every Lane gets a
+    synthetic Gate that only the second build run turns green (simulated
+    Gate fail → fix task to the same session); the E2E Gate analogously turns
+    green only through a triaged Lane fix (E2E triage path)."""
     data = config.model_dump()
     for lane in data["lanes"].values():
         lane["gates"] = list(lane["gates"]) + [
@@ -374,7 +374,7 @@ def _dry_run_runners() -> tuple[MockAgentRunner, MockCodexRunner]:
 
 
 def _dry_run_gh(config: AdwConfig) -> github.RunGh:
-    """Simulierte grüne GitHub-Actions inkl. Staging-Job — kein Netz."""
+    """Simulated green GitHub Actions incl. staging job — no network."""
     staging = config.ci.staging_job or "deploy-staging"
 
     def fake(argv: list[str], cwd: Path) -> str:
@@ -395,7 +395,7 @@ def _dry_run_gh(config: AdwConfig) -> github.RunGh:
 
 
 def _dry_run_glab(config: AdwConfig) -> ci.RunGlab:
-    """Simulierte grüne Pipeline inkl. Staging-Job — kein Netz."""
+    """Simulated green pipeline incl. staging job — no network."""
     staging = config.ci.staging_job or "deploy-staging"
 
     def fake(argv: list[str], cwd: Path) -> str:

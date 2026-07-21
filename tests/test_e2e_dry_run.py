@@ -1,8 +1,8 @@
-"""End-to-End-Dry-Run-Akzeptanztests — SPEC §8, DoD-Kriterien 1–5.
+"""End-to-end dry-run acceptance tests — SPEC §8, DoD criteria 1–5.
 
-Alles über die echte CLI bzw. die Phasen-Funktionen mit Mocks: 0 Tokens,
-kein Netz, echtes git im tmp_path. Feinere Verhaltens-Tests liegen in den
-Modul-Testdateien; hier steht je DoD-Kriterium der Abnahme-Pfad.
+Everything via the real CLI or the phase functions with mocks: 0 tokens,
+no network, real git in tmp_path. Finer-grained behavior tests live in the
+module test files; here each DoD criterion gets its acceptance path.
 """
 
 import json
@@ -94,8 +94,8 @@ def test_dod1_parallel_dry_run_covers_both_lanes_and_e2e_triage(target_repo):
 
 
 def test_dod2_gate_fail_fix_goes_to_same_session(target_repo):
-    """Der simulierte Gate-Fail des Dry-Runs erzeugt einen Fix-Task, der die
-    Session der Lane wiederverwendet (SDK-Resume statt Kontext-Neuaufbau)."""
+    """The simulated Gate fail of the dry run creates a fix task that reuses
+    the Lane's session (SDK resume instead of rebuilding context)."""
     agents = MockAgentRunner()
     agents.script_files("spec_agent", {".adw/spec.md": "# Spec\n"})
     agents.script_files(
@@ -287,8 +287,8 @@ def test_dod5_state_round_trip_is_lossless(target_repo):
 
 
 def test_dod5_resume_continues_in_the_same_phase(target_repo, monkeypatch):
-    """Crash mitten in der Build-Phase (Mock-Antworten erschöpft) → `adw resume`
-    setzt exakt dort fort und bringt den Run zu Ende."""
+    """Crash in the middle of the build phase (mock responses exhausted) →
+    `adw resume` continues exactly there and brings the run to completion."""
     import adw.cli as cli_mod
 
     real = cli_mod._dry_run_runners

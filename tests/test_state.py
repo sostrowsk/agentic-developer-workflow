@@ -82,7 +82,7 @@ def test_state_file_with_mismatched_embedded_run_id_is_rejected(target_repo):
 
 
 def test_concurrent_saves_allocate_unique_seqs(target_repo):
-    """Nebenläufige saves (parallele Lanes) dürfen keine Sequenznummern doppeln."""
+    """Concurrent saves (parallel Lanes) must not duplicate sequence numbers."""
     from concurrent.futures import ThreadPoolExecutor
 
     states = [make_state(run_id=f"{i:08x}") for i in range(32)]
@@ -93,7 +93,7 @@ def test_concurrent_saves_allocate_unique_seqs(target_repo):
 
 
 def test_seq_recovers_from_corrupted_seq_file(target_repo):
-    """Regression: leere/kaputte .seq darf die Sequenz nicht auf 0 zurückwerfen."""
+    """Regression: an empty/broken .seq must not reset the sequence to 0."""
     make_state(run_id="aaaa1111").save(target_repo)
     make_state(run_id="bbbb2222").save(target_repo)
     (target_repo / ".adw" / "runs" / ".seq").write_text("")
@@ -102,7 +102,7 @@ def test_seq_recovers_from_corrupted_seq_file(target_repo):
 
 
 def test_seq_reconciles_with_persisted_states_when_stale(target_repo):
-    """Regression: veraltete niedrigere .seq darf find_latest nicht verfälschen."""
+    """Regression: a stale lower .seq must not distort find_latest."""
     make_state(run_id="aaaa1111").save(target_repo)
     make_state(run_id="bbbb2222").save(target_repo)
     (target_repo / ".adw" / "runs" / ".seq").write_text("1")
@@ -118,7 +118,7 @@ def test_seq_with_unicode_digit_does_not_crash(target_repo):
 
 
 def test_concurrent_updates_do_not_lose_increments(target_repo):
-    """Parallele Lane-Updates desselben Runs: kein Lost-Update dank RunState.update()."""
+    """Parallel Lane updates of the same run: no lost update thanks to RunState.update()."""
     from concurrent.futures import ThreadPoolExecutor
 
     state = make_state()

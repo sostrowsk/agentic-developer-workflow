@@ -7,7 +7,7 @@ from adw.config import CiConfig
 
 
 class FakeGlab:
-    """Skriptbare glab-Antworten pro Aufruf-Sequenz + Aufzeichnung."""
+    """Scriptable glab responses per call sequence + recording."""
 
     def __init__(self, responses):
         self.responses = list(responses)
@@ -119,7 +119,7 @@ def test_no_pipeline_for_branch_keeps_polling_then_times_out(tmp_path):
 
 
 def test_sleep_never_exceeds_remaining_budget(tmp_path):
-    """Regression: timeout=90/interval=60 darf nicht 120s schlafen."""
+    """Regression: timeout=90/interval=60 must not sleep 120s."""
     cfg = CiConfig(poll_interval=60, timeout=90, staging_job=None)
     glab = FakeGlab([pipeline_json("running")] * 10)
     sleep = FakeSleep()
@@ -130,7 +130,7 @@ def test_sleep_never_exceeds_remaining_budget(tmp_path):
 
 
 def test_jobs_are_paginated_beyond_100(tmp_path):
-    """Regression: Staging-Job auf Seite 2 darf nicht als 'fehlt' gelten."""
+    """Regression: a staging job on page 2 must not count as 'missing'."""
     page1 = json.dumps([{"id": i, "name": f"job-{i}", "status": "success"} for i in range(1, 101)])
     page2 = json.dumps([{"id": 101, "name": "deploy-staging", "status": "success"}])
     cfg = CiConfig(staging_job="deploy-staging")
@@ -169,9 +169,9 @@ def test_ci_result_is_dataclass_with_pipeline_id(tmp_path):
 
 
 def test_poll_queries_pipelines_by_the_given_sha(tmp_path):
-    """Regression (Codex P1+P2): Poll bindet an die SHA des frischen Push — und
-    zwar SERVER-seitig (sha-Param in der API-Query), damit eine neuere fremde
-    Pipeline auf demselben Branch das Ergebnis weder bewertet noch verdeckt."""
+    """Regression (Codex P1+P2): the poll binds to the SHA of the fresh push —
+    SERVER-side (sha param in the API query), so that a newer foreign pipeline
+    on the same branch neither judges nor obscures the result."""
     cfg = CiConfig(poll_interval=60, timeout=2700, staging_job="deploy-staging")
     glab = FakeGlab(
         [

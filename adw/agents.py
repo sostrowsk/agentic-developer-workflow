@@ -1,4 +1,4 @@
-"""Agent-Registry (SPEC §3) und SDK-Runner (Claude Agent SDK)."""
+"""Agent registry (SPEC §3) and SDK runner (Claude Agent SDK)."""
 
 import os
 import sys
@@ -75,7 +75,7 @@ SECRET_STORE_DENY_RULES = (
 
 
 class AgentRunError(Exception):
-    """Der Agent-Lauf endete mit einem Fehler-Result."""
+    """The agent run ended with an error result."""
 
 
 @dataclass(frozen=True)
@@ -98,7 +98,7 @@ class AgentResult:
 
 
 class AgentRunner(Protocol):
-    """Eine Methode, wenige Parameter — mehr Interface braucht kein Node."""
+    """One method, few parameters — no node needs more interface than that."""
 
     def run(
         self,
@@ -117,10 +117,10 @@ REGISTRY: dict[str, AgentSpec] = {
         tools=WRITER_TOOLS,
         allowed_tools=[*SCOPED_READ_RULES, *SPEC_WRITE_RULES],
         system_append=(
-            "Du bist der Spec-Agent eines Agentic Developer Workflow. Du schreibst "
-            "AUSSCHLIESSLICH die Spezifikation nach fester Vorlage (Ziel, Scope, "
-            "Nicht-Ziele, Akzeptanzkriterien, Definition of Done) nach .adw/spec.md. "
-            "Du implementierst nie und änderst keinen Produktivcode."
+            "You are the Spec agent of an Agentic Developer Workflow. You write "
+            "EXCLUSIVELY the specification following a fixed template (goal, scope, "
+            "non-goals, acceptance criteria, Definition of Done) to .adw/spec.md. "
+            "You never implement and never change production code."
         ),
     ),
     "plan_agent": AgentSpec(
@@ -129,11 +129,11 @@ REGISTRY: dict[str, AgentSpec] = {
         tools=WRITER_TOOLS,
         allowed_tools=[*SCOPED_READ_RULES, *PLAN_WRITE_RULES],
         system_append=(
-            "Du bist der Plan-Agent eines Agentic Developer Workflow. Du erzeugst aus "
-            ".adw/spec.md den Implementierungsplan .adw/plan.md mit den Workstreams "
-            "'backend' und 'frontend' (sofern die Lane existiert) sowie den "
-            "Schnittstellen-Kontrakt .adw/contract.yaml (OpenAPI/Typen/Events). "
-            "Beide Lanes bauen später strikt gegen den Kontrakt. Du implementierst nie."
+            "You are the Plan agent of an Agentic Developer Workflow. From "
+            ".adw/spec.md you produce the implementation plan .adw/plan.md with the "
+            "Workstreams 'backend' and 'frontend' (if the lane exists) as well as the "
+            "interface contract .adw/contract.yaml (OpenAPI/types/events). "
+            "Both lanes will later build strictly against the contract. You never implement."
         ),
     ),
     "build_agent": AgentSpec(
@@ -145,12 +145,12 @@ REGISTRY: dict[str, AgentSpec] = {
         allowed_tools=[*SCOPED_READ_RULES, *SCOPED_WORKTREE_WRITE_RULES, "Bash"],
         sandbox_bash=True,
         system_append=(
-            "Du bist ein Build-Agent in einer isolierten Lane (eigener Git-Worktree). "
-            "Du implementierst deinen Workstream aus .adw/plan.md strikt gegen "
-            ".adw/contract.yaml, mit TDD (Test zuerst, RED bestätigen, dann minimal "
-            "implementieren). Fix-Pläne aus Reviews sind Empfehlungen: prüfe sie gegen "
-            "Spec und Konventionen und weiche begründet ab, wenn nötig. Du committest "
-            "NICHT — nach grünen Gates committet der Orchestrator deine Änderungen."
+            "You are a Build agent in an isolated Lane (its own git worktree). "
+            "You implement your Workstream from .adw/plan.md strictly against "
+            ".adw/contract.yaml, using TDD (test first, confirm RED, then implement "
+            "minimally). Fix plans from reviews are recommendations: check them against "
+            "the spec and conventions and deviate with justification when necessary. "
+            "You do NOT commit — after green Gates the orchestrator commits your changes."
         ),
     ),
     "e2e_triage": AgentSpec(
@@ -159,9 +159,9 @@ REGISTRY: dict[str, AgentSpec] = {
         tools=READ_ONLY_TOOLS,
         allowed_tools=SCOPED_READ_RULES,
         system_append=(
-            "Du bist der E2E-Triage-Agent. Du ordnest jeden Playwright-Fehler einer "
-            "Lane (frontend/backend) zu. Du fixt nichts. Antworte NUR mit dem "
-            "Review-JSON gemäß Schema."
+            "You are the E2E triage agent. You assign every Playwright failure to a "
+            "Lane (frontend/backend). You fix nothing. Respond ONLY with the "
+            "review JSON according to the schema."
         ),
         permission_mode="default",
     ),
@@ -171,9 +171,9 @@ REGISTRY: dict[str, AgentSpec] = {
         tools=READ_ONLY_TOOLS,
         allowed_tools=SCOPED_READ_RULES,
         system_append=(
-            "Du bist der Log-Analyst. Du liest CI-Logs und erzeugst strukturierte "
-            "Findings mit Lane-Zuordnung. Du fixt nichts. Antworte NUR mit dem "
-            "Review-JSON gemäß Schema."
+            "You are the log analyst. You read CI logs and produce structured "
+            "Findings with Lane assignment. You fix nothing. Respond ONLY with the "
+            "review JSON according to the schema."
         ),
         permission_mode="default",
     ),
@@ -183,10 +183,10 @@ REGISTRY: dict[str, AgentSpec] = {
         tools=READ_ONLY_TOOLS,
         allowed_tools=SCOPED_READ_RULES,
         system_append=(
-            "Du bist der finale Reviewer (strikt read-only). Du prüfst die "
-            "Implementierung gegen .adw/spec.md. Du lieferst NUR Findings — keine "
-            "Änderungen, keine Fixes. Antworte NUR mit dem Review-JSON gemäß Schema; "
-            "setze bei jedem Finding die category (scope_gap | implementation | trivial)."
+            "You are the final reviewer (strictly read-only). You check the "
+            "implementation against .adw/spec.md. You deliver ONLY Findings — no "
+            "changes, no fixes. Respond ONLY with the review JSON according to the "
+            "schema; set the category (scope_gap | implementation | trivial) on every Finding."
         ),
         permission_mode="default",
     ),
@@ -194,13 +194,13 @@ REGISTRY: dict[str, AgentSpec] = {
 
 
 def _sanitized_env_overrides() -> dict[str, str]:
-    """Neutralisiert alle Nicht-Whitelist-Variablen im CLI-Prozess.
+    """Neutralizes all non-whitelist variables in the CLI process.
 
-    Das SDK merged os.environ mit options.env — Variablen ENTFERNEN geht
-    nicht, aber per ""-Override blanken. Secrets (API-Keys, Cloud-Creds)
-    erreichen so weder das Modell noch Bash-Tool-Subprozesse. Die Claude-
-    Authentifizierung läuft über das Credentials-File unter HOME
-    (whitelisted), nicht über Env-Keys.
+    The SDK merges os.environ with options.env — REMOVING variables is
+    not possible, but blanking via ""-override is. Secrets (API keys, cloud creds)
+    thus reach neither the model nor Bash tool subprocesses. Claude
+    authentication runs via the credentials file under HOME
+    (whitelisted), not via env keys.
     """
     keep = safe_env()
     return {key: "" for key in os.environ if key not in keep}
@@ -224,17 +224,17 @@ def _env_overrides() -> dict[str, str]:
 
 
 def _config_dir() -> Path | None:
-    """CLAUDE_CONFIG_DIR als ABSOLUTER Pfad — die CLI startet mit dem
-    Worktree als cwd, ein relativer Wert zeigte dort ins Leere."""
+    """CLAUDE_CONFIG_DIR as an ABSOLUTE path — the CLI starts with the
+    Worktree as cwd, a relative value would point into the void there."""
     raw = os.environ.get("CLAUDE_CONFIG_DIR")
     return Path(raw).resolve() if raw else None
 
 
 def _deny_rules(deny_read_paths: list[str] | None = None) -> list[str]:
-    """Statische Secret-Store-Denies plus custom Config-Dir plus Aufrufer-
-    Pfade (z. B. Nachbar-Lane-Worktrees) — die OAuth-Credentials der CLI und
-    fremde Lanes darf kein Agent-Tool lesen. Jeder Pfad in BEIDEN Formen:
-    Glob (File-Tools) und plain Directory (Linux-Sandbox)."""
+    """Static secret-store denies plus custom config dir plus caller
+    paths (e.g. neighboring Lane Worktrees) — no agent tool may read the CLI's
+    OAuth credentials or foreign Lanes. Every path in BOTH forms:
+    glob (file tools) and plain directory (Linux sandbox)."""
     rules = list(SECRET_STORE_DENY_RULES)
     config_dir = _config_dir()
     if config_dir:
@@ -255,11 +255,11 @@ def _deny_rules(deny_read_paths: list[str] | None = None) -> list[str]:
 
 
 def _require_stored_login() -> None:
-    """Fail fast: Agents authentifizieren NUR über die gespeicherte
-    Claude-CLI-Anmeldung (Credentials-File). Env-Keys (ANTHROPIC_API_KEY,
-    CLAUDE_CODE_OAUTH_TOKEN) werden bewusst geblankt — sie würden sonst in
-    Bash-Tool-Subprozessen der Agents landen. Ohne stored login klar
-    abbrechen statt kryptisch an der Auth zu scheitern."""
+    """Fail fast: agents authenticate ONLY via the stored
+    Claude CLI login (credentials file). Env keys (ANTHROPIC_API_KEY,
+    CLAUDE_CODE_OAUTH_TOKEN) are deliberately blanked — otherwise they would
+    end up in the agents' Bash tool subprocesses. Without a stored login,
+    abort clearly instead of failing cryptically at auth."""
     if _IS_MACOS:
         # macOS legt OAuth-Credentials ggf. im Keychain ab (kein File) —
         # dort der CLI die Auth überlassen statt fälschlich zu blocken.
@@ -278,7 +278,7 @@ def _require_stored_login() -> None:
 
 
 class SdkAgentRunner:
-    """Führt einen Agent-Node über das Claude Agent SDK aus (headless)."""
+    """Executes an agent node via the Claude Agent SDK (headless)."""
 
     def run(
         self,

@@ -68,7 +68,7 @@ def test_non_ascii_repo_path_is_idempotent(tmp_path):
 
 
 def test_repo_hooks_never_run_during_worktree_ops(target_repo, tmp_path):
-    """Repo-Hooks laufen bei Orchestrator-Git-Ops GAR NICHT (core.hooksPath=/dev/null)."""
+    """Repo hooks do NOT run at all during orchestrator git ops (core.hooksPath=/dev/null)."""
     marker = tmp_path / "hook-lief.txt"
     hook = target_repo / ".git" / "hooks" / "post-checkout"
     hook.write_text(f'#!/bin/sh\ntouch "{marker}"\n')
@@ -135,8 +135,8 @@ def test_existing_gitignore_without_catchall_gets_amended(target_repo):
 
 
 def test_partially_created_worktree_is_not_accepted_on_retry(target_repo):
-    """Regression: registrierter Worktree OHNE Ready-Marker (abgebrochenes add)
-    muss beim Retry frisch neu erstellt werden."""
+    """Regression: a registered Worktree WITHOUT a ready marker (aborted add)
+    must be freshly recreated on retry."""
     path = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
     (path / "rest-des-abbruchs.txt").write_text("halbfertig")
     marker = target_repo / ".adw" / "runs" / RUN_ID / "trees" / "backend.ready"
@@ -148,7 +148,7 @@ def test_partially_created_worktree_is_not_accepted_on_retry(target_repo):
 
 
 def test_stale_ready_marker_does_not_bless_missing_worktree(target_repo):
-    """Regression: alter .ready-Marker + fehlendes Dir darf nicht als fertig gelten."""
+    """Regression: an old .ready marker + missing dir must not count as done."""
     import shutil
 
     path = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
@@ -159,7 +159,7 @@ def test_stale_ready_marker_does_not_bless_missing_worktree(target_repo):
 
 
 def test_stale_marker_on_unregistered_worktree_is_cleared_before_add(target_repo):
-    """Regression: extern entfernter Worktree + alter Marker → sauber neu erstellen."""
+    """Regression: externally removed Worktree + old marker → recreate cleanly."""
     path = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
     git(target_repo, "worktree", "remove", "--force", str(path))  # Marker bleibt
     recreated = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
@@ -168,7 +168,7 @@ def test_stale_marker_on_unregistered_worktree_is_cleared_before_add(target_repo
 
 
 def test_locked_partial_worktree_is_recovered(target_repo):
-    """Regression: gelockter Partial (abgebrochenes add) muss beim Retry weggeräumt werden."""
+    """Regression: a locked partial (aborted add) must be cleaned up on retry."""
     path = create_lane_worktree(target_repo, RUN_ID, "backend", "staging")
     git(target_repo, "worktree", "lock", str(path))
     (target_repo / ".adw" / "runs" / RUN_ID / "trees" / "backend.ready").unlink()

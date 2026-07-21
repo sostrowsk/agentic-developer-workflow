@@ -1,4 +1,4 @@
-"""Triage-Regeln, Iterations-Limits und Circuit-Breaker — reine Funktionen, kein I/O."""
+"""Triage rules, iteration limits and Circuit-Breaker — pure functions, no I/O."""
 
 from dataclasses import dataclass, field
 
@@ -10,17 +10,17 @@ MAX_FIX_CYCLES = 3
 
 
 class LimitExceededError(Exception):
-    """Ein Loop-Limit ist erschöpft — Eskalation an den Menschen."""
+    """A loop limit is exhausted — escalation to the human."""
 
 
 class NoProgressError(Exception):
-    """Circuit-Breaker: eine Fix-Iteration hat NICHTS verändert — sofort
-    eskalieren statt das Limit auszureizen."""
+    """Circuit-Breaker: a fix iteration changed NOTHING — escalate
+    immediately instead of exhausting the limit."""
 
 
 @dataclass(frozen=True)
 class TriageDecision:
-    """Ergebnis der Triage nach dem finalen Review (SPEC §4 Phase 6)."""
+    """Result of the triage after the final review (SPEC §4 phase 6)."""
 
     followups: list[Finding] = field(default_factory=list)
     fix_tasks: dict[str, list[Finding]] = field(default_factory=dict)
@@ -29,10 +29,10 @@ class TriageDecision:
 def triage_final_review(
     result: ReviewResult, active_lanes: list[str] | None = None
 ) -> TriageDecision:
-    """Scope-Lücken → Follow-up-Issue; Implementierung/trivial → Fix-Zyklus je Lane.
+    """Scope gaps → follow-up issue; implementation/trivial → fix cycle per Lane.
 
-    Findings ohne Lane-Zuordnung gehen an ALLE aktiven Lanes — lieber doppelt
-    geprüft als still verloren. Kein Finding wird verworfen.
+    Findings without a Lane assignment go to ALL active Lanes — better checked
+    twice than silently lost. No Finding is discarded.
     """
     lanes = active_lanes or ["backend"]
     followups: list[Finding] = []
@@ -66,7 +66,7 @@ def check_fix_cycles(lane: LaneState) -> None:
 
 
 def check_progress(previous: list[str] | None, current: list[str]) -> None:
-    """Identische Failure-Menge wie in der Vorrunde = Null-Fortschritt."""
+    """Identical failure set as in the previous round = zero progress."""
     if previous is None:
         return
     if sorted(previous) == sorted(current):

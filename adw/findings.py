@@ -1,17 +1,17 @@
-"""Findings-Schema: strukturierte Review-Ergebnisse zwischen allen Workflow-Nodes.
+"""Findings schema: structured review results between all workflow nodes.
 
-Parser-Kontrakt (bewusst strikt): Reviewer werden auf "antworte NUR mit dem
-JSON-Objekt (ggf. im ```json-Fence)" geprompted. Akzeptiert wird ausschließlich
+Parser contract (deliberately strict): reviewers are prompted to "respond ONLY
+with the JSON object (optionally in a ```json fence)". Accepted is exclusively
 
-  (a) Text, der als Ganzes (nach strip) EIN JSON-Objekt ist, oder
-  (b) der Inhalt des LETZTEN ```json-Fence im Text.
+  (a) text that as a whole (after strip) is ONE JSON object, or
+  (b) the content of the LAST ```json fence in the text.
 
-Alles andere — Prosa um nacktes JSON, Entwürfe, Zitate, abgeschnittene oder
-verpackte Antworten — ist ein FindingsParseError, den der Aufrufer als
-Retry-/Eskalationsfall behandelt. Toleranz-Heuristiken (Prosa-Extraktion,
-Entwurfs-/Zitat-Erkennung) sind absichtlich NICHT implementiert: Sie sind
-gegen adversariale Outputs nicht abdichtbar und riskieren Stale-ok-Verdicts.
-Ein Parse-Fehler ist safe (Retry), ein falsches "ok" nicht.
+Everything else — prose around bare JSON, drafts, quotes, truncated or
+wrapped answers — is a FindingsParseError, which the caller treats as a
+retry/escalation case. Tolerance heuristics (prose extraction,
+draft/quote detection) are deliberately NOT implemented: they cannot be
+sealed against adversarial outputs and risk stale-ok verdicts.
+A parse error is safe (retry), a wrong "ok" is not.
 """
 
 import json
@@ -21,24 +21,24 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 SCHEMA_INSTRUCTION = """\
-Antworte AUSSCHLIESSLICH mit einem JSON-Objekt nach exakt diesem Schema
-(keine Prosa davor oder danach, optional in einem ```json-Fence):
+Respond EXCLUSIVELY with a JSON object following exactly this schema
+(no prose before or after, optionally in a ```json fence):
 {
   "verdict": "ok | needs_fixes",
   "findings": [{
     "severity": "P1 | P2 | P3",
     "lane": "frontend | backend | unknown",
-    "file": "pfad/relativ/zum/repo",
-    "issue": "Beschreibung des Problems",
-    "remediation_plan": ["Schritt 1", "Schritt 2"]
+    "file": "path/relative/to/repo",
+    "issue": "description of the problem",
+    "remediation_plan": ["Step 1", "Step 2"]
   }]
 }
-Regeln: verdict "ok" nur mit leerem findings-Array; "needs_fixes" braucht
-mindestens ein Finding; alle Felder sind Pflicht."""
+Rules: verdict "ok" only with an empty findings array; "needs_fixes" requires
+at least one Finding; all fields are mandatory."""
 
 
 class FindingsParseError(Exception):
-    """Agent-/Codex-Output entsprach nicht dem strikten Review-JSON-Kontrakt."""
+    """Agent/Codex output did not conform to the strict review JSON contract."""
 
     def __init__(self, reason: str, raw: str):
         self.raw = raw
@@ -83,7 +83,7 @@ class ReviewResult(BaseModel):
 
 
 class _DuplicateKeyError(ValueError):
-    """JSON-Objekt enthält denselben Key mehrfach — Werte würden still überschrieben."""
+    """JSON object contains the same key multiple times — values would be silently overwritten."""
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict:
@@ -99,7 +99,7 @@ _MAX_INT_DIGITS = 100
 
 
 class _OversizedNumberError(ValueError):
-    """Integer-Token jenseits jeder plausiblen Review-Größe (adversarial)."""
+    """Integer token beyond any plausible review size (adversarial)."""
 
 
 def _bounded_int(token: str) -> int:
@@ -114,7 +114,7 @@ _MAX_NESTING = 100
 
 
 def _too_deep(value: object, limit: int = _MAX_NESTING) -> bool:
-    """Iterative Tiefenprüfung — legitime Reviews sind flach, Extremes ist adversarial."""
+    """Iterative depth check — legitimate reviews are flat, extremes are adversarial."""
     stack: list[tuple[object, int]] = [(value, 1)]
     while stack:
         current, depth = stack.pop()
@@ -134,10 +134,10 @@ _TILDE_OPEN = re.compile(r"^ {0,3}(~{3,})(.*)$")
 
 
 def _match_fence_open(line: str) -> tuple[str, str] | None:
-    """(Marker, Info-String) eines Fence-Openers — oder None für Prosa.
+    """(Marker, info string) of a fence opener — or None for prose.
 
-    CommonMark: Der Info-String eines Backtick-Fence darf keine Backticks
-    enthalten (sonst ist die Zeile Prosa); bei Tilde-Fences ist alles erlaubt.
+    CommonMark: the info string of a backtick fence must not contain
+    backticks (otherwise the line is prose); for tilde fences anything is allowed.
     """
     match = _BACKTICK_OPEN.match(line)
     if match is not None:
@@ -152,14 +152,14 @@ def _match_fence_open(line: str) -> tuple[str, str] | None:
 
 
 def _last_json_fence_content(text: str) -> str | None:
-    """Inhalt des letzten ```json-Fence — der ist per Kontrakt autoritativ.
+    """Content of the last ```json fence — which is authoritative per contract.
 
-    Zeilenbasierter Fence-Scanner nach CommonMark-Grundregeln: Ein Fence öffnet
-    mit >=3 Backticks/Tilden am Zeilenanfang und schließt nur mit einer PUREN
-    Zeile desselben Zeichens in mindestens gleicher Länge. Dadurch sind
-    ```json-Blöcke in äußeren Fences (```` ```` ````, ``~~~``) nur Content, und
-    eine Zeile wie ```` ```python ```` schließt keinen offenen json-Fence.
-    Ein json-Fence ohne Closer = abgeschnittener Output → fail-closed.
+    Line-based fence scanner following CommonMark ground rules: a fence opens
+    with >=3 backticks/tildes at the start of a line and closes only with a PURE
+    line of the same character of at least equal length. As a result,
+    ```json blocks inside outer fences (```` ```` ````, ``~~~``) are just content, and
+    a line like ```` ```python ```` does not close an open json fence.
+    A json fence without a closer = truncated output → fail-closed.
     """
     last: str | None = None
     open_char: str | None = None
@@ -196,11 +196,11 @@ def _last_json_fence_content(text: str) -> str | None:
 
 
 def extract_review_result(text: str) -> ReviewResult:
-    """Parst ein Review-Ergebnis nach dem strikten Kontrakt (siehe Modul-Docstring).
+    """Parses a review result according to the strict contract (see module docstring).
 
-    Kandidat ist der letzte ```json-Fence, sonst der gesamte Text. Der Kandidat
-    muss vollständig EIN JSON-Objekt sein; doppelte Keys, extreme Nesting-Tiefe
-    und Nicht-Objekte werden fail-closed abgelehnt.
+    The candidate is the last ```json fence, otherwise the entire text. The candidate
+    must be entirely ONE JSON object; duplicate keys, extreme nesting depth
+    and non-objects are rejected fail-closed.
     """
     candidate = _last_json_fence_content(text)
     if candidate is None:

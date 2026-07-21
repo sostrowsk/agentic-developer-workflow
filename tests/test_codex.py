@@ -117,7 +117,7 @@ def test_codex_call_has_timeout(captured_run, tmp_path):
 
 
 def test_codex_home_is_isolated_copy_with_auth_only(captured_run, tmp_path, monkeypatch):
-    """Regression: config.toml (inkl. MCP-Registrierungen) darf das Review nicht erreichen."""
+    """Regression: config.toml (incl. MCP registrations) must not reach the review."""
     from adw.env import safe_env
 
     src = tmp_path / "codex-home"
@@ -134,7 +134,7 @@ def test_codex_home_is_isolated_copy_with_auth_only(captured_run, tmp_path, monk
 
 
 def test_rotated_auth_token_is_synced_back(captured_run, tmp_path, monkeypatch):
-    """Regression: von codex rotierte Tokens dürfen nicht mit dem Temp-Home sterben."""
+    """Regression: tokens rotated by codex must not die with the temp home."""
     src = tmp_path / "codex-home"
     src.mkdir()
     (src / "auth.json").write_text('{"token": "alt"}')
@@ -147,7 +147,7 @@ def test_rotated_auth_token_is_synced_back(captured_run, tmp_path, monkeypatch):
 
 
 def test_externally_rotated_source_wins_over_stale_copy(captured_run, tmp_path, monkeypatch):
-    """Regression: parallel rotierte Quelle darf nicht mit unserer Kopie überschrieben werden."""
+    """Regression: a source rotated in parallel must not be overwritten with our copy."""
     src = tmp_path / "codex-home"
     src.mkdir()
     (src / "auth.json").write_text('{"token": "alt"}')
@@ -163,7 +163,7 @@ def test_externally_rotated_source_wins_over_stale_copy(captured_run, tmp_path, 
 
 
 def test_failed_sync_keeps_recoverable_token_copy(captured_run, tmp_path, monkeypatch, capsys):
-    """Regression: schlägt der Rücksync fehl, darf der einzige gültige Token nicht sterben."""
+    """Regression: if the sync-back fails, the only valid token must not die."""
     src = tmp_path / "codex-home"
     src.mkdir()
     (src / "auth.json").write_text('{"token": "alt"}')
@@ -196,7 +196,7 @@ def test_failed_sync_keeps_recoverable_token_copy(captured_run, tmp_path, monkey
 
 
 def test_failed_replace_leaves_no_tmp_token_files(captured_run, tmp_path, monkeypatch):
-    """Regression: fehlgeschlagener Sync darf keine .auth.*.tmp-Token-Kopien hinterlassen."""
+    """Regression: a failed sync must not leave .auth.*.tmp token copies behind."""
     import shutil
 
     src = tmp_path / "codex-home"

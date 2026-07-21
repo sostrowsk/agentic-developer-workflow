@@ -1,4 +1,4 @@
-"""CLI-Tests (typer CliRunner) — Dry-Run-Modus, 0 Tokens, echtes git."""
+"""CLI tests (typer CliRunner) — dry-run mode, 0 tokens, real git."""
 
 import json
 
@@ -199,8 +199,8 @@ def test_resume_unknown_run_id_exits_1(target_repo):
 
 
 def test_run_state_is_persisted_before_first_agent_call(target_repo, monkeypatch):
-    """Regression (Codex P1): Crasht der allererste Agent-Lauf, muss die
-    angezeigte run_id trotzdem per `adw resume` auffindbar sein."""
+    """Regression (Codex P1): if the very first agent run crashes, the displayed
+    run_id must still be findable via `adw resume`."""
     import adw.cli as cli_mod
     from adw.mock import MockAgentRunner, MockCodexRunner
 
@@ -217,8 +217,8 @@ def test_run_state_is_persisted_before_first_agent_call(target_repo, monkeypatch
 
 
 def test_base_branch_override_survives_approve(target_repo):
-    """Regression (Codex P1): --base-branch beim `run` muss auch nach der
-    Approval-Pause gelten, ohne dass `approve` das Flag wiederholt."""
+    """Regression (Codex P1): --base-branch on `run` must still apply after the
+    approval pause, without `approve` repeating the flag."""
     from tests.conftest import git
 
     git(target_repo, "checkout", "-b", "develop")
@@ -292,7 +292,7 @@ def test_blank_base_branch_override_is_rejected(target_repo):
 
 
 def test_gitlab_issue_is_not_fetched_when_config_is_broken(tmp_path, monkeypatch):
-    """Regression (Codex P2): Config-Validierung VOR dem glab-Netzaufruf."""
+    """Regression (Codex P2): config validation BEFORE the glab network call."""
     import adw.cli as cli_mod
     from tests.conftest import git
 
@@ -313,8 +313,8 @@ def test_gitlab_issue_is_not_fetched_when_config_is_broken(tmp_path, monkeypatch
 
 
 def test_dry_run_simulates_gate_fail_and_fix(target_repo):
-    """PLAN Task 11: Der Dry-Run enthält einen simulierten Gate-Fail, dessen
-    Fix als Folge-Task an dieselbe Session geht (2 Gate-Iterationen)."""
+    """PLAN Task 11: the dry run contains a simulated Gate fail whose fix goes
+    to the same session as a follow-up task (2 Gate iterations)."""
     result = runner.invoke(
         app,
         ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--no-approval"],
@@ -326,7 +326,7 @@ def test_dry_run_simulates_gate_fail_and_fix(target_repo):
 
 
 def test_parallel_dry_run_exercises_e2e_triage_path(target_repo):
-    """SPEC DoD 1: --dry-run --parallel durchläuft den E2E-Triage-Pfad."""
+    """SPEC DoD 1: --dry-run --parallel exercises the E2E-Triage path."""
     write_config(target_repo, PARALLEL_CLI_CONFIG)
     from tests.conftest import git
 
@@ -352,8 +352,8 @@ def test_parallel_dry_run_exercises_e2e_triage_path(target_repo):
 
 
 def crash_on_second_build(monkeypatch):
-    """Dry-Run-Runner, deren Build-Agent beim ZWEITEN Lauf crasht (nur 1 Antwort
-    gescriptet) — hinterlässt einen Gate-Fail-Checkpoint im State."""
+    """Dry-run runners whose build agent crashes on the SECOND run (only 1
+    response scripted) — leaves a Gate-fail checkpoint in the state."""
     import adw.cli as cli_mod
 
     real = cli_mod._dry_run_runners
@@ -368,9 +368,9 @@ def crash_on_second_build(monkeypatch):
 
 
 def test_dry_run_resume_after_gate_fail_checkpoint(target_repo, monkeypatch):
-    """Regression (Codex P2): Die Dry-Run-Simulation muss ihren Stand aus dem
-    Worktree ableiten — ein Resume mit frischem Mock darf den checkpointeten
-    Gate-Fix nicht wiederholen und in den Circuit-Breaker laufen."""
+    """Regression (Codex P2): the dry-run simulation must derive its progress
+    from the Worktree — a resume with a fresh mock must not repeat the
+    checkpointed Gate fix and run into the Circuit-Breaker."""
     with monkeypatch.context() as m:
         crash_on_second_build(m)
         crashed = runner.invoke(
@@ -386,8 +386,8 @@ def test_dry_run_resume_after_gate_fail_checkpoint(target_repo, monkeypatch):
 
 
 def test_base_branch_change_after_lane_creation_is_rejected(target_repo, monkeypatch):
-    """Regression (Codex P2): Lanes sind vom alten Base geforkt — ein
-    nachträglicher --base-branch-Wechsel würde inkonsistente Diffs erzeugen."""
+    """Regression (Codex P2): Lanes are forked from the old base — a subsequent
+    --base-branch change would produce inconsistent diffs."""
     from tests.conftest import git
 
     git(target_repo, "branch", "develop")
@@ -409,8 +409,8 @@ def test_base_branch_change_after_lane_creation_is_rejected(target_repo, monkeyp
 
 
 def test_invalid_resume_override_is_not_persisted(target_repo):
-    """Regression (Codex P2): Ein abgelehnter Override darf den State nicht
-    vergiften — der nächste `resume` ohne Flag muss normal funktionieren."""
+    """Regression (Codex P2): a rejected override must not poison the state —
+    the next `resume` without the flag must work normally."""
     runner.invoke(app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run"])
     state = RunState.find_latest(target_repo)
     rejected = runner.invoke(
@@ -424,9 +424,9 @@ def test_invalid_resume_override_is_not_persisted(target_repo):
 
 
 def test_config_base_branch_change_mid_run_does_not_move_existing_lanes(target_repo, monkeypatch):
-    """Regression (Codex P1): Ändert sich base_branch in der config.yaml mitten
-    im Run, darf ein Resume die bestehenden Lanes nicht gegen die neue Basis
-    integrieren — der effektive Base-Branch ist ab Run-Start gepinnt."""
+    """Regression (Codex P1): if base_branch changes in config.yaml mid-run, a
+    resume must not integrate the existing Lanes against the new base — the
+    effective base branch is pinned from run start."""
     from tests.conftest import git
 
     git(target_repo, "checkout", "-b", "develop")
@@ -505,9 +505,10 @@ def test_issue_sources_are_mutually_exclusive_all_pairs(target_repo):
 
 
 def test_agent_run_error_stops_cleanly_and_stays_resumable(target_repo, monkeypatch):
-    """Plan-Betrieb: Ein fehlgeschlagener SDK-Call (z. B. Abo-Fenster erschöpft)
-    beendet den Run kontrolliert mit Resume-Hinweis — er eskaliert NICHT
-    (phase=escalated wäre nicht fortsetzbar) und crasht nicht mit Traceback."""
+    """Plan-based operation: a failed SDK call (e.g. subscription window
+    exhausted) ends the run in a controlled way with a resume hint — it does
+    NOT escalate (phase=escalated would not be resumable) and does not crash
+    with a traceback."""
     import adw.cli as cli_mod
     from adw.agents import AgentRunError
 

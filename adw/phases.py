@@ -1,14 +1,14 @@
-"""Die sieben ADW-Phasen als Funktionen über einem RunContext (SPEC §4).
+"""The seven ADW phases as functions over a RunContext (SPEC §4).
 
-Kontrollfluss ist Code: Loops, Limits, Dispatch, Triage und State-Übergänge
-leben hier — die Agenten liefern nur Urteilsvermögen (Texte, Findings).
+Control flow is code: loops, limits, Dispatch, Triage and state transitions
+live here — the agents only provide judgment (texts, Findings).
 
-Vertrauensgrenze: Die Konfiguration des ZIEL-Repos (.git/config, z. B.
-clean-Filter, Signing-Programme) gilt als vertrauenswürdig — sie wird vom
-Nutzer kontrolliert und liegt außerhalb der Schreibpfade der Agents (.git
-ist nicht im Worktree-cwd). Orchestrator-Git läuft mit Env-Whitelist und
-deaktivierten Repo-Hooks; konfigurierte Filter/Signer laufen wie bei jedem
-manuellen git-Aufruf des Nutzers.
+Trust boundary: the configuration of the TARGET repo (.git/config, e.g.
+clean filters, signing programs) is considered trustworthy — it is
+controlled by the user and lies outside the agents' write paths (.git
+is not in the Worktree cwd). Orchestrator git runs with the env whitelist and
+disabled repo hooks; configured filters/signers run as with any
+manual git invocation by the user.
 """
 
 import os
@@ -59,11 +59,11 @@ ARTIFACTS = ("spec.md", "plan.md", "contract.yaml")
 
 
 class EscalationError(Exception):
-    """Der Run kann nicht autonom weiter — Mensch übernimmt (Exit ≠ 0)."""
+    """The run cannot continue autonomously — a human takes over (exit ≠ 0)."""
 
 
 class AwaitingApproval(Exception):
-    """Plan-Approval-Gate: Run pausiert, Fortsetzung via `adw approve`."""
+    """Plan-approval Gate: run paused, continuation via `adw approve`."""
 
 
 @dataclass
@@ -95,7 +95,7 @@ class RunContext:
 
 
 def escalate(ctx: RunContext, reason: str) -> EscalationError:
-    """Eskalations-Report schreiben, State markieren, Fehler zum Werfen liefern."""
+    """Write the escalation report, mark the state, return the error to be raised."""
     with ctx.state_lock:  # RLock: auch unter bereits gehaltenem Lock aufrufbar
         ctx.run_dir.mkdir(parents=True, exist_ok=True)
         report = ctx.run_dir / "escalation.md"
@@ -113,7 +113,7 @@ def escalate(ctx: RunContext, reason: str) -> EscalationError:
 
 
 def run_spec_and_plan(ctx: RunContext) -> None:
-    """Phasen 1–2: Spec- und Plan-Agent mit Codex-Review-Loops + Approval-Gate."""
+    """Phases 1–2: spec and plan agent with Codex review loops + approval Gate."""
     # Ignore-Regel VOR dem ersten State-/Artefakt-Write — der Haupt-Checkout
     # bleibt auch während der Approval-Pause sauber.
     ensure_runs_gitignored(ctx.repo)
@@ -166,9 +166,9 @@ def run_spec_and_plan(ctx: RunContext) -> None:
                 ctx,
                 agent_name="spec_agent",
                 initial_task=(
-                    f"Erstelle die Spezifikation für dieses Issue nach fester Vorlage "
-                    f"(Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, Definition of Done) "
-                    f"als .adw/spec.md.\n\nIssue:\n{ctx.state.issue}"
+                    f"Create the specification for this issue following the fixed "
+                    f"template (goal, scope, non-goals, acceptance criteria, Definition "
+                    f"of Done) as .adw/spec.md.\n\nIssue:\n{ctx.state.issue}"
                 ),
                 review_kind="spec",
                 artifacts=("spec.md",),
@@ -206,8 +206,8 @@ def run_spec_and_plan(ctx: RunContext) -> None:
             ctx,
             agent_name="plan_agent",
             initial_task=(
-                f"Erstelle aus .adw/spec.md den Implementierungsplan .adw/plan.md mit "
-                f"den Workstreams ({lanes}) und den Schnittstellen-Kontrakt "
+                f"From .adw/spec.md, create the implementation plan .adw/plan.md with "
+                f"the Workstreams ({lanes}) and the interface contract "
                 f".adw/contract.yaml."
             ),
             review_kind="plan",
@@ -230,7 +230,7 @@ def run_spec_and_plan(ctx: RunContext) -> None:
 
 
 def _restore_snapshot(path: Path, snapshot: bytes | None) -> None:
-    """Datei exakt auf den Snapshot zurücksetzen (None = existierte nicht)."""
+    """Reset the file exactly to the snapshot (None = did not exist)."""
     if snapshot is None:
         path.unlink(missing_ok=True)
         return
@@ -267,10 +267,10 @@ def _reviewed_authoring_loop(
     review_refs: tuple[str, ...] | None = None,
     protected: dict[Path, bytes | None] | None = None,
 ) -> None:
-    """Agent schreibt Artefakt(e), Codex reviewt, Findings gehen an DIESELBE
-    Session zurück — bis Verdict ok. Circuit-Breaker bei identischen Findings.
-    ``protected`` wird nach JEDEM Agent-Lauf restauriert — auch der Reviewer
-    sieht nie eine vom Agenten umgeschriebene geschützte Datei."""
+    """Agent writes artifact(s), Codex reviews, Findings go back to the SAME
+    session — until the verdict is ok. Circuit-Breaker on identical Findings.
+    ``protected`` is restored after EVERY agent run — even the reviewer
+    never sees a protected file rewritten by the agent."""
     spec = REGISTRY[agent_name]
     # Resume mitten im Authoring: Session, offener Fix-Task und Findings-Basis
     # aus dem State — sonst startet der Loop kontextlos neu und der
@@ -341,8 +341,8 @@ def _reviewed_authoring_loop(
             ) from exc
         previous_failures = failures
         task = (
-            f"Der Codex-Review zu {', '.join(f'.adw/{a}' for a in artifacts)} hat "
-            f"Findings. Arbeite sie ein und aktualisiere die Artefakte:\n\n"
+            f"The Codex review of {', '.join(f'.adw/{a}' for a in artifacts)} has "
+            f"Findings. Incorporate them and update the artifacts:\n\n"
             f"{_findings_text(review)}"
         )
         with ctx.state_lock:
@@ -353,7 +353,7 @@ def _reviewed_authoring_loop(
 
 
 def _clear_authoring_checkpoint(ctx: RunContext) -> None:
-    """Nur in-memory leeren — persistiert wird atomar mit dem Phasenübergang."""
+    """Clear in-memory only — persisting happens atomically with the phase transition."""
     ctx.state.authoring_session = None
     ctx.state.authoring_pending_task = None
     ctx.state.authoring_last_findings = []
@@ -367,16 +367,16 @@ def _findings_text(review: ReviewResult) -> str:
     lines = []
     for item in review.findings:
         plan = "; ".join(item.remediation_plan)
-        lines.append(f"- [{item.severity}] {item.file}: {item.issue} (Empfehlung: {plan})")
+        lines.append(f"- [{item.severity}] {item.file}: {item.issue} (Recommendation: {plan})")
     return "\n".join(lines)
 
 
 def _archive_artifacts(ctx: RunContext) -> None:
-    """Spec/Plan/Kontrakt in den Run-Ordner sichern; das Haupt-Repo bleibt sauber.
+    """Archive spec/plan/contract into the run folder; the main repo stays clean.
 
-    Getrackte Artefakte (gemergter früherer ADW-Run) werden per git auf den
-    eingecheckten Stand zurückgesetzt statt gelöscht — sonst bliebe eine
-    tracked deletion im Checkout. Untracked Artefakte werden entfernt."""
+    Tracked artifacts (merged earlier ADW run) are reset via git to the
+    checked-in state instead of deleted — otherwise a
+    tracked deletion would remain in the checkout. Untracked artifacts are removed."""
     ctx.run_dir.mkdir(parents=True, exist_ok=True)
     for name in ARTIFACTS:
         source = ctx.repo / ".adw" / name
@@ -393,8 +393,8 @@ def _archive_artifacts(ctx: RunContext) -> None:
 
 
 def run_build_phase(ctx: RunContext) -> None:
-    """Phase 3: Build-Agent(en) je Lane in isolierten Worktrees, Gate-Loop bis
-    grün (max. 10 Iterationen, Circuit-Breaker), Commit durch den Orchestrator."""
+    """Phase 3: build agent(s) per Lane in isolated Worktrees, Gate loop until
+    green (max. 10 iterations, Circuit-Breaker), commit by the orchestrator."""
     if ctx.state.phase != "build":
         return
     lanes = _active_lanes(ctx)
@@ -467,9 +467,9 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
     # Resume: offenes Gate-Feedback und Circuit-Breaker-Basis aus dem State —
     # sonst verliert ein Crash zwischen Gate-Fail und Fix-Lauf den Kontext.
     task = lane_state.pending_task or (
-        f"Implementiere den Workstream '{lane}' aus .adw/plan.md strikt gegen "
-        f".adw/contract.yaml (Spec: .adw/spec.md). TDD: Test zuerst, RED "
-        f"bestätigen, dann minimal implementieren. Du committest nicht.\n\n"
+        f"Implement the Workstream '{lane}' from .adw/plan.md strictly against "
+        f".adw/contract.yaml (spec: .adw/spec.md). TDD: test first, confirm RED, "
+        f"then implement minimally. You do not commit.\n\n"
         f"Issue:\n{ctx.state.issue}"
     )
     previous_failures: list[str] | None = lane_state.last_failures or None
@@ -531,8 +531,8 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             ) from exc
         previous_failures = failures
         task = (
-            f"Die Gates sind fehlgeschlagen. Analysiere die Ausgabe und fixe "
-            f"die Ursache (kein Workaround an den Gates vorbei):\n\n"
+            f"The Gates have failed. Analyze the output and fix the root cause "
+            f"(no workaround bypassing the Gates):\n\n"
             f"{_gate_failure_text(report)}"
         )
         with ctx.state_lock:
@@ -550,8 +550,8 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
 
 
 def _require_lane_branch(ctx: RunContext, worktree: Path, lane_state: LaneState) -> None:
-    """Ein SHA-gleicher Branch-Wechsel (git switch --detach) würde den
-    HEAD-Check passieren — der symbolische Ref muss der Lane-Branch bleiben."""
+    """A SHA-identical branch switch (git switch --detach) would pass the
+    HEAD check — the symbolic ref must remain the Lane branch."""
     result = subprocess.run(
         ["git", "-C", str(worktree), "symbolic-ref", "--short", "-q", "HEAD"],
         capture_output=True,
@@ -570,7 +570,7 @@ def _require_lane_branch(ctx: RunContext, worktree: Path, lane_state: LaneState)
 
 
 def _finalize_lane(ctx: RunContext, worktree: Path, lane: str, lane_state: LaneState) -> None:
-    """Nach nachweislich grünen Gates: committen, Implementierung prüfen, abschließen."""
+    """After provably green Gates: commit, check the implementation, finish."""
     _require_lane_branch(ctx, worktree, lane_state)
     _commit_lane(ctx, worktree, lane, lane_state.base_sha or ctx.config.base_branch)
     if not _has_implementation_changes(ctx, worktree):
@@ -586,10 +586,10 @@ def _finalize_lane(ctx: RunContext, worktree: Path, lane: str, lane_state: LaneS
 
 
 def _worktree_tree_hash(ctx: RunContext, worktree: Path) -> str:
-    """Inhalts-Hash des kompletten Worktree-Baums (inkl. untracked, ohne Ignoriertes).
+    """Content hash of the complete Worktree tree (incl. untracked, without ignored files).
 
-    Läuft über einen TEMPORÄREN Git-Index — der echte Index bleibt unberührt.
-    Bindet den gates_passed-Beweis an exakt diesen Stand."""
+    Runs over a TEMPORARY git index — the real index stays untouched.
+    Binds the gates_passed proof to exactly this state."""
     tmp_index = ctx.run_dir / f".treehash-index-{os.getpid()}-{threading.get_ident()}"
     env = safe_env(ctx.git_env)
     env["GIT_INDEX_FILE"] = str(tmp_index)
@@ -614,8 +614,8 @@ def _worktree_tree_hash(ctx: RunContext, worktree: Path) -> str:
 
 
 def _seed_artifacts(ctx: RunContext, worktree: Path) -> None:
-    """Spec/Plan/Kontrakt aus dem Run-Ordner in den Lane-Worktree kopieren und
-    committen — der Build-Agent arbeitet gegen eingecheckte Artefakte."""
+    """Copy spec/plan/contract from the run folder into the Lane Worktree and
+    commit — the build agent works against checked-in artifacts."""
     target_dir = worktree / ".adw"
     target_dir.mkdir(parents=True, exist_ok=True)
     for name in ARTIFACTS:
@@ -656,7 +656,7 @@ def _commit_lane(ctx: RunContext, worktree: Path, lane: str, base_ref: str) -> N
 
 
 def _has_implementation_changes(ctx: RunContext, worktree: Path) -> bool:
-    """Gibt es gegenüber dem Base-Branch Änderungen JENSEITS der .adw-Artefakte?"""
+    """Are there changes compared to the base branch BEYOND the .adw artifacts?"""
     changed = _git(
         ctx, worktree, "diff", "--name-only", f"{ctx.config.base_branch}...HEAD"
     ).splitlines()
@@ -664,11 +664,11 @@ def _has_implementation_changes(ctx: RunContext, worktree: Path) -> bool:
 
 
 def _restore_approved_artifacts(ctx: RunContext, worktree: Path, base_ref: str) -> None:
-    """Der Build-Agent baut GEGEN Spec/Plan/Kontrakt — er ändert sie nicht.
+    """The build agent builds AGAINST spec/plan/contract — it does not change them.
 
-    Abweichungen von den approvten Versionen im Run-Ordner werden vor dem
-    Commit zurückgesetzt; sonst könnte eine Lane den Kontrakt still umschreiben
-    und parallele Lanes bauten gegen unterschiedliche Artefakte."""
+    Deviations from the approved versions in the run folder are reset before
+    the commit; otherwise a Lane could silently rewrite the contract
+    and parallel Lanes would build against different artifacts."""
     adw_dir = worktree / ".adw"
     if adw_dir.is_symlink():
         # .adw selbst als Symlink: NIE folgen — sonst schreibt der
@@ -753,7 +753,7 @@ def _worktree_dirty(ctx: RunContext, worktree: Path) -> bool:
 
 
 def _git(ctx: RunContext, cwd: Path, *args: str) -> str:
-    """Git durch den Orchestrator — Env-Whitelist, Repo-Hooks deaktiviert."""
+    """Git through the orchestrator — env whitelist, repo hooks disabled."""
     result = subprocess.run(
         ["git", "-C", str(cwd), "-c", "core.hooksPath=/dev/null", *args],
         capture_output=True,
@@ -775,9 +775,9 @@ INTEGRATION_LANE = "integration"
 
 
 def run_integration_phase(ctx: RunContext) -> None:
-    """Phase 4: Lane-Branches auf einen Integrations-Branch mergen, E2E-Gate
-    fahren; bei Rot triagiert der E2E-Agent die Fehler in die Lanes zurück.
-    Max. 10 Runden, Circuit-Breaker bei identischem E2E-Output."""
+    """Phase 4: merge Lane branches onto an integration branch, run the E2E
+    Gate; on red the E2E agent triages the failures back into the Lanes.
+    Max. 10 rounds, Circuit-Breaker on identical E2E output."""
     if ctx.state.phase != "integration":
         return
     lanes = _active_lanes(ctx)
@@ -789,10 +789,10 @@ def run_integration_phase(ctx: RunContext) -> None:
 
 
 def _integration_loop(ctx: RunContext, lanes: list[str]) -> Path:
-    """Merge + E2E bis grün (Kern von Phase 4) — liefert den grünen
-    Integrations-Worktree. Auch die Review-Phasen laufen hier durch: JEDER
-    Review-Fix muss wieder durchs E2E-Gate, nicht nur durch die Lane-Gates.
-    Das Runden-Budget (integration_rounds) gilt run-weit."""
+    """Merge + E2E until green (core of phase 4) — returns the green
+    integration Worktree. The review phases also pass through here: EVERY
+    review fix must go through the E2E Gate again, not just through the Lane Gates.
+    The round budget (integration_rounds) applies run-wide."""
     previous: list[str] | None = ctx.state.integration_last_failures or None
     while True:
         # Limit VOR Merge/E2E prüfen: Ein Crash zwischen Runden-Save und
@@ -841,8 +841,8 @@ def _integration_loop(ctx: RunContext, lanes: list[str]) -> Path:
 
 
 def _fresh_integration_worktree(ctx: RunContext, lanes: list[str]) -> Path:
-    """Integrations-Branch je Runde frisch ab Base-Branch aufbauen und alle
-    Lane-Branches hineinmergen — idempotent und damit crash-sicher."""
+    """Rebuild the integration branch fresh from the base branch each round and
+    merge all Lane branches into it — idempotent and thus crash-safe."""
     remove_lane_worktree(ctx.repo, ctx.state.run_id, INTEGRATION_LANE)
     worktree = create_lane_worktree(
         ctx.repo, ctx.state.run_id, INTEGRATION_LANE, ctx.config.base_branch
@@ -885,7 +885,7 @@ def _fresh_integration_worktree(ctx: RunContext, lanes: list[str]) -> Path:
 
 
 def _abort_merge(ctx: RunContext, worktree: Path) -> None:
-    """Best effort: halb gemergten Zustand nicht liegen lassen."""
+    """Best effort: do not leave a half-merged state behind."""
     try:
         subprocess.run(
             ["git", "-C", str(worktree), "-c", "core.hooksPath=/dev/null", "merge", "--abort"],
@@ -911,9 +911,9 @@ def _run_e2e_gate(ctx: RunContext, worktree: Path, lanes: list[str]) -> GateRepo
 def _triage_e2e(ctx: RunContext, worktree: Path, report: GateReport) -> ReviewResult:
     spec = REGISTRY["e2e_triage"]
     task = (
-        "Die E2E-Tests auf dem Integrations-Branch sind rot. Ordne jeden Fehler "
-        "einer Lane zu (frontend/backend/unknown).\n\n"
-        f"{SCHEMA_INSTRUCTION}\n\nE2E-Ausgabe:\n{_gate_failure_text(report)}"
+        "The E2E tests on the integration branch are red. Assign each failure "
+        "to a Lane (frontend/backend/unknown).\n\n"
+        f"{SCHEMA_INSTRUCTION}\n\nE2E output:\n{_gate_failure_text(report)}"
     )
     result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
     try:
@@ -929,13 +929,13 @@ def _dispatch_lane_fixes(
     source: str,
     mutate_staged: Callable[[list[str]], None] | None = None,
 ) -> None:
-    """Findings je Lane als Fix-Task in den regulären Lane-Loop geben —
-    jeder Fix nimmt den validierten Pfad (Gates, Commit, kein Sonderweg).
+    """Hand Findings per Lane as a fix task into the regular Lane loop —
+    every fix takes the validated path (Gates, commit, no special route).
 
-    ``mutate_staged`` läuft unter demselben Lock und wird mit demselben Save
-    persistiert wie das Staging — Zähler (z. B. fix_cycles) und gestagter
-    Fix-Task sind damit atomar; ein Crash kann keinen Zyklus verbrennen,
-    ohne dass der zugehörige Fix beim Resume nachgeholt wird."""
+    ``mutate_staged`` runs under the same lock and is persisted with the same
+    save as the staging — counters (e.g. fix_cycles) and the staged
+    fix task are thus atomic; a crash cannot burn a cycle
+    without the corresponding fix being caught up on resume."""
     decision = triage_final_review(
         ReviewResult(verdict="needs_fixes", findings=findings)
         if findings
@@ -963,8 +963,8 @@ def _dispatch_lane_fixes(
             lane_state.gates_passed = False
             lane_state.gates_tree = None
             lane_state.pending_task = (
-                f"{source}-Findings für deine Lane. Fixe die Ursachen (kein Workaround "
-                f"an den Tests vorbei), TDD wo sinnvoll. Du committest nicht.\n\n{text}"
+                f"{source} Findings for your Lane. Fix the root causes (no workaround "
+                f"bypassing the tests), TDD where sensible. You do not commit.\n\n{text}"
             )
             lane_state.last_failures = []
             lane_state.gate_iterations = 0
@@ -979,20 +979,20 @@ MAX_REVIEW_ROUNDS = 10
 
 
 def _resume_pending_lanes(ctx: RunContext, lanes: list[str]) -> None:
-    """Vor Merge/Review JEDE Lane durch _run_lane schicken: Unfertige Lanes
-    (Crash nach Fix-Dispatch) holen Gates + Commit nach; fertige Lanes laufen
-    durch die Tree-Hash-Revalidierung und gehen bei Manipulation zurück in den
-    Loop statt ungegatete Änderungen ins Review zu geben."""
+    """Before merge/review, send EVERY Lane through _run_lane: unfinished Lanes
+    (crash after fix Dispatch) catch up on Gates + commit; finished Lanes go
+    through the tree-hash revalidation and, on manipulation, return to the
+    loop instead of feeding ungated changes into the review."""
     for lane in lanes:
         if ctx.state.lanes.get(lane) is not None:
             _run_lane(ctx, lane, lanes)
 
 
 def _review_worktree(ctx: RunContext, lanes: list[str]) -> Path:
-    """Worktree, gegen den Reviews laufen: parallel der Integrations-Branch
-    NACH grünem E2E-Gate (jeder Review-Fix muss wieder durch die komplette
-    Integrationsschleife), Single-Lane der Lane-Worktree — beides idempotent
-    wiederherstellbar, ein Crash-Resume braucht keinen alten Zustand."""
+    """Worktree that reviews run against: in parallel mode the integration branch
+    AFTER a green E2E Gate (every review fix must go through the complete
+    integration loop again), in single-lane mode the Lane Worktree — both idempotently
+    restorable, a crash resume needs no old state."""
     if ctx.state.parallel:
         return _integration_loop(ctx, lanes)
     return create_lane_worktree(ctx.repo, ctx.state.run_id, lanes[0], ctx.config.base_branch)
@@ -1006,8 +1006,8 @@ def _changed_files(ctx: RunContext, worktree: Path) -> list[str]:
 
 
 def run_codex_review_phase(ctx: RunContext) -> None:
-    """Phase 5: Codex reviewt den integrierten Diff; Findings werden per
-    lane-Feld in die Build-Lanes geroutet, bis Verdict ok."""
+    """Phase 5: Codex reviews the integrated diff; Findings are routed via the
+    lane field into the build Lanes, until the verdict is ok."""
     if ctx.state.phase != "codex_review":
         return
     lanes = _active_lanes(ctx)
@@ -1062,8 +1062,8 @@ def run_codex_review_phase(ctx: RunContext) -> None:
 
 
 def run_final_review_phase(ctx: RunContext) -> None:
-    """Phase 6: Finaler Reviewer (read-only) prüft gegen die Spec; Triage in
-    Code: scope_gap → Follow-up-Report, Rest → Fix-Zyklus (max. 3 je Lane)."""
+    """Phase 6: final reviewer (read-only) checks against the spec; Triage in
+    code: scope_gap → follow-up report, rest → fix cycle (max. 3 per Lane)."""
     if ctx.state.phase != "final_review":
         return
     lanes = _active_lanes(ctx)
@@ -1073,13 +1073,13 @@ def run_final_review_phase(ctx: RunContext) -> None:
         worktree = _review_worktree(ctx, lanes)
         spec = REGISTRY["final_reviewer"]
         task = (
-            "Prüfe die Implementierung in diesem Worktree read-only gegen "
-            ".adw/spec.md (Akzeptanzkriterien, Definition of Done) und "
+            "Check the implementation in this Worktree read-only against "
+            ".adw/spec.md (acceptance criteria, Definition of Done) and "
             ".adw/contract.yaml.\n\n"
             f"{SCHEMA_INSTRUCTION}\n\n"
-            'Zusätzlich PFLICHT bei jedem Finding: das Feld "category" mit '
-            "einem der Werte scope_gap | implementation | trivial "
-            "(Triage-Grundlage)."
+            'Additionally MANDATORY on every Finding: the field "category" with '
+            "one of the values scope_gap | implementation | trivial "
+            "(triage basis)."
         )
         result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
         try:
@@ -1128,7 +1128,7 @@ def run_final_review_phase(ctx: RunContext) -> None:
             ctx,
             review.findings,
             lanes,
-            source="Finaler-Review",
+            source="Final-Review",
             mutate_staged=_bump_fix_cycles,
         )
         with ctx.state_lock:
@@ -1148,8 +1148,8 @@ MAX_CI_REENTRIES = 1
 
 
 def run_ci_phase(ctx: RunContext) -> None:
-    """Phase 7: Feature-Branch pushen, Pipeline via glab pollen. Bei Rot liest
-    der Log-Analyst die Logs, EIN Re-Entry über die Lane-Loops — danach Mensch."""
+    """Phase 7: push the feature branch, poll the pipeline via glab. On red the
+    log analyst reads the logs, ONE re-entry via the Lane loops — then a human."""
     if ctx.state.phase != "ci":
         return
     lanes = _active_lanes(ctx)
@@ -1225,11 +1225,11 @@ def run_ci_phase(ctx: RunContext) -> None:
 
 
 def _ci_forge(ctx: RunContext) -> Forge:
-    """GitLab oder GitHub? Config-Override gewinnt, sonst origin-Erkennung.
+    """GitLab or GitHub? The config override wins, otherwise origin detection.
 
-    Im Dry-Run fällt ein unerkennbarer Host auf 'gitlab' zurück — dort ist
-    das Monitoring ohnehin gemockt und ein Wegwerf-Repo hat oft gar kein
-    origin. Im echten Lauf gilt fail fast: kein Poll gegen die falsche API."""
+    In dry-run an unrecognizable host falls back to 'gitlab' — there the
+    monitoring is mocked anyway and a throwaway repo often has no
+    origin at all. In a real run fail fast applies: no poll against the wrong API."""
     try:
         return detect_forge(ctx.repo, ctx.config.ci.provider)
     except ForgeError as exc:
@@ -1239,9 +1239,9 @@ def _ci_forge(ctx: RunContext) -> Forge:
 
 
 def _push_branch(ctx: RunContext, worktree: Path, branch: str) -> None:
-    """Push durch den Orchestrator. --force-with-lease: der Integrations-Branch
-    wird je Runde neu ab Base aufgebaut (non-fast-forward ist erwartet), aber
-    fremde Remote-Änderungen werden nie überschrieben."""
+    """Push by the orchestrator. --force-with-lease: the integration branch
+    is rebuilt fresh from base each round (non-fast-forward is expected), but
+    foreign remote changes are never overwritten."""
     extra = dict(ctx.git_env)
     # SSH-Agent nur dem Push durchreichen (bewusst nicht global in safe_env):
     # Gates/Agents sollen den Agenten-Socket nicht orten können.
@@ -1278,9 +1278,9 @@ def _push_branch(ctx: RunContext, worktree: Path, branch: str) -> None:
 def _analyze_ci_logs(ctx: RunContext, worktree: Path, log_excerpt: str) -> ReviewResult:
     spec = REGISTRY["log_analyst"]
     task = (
-        "Die CI-Pipeline ist rot. Analysiere die Logs und ordne jeden Fehler "
-        "einer Lane zu (frontend/backend/unknown).\n\n"
-        f"{SCHEMA_INSTRUCTION}\n\nCI-Logs:\n{log_excerpt}"
+        "The CI pipeline is red. Analyze the logs and assign each failure "
+        "to a Lane (frontend/backend/unknown).\n\n"
+        f"{SCHEMA_INSTRUCTION}\n\nCI logs:\n{log_excerpt}"
     )
     # cwd = der GEPUSHTE Worktree: der Analyst liest die Quellen, die die CI
     # getestet hat — nicht den Base-Checkout des Haupt-Repos.
@@ -1292,10 +1292,10 @@ def _analyze_ci_logs(ctx: RunContext, worktree: Path, log_excerpt: str) -> Revie
 
 
 def _write_followups(ctx: RunContext, followups: list[Finding]) -> None:
-    """scope_gap-Findings als Follow-up-Report sammeln (kein Auto-Restart).
+    """Collect scope_gap Findings as a follow-up report (no auto-restart).
 
-    Dedupe über file+issue: ein bewusst nicht gefixtes scope_gap taucht in
-    jeder weiteren Review-Runde erneut auf und darf den Report nicht fluten."""
+    Dedupe via file+issue: a deliberately unfixed scope_gap shows up again in
+    every further review round and must not flood the report."""
     ctx.run_dir.mkdir(parents=True, exist_ok=True)
     path = ctx.run_dir / "followups.md"
     existing = path.read_text(encoding="utf-8") if path.is_file() else ""

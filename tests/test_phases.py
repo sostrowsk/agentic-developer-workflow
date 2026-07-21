@@ -1,4 +1,4 @@
-"""Tests der Phasen-Orchestrierung — komplett mit Mocks, 0 Tokens, echtes git."""
+"""Tests of the phase orchestration — entirely with mocks, 0 tokens, real git."""
 
 import json
 import re
@@ -112,7 +112,7 @@ def test_identical_spec_findings_twice_escalate(ctx):
 
 
 def test_stale_artifacts_from_previous_run_are_cleared(ctx):
-    """Regression: alte .adw/spec.md darf einen untätigen Agenten nicht adeln."""
+    """Regression: an old .adw/spec.md must not dignify an idle agent."""
     (ctx.repo / ".adw" / "spec.md").write_text("# ALTE Spec vom letzten Run\n")
     ctx.agents.file_writes.pop("spec_agent")  # Agent schreibt diesmal nichts
     ctx.agents.script("spec_agent", "behauptet fertig zu sein")
@@ -121,8 +121,8 @@ def test_stale_artifacts_from_previous_run_are_cleared(ctx):
 
 
 def test_tracked_artifacts_from_merged_adw_run_do_not_block_the_next_run(ctx):
-    """Regression: nach Merge eines ADW-Branches sind Artefakte getrackt — der
-    nächste Run muss trotzdem laufen und den Checkout sauber hinterlassen."""
+    """Regression: after merging an ADW branch the artifacts are tracked — the
+    next run must still work and leave the checkout clean."""
     from tests.conftest import git
 
     spec_path = ctx.repo / ".adw" / "spec.md"
@@ -141,7 +141,7 @@ def test_tracked_artifacts_from_merged_adw_run_do_not_block_the_next_run(ctx):
 
 
 def test_plan_agent_cannot_silently_rewrite_reviewed_spec(ctx):
-    """Regression: Spec nach Spec-Review ist fix — der Plan-Agent plant nur."""
+    """Regression: the spec is fixed after the spec review — the plan agent only plans."""
     plan_files = dict(ctx.agents.file_writes["plan_agent"])
     plan_files[".adw/spec.md"] = "# Umgeschriebene Spec\n"
     ctx.agents.script_files("plan_agent", plan_files)
@@ -168,7 +168,7 @@ def test_run_artifacts_are_gitignored_from_the_start(ctx):
 
 
 def test_authoring_agents_cannot_mutate_target_config(ctx):
-    """Regression: Write(.adw/**) erlaubt technisch auch config.yaml — wird restauriert."""
+    """Regression: Write(.adw/**) technically also allows config.yaml — it gets restored."""
     original_config = (ctx.repo / ".adw" / "config.yaml").read_text()
     spec_files = dict(ctx.agents.file_writes["spec_agent"])
     spec_files[".adw/config.yaml"] = "base_branch: main  # sabotiert\n"
@@ -182,7 +182,7 @@ def test_authoring_agents_cannot_mutate_target_config(ctx):
 
 
 def test_config_is_restored_even_when_the_run_escalates(ctx):
-    """Regression: Restore muss exception-sicher sein — auch bei Eskalation."""
+    """Regression: the restore must be exception-safe — even on escalation."""
     original_config = (ctx.repo / ".adw" / "config.yaml").read_text()
     spec_files = dict(ctx.agents.file_writes["spec_agent"])
     spec_files[".adw/config.yaml"] = "base_branch: main  # sabotiert\n"
@@ -195,7 +195,7 @@ def test_config_is_restored_even_when_the_run_escalates(ctx):
 
 
 def test_plan_review_always_sees_the_reviewed_spec(ctx):
-    """Regression: Codex darf Plan+Kontrakt nie gegen eine umgeschriebene Spec reviewen."""
+    """Regression: Codex must never review plan+contract against a rewritten spec."""
     seen_specs = []
 
     class SpyCodex(MockCodexRunner):
@@ -289,7 +289,7 @@ ci:
 
 
 def prepare_approved(ctx):
-    """Bringt den Context in den Zustand 'build' (Spec/Plan fertig, approved)."""
+    """Brings the context into the 'build' state (spec/plan done, approved)."""
     ctx.agents.script("spec_agent", "Spec")
     ctx.agents.script("plan_agent", "Plan")
     ctx.codex.script(OK, OK)
@@ -419,8 +419,8 @@ def test_build_agent_without_changes_escalates(ctx):
 
 
 def test_resume_build_with_committed_artifacts_and_dirty_rest(ctx):
-    """Regression: Resume mit committeten Artefakten + dirty Nicht-.adw-Files
-    darf nicht an einem leeren Seeding-Commit scheitern."""
+    """Regression: a resume with committed artifacts + dirty non-.adw files
+    must not fail on an empty seeding commit."""
     import shutil
 
     from adw.worktrees import create_lane_worktree
@@ -444,7 +444,7 @@ def test_resume_build_with_committed_artifacts_and_dirty_rest(ctx):
 
 
 def test_agent_tampering_with_approved_artifacts_is_reverted(ctx):
-    """Regression: der Build-Agent darf den approvten Kontrakt nicht still ändern."""
+    """Regression: the build agent must not silently change the approved contract."""
     from tests.conftest import git
 
     prepare_approved(ctx)
@@ -463,7 +463,7 @@ def test_agent_tampering_with_approved_artifacts_is_reverted(ctx):
 
 
 def test_lane_checkpoint_is_persisted_before_gates(ctx, target_repo):
-    """Regression: Session-ID/Iteration müssen VOR den (langen) Gates auf Platte sein."""
+    """Regression: session ID/iteration must be on disk BEFORE the (long) Gates."""
     write_config(
         target_repo,
         """\
@@ -485,7 +485,7 @@ lanes:
 
 
 def test_gates_run_against_restored_artifacts(ctx, target_repo):
-    """Regression: Gates müssen den approvten Kontrakt sehen, nicht die Agent-Version."""
+    """Regression: Gates must see the approved contract, not the agent's version."""
     write_config(
         target_repo,
         """\
@@ -510,8 +510,8 @@ lanes:
 
 
 def test_reverted_implementation_escalates_at_commit(ctx):
-    """Regression: Resume-Iteration ohne jede Implementierungs-Änderung darf nicht
-    als Erfolg durchgehen."""
+    """Regression: a resume iteration without any implementation change must not
+    pass as a success."""
     from adw.state import LaneState
     from adw.worktrees import create_lane_worktree, ports_for
 
@@ -530,7 +530,7 @@ def test_reverted_implementation_escalates_at_commit(ctx):
 
 
 def test_resume_at_iteration_limit_escalates_without_new_agent_call(ctx):
-    """Regression: Crash bei Iteration 10 darf nach Resume keinen 11. Versuch erlauben."""
+    """Regression: a crash at iteration 10 must not allow an 11th attempt after resume."""
     from adw.state import LaneState
     from adw.worktrees import create_lane_worktree, ports_for
 
@@ -548,7 +548,7 @@ def test_resume_at_iteration_limit_escalates_without_new_agent_call(ctx):
 
 
 def test_no_approval_choice_survives_resume(ctx):
-    """Regression: --no-approval muss im State liegen — Resume darf nicht pausieren."""
+    """Regression: --no-approval must live in the state — a resume must not pause."""
     ctx.agents.script("spec_agent", "Spec")
     ctx.agents.script("plan_agent", "Plan")
     ctx.codex.script(OK, OK)
@@ -570,7 +570,7 @@ def test_no_approval_choice_survives_resume(ctx):
 
 
 def test_no_approval_is_persisted_before_spec_starts(ctx):
-    """Regression: --no-approval muss VOR dem ersten Agent-Lauf auf Platte sein."""
+    """Regression: --no-approval must be on disk BEFORE the first agent run."""
     ctx.skip_approval = True
     with pytest.raises(AssertionError):  # kein Script = simulierter Crash im Spec-Agent
         run_spec_and_plan(ctx)
@@ -578,7 +578,7 @@ def test_no_approval_is_persisted_before_spec_starts(ctx):
 
 
 def test_completed_lane_is_not_rebuilt_on_resume(ctx):
-    """Regression: Crash vor dem Phasenübergang darf eine fertige Lane nicht neu bauen."""
+    """Regression: a crash before the phase transition must not rebuild a finished Lane."""
     prepare_approved(ctx)
     ctx.agents.script_files("build_agent", {"neu.py": "pass\n"})
     ctx.agents.script("build_agent", "gebaut")
@@ -594,7 +594,7 @@ def test_completed_lane_is_not_rebuilt_on_resume(ctx):
 
 
 def test_committed_lane_without_completed_flag_is_recovered(ctx):
-    """Regression: Crash zwischen Commit und completed-Flag darf nicht neu bauen."""
+    """Regression: a crash between the commit and the completed flag must not rebuild."""
     prepare_approved(ctx)
     ctx.agents.script_files("build_agent", {"neu.py": "pass\n"})
     ctx.agents.script("build_agent", "gebaut")
@@ -611,7 +611,7 @@ def test_committed_lane_without_completed_flag_is_recovered(ctx):
 
 
 def test_authoring_write_rules_are_artifact_exact():
-    """Regression: Spec-/Plan-Agent dürfen nicht in .adw/runs/ (State!) schreiben können."""
+    """Regression: spec/plan agents must not be able to write into .adw/runs/ (state!)."""
     from adw.agents import REGISTRY
 
     spec_rules = set(REGISTRY["spec_agent"].allowed_tools)
@@ -632,7 +632,7 @@ def test_run_dir_writes_are_deny_listed_for_all_agents(tmp_path):
 
 
 def test_agent_side_commit_is_not_recovered_as_completed(ctx):
-    """Regression: nur der Orchestrator-Commit (Sentinel) beweist grüne Gates."""
+    """Regression: only the orchestrator commit (sentinel) proves green Gates."""
     from adw.state import LaneState
     from adw.worktrees import create_lane_worktree, ports_for
     from tests.conftest import git
@@ -656,8 +656,8 @@ def test_agent_side_commit_is_not_recovered_as_completed(ctx):
 
 
 def test_failed_gate_feedback_survives_resume(ctx, target_repo):
-    """Regression: Nach Crash zwischen Gate-Fail und Fix-Lauf muss der Resume
-    das Gate-Feedback und die Circuit-Breaker-Basis noch kennen."""
+    """Regression: after a crash between Gate fail and fix run, the resume must
+    still know the Gate feedback and the Circuit-Breaker baseline."""
     write_config(
         target_repo,
         """\
@@ -684,7 +684,7 @@ lanes:
 
 
 def test_forged_sentinel_commit_is_not_recovered(ctx):
-    """Regression: Commit-Messages sind fälschbar — nur persistierte gates_passed zählen."""
+    """Regression: commit messages are forgeable — only persisted gates_passed counts."""
     from adw.state import LaneState
     from adw.worktrees import create_lane_worktree, ports_for
     from tests.conftest import git
@@ -708,7 +708,7 @@ def test_forged_sentinel_commit_is_not_recovered(ctx):
 
 
 def test_build_agent_config_tampering_is_not_committed(ctx):
-    """Regression: der Build-Agent darf die Gate-Konfiguration nicht mitcommitten."""
+    """Regression: the build agent must not commit the Gate configuration along."""
     from tests.conftest import git
 
     prepare_approved(ctx)
@@ -724,7 +724,7 @@ def test_build_agent_config_tampering_is_not_committed(ctx):
 
 
 def test_every_post_gate_checkpoint_carries_the_feedback(ctx, target_repo, monkeypatch):
-    """Regression: kein persistierter Zwischenstand nach Gate-Fail ohne pending_task."""
+    """Regression: no persisted intermediate state after a Gate fail without pending_task."""
     write_config(
         target_repo,
         """\
@@ -762,7 +762,7 @@ lanes:
 
 
 def test_untracked_config_created_by_agent_is_not_committed(tmp_path):
-    """Regression: ist config.yaml untracked, darf der Agent keine eigene einschleusen."""
+    """Regression: if config.yaml is untracked, the agent must not smuggle in its own."""
     from tests.conftest import git, write_config
 
     repo = tmp_path / "target"
@@ -806,7 +806,7 @@ def test_untracked_config_created_by_agent_is_not_committed(tmp_path):
 
 
 def test_failed_config_restore_of_tracked_config_escalates(ctx, monkeypatch):
-    """Regression: Git-Fehler beim Config-Restore darf nicht als 'untracked' gelten."""
+    """Regression: a git error during config restore must not count as 'untracked'."""
     import subprocess as real_subprocess
 
     prepare_approved(ctx)
@@ -827,8 +827,8 @@ def test_failed_config_restore_of_tracked_config_escalates(ctx, monkeypatch):
 
 
 def test_tampered_tree_after_gates_passed_is_not_finalized_blindly(ctx):
-    """Regression: gates_passed beweist den DAMALIGEN Baum — ein veränderter
-    Baum muss erneut durch Agent/Gates statt blind committet zu werden."""
+    """Regression: gates_passed proves the tree AT THAT TIME — a changed tree
+    must go through agent/Gates again instead of being committed blindly."""
     from adw.state import LaneState
     from adw.worktrees import create_lane_worktree, ports_for
 
@@ -852,7 +852,7 @@ def test_tampered_tree_after_gates_passed_is_not_finalized_blindly(ctx):
 
 
 def test_git_error_during_config_absence_check_escalates(ctx, monkeypatch):
-    """Regression: Git-Fehler bei der Absenz-Prüfung darf nicht als 'fehlt' gelten."""
+    """Regression: a git error during the absence check must not count as 'missing'."""
     import subprocess as real_subprocess
 
     prepare_approved(ctx)
@@ -876,7 +876,7 @@ def test_git_error_during_config_absence_check_escalates(ctx, monkeypatch):
 
 
 def test_resume_in_plan_phase_reruns_the_plan_loop(ctx):
-    """Regression: Crash während der Plan-Phase darf den Run nicht in 'plan' stranden."""
+    """Regression: a crash during the plan phase must not strand the run in 'plan'."""
     ctx.agents.script("spec_agent", "Spec")  # Plan-Agent NICHT gescriptet → Crash
     ctx.codex.script(OK)
     with pytest.raises(AssertionError):
@@ -899,7 +899,7 @@ def test_resume_in_plan_phase_reruns_the_plan_loop(ctx):
 
 
 def test_restore_survives_deleted_adw_directory(ctx):
-    """Regression: gelöschtes .adw im Worktree darf die Restauration nicht crashen."""
+    """Regression: a deleted .adw in the Worktree must not crash the restoration."""
     import shutil
 
     from adw.phases import _restore_approved_artifacts
@@ -915,7 +915,7 @@ def test_restore_survives_deleted_adw_directory(ctx):
 
 
 def test_crash_between_archive_and_phase_save_is_recoverable(ctx):
-    """Regression: Spec schon archiviert, Phase noch 'plan' — Resume muss laufen."""
+    """Regression: spec already archived, phase still 'plan' — resume must work."""
     ctx.agents.script("spec_agent", "Spec")
     ctx.agents.script("plan_agent", "Plan")
     ctx.codex.script(OK, OK)
@@ -941,7 +941,7 @@ def test_crash_between_archive_and_phase_save_is_recoverable(ctx):
 
 
 def test_authoring_resume_keeps_session_and_review_feedback(ctx):
-    """Regression: Crash im Spec-Fix-Zyklus darf Session + Codex-Feedback nicht verlieren."""
+    """Regression: a crash in the spec fix cycle must not lose session + Codex feedback."""
     ctx.agents.script("spec_agent", "v1")  # Fix-Lauf NICHT gescriptet → Crash dort
     ctx.codex.script(needs_fixes("Akzeptanzkriterien fehlen"))
     with pytest.raises(AssertionError):
@@ -969,7 +969,7 @@ def test_authoring_resume_keeps_session_and_review_feedback(ctx):
 
 
 def test_config_restore_checkout_runs_without_repo_hooks(ctx, tmp_path):
-    """Regression: post-checkout-Hooks dürfen beim Config-Restore nicht feuern."""
+    """Regression: post-checkout hooks must not fire during the config restore."""
     from tests.conftest import git
 
     marker = tmp_path / "hook-lief"
@@ -989,7 +989,7 @@ def test_config_restore_checkout_runs_without_repo_hooks(ctx, tmp_path):
 
 
 def test_agent_side_commits_during_build_escalate(ctx):
-    """Regression: committet der Agent selbst (Bash), muss der Orchestrator eskalieren."""
+    """Regression: if the agent commits itself (Bash), the orchestrator must escalate."""
     from tests.conftest import git
 
     class CommittingAgentRunner(MockAgentRunner):
@@ -1012,7 +1012,7 @@ def test_agent_side_commits_during_build_escalate(ctx):
 
 
 def test_missing_archived_artifact_escalates_before_build(ctx):
-    """Regression: fehlt ein archiviertes Artefakt, darf keine Lane dagegen bauen."""
+    """Regression: if an archived artifact is missing, no Lane may build against it."""
     prepare_approved(ctx)
     (ctx.run_dir / "contract.yaml").unlink()
     ctx.agents.script_files("build_agent", {"neu.py": "pass\n"})
@@ -1022,7 +1022,7 @@ def test_missing_archived_artifact_escalates_before_build(ctx):
 
 
 def test_completed_lane_with_tampered_tree_is_not_skipped(ctx):
-    """Regression: completed + verändertem Baum darf nicht ungeprüft weitergereicht werden."""
+    """Regression: completed + a changed tree must not be passed on unchecked."""
     prepare_approved(ctx)
     ctx.agents.script_files("build_agent", {"neu.py": "pass\n"})
     ctx.agents.script("build_agent", "gebaut")
@@ -1040,8 +1040,8 @@ def test_completed_lane_with_tampered_tree_is_not_skipped(ctx):
 
 
 def test_uncommitted_edits_on_tracked_artifacts_fail_fast(ctx):
-    """Regression: ungespeicherte Nutzer-Edits an getrackten Artefakten dürfen
-    nicht durch die Archivierung verworfen werden."""
+    """Regression: unsaved user edits to tracked artifacts must not be
+    discarded by the archiving."""
     from tests.conftest import git
 
     spec_path = ctx.repo / ".adw" / "spec.md"
@@ -1056,7 +1056,7 @@ def test_uncommitted_edits_on_tracked_artifacts_fail_fast(ctx):
 
 
 def test_directory_shaped_injected_config_is_removed_safely(tmp_path):
-    """Regression: Verzeichnis statt config.yaml darf den Lauf nicht crashen."""
+    """Regression: a directory instead of config.yaml must not crash the run."""
     from tests.conftest import git, write_config
 
     repo = tmp_path / "target"
@@ -1099,8 +1099,8 @@ def test_directory_shaped_injected_config_is_removed_safely(tmp_path):
 
 
 def test_archived_spec_takes_precedence_on_plan_resume(ctx):
-    """Regression: Crash mitten in der Archivierung — die reviewte (archivierte)
-    Spec schlägt eine per git restaurierte alte getrackte Spec."""
+    """Regression: crash in the middle of archiving — the reviewed (archived)
+    spec beats an old tracked spec restored via git."""
     seen_specs = []
 
     class SpyCodex(MockCodexRunner):
@@ -1126,7 +1126,7 @@ def test_archived_spec_takes_precedence_on_plan_resume(ctx):
 
 
 def test_uncommitted_edits_guard_also_runs_on_plan_resume(ctx):
-    """Regression: der Datenverlust-Guard muss auch beim Resume in 'plan' greifen."""
+    """Regression: the data-loss guard must also apply on a resume in 'plan'."""
     from tests.conftest import git
 
     plan_path = ctx.repo / ".adw" / "plan.md"
@@ -1145,8 +1145,8 @@ def test_uncommitted_edits_guard_also_runs_on_plan_resume(ctx):
 
 
 def test_config_restore_uses_pinned_fork_point_not_moving_base(ctx):
-    """Regression: rückt der Base-Branch vor, darf die Lane nicht dessen NEUE
-    Config importieren — restauriert wird vom Fork-Point der Lane."""
+    """Regression: if the base branch advances, the Lane must not import its NEW
+    config — restoration happens from the Lane's fork point."""
     from tests.conftest import git
 
     original_config = (ctx.repo / ".adw" / "config.yaml").read_text()  # bereits getrackt
@@ -1174,8 +1174,8 @@ def test_config_restore_uses_pinned_fork_point_not_moving_base(ctx):
 
 
 def test_symlinked_artifact_is_replaced_not_followed(ctx):
-    """Regression: Symlink statt Artefakt darf weder Fremddateien überschreiben
-    noch die Restauration umgehen."""
+    """Regression: a symlink instead of an artifact must neither overwrite foreign
+    files nor bypass the restoration."""
     from adw.phases import _restore_approved_artifacts
     from adw.worktrees import create_lane_worktree
 
@@ -1194,8 +1194,8 @@ def test_symlinked_artifact_is_replaced_not_followed(ctx):
 
 
 def test_agent_commit_in_crash_window_is_detected_on_resume(ctx):
-    """Regression: committet der Agent und crasht der Orchestrator davor,
-    muss der Resume den fremden HEAD erkennen."""
+    """Regression: if the agent commits and the orchestrator crashes before that,
+    the resume must detect the foreign HEAD."""
     from adw.state import LaneState
     from adw.worktrees import create_lane_worktree, ports_for
     from tests.conftest import git
@@ -1219,7 +1219,7 @@ def test_agent_commit_in_crash_window_is_detected_on_resume(ctx):
 
 
 def test_agent_branch_switch_is_detected(ctx):
-    """Regression: git switch --detach am selben Commit darf nicht unbemerkt bleiben."""
+    """Regression: git switch --detach at the same commit must not go unnoticed."""
     from tests.conftest import git
 
     class BranchSwitchingAgent(MockAgentRunner):
@@ -1241,7 +1241,7 @@ def test_agent_branch_switch_is_detected(ctx):
 
 
 def test_symlinked_adw_directory_is_replaced_not_followed(ctx):
-    """Regression: .adw als Symlink darf den Orchestrator nicht aus der Lane schreiben lassen."""
+    """Regression: .adw as a symlink must not let the orchestrator write outside the Lane."""
     import shutil
 
     from adw.phases import _restore_approved_artifacts
@@ -1262,7 +1262,7 @@ def test_symlinked_adw_directory_is_replaced_not_followed(ctx):
 
 
 def test_config_symlink_to_directory_is_removed_safely(tmp_path):
-    """Regression: config.yaml als Symlink auf ein Verzeichnis darf rmtree nicht crashen."""
+    """Regression: config.yaml as a symlink to a directory must not crash rmtree."""
     from tests.conftest import git, write_config
 
     repo = tmp_path / "target"
@@ -1317,7 +1317,7 @@ def test_config_symlink_to_directory_is_removed_safely(tmp_path):
 
 
 def test_own_dirty_tracked_spec_does_not_trip_the_guard_on_plan_resume(ctx):
-    """Regression: die EIGENE neue Spec über einer getrackten alten ist kein User-Edit."""
+    """Regression: our OWN new spec over an old tracked one is not a user edit."""
     from tests.conftest import git
 
     spec_path = ctx.repo / ".adw" / "spec.md"
@@ -1344,7 +1344,7 @@ def test_own_dirty_tracked_spec_does_not_trip_the_guard_on_plan_resume(ctx):
 
 
 def test_file_shaped_adw_directory_is_replaced(ctx):
-    """Regression: .adw als DATEI darf mkdir nicht mit FileExistsError crashen."""
+    """Regression: .adw as a FILE must not crash mkdir with FileExistsError."""
     import shutil
 
     from adw.phases import _restore_approved_artifacts
@@ -1435,7 +1435,7 @@ def triage_json(lane: str, issue: str = "Button kaputt") -> str:
 
 @pytest.fixture
 def pctx(target_repo):
-    """Paralleler Context: zwei Lanes + E2E-Config, Spec/Plan-Agents gescriptet."""
+    """Parallel context: two Lanes + E2E config, spec/plan agents scripted."""
     write_config(target_repo, PARALLEL_CONFIG)
     agents = MockAgentRunner()
     agents.script_files("spec_agent", {".adw/spec.md": "# Spec\n"})
@@ -1455,7 +1455,7 @@ def pctx(target_repo):
 
 
 def prepare_built_parallel(pctx, lane_files=None, build_responses=2):
-    """Bringt den parallelen Context bis phase='integration' (Lanes gebaut)."""
+    """Brings the parallel context up to phase='integration' (Lanes built)."""
     pctx.agents.script("spec_agent", "Spec")
     pctx.agents.script("plan_agent", "Plan")
     pctx.codex.script(OK, OK)
@@ -1588,8 +1588,8 @@ def test_integration_round_counter_survives_resume(pctx, target_repo):
 
 
 def test_exhausted_round_limit_escalates_before_any_new_e2e_run(pctx, target_repo):
-    """Regression (Codex): Crash zwischen Runden-Save und Limit-Check darf beim
-    Resume keine 11. Runde starten — Limit-Check VOR Merge/E2E."""
+    """Regression (Codex): a crash between the round save and the limit check must
+    not start an 11th round on resume — limit check BEFORE merge/E2E."""
     write_config(target_repo, E2E_MARKER_CONFIG)
     pctx.config = AdwConfig.load(target_repo)
     prepare_built_parallel(pctx)
@@ -1604,8 +1604,8 @@ def test_exhausted_round_limit_escalates_before_any_new_e2e_run(pctx, target_rep
 
 
 def test_merge_timeout_escalates_instead_of_crashing(pctx, monkeypatch):
-    """Regression (Codex): TimeoutExpired beim Merge muss im Eskalationspfad
-    landen (Report + phase=escalated), nicht als roher Traceback."""
+    """Regression (Codex): TimeoutExpired during the merge must end up in the
+    escalation path (report + phase=escalated), not as a raw traceback."""
     import subprocess as sp
 
     prepare_built_parallel(pctx)
@@ -1658,7 +1658,7 @@ def finding_dict(lane: str, issue: str, category: str) -> dict:
 
 
 def prepare_reviewable(ctx):
-    """Single-Lane bis phase='codex_review' bringen (Build fertig committet)."""
+    """Bring the single Lane up to phase='codex_review' (build fully committed)."""
     prepare_approved(ctx)
     ctx.agents.script_files("build_agent", {"src_neu.py": "print('v1')\n"})
     ctx.agents.script("build_agent", "gebaut")
@@ -1806,8 +1806,8 @@ def test_unparseable_final_review_output_escalates(ctx):
 
 
 def test_pending_lane_fix_is_resumed_before_codex_review(ctx):
-    """Regression (Codex P1): Crash zwischen Fix-Dispatch und Gates/Commit darf
-    beim Resume keinen ungeprüften, uncommitteten Stand ins Review geben."""
+    """Regression (Codex P1): a crash between fix Dispatch and Gates/commit must
+    not hand an unchecked, uncommitted state to the review on resume."""
     from pathlib import Path
 
     from tests.conftest import git
@@ -1835,8 +1835,8 @@ def test_pending_lane_fix_is_resumed_before_codex_review(ctx):
 
 
 def test_review_round_limit_escalates_without_terminal_fix_dispatch(ctx):
-    """Regression (Codex P2): Der 10. needs_fixes-Review darf keinen Fix mehr
-    dispatchen, den nie wieder ein Review prüfen kann."""
+    """Regression (Codex P2): the 10th needs_fixes review must not dispatch a fix
+    that no review can ever check again."""
     prepare_reviewable(ctx)
     ctx.agents.script("build_agent", *["Fix"] * 12)
 
@@ -1854,9 +1854,9 @@ def test_review_round_limit_escalates_without_terminal_fix_dispatch(ctx):
 
 
 def test_final_review_finding_for_inactive_lane_routes_to_active_lanes(ctx):
-    """lane='frontend' im Single-Lane-Run wird wie 'unknown' behandelt und in
-    die aktiven Lanes geroutet — kein KeyError, keine Eskalation, kein
-    verworfenes Finding."""
+    """lane='frontend' in a single-Lane run is treated like 'unknown' and routed
+    into the active Lanes — no KeyError, no escalation, no discarded
+    Finding."""
     prepare_reviewable(ctx)
     ctx.codex.script(OK)
     run_codex_review_phase(ctx)
@@ -1877,8 +1877,8 @@ def test_final_review_finding_for_inactive_lane_routes_to_active_lanes(ctx):
 
 
 def test_identical_final_review_findings_trigger_circuit_breaker(ctx):
-    """Regression (Codex P2): identisches Finding nach einem Fix-Zyklus muss den
-    Circuit-Breaker auslösen statt alle 3 Zyklen auszureizen."""
+    """Regression (Codex P2): an identical Finding after one fix cycle must trip
+    the Circuit-Breaker instead of exhausting all 3 cycles."""
     prepare_reviewable(ctx)
     ctx.codex.script(OK)
     run_codex_review_phase(ctx)
@@ -1900,8 +1900,8 @@ def test_identical_final_review_findings_trigger_circuit_breaker(ctx):
 
 
 def test_tampered_completed_lane_is_revalidated_before_review(ctx):
-    """Regression (Codex P1): Auch 'completed'-Lanes müssen vor dem Review durch
-    die Tree-Hash-Revalidierung — sonst konsumiert das Review ungegatete Änderungen."""
+    """Regression (Codex P1): even 'completed' Lanes must pass the tree-hash
+    revalidation before the review — otherwise the review consumes ungated changes."""
     from pathlib import Path
 
     from tests.conftest import git
@@ -1921,8 +1921,8 @@ def test_tampered_completed_lane_is_revalidated_before_review(ctx):
 
 
 def test_fix_cycle_increment_is_persisted_with_the_staged_fix(ctx, monkeypatch):
-    """Regression (Codex P2): Zähler-Inkrement und gestagter Fix-Task müssen im
-    SELBEN Save landen — sonst verbrennt ein Crash dazwischen einen Fix-Zyklus."""
+    """Regression (Codex P2): the counter increment and the staged fix task must
+    land in the SAME save — otherwise a crash in between burns a fix cycle."""
     prepare_reviewable(ctx)
     ctx.codex.script(OK)
     run_codex_review_phase(ctx)
@@ -1948,8 +1948,8 @@ def test_fix_cycle_increment_is_persisted_with_the_staged_fix(ctx, monkeypatch):
 
 
 def test_followups_are_not_duplicated_across_review_rounds(ctx):
-    """Regression (Codex P2): Ein scope_gap, das bewusst nicht gefixt wird, darf
-    im Follow-up-Report nicht pro Review-Runde erneut auftauchen."""
+    """Regression (Codex P2): a scope_gap that is deliberately not fixed must not
+    reappear in the follow-up report on every review round."""
     prepare_reviewable(ctx)
     ctx.codex.script(OK)
     run_codex_review_phase(ctx)
@@ -1972,8 +1972,8 @@ def test_followups_are_not_duplicated_across_review_rounds(ctx):
 
 
 def test_review_fix_in_parallel_run_goes_back_through_e2e(pctx, target_repo):
-    """Regression (Codex P1): Ein Review-Fix im Parallel-Run muss wieder durchs
-    E2E-Gate — nicht nur durch die Lane-Gates + Re-Merge."""
+    """Regression (Codex P1): a review fix in a parallel run must go through the
+    E2E gate again — not just through the Lane Gates + re-merge."""
     write_config(
         target_repo,
         PARALLEL_CONFIG.replace(
@@ -2001,8 +2001,8 @@ def test_review_fix_in_parallel_run_goes_back_through_e2e(pctx, target_repo):
 
 
 def test_final_review_finding_without_category_escalates(ctx):
-    """Regression (Codex P2): Fehlendes category-Feld darf nicht still als
-    'implementation' durchgehen — der Reviewer muss triagierbar antworten."""
+    """Regression (Codex P2): a missing category field must not silently pass as
+    'implementation' — the reviewer must answer in a triageable way."""
     prepare_reviewable(ctx)
     ctx.codex.script(OK)
     run_codex_review_phase(ctx)
@@ -2020,8 +2020,8 @@ def test_final_review_finding_without_category_escalates(ctx):
 
 
 def test_schema_invalid_final_review_output_escalates(ctx):
-    """Regression (Codex P2): Valides JSON mit Schema-Verstoß (ValidationError)
-    muss genauso eskalieren wie kaputtes JSON — kein roher Traceback."""
+    """Regression (Codex P2): valid JSON with a schema violation (ValidationError)
+    must escalate just like broken JSON — no raw traceback."""
     prepare_reviewable(ctx)
     ctx.codex.script(OK)
     run_codex_review_phase(ctx)
@@ -2053,10 +2053,10 @@ def test_schema_invalid_e2e_triage_output_escalates(pctx, target_repo):
 
 
 class FakeGlab:
-    """Skriptbare glab-Antworten: eine Pipeline-Outcome-Sequenz, je Poll eine.
+    """Scriptable glab responses: one pipeline outcome sequence, one per poll.
 
-    Outcome "stale:<status>" simuliert eine terminale Pipeline eines FRÜHEREN
-    Push (falsche SHA); alle anderen Outcomes tragen die echte Branch-SHA."""
+    Outcome "stale:<status>" simulates a terminal pipeline of an EARLIER
+    push (wrong SHA); all other outcomes carry the real branch SHA."""
 
     def __init__(self, *outcomes: str, staging_job: str = "deploy-staging"):
         self.outcomes = list(outcomes)
@@ -2088,7 +2088,7 @@ class FakeGlab:
 
 
 def add_bare_origin(repo):
-    """Bare-Remote als origin — Push-Ziel für Tests."""
+    """Bare remote as origin — push target for tests."""
     from tests.conftest import git
 
     bare = repo.parent / "origin.git"
@@ -2103,7 +2103,7 @@ def analyst_json(lane: str, issue: str = "ImportError in app.py") -> str:
 
 
 def prepare_ci_ready(ctx):
-    """Single-Lane bis phase='ci' bringen."""
+    """Bring the single Lane up to phase='ci'."""
     prepare_reviewable(ctx)
     ctx.codex.script(OK)
     run_codex_review_phase(ctx)
@@ -2207,8 +2207,8 @@ def test_unparseable_log_analyst_output_escalates(ctx, target_repo):
 
 
 def test_ci_poll_ignores_stale_pipeline_from_previous_push(ctx, target_repo):
-    """Regression (Codex P1): Eine terminale Pipeline des vorherigen Push (andere
-    SHA) darf das Ergebnis des frischen Push nicht bewerten."""
+    """Regression (Codex P1): a terminal pipeline of the previous push (different
+    SHA) must not judge the result of the fresh push."""
     add_bare_origin(target_repo)
     prepare_ci_ready(ctx)
     ctx.run_glab = FakeGlab("stale:failed", "success")
@@ -2221,8 +2221,8 @@ def test_ci_poll_ignores_stale_pipeline_from_previous_push(ctx, target_repo):
 
 
 def test_ci_reentry_counter_is_persisted_with_the_staged_fix(ctx, target_repo, monkeypatch):
-    """Regression (Codex P2): ci_reentries-Inkrement und gestagter CI-Fix müssen
-    im SELBEN Save landen — sonst verbrennt ein Crash das einzige Re-Entry."""
+    """Regression (Codex P2): the ci_reentries increment and the staged CI fix must
+    land in the SAME save — otherwise a crash burns the only re-entry."""
     add_bare_origin(target_repo)
     prepare_ci_ready(ctx)
     ctx.agents.script("build_agent", "CI-Fix")
@@ -2245,9 +2245,9 @@ def test_ci_reentry_counter_is_persisted_with_the_staged_fix(ctx, target_repo, m
 
 
 def test_log_analyst_gets_schema_and_pushed_worktree(ctx, target_repo):
-    """Regression (Codex P1+P2): Der Log-Analyst braucht das exakte
-    Findings-Schema im Prompt und den GEPUSHTEN Worktree als cwd — nicht den
-    Base-Checkout des Haupt-Repos."""
+    """Regression (Codex P1+P2): the log analyst needs the exact
+    Findings schema in the prompt and the PUSHED Worktree as cwd — not the
+    base checkout of the main repo."""
     add_bare_origin(target_repo)
     prepare_ci_ready(ctx)
     ctx.agents.script("build_agent", "CI-Fix")
@@ -2289,8 +2289,8 @@ def test_triage_and_final_review_prompts_contain_schema(pctx, target_repo):
 
 
 def test_ci_failure_without_logs_escalates_directly(ctx, target_repo):
-    """Regression (Codex P2): Rote Pipeline OHNE verwertbare Logs (canceled,
-    YAML-Fehler) darf keinen Analyst-Lauf auf Null-Evidenz auslösen."""
+    """Regression (Codex P2): a red pipeline WITHOUT usable logs (canceled,
+    YAML error) must not trigger an analyst run on zero evidence."""
     add_bare_origin(target_repo)
     prepare_ci_ready(ctx)
     ctx.run_glab = FakeGlab("canceled")
@@ -2306,7 +2306,7 @@ def test_ci_failure_without_logs_escalates_directly(ctx, target_repo):
 
 
 class FakeGhPhases:
-    """gh-Fake auf Phasen-Ebene: grüne Workflow-Runs + Staging-Job."""
+    """gh fake at the phase level: green workflow runs + staging job."""
 
     def __init__(self, staging_job: str = "deploy-staging"):
         self.staging_job = staging_job
@@ -2350,8 +2350,8 @@ def test_ci_phase_uses_github_actions_when_provider_is_github(ctx, target_repo):
 
 
 def test_ci_phase_escalates_when_forge_is_undetectable(ctx, target_repo):
-    """Lokaler bare-origin ohne ci.provider: weder GitLab noch GitHub erkennbar —
-    klare Eskalation mit Handlungsanweisung statt Poll gegen die falsche API."""
+    """Local bare origin without ci.provider: neither GitLab nor GitHub detectable —
+    clear escalation with an action instruction instead of polling the wrong API."""
     write_config(
         target_repo,
         DEFAULT_CONFIG.replace("  provider: gitlab\n", ""),  # KEIN Override

@@ -31,7 +31,7 @@ class FakeResultMessage:
 
 @pytest.fixture(autouse=True)
 def fake_stored_login(monkeypatch, tmp_path_factory):
-    """Hermetisch: gefakte stored-login-Credentials, unabhängig von der Maschine."""
+    """Hermetic: faked stored-login credentials, independent of the machine."""
     config_dir = tmp_path_factory.mktemp("claude-config")
     (config_dir / ".credentials.json").write_text("{}")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
@@ -105,7 +105,7 @@ def test_sdk_runner_raises_on_error_result(monkeypatch, tmp_path):
 
 
 def test_sdk_runner_surfaces_structured_errors_when_result_is_none(monkeypatch, tmp_path):
-    """Regression: is_error mit result=None muss message.errors zeigen, nicht '(kein Result)'."""
+    """Regression: is_error with result=None must show message.errors, not '(kein Result)'."""
     from adw.agents import AgentRunError
 
     def fake_query(*, prompt, options):
@@ -172,7 +172,7 @@ def test_all_agents_run_with_isolated_settings(captured_query, tmp_path):
 
 
 def test_builder_sandbox_has_no_escape_hatch_commands(captured_query, tmp_path):
-    """Regression: git lief unsandboxed und konnte via Hooks die Lane-Isolation brechen."""
+    """Regression: git ran unsandboxed and could break Lane isolation via hooks."""
     SdkAgentRunner().run(REGISTRY["build_agent"], "task", cwd=tmp_path)
     sandbox = captured_query["options"].sandbox
     assert not sandbox.get("excludedCommands")
@@ -204,7 +204,7 @@ def test_custom_codex_home_is_deny_listed_for_agents(captured_query, tmp_path, m
 
 
 def test_shell_startup_and_history_files_are_deny_listed(captured_query, tmp_path):
-    """Regression: source ~/.bashrc darf exportierte Secrets nicht zurückholen."""
+    """Regression: source ~/.bashrc must not bring back exported secrets."""
     SdkAgentRunner().run(REGISTRY["build_agent"], "task", cwd=tmp_path)
     denied = set(captured_query["options"].disallowed_tools)
     for startup in ("~/.bashrc", "~/.profile", "~/.bash_profile", "~/.zshrc", "~/.bash_history"):
@@ -212,7 +212,7 @@ def test_shell_startup_and_history_files_are_deny_listed(captured_query, tmp_pat
 
 
 def test_sandbox_must_fail_if_unavailable(captured_query, tmp_path):
-    """Regression: ohne bubblewrap darf der Builder nicht still unsandboxed laufen."""
+    """Regression: without bubblewrap the builder must not silently run unsandboxed."""
     SdkAgentRunner().run(REGISTRY["build_agent"], "task", cwd=tmp_path)
     sandbox = captured_query["options"].sandbox
     assert sandbox["failIfUnavailable"] is True
@@ -294,8 +294,8 @@ def test_relative_config_dir_is_normalized_for_the_cli(captured_query, monkeypat
 
 
 def test_shell_keeps_bash_semantics_but_blanks_startup_hooks(captured_query, tmp_path):
-    """Bash-Semantik bleibt erhalten; BASH_ENV/ENV sind geblankt (kein Secret-Reimport
-    über Startup-Files nicht-interaktiver Shells)."""
+    """Bash semantics are preserved; BASH_ENV/ENV are blanked (no secret re-import
+    via startup files of non-interactive shells)."""
     SdkAgentRunner().run(REGISTRY["build_agent"], "task", cwd=tmp_path)
     env = captured_query["options"].env
     assert env.get("SHELL") == "/bin/bash"
@@ -327,7 +327,7 @@ def test_missing_stored_login_fails_fast_with_clear_message(monkeypatch, tmp_pat
 
 
 def test_builder_is_instructed_not_to_commit():
-    assert "committest nicht" in REGISTRY["build_agent"].system_append.lower()
+    assert "do not commit" in REGISTRY["build_agent"].system_append.lower()
 
 
 def test_mock_runner_gives_fresh_sessions_per_conversation(tmp_path):
@@ -370,7 +370,7 @@ def test_registry_builders_have_full_tooling_and_opus():
 
 
 def test_all_read_rules_are_workspace_scoped():
-    """Kein pauschales Read/Grep/Glob-Approval — cwd ist keine Dateisystem-Grenze."""
+    """No blanket Read/Grep/Glob approval — cwd is not a filesystem boundary."""
     for spec in REGISTRY.values():
         for rule in spec.allowed_tools:
             assert not rule.startswith(("Read,", "Grep,", "Glob,"))

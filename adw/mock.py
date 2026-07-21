@@ -1,4 +1,4 @@
-"""Mocks für --dry-run und Tests: skriptbare Agent-/Codex-Antworten, 0 Tokens."""
+"""Mocks for --dry-run and tests: scriptable agent/Codex responses, 0 tokens."""
 
 from collections import defaultdict, deque
 from collections.abc import Callable
@@ -20,8 +20,8 @@ class AgentCall:
 
 @dataclass
 class MockAgentRunner:
-    """Liefert vorab gescriptete Antworten je Agent-Name, in Reihenfolge, und
-    zeichnet jeden Aufruf auf — Grundlage aller Phasen- und Dry-Run-Tests."""
+    """Delivers pre-scripted responses per agent name, in order, and
+    records every call — the foundation of all phase and dry-run tests."""
 
     scripts: dict[str, deque[str]] = field(default_factory=lambda: defaultdict(deque))
     calls: list[AgentCall] = field(default_factory=list)
@@ -86,7 +86,7 @@ class CodexCall:
 
 @dataclass
 class MockCodexRunner:
-    """Skriptbare Codex-Review-Ergebnisse in Aufruf-Reihenfolge, 0 Tokens."""
+    """Scriptable Codex review results in call order, 0 tokens."""
 
     results: deque[ReviewResult] = field(default_factory=deque)
     calls: list[CodexCall] = field(default_factory=list)

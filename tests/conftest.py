@@ -1,4 +1,4 @@
-"""Geteilte Fixtures: echtes Mini-Git-Repo als ADW-Ziel-Repo."""
+"""Shared fixtures: real mini Git repo as the ADW target repo."""
 
 import subprocess
 from pathlib import Path
@@ -37,7 +37,7 @@ def write_config(repo: Path, content: str = DEFAULT_CONFIG) -> Path:
 
 @pytest.fixture
 def target_repo(tmp_path: Path) -> Path:
-    """Echtes Git-Repo mit staging-Branch, einem Commit und gültiger .adw/config.yaml."""
+    """Real Git repo with a staging branch, one commit, and a valid .adw/config.yaml."""
     repo = tmp_path / "target"
     repo.mkdir()
     git(repo, "init", "-b", "staging")
