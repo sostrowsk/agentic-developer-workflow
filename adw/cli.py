@@ -63,6 +63,10 @@ def run(
     no_approval: Annotated[
         bool, typer.Option("--no-approval", help="Plan-Approval überspringen")
     ] = False,
+    spec_approval: Annotated[
+        bool,
+        typer.Option("--spec-approval", help="Zusätzlicher Stopp NACH der Spec, VOR dem Plan"),
+    ] = False,
     base_branch: Annotated[
         str | None,
         typer.Option("--base-branch", help="Base-Branch-Override gegenüber .adw/config.yaml"),
@@ -84,6 +88,9 @@ def run(
         issue_text = _fetch_github_issue(repo, github_issue)
     state = RunState.new(issue=issue_text, parallel=parallel)
     state.dry_run = dry_run
+    # --spec-approval beim Run-Start pinnen (wie --no-approval): der Resume-/
+    # Approve-Aufruf kennt das CLI-Flag nicht mehr.
+    state.spec_approval = spec_approval
     # Effektiven Base-Branch pinnen (Config ODER Override): Fortsetzungen
     # bauen exakt gegen diese Basis, auch wenn die config.yaml sich ändert.
     state.pinned_base_branch = config.base_branch
@@ -91,7 +98,9 @@ def run(
     # angezeigte run_id per `adw resume` auffindbar sein.
     ensure_runs_gitignored(repo)
     state.save(repo)
-    ctx = _build_context(repo, config, state, skip_approval=no_approval)
+    ctx = _build_context(
+        repo, config, state, skip_approval=no_approval, spec_approval=spec_approval
+    )
     typer.echo(f"Run {state.run_id} gestartet (Phase: {state.phase})")
     _execute(ctx)
 
@@ -122,16 +131,22 @@ def approve(
     repo: Annotated[Path, typer.Option("--repo")] = Path("."),
     base_branch: Annotated[str | None, typer.Option("--base-branch")] = None,
 ) -> None:
-    """Grant plan approval and continue the run."""
+    """Grant a pending approval (spec or plan) and continue the run."""
     repo = repo.resolve()
     state = _load_state(repo, run_id)
-    if state.phase != "awaiting_approval":
+    if state.phase not in ("awaiting_approval", "awaiting_spec_approval"):
         raise _fail(
             f"Run {run_id} wartet nicht auf Approval (Phase: {state.phase}) — "
             f"für Crash-Fortsetzung `adw resume` benutzen"
         )
     config = _config_for_continuation(repo, state, base_branch)
-    state.approval_granted = True
+    if state.phase == "awaiting_spec_approval":
+        # Spec approven: in die Plan-Phase übergehen. Der Lauf pausiert danach
+        # regulär beim Plan-Approval, sofern der Run nicht mit --no-approval lief.
+        state.spec_approval_granted = True
+        state.phase = "plan"
+    else:
+        state.approval_granted = True
     state.save(repo)
     ctx = _build_context(repo, config, state)
     typer.echo(f"Approval erteilt — Run {state.run_id} läuft weiter")
@@ -162,7 +177,7 @@ def status(
         issue_head = state.issue.splitlines()[0][:60] if state.issue else ""
         mode = "parallel" if state.parallel else "single"
         extra = " [dry-run]" if state.dry_run else ""
-        typer.echo(f"{state.run_id}  {state.phase:<18} {mode:<8}{extra}  {issue_head}")
+        typer.echo(f"{state.run_id}  {state.phase:<22} {mode:<8}{extra}  {issue_head}")
 
 
 # --- interne Verdrahtung ------------------------------------------------------
@@ -178,10 +193,16 @@ def _execute(ctx: RunContext) -> None:
         run_final_review_phase(ctx)
         run_ci_phase(ctx)
     except AwaitingApproval:
-        typer.echo(
-            f"Plan-Approval ausstehend: .adw/runs/{ctx.state.run_id}/plan.md lesen, "
-            f"dann `adw approve {ctx.state.run_id}`"
-        )
+        if ctx.state.phase == "awaiting_spec_approval":
+            typer.echo(
+                f"Spec-Approval ausstehend: .adw/runs/{ctx.state.run_id}/spec.md lesen, "
+                f"dann `adw approve {ctx.state.run_id}`"
+            )
+        else:
+            typer.echo(
+                f"Plan-Approval ausstehend: .adw/runs/{ctx.state.run_id}/plan.md lesen, "
+                f"dann `adw approve {ctx.state.run_id}`"
+            )
         raise typer.Exit(EXIT_AWAITING_APPROVAL) from None
     except EscalationError as exc:
         typer.echo(
@@ -270,7 +291,11 @@ def _fetch_gitlab_issue(repo: Path, issue_id: int) -> str:
 
 
 def _build_context(
-    repo: Path, config: AdwConfig, state: RunState, skip_approval: bool = False
+    repo: Path,
+    config: AdwConfig,
+    state: RunState,
+    skip_approval: bool = False,
+    spec_approval: bool = False,
 ) -> RunContext:
     if state.dry_run:
         config = _dry_run_config(config)
@@ -285,6 +310,7 @@ def _build_context(
             run_gh=_dry_run_gh(config),
             sleep=lambda seconds: None,
             skip_approval=skip_approval,
+            spec_approval=spec_approval,
             dry_run=True,
         )
     return RunContext(
@@ -294,6 +320,7 @@ def _build_context(
         agents=SdkAgentRunner(),
         codex=CodexRunner(),
         skip_approval=skip_approval,
+        spec_approval=spec_approval,
     )
 
 

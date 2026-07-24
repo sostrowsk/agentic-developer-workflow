@@ -544,3 +544,77 @@ def test_agent_run_error_stops_cleanly_and_stays_resumable(target_repo, monkeypa
     resumed = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
     assert resumed.exit_code == 0, resumed.output
     assert RunState.load(target_repo, state.run_id).phase == "done"
+
+
+# --- B2: Spec-Approval-Stopp (CLI) ------------------------------------------
+
+
+def test_run_with_spec_approval_pauses_after_spec(target_repo):
+    result = runner.invoke(
+        app,
+        ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--spec-approval"],
+    )
+    assert result.exit_code == 2, result.output
+    state = RunState.find_latest(target_repo)
+    assert state.phase == "awaiting_spec_approval"
+    assert (state.run_dir(target_repo) / "spec.md").is_file()
+
+
+def test_approve_spec_then_pauses_at_plan_approval(target_repo):
+    runner.invoke(
+        app,
+        ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--spec-approval"],
+    )
+    state = RunState.find_latest(target_repo)
+    assert state.phase == "awaiting_spec_approval"
+    # Spec approven → Lauf pausiert regulär beim Plan-Approval:
+    approved = runner.invoke(app, ["approve", state.run_id, "--repo", str(target_repo)])
+    assert approved.exit_code == 2, approved.output
+    assert RunState.load(target_repo, state.run_id).phase == "awaiting_approval"
+    # Plan approven → Durchlauf bis done:
+    done = runner.invoke(app, ["approve", state.run_id, "--repo", str(target_repo)])
+    assert done.exit_code == 0, done.output
+    assert RunState.load(target_repo, state.run_id).phase == "done"
+
+
+def test_spec_approval_with_no_approval_runs_through_after_spec(target_repo):
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "--repo",
+            str(target_repo),
+            "--issue",
+            "Demo",
+            "--dry-run",
+            "--spec-approval",
+            "--no-approval",
+        ],
+    )
+    assert result.exit_code == 2, result.output  # Stopp nach Spec
+    state = RunState.find_latest(target_repo)
+    assert state.phase == "awaiting_spec_approval"
+    approved = runner.invoke(app, ["approve", state.run_id, "--repo", str(target_repo)])
+    assert approved.exit_code == 0, approved.output  # danach Durchlauf ohne Plan-Stopp
+    assert RunState.load(target_repo, state.run_id).phase == "done"
+
+
+def test_resume_at_spec_approval_pauses_again(target_repo):
+    runner.invoke(
+        app,
+        ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--spec-approval"],
+    )
+    state = RunState.find_latest(target_repo)
+    result = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert result.exit_code == 2
+    assert RunState.load(target_repo, state.run_id).phase == "awaiting_spec_approval"
+
+
+def test_status_shows_spec_approval_phase(target_repo):
+    runner.invoke(
+        app,
+        ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--spec-approval"],
+    )
+    result = runner.invoke(app, ["status", "--repo", str(target_repo)])
+    assert result.exit_code == 0
+    assert "awaiting_spec_approval" in result.output

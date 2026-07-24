@@ -2367,3 +2367,417 @@ def test_ci_phase_escalates_when_forge_is_undetectable(ctx, target_repo):
     ctx.sleep = lambda s: None
     with pytest.raises(EscalationError, match="ci.provider"):
         run_ci_phase(ctx)
+
+
+# --- B1: Runden-Cap im Authoring-Loop ---------------------------------------
+
+
+def p1_finding(issue: str = "kritisch", lane: str = "backend") -> ReviewResult:
+    return ReviewResult(
+        verdict="needs_fixes",
+        findings=[
+            Finding(
+                severity="P1",
+                lane=lane,
+                file=".adw/spec.md",
+                issue=issue,
+                remediation_plan=["dringend fixen"],
+            )
+        ],
+    )
+
+
+def test_authoring_accepts_after_round_cap_with_only_p2_p3(ctx):
+    """B1(a): 3 Runden mit nur P2/P3 → Artefakt akzeptiert, Known-Findings-Datei."""
+    ctx.agents.script("spec_agent", "v1", "v2", "v3")
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(needs_fixes("A"), needs_fixes("B"), needs_fixes("C"), OK)
+    ctx.skip_approval = True
+    run_spec_and_plan(ctx)
+    assert ctx.state.phase == "build"
+    known = ctx.run_dir / "authoring-spec-known-findings.md"
+    assert known.is_file()
+    assert "C" in known.read_text()
+    # Genau 3 Spec-Runden (kein 4. Agent-Lauf nach dem Cap):
+    assert len([c for c in ctx.agents.calls if c.agent == "spec_agent"]) == 3
+
+
+def test_authoring_escalates_after_round_cap_with_p1(ctx):
+    """B1(b): 3 Runden, in der dritten ein P1 → Eskalation, keine Known-Findings."""
+    ctx.agents.script("spec_agent", "v1", "v2", "v3")
+    ctx.codex.script(needs_fixes("A"), needs_fixes("B"), p1_finding("C"))
+    with pytest.raises(EscalationError, match="[Rr]unden-Cap"):
+        run_spec_and_plan(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.phase == "escalated"
+    assert not (ctx.run_dir / "authoring-spec-known-findings.md").is_file()
+
+
+def test_authoring_ok_before_cap_writes_no_known_findings(ctx):
+    """B1(c): Verdict ok vor dem Cap → unverändert, keine Known-Findings-Datei."""
+    ctx.agents.script("spec_agent", "v1", "v2")
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(needs_fixes("A"), OK, OK)  # Spec: 1 Fix, dann ok; Plan ok
+    ctx.skip_approval = True
+    run_spec_and_plan(ctx)
+    assert ctx.state.phase == "build"
+    assert not (ctx.run_dir / "authoring-spec-known-findings.md").is_file()
+
+
+def test_authoring_round_counter_survives_resume(ctx):
+    """B1(d): Der Runden-Zähler überlebt Crash+Resume und läuft korrekt weiter."""
+    ctx.agents.script("spec_agent", "v1", "v2", "v3", "v4")
+    ctx.codex.script(needs_fixes("A"))  # Runde 2: Codex-Queue leer → Crash
+    with pytest.raises(AssertionError):
+        run_spec_and_plan(ctx)
+    assert RunState.load(ctx.repo, ctx.state.run_id).authoring_rounds == 1
+
+    resumed = RunContext(
+        repo=ctx.repo,
+        config=ctx.config,
+        state=RunState.load(ctx.repo, ctx.state.run_id),
+        agents=ctx.agents,
+        codex=ctx.codex,
+        skip_approval=True,
+    )
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(needs_fixes("B"), needs_fixes("C"), OK)  # Runde 2+3 → Cap, Plan ok
+    run_spec_and_plan(resumed)
+    assert resumed.state.phase == "build"
+    assert (resumed.run_dir / "authoring-spec-known-findings.md").is_file()
+
+
+# --- B2: Optionaler Spec-Approval-Stopp -------------------------------------
+
+
+def test_spec_approval_pauses_after_spec_phase(ctx):
+    """B2(a): --spec-approval pausiert nach der Spec, vor dem Plan."""
+    ctx.spec_approval = True
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.codex.script(OK)  # nur Spec-Review; Plan wird nicht erreicht
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.phase == "awaiting_spec_approval"
+    assert (ctx.run_dir / "spec.md").is_file()  # Spec archiviert
+    assert [c for c in ctx.agents.calls if c.agent == "plan_agent"] == []
+
+
+def test_granted_spec_approval_continues_into_plan(ctx):
+    """B2(b): nach erteiltem Spec-Approval läuft der Run in die Plan-Phase."""
+    ctx.spec_approval = True
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.codex.script(OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    # Approve simulieren:
+    state = RunState.load(ctx.repo, ctx.state.run_id)
+    state.spec_approval_granted = True
+    state.phase = "plan"
+    state.save(ctx.repo)
+    resumed = RunContext(
+        repo=ctx.repo,
+        config=ctx.config,
+        state=RunState.load(ctx.repo, ctx.state.run_id),
+        agents=ctx.agents,
+        codex=ctx.codex,
+        skip_approval=True,
+    )
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(OK)
+    run_spec_and_plan(resumed)
+    assert resumed.state.phase == "build"
+
+
+def test_no_spec_approval_flag_does_not_pause_after_spec(ctx):
+    """B2(d): ohne Flag unverändertes Verhalten — Stopp erst beim Plan-Approval."""
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(OK, OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "awaiting_approval"
+
+
+def test_resume_at_spec_approval_pauses_again(ctx):
+    """B2(e): Resume bei awaiting_spec_approval pausiert erneut."""
+    ctx.spec_approval = True
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.codex.script(OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    resumed = RunContext(
+        repo=ctx.repo,
+        config=ctx.config,
+        state=RunState.load(ctx.repo, ctx.state.run_id),
+        agents=ctx.agents,
+        codex=ctx.codex,  # spec_approval NICHT gesetzt — kommt aus dem State
+    )
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(resumed)
+    assert resumed.state.phase == "awaiting_spec_approval"
+
+
+def test_spec_approval_flag_read_from_state_on_resume(ctx):
+    """B2(f): Crash nach Spec-Archivierung → Resume landet wieder im Spec-Stopp
+    (Flag aus State, nicht aus dem Resume-Kontext); Spec liegt archiviert."""
+    ctx.spec_approval = True
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.codex.script(OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.phase == "awaiting_spec_approval"
+    assert saved.spec_approval is True
+    assert (ctx.run_dir / "spec.md").is_file()
+    resumed = RunContext(
+        repo=ctx.repo,
+        config=ctx.config,
+        state=saved,
+        agents=ctx.agents,
+        codex=ctx.codex,
+    )
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(resumed)
+    assert resumed.state.phase == "awaiting_spec_approval"
+
+
+def test_authoring_rounds_reset_across_spec_approval_gate(ctx):
+    """B1/B2-Wechselwirkung: der Plan-Loop startet mit authoring_rounds=0,
+    auch wenn der Spec-Loop Fix-Runden hatte."""
+    ctx.spec_approval = True
+    ctx.agents.script("spec_agent", "v1", "v2")
+    ctx.codex.script(needs_fixes("A"), OK)  # Spec: 1 Fix-Runde, dann ok
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.phase == "awaiting_spec_approval"
+    assert saved.authoring_rounds == 0
+
+
+# --- B3: Issue-Text als Review-Referenz -------------------------------------
+
+
+def test_spec_review_includes_issue_ref(ctx):
+    """B3(a): Spec-Review erhält issue.md UND spec.md als Refs."""
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(OK, OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    spec_review = ctx.codex.calls[0]
+    assert spec_review.kind == "spec"
+    assert any("issue.md" in r for r in spec_review.content_refs)
+    assert any("spec.md" in r for r in spec_review.content_refs)
+
+
+def test_plan_review_includes_issue_ref(ctx):
+    """B3(b): Plan-Review erhält issue.md zusätzlich zu spec/plan/contract."""
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(OK, OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    plan_review = ctx.codex.calls[1]
+    assert plan_review.kind == "plan"
+    assert any("issue.md" in r for r in plan_review.content_refs)
+    assert any("spec.md" in r for r in plan_review.content_refs)
+
+
+def test_issue_md_archived_and_removed_from_checkout(ctx):
+    """B3(c): issue.md landet archiviert im run_dir und verschwindet aus dem Checkout."""
+    from tests.conftest import git
+
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(OK, OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    archived = ctx.run_dir / "issue.md"
+    assert archived.is_file()
+    assert "ISSUE-1" in archived.read_text()
+    assert not (ctx.repo / ".adw" / "issue.md").is_file()
+    assert git(ctx.repo, "status", "--porcelain") == ""
+
+
+def test_issue_md_agent_tampering_is_restored(ctx):
+    """B3(d): eine Agent-seitige Änderung an issue.md wird nach dem Lauf restauriert."""
+    spec_files = dict(ctx.agents.file_writes["spec_agent"])
+    spec_files[".adw/issue.md"] = "# sabotiert\n"
+    ctx.agents.script_files("spec_agent", spec_files)
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(OK, OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    archived = (ctx.run_dir / "issue.md").read_text()
+    assert "sabotiert" not in archived
+    assert "ISSUE-1" in archived
+
+
+def test_resume_in_plan_phase_regenerates_issue_md(ctx):
+    """B3(e): Resume in der Plan-Phase ohne vorhandene issue.md schreibt sie neu."""
+    seen = {}
+
+    class SpyCodex(MockCodexRunner):
+        def review(self, kind, content_refs, cwd):
+            if kind == "plan":
+                path = cwd / ".adw" / "issue.md"
+                seen["exists"] = path.is_file()
+                seen["content"] = path.read_text() if path.is_file() else ""
+            return super().review(kind, content_refs, cwd)
+
+    ctx.agents.script("spec_agent", "Spec")  # Plan-Agent NICHT gescriptet → Crash
+    ctx.codex.script(OK)
+    with pytest.raises(AssertionError):
+        run_spec_and_plan(ctx)
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "plan"
+    (ctx.repo / ".adw" / "issue.md").unlink(missing_ok=True)
+
+    spy = SpyCodex()
+    resumed = RunContext(
+        repo=ctx.repo,
+        config=ctx.config,
+        state=RunState.load(ctx.repo, ctx.state.run_id),
+        agents=ctx.agents,
+        codex=spy,
+    )
+    ctx.agents.script("plan_agent", "Plan")
+    spy.script(OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(resumed)
+    assert seen["exists"] is True
+    assert "ISSUE-1" in seen["content"]
+
+
+# --- Codex-Review-Fixes (B1/B2/B3) ------------------------------------------
+
+
+def test_preexisting_foreign_issue_md_is_not_silently_destroyed(ctx):
+    """P1-Fix: eine fremde .adw/issue.md wird nicht überschrieben/verworfen,
+    sondern eskaliert — der Pfad gehört dem ADW."""
+    foreign = ctx.repo / ".adw" / "issue.md"
+    foreign.write_text("# WICHTIGE User-Notizen\n")
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.codex.script(OK)
+    with pytest.raises(EscalationError, match="issue.md"):
+        run_spec_and_plan(ctx)
+    # User-Inhalt unangetastet:
+    assert foreign.read_text() == "# WICHTIGE User-Notizen\n"
+
+
+def test_own_regenerated_issue_md_is_no_op_overwrite(ctx):
+    """P1-Fix: identischer (eigener) Inhalt darf NICHT eskalieren — Resume-Fall."""
+    from adw.phases import _write_issue
+
+    data = _write_issue(ctx)  # erzeugt .adw/issue.md aus dem State
+    # Zweiter Aufruf mit identischem Inhalt (wie beim Resume) ist ein No-op:
+    assert _write_issue(ctx) == data
+
+
+def test_spec_approval_pause_leaves_checkout_clean(ctx):
+    """P2-Fix: der Spec-Gate-Stopp archiviert + säubert wie das Plan-Gate."""
+    from tests.conftest import git
+
+    ctx.spec_approval = True
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.codex.script(OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    assert git(ctx.repo, "status", "--porcelain") == ""
+    assert (ctx.run_dir / "spec.md").is_file()
+    assert (ctx.run_dir / "issue.md").is_file()
+    assert not (ctx.repo / ".adw" / "spec.md").is_file()
+    assert not (ctx.repo / ".adw" / "issue.md").is_file()
+
+
+def test_preexisting_issue_md_symlink_is_not_followed_or_destroyed(ctx):
+    """P1-Fix (Runde 2): ein vorhandener .adw/issue.md-Symlink wird nicht
+    entfernt/ersetzt (die Archivierung würde ihn verlieren), sondern eskaliert;
+    die Referenz bleibt unangetastet."""
+    target = ctx.repo / "geheim.txt"
+    target.write_text("SENSIBEL\n")
+    link = ctx.repo / ".adw" / "issue.md"
+    link.symlink_to(target)
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.codex.script(OK)
+    with pytest.raises(EscalationError, match="issue.md"):
+        run_spec_and_plan(ctx)
+    assert link.is_symlink()  # nicht ersetzt
+    assert target.read_text() == "SENSIBEL\n"  # Referenz unangetastet
+
+
+def test_spec_approval_pause_retries_cleanup_on_resume(ctx):
+    """P2-Fix (Runde 2): ein Crash zwischen awaiting_spec_approval-Save und
+    Archivierung hinterlässt generierte Artefakte im Checkout — ein Resume holt
+    die Archivierung nach und säubert den Checkout."""
+    from tests.conftest import git
+
+    ctx.spec_approval = True
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.codex.script(OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    # Crash-Fenster simulieren: generierte Artefakte liegen wieder dirty im Checkout.
+    (ctx.repo / ".adw" / "spec.md").write_text((ctx.run_dir / "spec.md").read_text())
+    (ctx.repo / ".adw" / "issue.md").write_text((ctx.run_dir / "issue.md").read_text())
+    assert git(ctx.repo, "status", "--porcelain") != ""  # dirty vor dem Resume
+    resumed = RunContext(
+        repo=ctx.repo,
+        config=ctx.config,
+        state=RunState.load(ctx.repo, ctx.state.run_id),
+        agents=ctx.agents,
+        codex=ctx.codex,
+    )
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(resumed)
+    assert resumed.state.phase == "awaiting_spec_approval"
+    assert git(ctx.repo, "status", "--porcelain") == ""  # Cleanup nachgeholt
+    assert not (ctx.repo / ".adw" / "spec.md").is_file()
+    assert not (ctx.repo / ".adw" / "issue.md").is_file()
+
+
+def test_spec_approval_resume_preserves_reviewed_archive_when_spec_tracked(ctx):
+    """P1-Fix (Runde 3): ein Resume während der Spec-Pause darf die reviewte
+    Archiv-Spec NICHT mit einer alten getrackten Checkout-Version überschreiben."""
+    from tests.conftest import git
+
+    spec_path = ctx.repo / ".adw" / "spec.md"
+    spec_path.write_text("# ALTE gemergte Spec\n")
+    git(ctx.repo, "add", ".adw/spec.md")
+    git(ctx.repo, "commit", "-m", "alt")
+    ctx.spec_approval = True
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.codex.script(OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    assert (ctx.run_dir / "spec.md").read_text() == "# Spec\nZiel: Demo\n"
+    # Checkout wurde auf die alte getrackte Version zurückgesetzt:
+    assert spec_path.read_text() == "# ALTE gemergte Spec\n"
+
+    resumed = RunContext(
+        repo=ctx.repo,
+        config=ctx.config,
+        state=RunState.load(ctx.repo, ctx.state.run_id),
+        agents=ctx.agents,
+        codex=ctx.codex,
+    )
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(resumed)
+    # Reviewte Spec im Archiv bleibt erhalten (nicht durch die alte überschrieben):
+    assert (resumed.run_dir / "spec.md").read_text() == "# Spec\nZiel: Demo\n"
+
+
+def test_ok_verdict_clears_stale_known_findings_report(ctx):
+    """P2-Fix (Runde 3): ein terminaler ok-Verdict entfernt einen stale
+    Known-Findings-Report (z. B. aus einem gecrashten Cap-Accept)."""
+    ctx.run_dir.mkdir(parents=True, exist_ok=True)
+    stale = ctx.run_dir / "authoring-spec-known-findings.md"
+    stale.write_text("# alte Known Limitations\n")
+    ctx.agents.script("spec_agent", "Spec")
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(OK, OK)
+    ctx.skip_approval = True
+    run_spec_and_plan(ctx)
+    assert ctx.state.phase == "build"
+    assert not stale.is_file()

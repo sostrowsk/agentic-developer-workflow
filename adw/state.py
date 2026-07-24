@@ -17,6 +17,7 @@ RUNS_RELPATH = Path(".adw") / "runs"
 
 Phase = Literal[
     "spec",
+    "awaiting_spec_approval",
     "plan",
     "awaiting_approval",
     "build",
@@ -81,6 +82,10 @@ class RunState(BaseModel):
     # --no-approval muss den Crash überleben — der Resume-Aufruf kennt das
     # CLI-Flag nicht mehr.
     skip_approval: bool = False
+    # --spec-approval: optionaler menschlicher Stopp NACH der Spec und VOR dem
+    # Plan. Beim Run-Start gepinnt, damit ein Resume/Approve das Gate kennt.
+    spec_approval: bool = False
+    spec_approval_granted: bool = False
     # Runden-Zähler der Integration/E2E-Phase — persistiert, damit ein Crash
     # das 10-Runden-Limit nicht zurücksetzt. last_failures ist die
     # Circuit-Breaker-Basis (wird erst NACH dem Fix-Dispatch fortgeschrieben).
@@ -98,6 +103,9 @@ class RunState(BaseModel):
     authoring_session: str | None = None
     authoring_pending_task: str | None = None
     authoring_last_findings: list[str] = Field(default_factory=list)
+    # Runden-Zähler des Authoring-Loops (Agent-Lauf + Codex-Review = 1 Runde) —
+    # persistiert, damit ein Crash das Runden-Cap nicht zurücksetzt.
+    authoring_rounds: int = 0
     # Monotone Speicher-Sequenz für find_latest — Datei-mtimes haben nur
     # Kernel-Tick-Granularität und produzieren Gleichstände.
     seq: int = 0

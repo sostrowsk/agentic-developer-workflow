@@ -11,6 +11,7 @@ disabled repo hooks; configured filters/signers run as with any
 manual git invocation by the user.
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -57,6 +58,19 @@ from adw.worktrees import (
 
 ARTIFACTS = ("spec.md", "plan.md", "contract.yaml")
 
+# Der Original-Issue-Text wird als reviewbares Artefakt bereitgestellt (B3),
+# damit Codex Spec/Plan gegen die tatsächliche Anforderung (Proportionalität)
+# prüfen kann. NICHT in ARTIFACTS: kein Agent erzeugt es, keine Build-Lane baut
+# dagegen — es ist reine Review-Referenz.
+ISSUE_FILE = "issue.md"
+
+# Runden-Cap des Authoring-Loops: eine Runde = ein Agent-Lauf + ein
+# Codex-Review. Nach so vielen erfolglosen Runden wird abgebrochen (P1 offen)
+# bzw. das Artefakt mit dokumentierten Known Limitations akzeptiert (nur P2/P3).
+AUTHORING_MAX_ROUNDS = 3
+
+logger = logging.getLogger(__name__)
+
 
 class EscalationError(Exception):
     """The run cannot continue autonomously — a human takes over (exit ≠ 0)."""
@@ -77,6 +91,9 @@ class RunContext:
     run_gh: github.RunGh = github.run_gh
     sleep: Callable[[float], None] = time.sleep
     skip_approval: bool = False
+    # --spec-approval (Stopp nach Spec, vor Plan). Wie skip_approval als
+    # State-Feld gepinnt, damit Resume/Approve das Gate kennen.
+    spec_approval: bool = False
     # Dry-Run: Agents/Codex/glab sind Mocks; zusätzlich entfällt der echte
     # Push (externe Seiteneffekte gehören nicht in einen Dry-Run).
     dry_run: bool = False
@@ -121,7 +138,11 @@ def run_spec_and_plan(ctx: RunContext) -> None:
     if ctx.skip_approval and not ctx.state.skip_approval:
         ctx.state.skip_approval = True
         ctx.save()  # sofort persistieren — der Resume-Aufruf kennt das Flag nicht
+    if ctx.spec_approval and not ctx.state.spec_approval:
+        ctx.state.spec_approval = True
+        ctx.save()  # sofort persistieren — der Resume-Aufruf kennt das Flag nicht
     skip = ctx.skip_approval or ctx.state.skip_approval
+    spec_approval = ctx.spec_approval or ctx.state.spec_approval
     # Die Ziel-Repo-Config ist für Agents tabu — Write(.adw/**) würde sie
     # technisch erlauben, deshalb Snapshot + Restore um die Authoring-Loops.
     config_path = ctx.repo / ".adw" / "config.yaml"
@@ -133,12 +154,26 @@ def run_spec_and_plan(ctx: RunContext) -> None:
             return
         ctx.save()
         raise AwaitingApproval(ctx.state.run_id)
+    if ctx.state.phase == "awaiting_spec_approval":
+        # Archivierung idempotent nachholen: crasht ein Run zwischen dem
+        # awaiting_spec_approval-Save und dem _archive_artifacts, lägen die
+        # generierten Artefakte (spec.md, issue.md) sonst die ganze Pause über
+        # dirty im Checkout. Cleanup-Modus: die bereits archivierte (reviewte)
+        # Spec NICHT mit einer alten getrackten Checkout-Version überschreiben.
+        _archive_artifacts(ctx, overwrite_existing_archive=False)
+        if not ctx.state.spec_approval_granted:
+            ctx.save()
+            raise AwaitingApproval(ctx.state.run_id)
+        # Approval erteilt: in die Plan-Phase übergehen und normal fortfahren.
+        ctx.state.phase = "plan"
+        ctx.save()
     if ctx.state.phase not in ("spec", "plan"):
         return  # Resume in einer späteren Phase — hier nichts zu tun
 
     # protected: nach JEDEM Agent-Lauf (vor dem Review) und exception-sicher
     # am Ende restauriert — Agents dürfen diese Dateien nie effektiv ändern.
     protected: dict[Path, bytes | None] = {config_path: config_snapshot}
+    paused_for_spec_approval = False
     try:
         # Fail fast (in Phase spec UND plan): uncommittete Nutzer-Edits an
         # getrackten Artefakten würde die Archivierung (git checkout --)
@@ -161,6 +196,10 @@ def run_spec_and_plan(ctx: RunContext) -> None:
                     f".adw/{name} ist getrackt und hat uncommittete Änderungen — "
                     f"bitte committen oder stashen, der ADW würde sie verwerfen",
                 )
+        # Issue-Text als reviewbares Artefakt (B3) — idempotent, damit ein
+        # Resume in der Spec- ODER Plan-Phase es wieder herstellt; protected,
+        # damit ein Agent es nicht effektiv verändern kann (wie config.yaml).
+        protected[ctx.repo / ".adw" / ISSUE_FILE] = _write_issue(ctx)
         if ctx.state.phase == "spec":
             _reviewed_authoring_loop(
                 ctx,
@@ -172,6 +211,9 @@ def run_spec_and_plan(ctx: RunContext) -> None:
                 ),
                 review_kind="spec",
                 artifacts=("spec.md",),
+                # Issue mitgeben: Codex prüft die Spec auf Proportionalität
+                # gegen die tatsächliche Anforderung.
+                review_refs=(ISSUE_FILE, "spec.md"),
                 protected=protected,
             )
             with ctx.state_lock:
@@ -180,45 +222,60 @@ def run_spec_and_plan(ctx: RunContext) -> None:
                 # sie vor dem Crash-Fenster bis zur Archivierung.
                 ctx.run_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(ctx.repo / ".adw" / "spec.md", ctx.run_dir / "spec.md")
-                ctx.state.phase = "plan"
+                # Spec-Gate: Phase + geleerter Checkpoint atomar. Ein Crash im
+                # Fenster darf nie phase="plan" hinterlassen, sonst würde der
+                # Stopp übersprungen (Runden-Zähler startet für den Plan bei 0).
+                if spec_approval and not ctx.state.spec_approval_granted:
+                    ctx.state.phase = "awaiting_spec_approval"
+                    paused_for_spec_approval = True
+                else:
+                    ctx.state.phase = "plan"
                 ctx.save()  # Phase + geleerter Authoring-Checkpoint in EINEM Save
 
-        # Phase "plan" — frisch erreicht ODER Resume nach Crash in der Plan-Phase.
-        spec_path = ctx.repo / ".adw" / "spec.md"
-        archived = ctx.run_dir / "spec.md"
-        if archived.is_file():
-            # Die ARCHIVIERTE (reviewte) Spec hat immer Vorrang: Ein Crash
-            # mitten in der Archivierung kann .adw/spec.md bereits auf eine
-            # alte getrackte Version zurückgesetzt haben.
-            shutil.copy2(archived, spec_path)
-        elif not spec_path.is_file():
-            raise escalate(
-                ctx,
-                "Resume in Phase 'plan', aber .adw/spec.md fehlt — Spec-Ergebnis "
-                "verloren, bitte Run neu starten",
-            )
-        # Die reviewte Spec ist ab hier fix — der Plan-Agent darf sie lesen,
-        # aber nicht umschreiben (Write(.adw/**) würde es technisch erlauben).
-        protected[spec_path] = spec_path.read_bytes()
+        if not paused_for_spec_approval:
+            # Phase "plan" — frisch erreicht ODER Resume nach Crash in der Plan-Phase.
+            spec_path = ctx.repo / ".adw" / "spec.md"
+            archived = ctx.run_dir / "spec.md"
+            if archived.is_file():
+                # Die ARCHIVIERTE (reviewte) Spec hat immer Vorrang: Ein Crash
+                # mitten in der Archivierung kann .adw/spec.md bereits auf eine
+                # alte getrackte Version zurückgesetzt haben.
+                shutil.copy2(archived, spec_path)
+            elif not spec_path.is_file():
+                raise escalate(
+                    ctx,
+                    "Resume in Phase 'plan', aber .adw/spec.md fehlt — Spec-Ergebnis "
+                    "verloren, bitte Run neu starten",
+                )
+            # Die reviewte Spec ist ab hier fix — der Plan-Agent darf sie lesen,
+            # aber nicht umschreiben (Write(.adw/**) würde es technisch erlauben).
+            protected[spec_path] = spec_path.read_bytes()
 
-        lanes = ", ".join(_active_lanes(ctx))
-        _reviewed_authoring_loop(
-            ctx,
-            agent_name="plan_agent",
-            initial_task=(
-                f"From .adw/spec.md, create the implementation plan .adw/plan.md with "
-                f"the Workstreams ({lanes}) and the interface contract "
-                f".adw/contract.yaml."
-            ),
-            review_kind="plan",
-            artifacts=("plan.md", "contract.yaml"),
-            # Spec mitgeben: Codex prüft Plan/Kontrakt GEGEN die Akzeptanzkriterien.
-            review_refs=("spec.md", "plan.md", "contract.yaml"),
-            protected=protected,
-        )
+            lanes = ", ".join(_active_lanes(ctx))
+            _reviewed_authoring_loop(
+                ctx,
+                agent_name="plan_agent",
+                initial_task=(
+                    f"From .adw/spec.md, create the implementation plan .adw/plan.md with "
+                    f"the Workstreams ({lanes}) and the interface contract "
+                    f".adw/contract.yaml."
+                ),
+                review_kind="plan",
+                artifacts=("plan.md", "contract.yaml"),
+                # Issue + Spec mitgeben: Codex prüft Plan/Kontrakt GEGEN die
+                # Akzeptanzkriterien und die tatsächliche Anforderung.
+                review_refs=(ISSUE_FILE, "spec.md", "plan.md", "contract.yaml"),
+                protected=protected,
+            )
     finally:
         _restore_all(protected)
+    # Archivieren + Haupt-Checkout säubern — auch beim Spec-Gate-Stopp, damit
+    # die generierten Artefakte (issue.md, spec.md) nicht während der
+    # Approval-Pause dirty im Checkout liegen (wie beim Plan-Gate).
     _archive_artifacts(ctx)
+
+    if paused_for_spec_approval:
+        raise AwaitingApproval(ctx.state.run_id)
 
     ctx.state.phase = "awaiting_approval"
     ctx.save()  # Phase + geleerter Authoring-Checkpoint in EINEM Save
@@ -279,6 +336,9 @@ def _reviewed_authoring_loop(
     session: str | None = ctx.state.authoring_session
     task = ctx.state.authoring_pending_task or initial_task
     previous_failures: list[str] | None = ctx.state.authoring_last_findings or None
+    # Runden-Zähler aus dem State (überlebt Crash+Resume): eine Runde =
+    # ein Agent-Lauf + ein Codex-Review, das mit Verdict ≠ ok endet.
+    rounds = ctx.state.authoring_rounds
     # Prior-Snapshot: Altbestand (z. B. gemergte Artefakte früherer Runs) darf
     # einen untätigen Agenten nicht adeln — das Artefakt muss sich ÄNDERN.
     prior: dict[str, bytes | None] = {}
@@ -286,6 +346,11 @@ def _reviewed_authoring_loop(
         path = ctx.repo / ".adw" / name
         prior[name] = path.read_bytes() if path.is_file() else None
     first_iteration = not resuming
+    # Report der Known Limitations: nur der Cap-Accept-Pfad schreibt ihn; jeder
+    # andere terminale Ausgang (ok, Cap-Eskalation) entfernt einen etwaigen
+    # STALE Report — z. B. ein Crash nach Cap-Accept, dessen Resume erneut die
+    # letzte Runde fährt und "ok" bzw. andere Findings erhält.
+    known_findings_path = ctx.run_dir / f"authoring-{review_kind}-known-findings.md"
     while True:
         result = ctx.agents.run(spec, task, cwd=ctx.repo, resume=session)
         session = result.session_id or session
@@ -325,12 +390,36 @@ def _reviewed_authoring_loop(
         except (FindingsParseError, ValidationError) as exc:
             raise escalate(ctx, f"Codex-{review_kind}-Review unlesbar: {exc}") from exc
         if review.verdict == "ok":
+            known_findings_path.unlink(missing_ok=True)  # kein stale Report
             # Bewusst KEIN Save hier: Das Leeren des Authoring-Checkpoints
             # passiert atomar mit dem Phasenübergang beim Aufrufer — sonst
             # gäbe es ein Crash-Fenster "Phase alt, Checkpoint weg".
             _clear_authoring_checkpoint(ctx)
             return
+        # Eine Runde (Agent-Lauf + Review) endete mit Verdict ≠ ok.
+        rounds += 1
         failures = _finding_keys(review)
+        if rounds >= AUTHORING_MAX_ROUNDS:
+            if any(f.severity == "P1" for f in review.findings):
+                known_findings_path.unlink(missing_ok=True)  # kein stale Report
+                raise escalate(
+                    ctx,
+                    f"Authoring-{review_kind}: Runden-Cap ({AUTHORING_MAX_ROUNDS}) "
+                    f"erreicht, P1-Findings weiterhin offen — Eskalation an den "
+                    f"Menschen.\n\n{_findings_text(review)}",
+                )
+            # Nur P2/P3 offen: Artefakt akzeptieren, verbleibende Findings als
+            # Known Limitations dokumentieren und wie ein ok-Verdict beenden.
+            known_path = _write_known_findings(ctx, review_kind, review)
+            logger.warning(
+                "Authoring-%s: Runden-Cap (%d) erreicht, nur P2/P3 offen — "
+                "Artefakt akzeptiert, Known Limitations unter %s",
+                review_kind,
+                AUTHORING_MAX_ROUNDS,
+                known_path,
+            )
+            _clear_authoring_checkpoint(ctx)
+            return
         try:
             check_progress(previous_failures, failures)
         except NoProgressError as exc:
@@ -347,9 +436,54 @@ def _reviewed_authoring_loop(
         )
         with ctx.state_lock:
             # Checkpoint des Fix-Zyklus — überlebt einen Crash vor dem Fix-Lauf.
+            # authoring_rounds im SELBEN Save wie der Fix-Task persistieren.
             ctx.state.authoring_pending_task = task
             ctx.state.authoring_last_findings = failures
+            ctx.state.authoring_rounds = rounds
             ctx.save()
+
+
+def _write_issue(ctx: RunContext) -> bytes:
+    """Write the original issue text as .adw/issue.md so Codex can review the
+    spec/plan against the actual request (proportionality). Idempotent: it is
+    regenerated from the state, so a resume in any authoring phase restores it.
+
+    The path belongs to the ADW (it is derived deterministically from the run
+    state). A pre-existing file with FOREIGN content is therefore never
+    overwritten — it would later be deleted/reset by the archival, silently
+    losing user data — but escalated instead. Our own regenerated content
+    (identical bytes, e.g. after a crash+resume) is a no-op overwrite."""
+    path = ctx.repo / ".adw" / ISSUE_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = (
+        f"# Issue (ADW-generiert aus dem Run-State — nicht manuell editieren)\n\n"
+        f"{ctx.state.issue}\n"
+    ).encode()
+    if path.is_symlink():
+        # Ein Symlink an diesem Pfad ist NIE unser Artefakt (wir schreiben immer
+        # eine reguläre Datei) — also fremd. Nicht folgen (Referenz-Korruption)
+        # und nicht still entfernen (die Archivierung würde den Ersatz löschen
+        # und den Symlink verlieren), sondern eskalieren.
+        raise escalate(
+            ctx,
+            f".adw/{ISSUE_FILE} ist ein Symlink — dieser Pfad gehört dem ADW (wird "
+            f"aus dem Issue-Text generiert); bitte entfernen oder umbenennen",
+        )
+    elif path.is_dir():
+        raise escalate(
+            ctx,
+            f".adw/{ISSUE_FILE} ist ein Verzeichnis — dieser Pfad gehört dem ADW "
+            f"(wird aus dem Issue-Text generiert); bitte entfernen",
+        )
+    elif path.is_file() and path.read_bytes() != data:
+        raise escalate(
+            ctx,
+            f".adw/{ISSUE_FILE} existiert bereits mit fremdem Inhalt — dieser Pfad "
+            f"gehört dem ADW (wird aus dem Issue-Text generiert); bitte entfernen "
+            f"oder umbenennen, der ADW würde ihn sonst überschreiben und verwerfen",
+        )
+    path.write_bytes(data)
+    return data
 
 
 def _clear_authoring_checkpoint(ctx: RunContext) -> None:
@@ -357,6 +491,23 @@ def _clear_authoring_checkpoint(ctx: RunContext) -> None:
     ctx.state.authoring_session = None
     ctx.state.authoring_pending_task = None
     ctx.state.authoring_last_findings = []
+    ctx.state.authoring_rounds = 0
+
+
+def _write_known_findings(ctx: RunContext, review_kind: str, review: ReviewResult) -> Path:
+    """Persist the remaining P2/P3 findings as Known Limitations when the
+    authoring round cap is reached — the artifact is accepted, but the open
+    findings stay documented."""
+    ctx.run_dir.mkdir(parents=True, exist_ok=True)
+    path = ctx.run_dir / f"authoring-{review_kind}-known-findings.md"
+    path.write_text(
+        f"# Known Limitations — Authoring-{review_kind} (Run {ctx.state.run_id})\n\n"
+        f"Runden-Cap ({AUTHORING_MAX_ROUNDS}) erreicht, nur P2/P3 offen — Artefakt "
+        f"akzeptiert.\n\n"
+        f"{_findings_text(review)}\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def _finding_keys(review: ReviewResult) -> list[str]:
@@ -371,18 +522,27 @@ def _findings_text(review: ReviewResult) -> str:
     return "\n".join(lines)
 
 
-def _archive_artifacts(ctx: RunContext) -> None:
+def _archive_artifacts(ctx: RunContext, overwrite_existing_archive: bool = True) -> None:
     """Archive spec/plan/contract into the run folder; the main repo stays clean.
 
     Tracked artifacts (merged earlier ADW run) are reset via git to the
     checked-in state instead of deleted — otherwise a
-    tracked deletion would remain in the checkout. Untracked artifacts are removed."""
+    tracked deletion would remain in the checkout. Untracked artifacts are removed.
+
+    ``overwrite_existing_archive=False`` is the idempotent CLEANUP mode (spec-gate
+    resume): an already-archived artifact is NOT re-copied from the checkout —
+    the checkout copy of a tracked artifact was reset to the OLD merged version
+    by an earlier archival and would clobber the reviewed archive. The stray
+    checkout file is still cleaned up."""
     ctx.run_dir.mkdir(parents=True, exist_ok=True)
-    for name in ARTIFACTS:
+    # issue.md wird mitarchiviert (B3) — nicht in ARTIFACTS, weil keine
+    # Build-Lane dagegen baut; hier aber wie die anderen aufgeräumt.
+    for name in (*ARTIFACTS, ISSUE_FILE):
         source = ctx.repo / ".adw" / name
         if not source.is_file():
             continue
-        shutil.copy2(source, ctx.run_dir / name)
+        if overwrite_existing_archive or not (ctx.run_dir / name).is_file():
+            shutil.copy2(source, ctx.run_dir / name)
         if _git(ctx, ctx.repo, "ls-files", "--", f".adw/{name}").strip():
             _git(ctx, ctx.repo, "checkout", "--", f".adw/{name}")
         else:
