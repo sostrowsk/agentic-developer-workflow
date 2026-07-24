@@ -35,13 +35,28 @@ ReviewKind = Literal["spec", "plan", "code"]
 
 _KIND_INSTRUCTIONS: dict[ReviewKind, str] = {
     "spec": (
-        "Review the specification critically: Is the goal clear, the scope "
-        "complete, are the acceptance criteria testable, are edge cases missing?"
+        "Review the specification critically, in BOTH directions. "
+        "Gaps: Is the goal clear, are the acceptance criteria testable, are "
+        "edge cases with real damage missing? "
+        "Excess: Flag over-engineering as findings too — any mechanism, state, "
+        "or test defending a scenario that cannot realistically occur in this "
+        "system's deployment profile, or whose damage is already bounded by an "
+        "existing backstop (TTL, webhook, log, retry). Proportionality to the "
+        "issue is an acceptance criterion: every requirement must trace back "
+        "to the issue or to a concrete failure with real damage. Respect "
+        "explicit non-goals and scope ceilings in the issue; never demand "
+        "mechanisms they exclude — such hardening belongs in the spec's "
+        "'Deferred' section, not in acceptance criteria."
     ),
     "plan": (
-        "Review the implementation plan AND the interface contract together: "
-        "Are the Workstreams consistent with the contract, is the contract "
-        "complete enough for both Lanes to build independently?"
+        "Review the implementation plan AND the interface contract together, "
+        "in BOTH directions. Gaps: Are the Workstreams consistent with the "
+        "contract, is the contract complete enough for the Lanes to build "
+        "independently? Excess: Flag over-engineering — plan steps, tests, or "
+        "contract clauses exceeding the spec's scope or defending scenarios "
+        "without real damage. With a single Workstream the contract must pin "
+        "only externally observable surfaces (HTTP routes, events, template "
+        "behavior), never internal helper signatures."
     ),
     "code": (
         "Review the code changes for correctness, silent data loss, "
