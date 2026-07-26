@@ -1646,9 +1646,9 @@ def final_review_json(verdict: str = "ok", findings: list[dict] | None = None) -
     return json.dumps({"verdict": verdict, "findings": findings or []})
 
 
-def finding_dict(lane: str, issue: str, category: str) -> dict:
+def finding_dict(lane: str, issue: str, category: str, severity: str = "P2") -> dict:
     return {
-        "severity": "P2",
+        "severity": severity,
         "lane": lane,
         "file": "src_neu.py",
         "issue": issue,
@@ -1897,6 +1897,104 @@ def test_identical_final_review_findings_trigger_circuit_breaker(ctx):
     with pytest.raises(EscalationError, match="Circuit|unverändert"):
         run_final_review_phase(ctx)
     assert ctx.state.lanes["backend"].fix_cycles == 1  # nicht bis 3 ausgereizt
+
+
+def prepare_final_review_fix(ctx, findings: list[dict]) -> None:
+    """Bring the run to phase='final_review' and script the reviewer with one
+    round of ``findings``, then ok."""
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("build_agent", "Findings gesichtet")
+    ctx.agents.script(
+        "final_reviewer",
+        final_review_json("needs_fixes", findings),
+        final_review_json("ok"),
+    )
+
+
+def test_p3_only_fix_dispatch_without_changes_becomes_followup(ctx):
+    """Regression (Run 8afec216): a P3 that demands no code change at all left
+    the Worktree empty and escalated the whole run. It belongs in the
+    follow-up report — the run continues."""
+    prepare_final_review_fix(
+        ctx, [finding_dict("backend", "Prozess-Hinweis, kein Code", "implementation", "P3")]
+    )
+    ctx.agents.file_writes.pop("build_agent", None)  # Agent ändert nichts
+    run_final_review_phase(ctx)
+    assert ctx.state.phase == "ci"
+    assert "Prozess-Hinweis" in (ctx.run_dir / "followups.md").read_text()
+
+
+def test_deferred_p3_is_not_dispatched_again_on_re_review(ctx):
+    """Regression (Codex P2): ein deterministischer Reviewer meldet das
+    vertagte P3 erneut — es darf weder einen zweiten Fix-Lauf noch den
+    Circuit-Breaker auslösen."""
+    same = finding_dict("backend", "Prozess-Hinweis, kein Code", "implementation", "P3")
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("build_agent", "Findings gesichtet")
+    ctx.agents.file_writes.pop("build_agent", None)
+    ctx.agents.script(
+        "final_reviewer",
+        final_review_json("needs_fixes", [same]),
+        final_review_json("needs_fixes", [same]),
+    )
+    run_final_review_phase(ctx)
+    assert ctx.state.phase == "ci"
+    build_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert len(build_calls) == 2  # Build + EIN wirkungsloser Fix-Lauf, kein zweiter
+
+
+def test_deferred_finding_returning_as_p2_is_fixed_after_all(ctx):
+    """Regression (Codex P1): Vertagt wird die P3-BEWERTUNG, nicht die Datei.
+    Stuft ein späterer Review dasselbe Problem hoch, muss es gefixt werden."""
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("build_agent", "gesichtet", "gefixt")
+    fix_runs = []
+
+    def writes(cwd):
+        fix_runs.append(cwd)
+        return {} if len(fix_runs) == 1 else {"src_neu.py": "print('v2')\n"}
+
+    ctx.agents.file_writes["build_agent"] = writes
+    ctx.agents.script(
+        "final_reviewer",
+        final_review_json(
+            "needs_fixes", [finding_dict("backend", "dasselbe", "implementation", "P3")]
+        ),
+        final_review_json(
+            "needs_fixes", [finding_dict("backend", "dasselbe", "implementation", "P2")]
+        ),
+        final_review_json("ok"),
+    )
+    run_final_review_phase(ctx)
+    assert ctx.state.phase == "ci"
+    assert ctx.state.lanes["backend"].fix_cycles == 2  # P3 vertagt, P2 gefixt
+    assert len(fix_runs) == 2
+
+
+def test_fix_dispatch_without_changes_still_escalates_on_p2(ctx):
+    """Bei P1/P2 ist Untätigkeit des Build-Agenten ein echtes Problem."""
+    prepare_final_review_fix(
+        ctx, [finding_dict("backend", "Race Condition", "implementation", "P2")]
+    )
+    ctx.agents.file_writes.pop("build_agent", None)
+    with pytest.raises(EscalationError, match="keine Änderungen"):
+        run_final_review_phase(ctx)
+
+
+def test_p3_fix_dispatch_with_changes_takes_the_regular_path(ctx):
+    prepare_final_review_fix(ctx, [finding_dict("backend", "Kleinigkeit", "implementation", "P3")])
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2, P3 erledigt')\n"}
+    run_final_review_phase(ctx)
+    assert ctx.state.phase == "ci"
+    assert not (ctx.run_dir / "followups.md").is_file()  # gefixt statt vertagt
+    build_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert len(build_calls) == 2  # Build + Fix-Lauf, Gates regulär gelaufen
 
 
 def test_tampered_completed_lane_is_revalidated_before_review(ctx):

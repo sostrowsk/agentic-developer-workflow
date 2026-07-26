@@ -126,7 +126,18 @@ REGISTRY: dict[str, AgentSpec] = {
             "persistent states. Honor explicit non-goals and scope ceilings in "
             "the issue. Put defensible-but-disproportionate hardening ideas into "
             "a 'Deferred (deliberately not built)' section instead of acceptance "
-            "criteria. You never implement and never change production code."
+            "criteria. The spec describes PRODUCT behavior only — observable "
+            "behavior, data states, interfaces. It never normalizes the "
+            "development process: no requirements on commit messages, commit "
+            "prefixes, branch topology, commit order or git history, neither in "
+            "acceptance criteria nor in the Definition of Done. Implementation "
+            "agents do not commit — the orchestrator commits for them, so such "
+            "criteria are structurally unsatisfiable and unverifiable. This "
+            "concerns the WORKFLOW's own process; git behavior that the product "
+            "under change itself produces (e.g. commits written by the code) is "
+            "observable product behavior and belongs in the spec. TDD is "
+            "the agents' way of working and needs no acceptance criterion. "
+            "You never implement and never change production code."
         ),
     ),
     "plan_agent": AgentSpec(

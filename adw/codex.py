@@ -47,7 +47,13 @@ _KIND_INSTRUCTIONS: dict[ReviewKind, str] = {
         "with real damage. Respect "
         "explicit non-goals and scope ceilings in the issue; never demand "
         "mechanisms they exclude — such hardening belongs in the spec's "
-        "'Deferred' section, not in acceptance criteria."
+        "'Deferred' section, not in acceptance criteria. Process requirements "
+        "are a finding of the same category as over-engineering: acceptance "
+        "criteria or Definition of Done items about commit messages, commit "
+        "prefixes, branch topology or git history are unsatisfiable here — the "
+        "orchestrator commits, not the implementation agent. A spec describes "
+        "product behavior only; git behavior produced by the product's own code "
+        "is such behavior and stays legitimate."
     ),
     "plan": (
         "Review the implementation plan AND the interface contract together, "
@@ -57,7 +63,9 @@ _KIND_INSTRUCTIONS: dict[ReviewKind, str] = {
         "contract clauses exceeding the spec's scope or defending scenarios "
         "without real damage. With a single Workstream the contract must pin "
         "only externally observable surfaces (HTTP routes, events, template "
-        "behavior), never internal helper signatures."
+        "behavior), never internal helper signatures. Process requirements "
+        "(commit messages, commit prefixes, branch topology, git history) are "
+        "a finding too — the orchestrator commits, not the implementation agent."
     ),
     "code": (
         "Review the code changes for correctness, silent data loss, "

@@ -510,8 +510,31 @@ def _write_known_findings(ctx: RunContext, review_kind: str, review: ReviewResul
     return path
 
 
+def _finding_key(item: Finding) -> str:
+    return f"{item.file}|{item.issue}"
+
+
 def _finding_keys(review: ReviewResult) -> list[str]:
-    return sorted(f"{f.file}|{f.issue}" for f in review.findings)
+    return sorted(_finding_key(f) for f in review.findings)
+
+
+def _circuit_breaker_keys(ctx: RunContext, findings: list[Finding]) -> list[str]:
+    """Baseline for the Circuit-Breaker AFTER a dispatch: deferred Findings
+    triggered no fix, so their unchanged reappearance is not a standstill."""
+    return sorted(_finding_key(f) for f in _without_deferred(ctx, findings))
+
+
+def _without_deferred(ctx: RunContext, findings: list[Finding]) -> list[Finding]:
+    """Drop Findings that a fix run has already proven unactionable.
+
+    They are in the follow-up report; dispatching them again would burn a fix
+    cycle without effect and trip the Circuit-Breaker on the next round.
+    Deferred is the P3 ASSESSMENT, not the location: if a later review rates
+    the same problem P1/P2, it goes through the fix cycle after all."""
+    deferred = set(ctx.state.deferred_findings)
+    return [
+        item for item in findings if item.severity != "P3" or _finding_key(item) not in deferred
+    ]
 
 
 def _findings_text(review: ReviewResult) -> str:
@@ -633,6 +656,9 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
         f"Issue:\n{ctx.state.issue}"
     )
     previous_failures: list[str] | None = lane_state.last_failures or None
+    # Die Findings des Fix-Dispatches (leer beim initialen Build) entscheiden,
+    # ob ein wirkungsloser Agent-Lauf eskaliert wird — siehe _handle_idle_agent_run.
+    dispatch_findings = list(lane_state.pending_findings)
     while True:
         current_head = _git(ctx, worktree, "rev-parse", "HEAD").strip()
         with ctx.state_lock:
@@ -670,11 +696,7 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
         # müssen exakt denselben, approvten Stand sehen.
         _restore_approved_artifacts(ctx, worktree, lane_state.base_sha or ctx.config.base_branch)
         if lane_state.gate_iterations == 1 and not _worktree_dirty(ctx, worktree):
-            raise escalate(
-                ctx,
-                f"Build-Agent (Lane {lane}) hat keine Änderungen im Worktree "
-                f"hinterlassen — nichts zu bauen oder Agent-Lauf wirkungslos",
-            )
+            _handle_idle_agent_run(ctx, lane, dispatch_findings)
         # Kein Save zwischen Gates und Feedback-Persistenz — jeder Checkpoint
         # nach einem Gate-Fail muss pending_task/last_failures bereits tragen.
         report = _run_lane_gates(ctx, lane, worktree, lane_state)
@@ -698,15 +720,49 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
         with ctx.state_lock:
             lane_state.pending_task = task
             lane_state.last_failures = failures
+            # Ab hier treibt Gate-Feedback den Lauf, nicht mehr die Findings.
+            lane_state.pending_findings = []
             ctx.save()
+        dispatch_findings = []
     with ctx.state_lock:
         lane_state.pending_task = None
         lane_state.last_failures = []
+        lane_state.pending_findings = []
         lane_state.expected_head = None  # ab hier committet der Orchestrator selbst
         lane_state.gates_passed = True  # persistierter Beweis VOR dem Commit,
         lane_state.gates_tree = _worktree_tree_hash(ctx, worktree)  # an den Baum gebunden
         ctx.save()
     _finalize_lane(ctx, worktree, lane, lane_state)
+
+
+def _handle_idle_agent_run(ctx: RunContext, lane: str, findings: list[Finding]) -> None:
+    """An agent run that left the Worktree untouched — escalate or defer?
+
+    In the initial build (no Findings) nothing to build means the run is
+    pointless. After a fix dispatch it can be legitimate: pure P3 observations
+    (documentation or process notes, findings the agent rejects with reason)
+    demand no code change at all, and escalating there kills a finished,
+    gate-green run. Those go into the follow-up report instead. As soon as a
+    P1/P2 is among them, idleness is a real problem and stays an escalation."""
+    if findings and all(item.severity == "P3" for item in findings):
+        _write_followups(ctx, findings)
+        with ctx.state_lock:
+            # Vertagt merken: ein deterministischer Reviewer meldet dasselbe
+            # Finding sonst erneut und der Circuit-Breaker killt den Run.
+            deferred = ctx.state.deferred_findings
+            deferred.extend(k for k in map(_finding_key, findings) if k not in deferred)
+            ctx.save()
+        logger.warning(
+            "Lane %s: Fix-Lauf ohne Worktree-Änderungen bei ausschließlich "
+            "P3-Findings — als Follow-up vermerkt statt eskaliert",
+            lane,
+        )
+        return
+    raise escalate(
+        ctx,
+        f"Build-Agent (Lane {lane}) hat keine Änderungen im Worktree "
+        f"hinterlassen — nichts zu bauen oder Agent-Lauf wirkungslos",
+    )
 
 
 def _require_lane_branch(ctx: RunContext, worktree: Path, lane_state: LaneState) -> None:
@@ -1127,6 +1183,7 @@ def _dispatch_lane_fixes(
                 f"bypassing the tests), TDD where sensible. You do not commit.\n\n{text}"
             )
             lane_state.last_failures = []
+            lane_state.pending_findings = list(items)
             lane_state.gate_iterations = 0
         ctx.save()  # EIN Save: Staging aller Lanes + mutate_staged atomar
     for lane in decision.fix_tasks:
@@ -1189,6 +1246,10 @@ def run_codex_review_phase(ctx: RunContext) -> None:
             raise escalate(ctx, f"Codex-Code-Review unlesbar: {exc}") from exc
         if review.verdict == "ok":
             break
+        findings = _without_deferred(ctx, review.findings)
+        if not findings:
+            break  # nur bereits vertagte Findings — sie stehen im Follow-up-Report
+        review = ReviewResult(verdict="needs_fixes", findings=findings)
         with ctx.state_lock:
             ctx.state.review_rounds += 1
             ctx.save()
@@ -1211,7 +1272,9 @@ def run_codex_review_phase(ctx: RunContext) -> None:
             ) from exc
         _dispatch_lane_fixes(ctx, review.findings, lanes, source="Codex-Code-Review")
         with ctx.state_lock:
-            # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4.
+            # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4. Der
+            # Dispatch kann Findings vertagt haben; die fallen aus der Basis.
+            failures = _circuit_breaker_keys(ctx, review.findings)
             ctx.state.review_last_failures = failures
             ctx.save()
         previous = failures
@@ -1257,6 +1320,10 @@ def run_final_review_phase(ctx: RunContext) -> None:
                 f"Finaler Review ohne category-Feld bei: {', '.join(uncategorized)} — "
                 f"Findings sind nicht triagierbar",
             )
+        findings = _without_deferred(ctx, review.findings)
+        if not findings:
+            break  # nur bereits vertagte Findings — sie stehen im Follow-up-Report
+        review = ReviewResult(verdict="needs_fixes", findings=findings)
         decision = triage_final_review(review, active_lanes=lanes)
         if decision.followups:
             _write_followups(ctx, decision.followups)
@@ -1292,7 +1359,9 @@ def run_final_review_phase(ctx: RunContext) -> None:
             mutate_staged=_bump_fix_cycles,
         )
         with ctx.state_lock:
-            # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4/5.
+            # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4/5. Der
+            # Dispatch kann Findings vertagt haben; die fallen aus der Basis.
+            failures = _circuit_breaker_keys(ctx, fixable)
             ctx.state.final_review_last_failures = failures
             ctx.save()
         previous = failures
@@ -1452,7 +1521,8 @@ def _analyze_ci_logs(ctx: RunContext, worktree: Path, log_excerpt: str) -> Revie
 
 
 def _write_followups(ctx: RunContext, followups: list[Finding]) -> None:
-    """Collect scope_gap Findings as a follow-up report (no auto-restart).
+    """Collect deferred Findings as a follow-up report (no auto-restart):
+    scope gaps and P3s that a fix run could not act on.
 
     Dedupe via file+issue: a deliberately unfixed scope_gap shows up again in
     every further review round and must not flood the report."""

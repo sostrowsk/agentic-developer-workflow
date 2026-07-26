@@ -330,6 +330,14 @@ def test_builder_is_instructed_not_to_commit():
     assert "do not commit" in REGISTRY["build_agent"].system_append.lower()
 
 
+def test_spec_agent_is_instructed_to_keep_process_rules_out_of_the_spec():
+    """Prozess-/Historien-Kriterien (Commit-Präfixe & Co.) sind im ADW
+    strukturell unerfüllbar — der Orchestrator committet, nicht der Agent."""
+    prompt = REGISTRY["spec_agent"].system_append.lower()
+    assert "commit" in prompt
+    assert "process" in prompt
+
+
 def test_mock_runner_gives_fresh_sessions_per_conversation(tmp_path):
     from adw.mock import MockAgentRunner as Mock
 

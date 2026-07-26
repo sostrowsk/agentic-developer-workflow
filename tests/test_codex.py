@@ -70,6 +70,15 @@ def test_prompt_contains_schema_and_content(captured_run, tmp_path):
     assert "spec" in prompt.lower()
 
 
+def test_spec_and_plan_review_flag_process_requirements(captured_run, tmp_path):
+    """Prozess-/Historien-Vorgaben in Akzeptanzkriterien/DoD sind ein Finding —
+    im ADW committet der Orchestrator, nicht der Implementierungs-Agent."""
+    for kind in ("spec", "plan"):
+        CodexRunner().review(kind, [".adw/spec.md"], cwd=tmp_path)
+        prompt = captured_run["argv"][-1].lower()
+        assert "commit" in prompt, kind
+
+
 def test_broken_codex_output_raises_parse_error(captured_run, tmp_path):
     captured_run["stdout"] = "Ich bin nur Prosa ohne JSON."
     with pytest.raises(FindingsParseError):

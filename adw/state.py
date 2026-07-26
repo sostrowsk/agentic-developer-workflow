@@ -11,6 +11,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from adw.findings import Finding
+
 RUN_ID_RE = re.compile(r"^[0-9a-f]{8}$")
 
 RUNS_RELPATH = Path(".adw") / "runs"
@@ -58,6 +60,11 @@ class LaneState(BaseModel):
     # überlebt einen Crash zwischen Gate-Fail und Fix-Iteration.
     pending_task: str | None = None
     last_failures: list[str] = Field(default_factory=list)
+    # Findings, die den offenen Fix-Task ausgelöst haben (leer beim initialen
+    # Build und bei Gate-Feedback). Der Orchestrator braucht sie, um einen
+    # wirkungslosen Fix-Lauf bewerten zu können: reine P3-Findings verlangen
+    # oft gar keine Code-Änderung.
+    pending_findings: list[Finding] = Field(default_factory=list)
     # HEAD vor dem Agent-Lauf: erkennt Agent-Commits auch über ein Crash-
     # Fenster hinweg (Orchestrator-only-Commit-Invariante).
     expected_head: str | None = None
@@ -96,6 +103,11 @@ class RunState(BaseModel):
     review_rounds: int = 0
     review_last_failures: list[str] = Field(default_factory=list)
     final_review_last_failures: list[str] = Field(default_factory=list)
+    # Findings-Keys, die ein Fix-Lauf nachweislich nicht umsetzen konnte
+    # (reine P3-Beobachtungen, im Follow-up-Report vermerkt). Ein
+    # deterministischer Reviewer meldet sie erneut — sie dürfen dann weder
+    # einen weiteren Fix-Zyklus noch den Circuit-Breaker auslösen.
+    deferred_findings: list[str] = Field(default_factory=list)
     # Phase 7: rote Pipeline → Log-Analyst → EIN Re-Entry, dann Eskalation.
     ci_reentries: int = 0
     # Checkpoint des Spec-/Plan-Authoring-Loops: Session, offener Fix-Task und
