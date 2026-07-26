@@ -223,7 +223,7 @@ Phase 5–6: Zwei unabhängige Reviews + Triage
 
 <div class="inner">
 
-**Codex** reviewt den integrierten Diff (Findings mit Fix-Plan, geroutet per Lane, bis `ok`). Danach prüft der **finale Reviewer** (Fable 5, strikt read-only) die Implementierung gegen die Spec. Die **Triage ist Code**: Findings der Kategorie `scope_gap` („war nie Teil des Plans") landen als Follow-up in `followups.md` — sie lösen *keinen* Umbau aus. `implementation`/`trivial`-Findings gehen als Fix-Zyklus in die zuständige Lane (max. 3 Zyklen je Lane), inklusive erneutem Gate-Lauf und Re-Review. Wichtig: Build-Agents dürfen von Fix-Plänen **begründet abweichen** — der Reviewer beschreibt das Problem, der Builder entscheidet die Lösung.
+**Codex** reviewt den integrierten Diff (Findings mit Fix-Plan, geroutet per Lane, bis `ok`). Danach prüft der **finale Reviewer** (Fable 5, strikt read-only) die Implementierung gegen die Spec. Die **Triage ist Code**: Findings der Kategorie `scope_gap` („war nie Teil des Plans") landen als Follow-up in `followups.md` — sie lösen *keinen* Umbau aus. `implementation`/`trivial`-Findings gehen als Fix-Zyklus in die zuständige Lane (max. 3 Zyklen je Lane), inklusive erneutem Gate-Lauf und Re-Review. Wichtig: Build-Agents dürfen von Fix-Plänen **begründet abweichen** — der Reviewer beschreibt das Problem, der Builder entscheidet die Lösung. Lässt ein Fix-Zyklus den Worktree unverändert und waren die auslösenden Findings **ausschließlich P3**, ist das kein Fehler: der Befund wird ebenfalls nach `followups.md` vertagt und der Lauf geht weiter (Untätigkeit bei P1/P2 eskaliert dagegen weiterhin).
 
 </div>
 
@@ -261,7 +261,7 @@ Das Approval-Gate ist der billigste Ort, um falsche Richtungen zu stoppen: Eine 
 | `.adw/runs/<run_id>/state.json`                      | Kompletter Run-Zustand (Phase, Lanes, Sessions, Zähler) — Grundlage für `resume`.                                       | gitignored (ADW legt die Ignore-Regel selbst an)                  |
 | `.adw/runs/<run_id>/spec.md` etc.                    | Archivierte, reviewte Artefakt-Stände dieses Runs.                                                                      |                                                                   |
 | `.adw/runs/<run_id>/escalation.md`                   | Eskalations-Report: erreichter Stand, Phase, konkreter Grund.                                                           |                                                                   |
-| `.adw/runs/<run_id>/followups.md`                    | Follow-up-Issues aus `scope_gap`-Findings (dedupliziert).                                                               |                                                                   |
+| `.adw/runs/<run_id>/followups.md`                    | Follow-up-Issues aus `scope_gap`-Findings und vertagten P3-Findings (dedupliziert).                                                               |                                                                   |
 | `.adw/runs/<run_id>/trees/<lane>`                    | Lane-Worktrees (+ `trees/integration` bei `--parallel`).                                                                |                                                                   |
 
 ## 8. Crash, Pause, Resume

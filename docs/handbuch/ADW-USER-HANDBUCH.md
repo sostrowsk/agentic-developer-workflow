@@ -223,7 +223,7 @@ Phases 5–6: Two independent reviews + Triage
 
 <div class="inner">
 
-**Codex** reviews the integrated diff (Findings with a fix plan, routed per Lane, until `ok`). Then the **final reviewer** (Fable 5, strictly read-only) checks the implementation against the spec. The **Triage is code**: Findings of category `scope_gap` ("was never part of the plan") end up as follow-ups in `followups.md` — they trigger *no* rework. `implementation`/`trivial` Findings go into the responsible Lane as a fix cycle (max. 3 cycles per Lane), including a fresh Gate run and re-review. Important: Build agents may **deviate from fix plans with justification** — the reviewer describes the problem, the builder decides the solution.
+**Codex** reviews the integrated diff (Findings with a fix plan, routed per Lane, until `ok`). Then the **final reviewer** (Fable 5, strictly read-only) checks the implementation against the spec. The **Triage is code**: Findings of category `scope_gap` ("was never part of the plan") end up as follow-ups in `followups.md` — they trigger *no* rework. `implementation`/`trivial` Findings go into the responsible Lane as a fix cycle (max. 3 cycles per Lane), including a fresh Gate run and re-review. Important: Build agents may **deviate from fix plans with justification** — the reviewer describes the problem, the builder decides the solution. If a fix cycle leaves the worktree untouched and the triggering Findings were **P3 only**, that is not a failure: the finding is deferred to `followups.md` as well and the run continues (idleness on P1/P2 still escalates).
 
 </div>
 
@@ -261,7 +261,7 @@ The approval Gate is the cheapest place to stop wrong directions: a corrected as
 | `.adw/runs/<run_id>/state.json`                      | Complete run state (phase, Lanes, sessions, counters) — the basis for `resume`.                                     | gitignored (ADW creates the ignore rule itself)              |
 | `.adw/runs/<run_id>/spec.md` etc.                    | Archived, reviewed artifact states of this run.                                                                     |                                                              |
 | `.adw/runs/<run_id>/escalation.md`                   | Escalation report: state reached, phase, concrete reason.                                                           |                                                              |
-| `.adw/runs/<run_id>/followups.md`                    | Follow-up issues from `scope_gap` Findings (deduplicated).                                                          |                                                              |
+| `.adw/runs/<run_id>/followups.md`                    | Follow-up issues from `scope_gap` Findings and deferred P3 Findings (deduplicated).                                                          |                                                              |
 | `.adw/runs/<run_id>/trees/<lane>`                    | Lane Worktrees (+ `trees/integration` with `--parallel`).                                                           |                                                              |
 
 ## 8. Crash, pause, resume
