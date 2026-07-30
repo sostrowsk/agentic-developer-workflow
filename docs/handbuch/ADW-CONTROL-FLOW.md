@@ -68,7 +68,8 @@ phase by phase.
 2. The **Codex reviewer** (a second, independent AI) checks the specification.
 3. If it finds defects, they go **back to the same Spec agent** — which keeps
    its "memory" from the first round (session resume) and reworks.
-4. This repeats until the reviewer says **"ok"**.
+4. This repeats until the reviewer says **"ok"** — at most **5 rounds**, with
+   the bar descending per round (details in phase 5).
 
 > Like an essay that an editor keeps handing back until it is clean —
 > but the editor never writes on the essay himself.
@@ -82,7 +83,7 @@ phase by phase.
    the server logic) must fit together later — so that two teams working separately
    don't deliver incompatible parts in the end.
 2. The Codex reviewer checks plan and contract **together**, again in the
-   loop until "ok".
+   loop until "ok" (same 5-round rule).
 3. **Plan approval gate — the built-in STOP:** The workflow **halts**,
    saves its complete state and exits. Now a
    **human** reads the plan and decides. Only the command `adw approve` (or
@@ -136,7 +137,14 @@ phase by phase.
 3. Important: the repair suggestion is a **recommendation, not an order**. The
    build agent checks it against the specification and project rules and may
    repair **differently, with justification** — after all, the reviewer only sees the code from the outside.
-4. After each repair: all gates, then another review — **until "ok"**.
+4. After each repair: all gates, then another review — **until "ok"**, at most
+   **5 rounds**. The bar descends per round: round 1 fixes all defects, round 2
+   only critical and medium ones (P1+P2), from round 3 only critical ones (P1)
+   — smaller points are recorded as known limitations instead of being polished
+   forever.
+5. So the reviewer does not keep flagging the same things, from round 2 on it
+   receives the **defect list of the previous rounds including the reasoning**
+   ("fixed" or "deliberately not adopted, because …").
 
 ### Phase 6 — Final Review + Triage: "Was the right thing actually built?"
 
@@ -174,7 +182,7 @@ specification says?*
 
 | Mechanism | What it means |
 |---|---|
-| **Limits** | Phase 3: max. 10 fix iterations · Phase 4: max. 10 rounds · Phase 6: max. 3 cycles · Phase 7: max. 45 min waiting |
+| **Limits** | Phase 3: max. 10 fix iterations · Phase 4: max. 10 rounds · Phase 5: max. 5 review rounds · Phase 6: max. 3 cycles · Phase 7: max. 45 min waiting |
 | **Circuit breaker** | If a repair round resolves *nothing* → immediate abort instead of pointless spinning |
 | **Escalation report** | Every abort produces `escalation.md`: what was achieved, what is open, why — the handover to the human |
 | **Checkpoints** | After **every phase transition** the complete state is saved. `adw resume` continues **exactly there** after a crash, a pause or an exhausted AI quota — like a save point in a video game |

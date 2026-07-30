@@ -199,7 +199,7 @@ Phases 1–2: Spec and plan are created — and independently reviewed
 
 <div class="inner">
 
-The **Spec agent** turns your issue into a specification following a fixed template (goal, scope, non-goals, acceptance criteria, definition of done) written to `.adw/spec.md`. **Codex** reviews it; Findings go back **to the same agent session** as a follow-up task until the verdict is `ok`. Then the **Plan agent** analogously produces `.adw/plan.md` (workstreams) and `.adw/contract.yaml` (interface contract: OpenAPI/types/events) — Codex checks both **together against the spec**. The run then pauses for your approval (section 6).
+The **Spec agent** turns your issue into a specification following a fixed template (goal, scope, non-goals, acceptance criteria, definition of done) written to `.adw/spec.md`. **Codex** reviews it; Findings go back **to the same agent session** as a follow-up task until the verdict is `ok` — at most 5 rounds. The severity threshold descends per round (round 1: all findings, round 2: P1+P2, from round 3: P1 only), and from round 2 on Codex receives the previous rounds' findings including their disposition, so it does not re-report settled or deliberately rejected points. Then the **Plan agent** analogously produces `.adw/plan.md` (workstreams) and `.adw/contract.yaml` (interface contract: OpenAPI/types/events) — Codex checks both **together against the spec**. The run then pauses for your approval (section 6).
 
 </div>
 
@@ -223,7 +223,7 @@ Phases 5–6: Two independent reviews + Triage
 
 <div class="inner">
 
-**Codex** reviews the integrated diff (Findings with a fix plan, routed per Lane, until `ok`). Then the **final reviewer** (Fable 5, strictly read-only) checks the implementation against the spec. The **Triage is code**: Findings of category `scope_gap` ("was never part of the plan") end up as follow-ups in `followups.md` — they trigger *no* rework. `implementation`/`trivial` Findings go into the responsible Lane as a fix cycle (max. 3 cycles per Lane), including a fresh Gate run and re-review. Important: Build agents may **deviate from fix plans with justification** — the reviewer describes the problem, the builder decides the solution. If a fix cycle leaves the worktree untouched and the triggering Findings were **P3 only**, that is not a failure: the finding is deferred to `followups.md` as well and the run continues (idleness on P1/P2 still escalates).
+**Codex** reviews the integrated diff (Findings with a fix plan, routed per Lane, until `ok` — same review-loop policy as in phases 1–2: max. 5 rounds, descending severity threshold, findings memory; P2/P3 below the threshold go to `followups.md`). Then the **final reviewer** (Fable 5, strictly read-only) checks the implementation against the spec. The **Triage is code**: Findings of category `scope_gap` ("was never part of the plan") end up as follow-ups in `followups.md` — they trigger *no* rework. `implementation`/`trivial` Findings go into the responsible Lane as a fix cycle (max. 3 cycles per Lane), including a fresh Gate run and re-review. Important: Build agents may **deviate from fix plans with justification** — the reviewer describes the problem, the builder decides the solution. If a fix cycle leaves the worktree untouched and the triggering Findings were **P3 only**, that is not a failure: the finding is deferred to `followups.md` as well and the run continues (idleness on P1/P2 still escalates).
 
 </div>
 

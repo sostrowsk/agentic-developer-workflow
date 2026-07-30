@@ -123,7 +123,7 @@ Phase 1–2 — `run_spec_and_plan`: Authoring-Loops + Approval-Gate
 
 <div class="inner">
 
-Gemeinsamer Baustein ist der **Reviewed-Authoring-Loop**: Agent schreibt Artefakt(e) → Codex reviewt (`kind=spec` bzw. `plan`, der Plan-Review bekommt die Spec als Referenz mit) → Findings gehen als Folge-Task an **dieselbe SDK-Session** (`resume=session_id`) → bis Verdict `ok`. Absicherungen:
+Gemeinsamer Baustein ist der **Reviewed-Authoring-Loop**: Agent schreibt Artefakt(e) → Codex reviewt (`kind=spec` bzw. `plan`, der Plan-Review bekommt die Spec als Referenz mit) → Findings gehen als Folge-Task an **dieselbe SDK-Session** (`resume=session_id`) → bis Verdict `ok`, maximal 5 Runden (`AUTHORING_MAX_ROUNDS`). Je Runde sinkt die Severity-Schwelle (Runde 1: alle Findings, Runde 2: P1+P2, ab Runde 3: nur P1 — darunter liegende Findings werden als Known Limitations akzeptiert statt weiter iteriert), und ab Runde 2 erhält Codex die Vorrunden-Findings inkl. Disposition als Review-Kontext, damit erledigte oder bewusst abgewiesene Punkte nicht erneut gemeldet werden. Am Cap: offene P1 → Eskalation, sonst Accept + Known-Limitations-Report. Absicherungen:
 
 - **Prior-Content-Check:** Ein Altbestand (z. B. gemergte Artefakte eines früheren Runs) adelt keinen untätigen Agenten — das Artefakt muss sich beim Erstlauf ändern, sonst Eskalation.
 - **Protected Files:** `.adw/config.yaml` und (ab Phase 2) die reviewte Spec werden nach *jedem* Agent-Lauf byte-genau restauriert — Agents können sie technisch beschreiben, aber nie effektiv ändern.
@@ -162,7 +162,7 @@ Phase 5–6 — Codex-Review + finaler Review + Triage
 
 Vor jedem Review: `_resume_pending_lanes` schickt **jede** Lane durch `_run_lane` — unfertige Fixes (Crash-Fenster) holen Gates + Commit nach, fertige werden per Tree-Hash revalidiert. Kein ungegateter Stand erreicht je ein Review.
 
-**Phase 5:** `codex.review("code", <geänderte Dateien via 3-Punkte-Diff>, cwd=Review-Worktree)`. `needs_fixes` → Runde persistieren, Limit-Check *vor* dem Dispatch (kein „Terminal-Fix", den nie wieder ein Review prüft), Circuit-Breaker auf identische Finding-Mengen, Dispatch in die Lanes, Re-Review.
+**Phase 5:** `codex.review("code", <geänderte Dateien via 3-Punkte-Diff>, cwd=Review-Worktree)`. `needs_fixes` → Runde persistieren, Limit-Check *vor* dem Dispatch (kein „Terminal-Fix", den nie wieder ein Review prüft), Circuit-Breaker auf identische Finding-Mengen, Dispatch in die Lanes, Re-Review. Es gilt dieselbe **Review-Loop-Policy** wie im Authoring: max. 5 Runden (`MAX_REVIEW_ROUNDS`), absteigende Severity-Schwelle je Runde (1: alle, 2: P1+P2, ab 3: nur P1 — Gedroppte wandern nach `followups.md`), Vorrunden-Findings + Disposition gehen als Kontext an Codex; Circuit-Breaker und Dispatch arbeiten nur auf der actionable Finding-Menge.
 
 **Phase 6:** Finaler Reviewer (Fable, read-only) antwortet im Findings-JSON **mit Pflicht-`category`** (fehlt sie, ist keine Triage möglich → Eskalation statt stiller Default). `triage_final_review` (reiner Code) trennt: `scope_gap` → deduplizierter Follow-up-Report; Rest → Fix-Zyklen je Lane (max. 3). Das Zyklus-Inkrement wird **im selben Save** wie der gestagte Fix-Task persistiert (`mutate_staged`-Hook im Dispatch) — ein Crash kann kein Budget verbrennen, ohne dass der zugehörige Fix beim Resume nachgeholt wird.
 
@@ -223,12 +223,12 @@ Die wichtigsten Checkpoint-Felder und ihr Zweck
 
 | Feld                                                                                   | Ebene    | Überlebt damit                                                                                                      |
 |----------------------------------------------------------------------------------------|----------|---------------------------------------------------------------------------------------------------------------------|
-| `authoring_session / _pending_task / _last_findings`                                   | Run      | Crash mitten im Spec-/Plan-Review-Zyklus: Session, offener Fix-Task und Circuit-Breaker-Basis                       |
+| `authoring_session / _pending_task / _last_findings / _rounds / _prior_context`        | Run      | Crash mitten im Spec-/Plan-Review-Zyklus: Session, offener Fix-Task, Circuit-Breaker-Basis, Runden-Budget, Findings-Historie |
 | `pending_task`, `last_failures`                                                        | Lane     | Crash zwischen Gate-Fail und Fix-Lauf                                                                               |
 | `gates_passed` + `gates_tree`                                                          | Lane     | Crash zwischen „Gates grün" und Commit — der Beweis ist an den exakten Baum-Hash gebunden und damit nicht fälschbar |
 | `expected_head`                                                                        | Lane     | Erkennung von Fremd-Commits über ein Crash-Fenster hinweg (Orchestrator-only-Commit-Invariante)                     |
 | `base_sha`                                                                             | Lane     | Fork-Punkt der Lane — Restaurationen nutzen den unbeweglichen Stand, nicht den weiterrückenden Base-Branch          |
-| `integration_rounds / review_rounds / fix_cycles / ci_reentries` (+ `*_last_failures`) | Run/Lane | Alle Loop-Budgets — ein Neustart verschafft keine Extra-Versuche; Limit-Checks stehen *vor* teurer Arbeit           |
+| `integration_rounds / review_rounds / fix_cycles / ci_reentries` (+ `*_last_failures`, `review_prior_context`) | Run/Lane | Alle Loop-Budgets — ein Neustart verschafft keine Extra-Versuche; Limit-Checks stehen *vor* teurer Arbeit           |
 | `dry_run`, `skip_approval`, `pinned_base_branch`                                       | Run      | CLI-Entscheidungen, die der Resume-Aufruf nicht mehr kennt                                                          |
 
 Durchgängiges Muster: **Budget-Inkremente werden atomar mit der Arbeit persistiert, die sie rechtfertigen** (via `mutate_staged`-Hook im Fix-Dispatch), und **Circuit-Breaker-Baselines erst *nach* dem Fix-Dispatch fortgeschrieben** — sonst würde ein Crash dazwischen beim Resume als „identische Runde" fehl-eskalieren.
@@ -241,7 +241,8 @@ Durchgängiges Muster: **Budget-Inkremente werden atomar mit der Arbeit persisti
 |--------------------------------|---------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------|
 | Gate-Loop je Lane              | 10 (`MAX_GATE_ITERATIONS`) — pro Task, Reset bei neuem Fix-Task           | Circuit-Breaker `check_progress`: exakt dieselbe Failure-/Finding-Menge wie in der Vorrunde → sofortige Eskalation statt Limit ausreizen |
 | Integration/E2E                | 10 Runden (`MAX_E2E_ROUNDS`, run-weit)                                    |                                                                                                                                          |
-| Codex-Code-Review              | 10 Runden (`MAX_REVIEW_ROUNDS`)                                           |                                                                                                                                          |
+| Authoring-Loop (Spec/Plan)     | 5 Runden (`AUTHORING_MAX_ROUNDS`)                                         | Severity-Schwelle je Runde: 1 alle, 2 P1+P2, ab 3 nur P1; am Cap P1 → Eskalation, sonst Accept + Known Limitations                       |
+| Codex-Code-Review              | 5 Runden (`MAX_REVIEW_ROUNDS`)                                            | Gleiche Severity-Schwelle; Vorrunden-Findings + Disposition als Codex-Kontext, Sub-Schwellen-Findings → `followups.md`                   |
 | Fix-Zyklen nach finalem Review | 3 je Lane (`MAX_FIX_CYCLES`)                                              |                                                                                                                                          |
 | CI-Re-Entry                    | 1 (`MAX_CI_REENTRIES`)                                                    |                                                                                                                                          |
 | Gate-/Codex-/glab-Subprozesse  | Timeout je Gate aus der Config; Codex 900 s; glab 120 s; CI-Budget 2700 s | Prozessgruppen-Kill (`start_new_session` + `killpg`) auf allen Exit-Pfaden — keine Zombie-Prozesse                                       |

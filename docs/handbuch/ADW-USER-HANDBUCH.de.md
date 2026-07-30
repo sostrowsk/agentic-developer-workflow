@@ -199,7 +199,7 @@ Phase 1–2: Spec und Plan entstehen — und werden unabhängig reviewt
 
 <div class="inner">
 
-Der **Spec-Agent** schreibt aus deinem Issue eine Spezifikation nach fester Vorlage (Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, Definition of Done) nach `.adw/spec.md`. **Codex** reviewt sie; Findings gehen als Folge-Task **an dieselbe Agent-Session** zurück, bis das Verdict `ok` ist. Danach erzeugt der **Plan-Agent** analog `.adw/plan.md` (Workstreams) und `.adw/contract.yaml` (Schnittstellen-Kontrakt: OpenAPI/Typen/Events) — Codex prüft beides **gemeinsam gegen die Spec**. Anschließend pausiert der Run für dein Approval (Abschnitt 6).
+Der **Spec-Agent** schreibt aus deinem Issue eine Spezifikation nach fester Vorlage (Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, Definition of Done) nach `.adw/spec.md`. **Codex** reviewt sie; Findings gehen als Folge-Task **an dieselbe Agent-Session** zurück, bis das Verdict `ok` ist — maximal 5 Runden. Pro Runde sinkt die Severity-Schwelle (Runde 1: alle Findings, Runde 2: P1+P2, ab Runde 3: nur P1), und Codex bekommt ab Runde 2 die Vorrunden-Findings samt Disposition mit, damit er erledigte oder bewusst abgewiesene Punkte nicht erneut anmerkt. Danach erzeugt der **Plan-Agent** analog `.adw/plan.md` (Workstreams) und `.adw/contract.yaml` (Schnittstellen-Kontrakt: OpenAPI/Typen/Events) — Codex prüft beides **gemeinsam gegen die Spec**. Anschließend pausiert der Run für dein Approval (Abschnitt 6).
 
 </div>
 
@@ -223,7 +223,7 @@ Phase 5–6: Zwei unabhängige Reviews + Triage
 
 <div class="inner">
 
-**Codex** reviewt den integrierten Diff (Findings mit Fix-Plan, geroutet per Lane, bis `ok`). Danach prüft der **finale Reviewer** (Fable 5, strikt read-only) die Implementierung gegen die Spec. Die **Triage ist Code**: Findings der Kategorie `scope_gap` („war nie Teil des Plans") landen als Follow-up in `followups.md` — sie lösen *keinen* Umbau aus. `implementation`/`trivial`-Findings gehen als Fix-Zyklus in die zuständige Lane (max. 3 Zyklen je Lane), inklusive erneutem Gate-Lauf und Re-Review. Wichtig: Build-Agents dürfen von Fix-Plänen **begründet abweichen** — der Reviewer beschreibt das Problem, der Builder entscheidet die Lösung. Lässt ein Fix-Zyklus den Worktree unverändert und waren die auslösenden Findings **ausschließlich P3**, ist das kein Fehler: der Befund wird ebenfalls nach `followups.md` vertagt und der Lauf geht weiter (Untätigkeit bei P1/P2 eskaliert dagegen weiterhin).
+**Codex** reviewt den integrierten Diff (Findings mit Fix-Plan, geroutet per Lane, bis `ok` — gleiche Review-Loop-Policy wie in Phase 1–2: max. 5 Runden, sinkende Severity-Schwelle, Findings-Gedächtnis; unter die Schwelle gefallene P2/P3 wandern nach `followups.md`). Danach prüft der **finale Reviewer** (Fable 5, strikt read-only) die Implementierung gegen die Spec. Die **Triage ist Code**: Findings der Kategorie `scope_gap` („war nie Teil des Plans") landen als Follow-up in `followups.md` — sie lösen *keinen* Umbau aus. `implementation`/`trivial`-Findings gehen als Fix-Zyklus in die zuständige Lane (max. 3 Zyklen je Lane), inklusive erneutem Gate-Lauf und Re-Review. Wichtig: Build-Agents dürfen von Fix-Plänen **begründet abweichen** — der Reviewer beschreibt das Problem, der Builder entscheidet die Lösung. Lässt ein Fix-Zyklus den Worktree unverändert und waren die auslösenden Findings **ausschließlich P3**, ist das kein Fehler: der Befund wird ebenfalls nach `followups.md` vertagt und der Lauf geht weiter (Untätigkeit bei P1/P2 eskaliert dagegen weiterhin).
 
 </div>
 

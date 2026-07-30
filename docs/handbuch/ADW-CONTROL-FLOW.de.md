@@ -68,7 +68,8 @@ Phase für Phase.
 2. Der **Codex-Reviewer** (eine zweite, unabhängige KI) prüft die Spezifikation.
 3. Findet er Mängel, gehen sie **an denselben Spec-Agenten zurück** — der behält
    sein „Gedächtnis" aus der ersten Runde (Session-Resume) und bessert nach.
-4. Das wiederholt sich, bis der Prüfer **„ok"** sagt.
+4. Das wiederholt sich, bis der Prüfer **„ok"** sagt — höchstens **5 Runden**,
+   und die Messlatte sinkt pro Runde (Details bei Phase 5).
 
 > Wie ein Aufsatz, den ein Lektor so lange zurückgibt, bis er sauber ist —
 > aber der Lektor schreibt nie selbst am Aufsatz mit.
@@ -82,7 +83,7 @@ Phase für Phase.
    Server-Logik) später zusammenpassen müssen — damit zwei getrennt arbeitende
    Teams am Ende keine inkompatiblen Teile abliefern.
 2. Der Codex-Reviewer prüft Plan und Kontrakt **gemeinsam**, wieder in der
-   Schleife bis „ok".
+   Schleife bis „ok" (gleiche 5-Runden-Regel).
 3. **Plan-Approval-Gate — der eingebaute STOPP:** Der Workflow **hält an**,
    speichert seinen kompletten Zustand und beendet sich. Jetzt liest ein
    **Mensch** den Plan und entscheidet. Erst der Befehl `adw approve` (bzw.
@@ -136,7 +137,14 @@ Phase für Phase.
 3. Wichtig: Der Reparatur-Vorschlag ist eine **Empfehlung, kein Befehl**. Der
    Build-Agent prüft ihn gegen Spezifikation und Projektregeln und darf
    **begründet anders** reparieren — der Prüfer sieht den Code ja nur von außen.
-4. Nach jeder Reparatur: alle Gates, dann erneutes Review — **bis „ok"**.
+4. Nach jeder Reparatur: alle Gates, dann erneutes Review — **bis „ok"**,
+   höchstens **5 Runden**. Dabei sinkt die Messlatte pro Runde: Runde 1 behebt
+   alle Mängel, Runde 2 nur noch kritische und mittlere (P1+P2), ab Runde 3 nur
+   noch kritische (P1) — kleinere Punkte werden als bekannte Einschränkungen
+   festgehalten statt endlos nachpoliert.
+5. Damit der Prüfer nicht immer wieder dasselbe anmerkt, bekommt er ab Runde 2
+   die **Mängelliste der Vorrunden samt Begründung** mit („behoben" bzw.
+   „bewusst nicht übernommen, weil …").
 
 ### Phase 6 — Finaler Review + Triage: „Wurde wirklich das Richtige gebaut?"
 
@@ -174,7 +182,7 @@ der Spezifikation steht?*
 
 | Mechanismus | Was er bedeutet |
 |---|---|
-| **Limits** | Phase 3: max. 10 Fix-Iterationen · Phase 4: max. 10 Runden · Phase 6: max. 3 Zyklen · Phase 7: max. 45 min Warten |
+| **Limits** | Phase 3: max. 10 Fix-Iterationen · Phase 4: max. 10 Runden · Phase 5: max. 5 Review-Runden · Phase 6: max. 3 Zyklen · Phase 7: max. 45 min Warten |
 | **Circuit-Breaker** | Löst eine Reparatur-Runde *nichts* auf → sofortiger Abbruch statt sinnlosem Weiterdrehen |
 | **Eskalations-Bericht** | Bei jedem Abbruch entsteht `escalation.md`: was erreicht, was offen, warum — Übergabe an den Menschen |
 | **Speicherpunkte** | Nach **jedem Phasenübergang** wird der komplette Zustand gespeichert. `adw resume` setzt nach Absturz, Pause oder erschöpftem KI-Kontingent **exakt dort** fort — wie ein Spielstand im Videospiel |

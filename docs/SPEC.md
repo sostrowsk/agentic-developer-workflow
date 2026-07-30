@@ -65,7 +65,8 @@ all Gates — no shortcut for "trivial" fixes.
    assigns each failure to a lane → fix in the lane → integrate again. Max. 10 rounds.
 5. **Codex code review:** Codex reviews the integrated diff, delivers Findings with
    `remediation_plan`. Findings are routed via the `lane` field; build agents check the
-   fix plan against spec/conventions and may deviate with justification. Runs until verdict `ok`.
+   fix plan against spec/conventions and may deviate with justification. Runs until verdict `ok` —
+   max. 5 rounds (review-loop policy below).
 6. **Final review + Triage:** Fable 5 checks read-only against `.adw/spec.md`. Triage (code):
    `scope_gap` → follow-up issue (report, no auto-restart); `implementation`/`trivial` →
    fix cycle into the lane. Max. 3 fix cycles.
@@ -73,6 +74,14 @@ all Gates — no shortcut for "trivial" fixes.
    45-min timeout) until pipeline + staging deploy are green — GitLab via `glab`, GitHub
    Actions via `gh` (forge from `ci.provider` or origin URL). On a red pipeline:
    log analyst reads logs → Findings → back to phase 3/4.
+
+**Codex review-loop policy** (spec/plan authoring loops in phases 1–2 and the code review in
+phase 5): round 1 acts on all findings (P1–P3), round 2 only on P1+P2, from round 3 only on P1 —
+findings below the current round's threshold are recorded as follow-ups/known limitations instead
+of being fixed. From round 2 on, Codex receives the previous rounds' findings including their
+disposition (fix dispatched / not adopted + reason) and must not re-report settled points.
+Hard cap: 5 rounds — open P1 findings then escalate; otherwise the artifact is accepted with
+documented known limitations.
 
 **Escalation:** Every exhausted limit and the circuit breaker (a fix iteration resolves
 **nothing** → abort immediately) ends the run with exit code ≠ 0 and an
