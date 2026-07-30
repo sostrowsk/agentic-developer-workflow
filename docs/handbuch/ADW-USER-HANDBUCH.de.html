@@ -221,7 +221,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;pfad&gt;]   <span class="c"># Runs + Ph
 <details open>
   <summary>Phase 1–2: Spec und Plan entstehen — und werden unabhängig reviewt</summary>
   <div class="inner">
-    <p>Der <b>Spec-Agent</b> schreibt aus deinem Issue eine Spezifikation nach fester Vorlage (Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, Definition of Done) nach <code>.adw/spec.md</code>. <b>Codex</b> reviewt sie; Findings gehen als Folge-Task <b>an dieselbe Agent-Session</b> zurück, bis das Verdict <code>ok</code> ist. Danach erzeugt der <b>Plan-Agent</b> analog <code>.adw/plan.md</code> (Workstreams) und <code>.adw/contract.yaml</code> (Schnittstellen-Kontrakt: OpenAPI/Typen/Events) — Codex prüft beides <b>gemeinsam gegen die Spec</b>. Anschließend pausiert der Run für dein Approval (Abschnitt 6).</p>
+    <p>Der <b>Spec-Agent</b> schreibt aus deinem Issue eine Spezifikation nach fester Vorlage (Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, Definition of Done) nach <code>.adw/spec.md</code>. <b>Codex</b> reviewt sie; Findings gehen als Folge-Task <b>an dieselbe Agent-Session</b> zurück, bis das Verdict <code>ok</code> ist — maximal 5 Runden. Pro Runde sinkt die Severity-Schwelle (Runde 1: alle Findings, Runde 2: P1+P2, ab Runde 3: nur P1), und Codex bekommt ab Runde 2 die Vorrunden-Findings samt Disposition mit, damit er erledigte oder bewusst abgewiesene Punkte nicht erneut anmerkt. Danach erzeugt der <b>Plan-Agent</b> analog <code>.adw/plan.md</code> (Workstreams) und <code>.adw/contract.yaml</code> (Schnittstellen-Kontrakt: OpenAPI/Typen/Events) — Codex prüft beides <b>gemeinsam gegen die Spec</b>. Anschließend pausiert der Run für dein Approval (Abschnitt 6).</p>
   </div>
 </details>
 <details>
@@ -239,7 +239,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;pfad&gt;]   <span class="c"># Runs + Ph
 <details>
   <summary>Phase 5–6: Zwei unabhängige Reviews + Triage</summary>
   <div class="inner">
-    <p><b>Codex</b> reviewt den integrierten Diff (Findings mit Fix-Plan, geroutet per Lane, bis <code>ok</code>). Danach prüft der <b>finale Reviewer</b> (Fable 5, strikt read-only) die Implementierung gegen die Spec. Die <b>Triage ist Code</b>: Findings der Kategorie <code>scope_gap</code> („war nie Teil des Plans") landen als Follow-up in <code>followups.md</code> — sie lösen <i>keinen</i> Umbau aus. <code>implementation</code>/<code>trivial</code>-Findings gehen als Fix-Zyklus in die zuständige Lane (max. 3 Zyklen je Lane), inklusive erneutem Gate-Lauf und Re-Review. Wichtig: Build-Agents dürfen von Fix-Plänen <b>begründet abweichen</b> — der Reviewer beschreibt das Problem, der Builder entscheidet die Lösung.</p>
+    <p><b>Codex</b> reviewt den integrierten Diff (Findings mit Fix-Plan, geroutet per Lane, bis <code>ok</code> — gleiche Review-Loop-Policy wie in Phase 1–2: max. 5 Runden, sinkende Severity-Schwelle, Findings-Gedächtnis; unter die Schwelle gefallene P2/P3 wandern nach <code>followups.md</code>). Danach prüft der <b>finale Reviewer</b> (Fable 5, strikt read-only) die Implementierung gegen die Spec. Die <b>Triage ist Code</b>: Findings der Kategorie <code>scope_gap</code> („war nie Teil des Plans") landen als Follow-up in <code>followups.md</code> — sie lösen <i>keinen</i> Umbau aus. <code>implementation</code>/<code>trivial</code>-Findings gehen als Fix-Zyklus in die zuständige Lane (max. 3 Zyklen je Lane), inklusive erneutem Gate-Lauf und Re-Review. Wichtig: Build-Agents dürfen von Fix-Plänen <b>begründet abweichen</b> — der Reviewer beschreibt das Problem, der Builder entscheidet die Lösung. Lässt ein Fix-Zyklus den Worktree unverändert und waren die auslösenden Findings <b>ausschließlich P3</b>, ist das kein Fehler: der Befund wird ebenfalls nach <code>followups.md</code> vertagt und der Lauf geht weiter (Untätigkeit bei P1/P2 eskaliert dagegen weiterhin).</p>
   </div>
 </details>
 <details>
@@ -267,7 +267,7 @@ $ uv run adw approve 3f9a12c4 --repo ~/projekte/shop    <span class="c"># weiter
   <tr><td><code>.adw/runs/&lt;run_id&gt;/state.json</code></td><td>Kompletter Run-Zustand (Phase, Lanes, Sessions, Zähler) — Grundlage für <code>resume</code>.</td><td rowspan="5">gitignored (ADW legt die Ignore-Regel selbst an)</td></tr>
   <tr><td><code>.adw/runs/&lt;run_id&gt;/spec.md</code> etc.</td><td>Archivierte, reviewte Artefakt-Stände dieses Runs.</td></tr>
   <tr><td><code>.adw/runs/&lt;run_id&gt;/escalation.md</code></td><td>Eskalations-Report: erreichter Stand, Phase, konkreter Grund.</td></tr>
-  <tr><td><code>.adw/runs/&lt;run_id&gt;/followups.md</code></td><td>Follow-up-Issues aus <code>scope_gap</code>-Findings (dedupliziert).</td></tr>
+  <tr><td><code>.adw/runs/&lt;run_id&gt;/followups.md</code></td><td>Follow-up-Issues aus <code>scope_gap</code>-Findings, vertagten P3-Findings und unter die Review-Runden-Schwelle gefallenen P2/P3 (dedupliziert).</td></tr>
   <tr><td><code>.adw/runs/&lt;run_id&gt;/trees/&lt;lane&gt;</code></td><td>Lane-Worktrees (+ <code>trees/integration</code> bei <code>--parallel</code>).</td></tr>
 </table>
 
@@ -294,7 +294,7 @@ Run 3f9a12c4 wird fortgesetzt (Phase: build)</code></pre>
   <tr><td>Circuit-Breaker</td><td>2× exakt derselbe Fehler</td><td>Der Agent dreht sich im Kreis — sofortiger Abbruch statt Limit ausreizen</td></tr>
   <tr><td>Integration/E2E</td><td>10 Runden pro Run</td><td>Cross-Lane-Inkompatibilität, Kontrakt-Lücke</td></tr>
   <tr><td>Merge-Konflikt</td><td>sofort</td><td>Lanes haben dieselben Dateien widersprüchlich geändert</td></tr>
-  <tr><td>Review-Loops</td><td>10 Codex-Runden / 3 Fix-Zyklen je Lane</td><td>Grundsatzproblem, das Reviews nicht „wegfixen" können</td></tr>
+  <tr><td>Review-Loops</td><td>5 Codex-Runden (Severity-Schwelle: Runde 1 alle, 2 P1+P2, ab 3 nur P1) / 3 Fix-Zyklen je Lane</td><td>Grundsatzproblem, das Reviews nicht „wegfixen" können</td></tr>
   <tr><td>CI</td><td>1 Re-Entry, 45 min Budget</td><td>Infrastruktur-/Pipeline-Problem, Umgebungsunterschied</td></tr>
   <tr><td>Unlesbare Reviewer-Antwort</td><td>sofort</td><td>Agent/Codex hat das Findings-JSON-Schema nicht eingehalten</td></tr>
 </table>

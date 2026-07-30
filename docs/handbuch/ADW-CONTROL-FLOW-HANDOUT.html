@@ -265,7 +265,7 @@
   <text x="440" y="140" text-anchor="middle" font-size="12.5" fill="#46586b">What should be built? → .adw/spec.md</text>
   <path d="M 624 112 C 668 100, 668 150, 624 138" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
   <text x="682" y="122" font-size="11.5" fill="#2563a8">Codex checks,</text>
-  <text x="682" y="137" font-size="11.5" fill="#2563a8">until "ok"</text>
+  <text x="682" y="137" font-size="11.5" fill="#2563a8">until "ok", max. 5×</text>
   <line x1="440" y1="154" x2="440" y2="188" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
 
   <!-- P2 -->
@@ -274,7 +274,7 @@
   <text x="440" y="236" text-anchor="middle" font-size="12.5" fill="#46586b">How is it built? → plan.md + contract.yaml</text>
   <path d="M 624 208 C 668 196, 668 246, 624 234" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
   <text x="682" y="218" font-size="11.5" fill="#2563a8">Codex checks,</text>
-  <text x="682" y="233" font-size="11.5" fill="#2563a8">until "ok"</text>
+  <text x="682" y="233" font-size="11.5" fill="#2563a8">until "ok", max. 5×</text>
   <line x1="440" y1="250" x2="440" y2="284" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
 
   <!-- Approval gate -->
@@ -307,7 +307,7 @@
   <text x="440" y="620" text-anchor="middle" font-size="12.5" fill="#46586b">Is the code well made? Findings → lanes fix</text>
   <path d="M 624 592 C 668 580, 668 630, 624 618" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
   <text x="682" y="602" font-size="11.5" fill="#2563a8">Review loop,</text>
-  <text x="682" y="617" font-size="11.5" fill="#2563a8">until "ok"</text>
+  <text x="682" y="617" font-size="11.5" fill="#2563a8">until "ok", max. 5×</text>
   <line x1="440" y1="634" x2="440" y2="668" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
 
   <!-- P6 -->
@@ -350,7 +350,7 @@
 <!-- ============ 3 Prüf-Schleife ============ -->
 <h2 id="pruefschleife">3 · The basic pattern: the review loop</h2>
 
-<p>One pattern recurs throughout the ADW — in Phase&nbsp;1 (Spec), Phase&nbsp;2 (Plan) and Phase&nbsp;5 (Code Review): an agent <em>creates</em> something, an independent reviewer <em>evaluates</em> it, and defects go back until the verdict is <strong>"ok"</strong>. Crucially, the agent keeps its "memory" from the previous rounds (<strong>session resume</strong>) — it does not have to familiarize itself from scratch each time.</p>
+<p>One pattern recurs throughout the ADW — in Phase&nbsp;1 (Spec), Phase&nbsp;2 (Plan) and Phase&nbsp;5 (Code Review): an agent <em>creates</em> something, an independent reviewer <em>evaluates</em> it, and defects go back until the verdict is <strong>"ok"</strong>. Crucially, the agent keeps its "memory" from the previous rounds (<strong>session resume</strong>) — it does not have to familiarize itself from scratch each time. So the loop is guaranteed to converge, the same <strong>review-loop policy</strong> applies everywhere: at most <strong>5 rounds</strong>, with the bar descending per round — round 1 acts on all findings, round 2 only on critical and medium ones (P1+P2), from round 3 only on critical ones (P1); smaller points are recorded as known limitations. In addition, from round 2 on the reviewer receives the previous rounds' findings including the reasoning ("fixed" or "deliberately not adopted, because …"), so it does not keep flagging the same points.</p>
 
 <figure>
 <div class="svgbox">
@@ -393,7 +393,7 @@
   <text x="410" y="60" text-anchor="middle" font-size="13.5" fill="#1c2733">but the editor never writes on the essay himself.</text>
 </svg>
 </div>
-<figcaption>Fig. 2 — The basic pattern "create → check → rework", which works identically in phases 1, 2 and 5.</figcaption>
+<figcaption>Fig. 2 — The basic pattern "create → check → rework", which works identically in phases 1, 2 and 5 — at most 5 rounds, with a per-round descending severity threshold and findings memory from round 2 on.</figcaption>
 </figure>
 
 <!-- ============ Phase 1 ============ -->
@@ -406,7 +406,7 @@
     <li>The <strong>Spec agent</strong> (AI) reads the issue and the project and writes a <strong>specification</strong> (<code>.adw/spec.md</code>): the goal, what is in scope, what is explicitly <em>not</em> in scope, and how you can tell it is done ("acceptance criteria", "definition of done"). It may <strong>only read and write this one file</strong> — it is not allowed to build anything.</li>
     <li>The <strong>Codex reviewer</strong> (a second, independent AI) checks the specification.</li>
     <li>If it finds defects, they go <strong>back to the same Spec agent</strong> — which keeps its memory from the first round (session resume) and reworks.</li>
-    <li>This repeats until the reviewer says <strong>"ok"</strong> (review loop, see Fig.&nbsp;2).</li>
+    <li>This repeats until the reviewer says <strong>"ok"</strong> — at most <strong>5 rounds</strong>, with the bar descending per round (review loop, see Fig.&nbsp;2).</li>
   </ol>
   <details>
     <summary>More details (from the SPEC)</summary>
@@ -421,7 +421,7 @@
   <p class="frage">"How will it be built?"</p>
   <ol>
     <li>The <strong>Plan agent</strong> (AI) turns the specification into a <strong>step-by-step blueprint</strong> (<code>.adw/plan.md</code>) and a <strong>contract</strong> (<code>.adw/contract.yaml</code>). The contract is like a binding <strong>power-socket standard</strong>: it defines exactly how the parts (e.g.&nbsp;the interface and the server logic) must fit together later — so that two teams working separately don't deliver incompatible parts in the end.</li>
-    <li>The Codex reviewer checks plan and contract <strong>together</strong>, again in the loop until "ok".</li>
+    <li>The Codex reviewer checks plan and contract <strong>together</strong>, again in the loop until "ok" (same 5-round rule).</li>
     <li><strong>Plan approval gate — the built-in STOP:</strong> The workflow <strong>halts</strong>, saves its complete state and exits. Now a <strong>human</strong> reads the plan and decides. Only the command <code>adw approve</code> (or <code>adw resume</code>) lets the run continue at exactly this point.</li>
   </ol>
   <div class="callout amber">
@@ -522,7 +522,8 @@
     <li>The <strong>Codex reviewer</strong> reads all the new code (read-only!) and delivers a structured defect list: what is the problem, how severe is it (<strong>P1</strong>&nbsp;=&nbsp;critical … <strong>P3</strong>&nbsp;=&nbsp;minor), which lane is responsible — and a <strong>repair suggestion</strong> (<code>remediation_plan</code>).</li>
     <li>A fixed program <strong>distributes</strong> the defects to the right build agents based on the lane field.</li>
     <li>Important: the repair suggestion is a <strong>recommendation, not an order</strong>. The build agent checks it against the specification and project rules and may repair <strong>differently, with justification</strong> — after all, the reviewer only sees the code from the outside.</li>
-    <li>After each repair: all gates, then another review — <strong>until "ok"</strong>.</li>
+    <li>After each repair: all gates, then another review — <strong>until "ok"</strong>, at most <strong>5 rounds</strong>. The bar descends per round: round 1 fixes all defects, round 2 only critical and medium ones (P1+P2), from round 3 only critical ones (P1) — smaller points are recorded as known limitations instead of being polished forever.</li>
+    <li>So the reviewer does not keep flagging the same things, from round 2 on it receives the <strong>defect list of the previous rounds including the reasoning</strong> ("fixed" or "deliberately not adopted, because …").</li>
   </ol>
   <details>
     <summary>More details (from the SPEC)</summary>
@@ -616,7 +617,7 @@
 <div class="table-scroll">
 <table>
   <tr><th>Mechanism</th><th>What it means</th></tr>
-  <tr><td><strong>Limits</strong></td><td>Phase 3: max. 10 fix iterations · Phase 4: max. 10 rounds · Phase 6: max. 3 cycles · Phase 7: max. 45 min waiting</td></tr>
+  <tr><td><strong>Limits</strong></td><td>Phase 3: max. 10 fix iterations · Phase 4: max. 10 rounds · Phase 5: max. 5 review rounds · Phase 6: max. 3 cycles · Phase 7: max. 45 min waiting</td></tr>
   <tr><td><strong>Circuit breaker</strong></td><td>If a repair round resolves <em>nothing</em> → immediate abort instead of pointless spinning — like a fuse in the fuse box</td></tr>
   <tr><td><strong>Escalation report</strong></td><td>Every abort produces <code>escalation.md</code>: what was achieved, what is open, why — the handover to the human</td></tr>
   <tr><td><strong>Checkpoints</strong></td><td>After <strong>every phase transition</strong> the complete state is saved. <code>adw resume</code> continues <strong>exactly there</strong> after a crash, a pause or an exhausted AI quota — like a save point in a video game</td></tr>

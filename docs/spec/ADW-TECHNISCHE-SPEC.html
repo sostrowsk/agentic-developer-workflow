@@ -151,7 +151,7 @@
 <details open>
   <summary>Phases 1–2 — <code>run_spec_and_plan</code>: authoring loops + approval gate</summary>
   <div class="inner">
-    <p>The shared building block is the <b>reviewed authoring loop</b>: agent writes artifact(s) → Codex reviews (<code>kind=spec</code> or <code>plan</code>; the plan review receives the spec as a reference) → Findings go as a follow-up task to <b>the same SDK session</b> (<code>resume=session_id</code>) → until verdict <code>ok</code>. Safeguards:</p>
+    <p>The shared building block is the <b>reviewed authoring loop</b>: agent writes artifact(s) → Codex reviews (<code>kind=spec</code> or <code>plan</code>; the plan review receives the spec as a reference) → Findings go as a follow-up task to <b>the same SDK session</b> (<code>resume=session_id</code>) → until verdict <code>ok</code>, at most 5 rounds (<code>AUTHORING_MAX_ROUNDS</code>). The severity threshold descends per round (round 1: all findings, round 2: P1+P2, from round 3: P1 only — findings below it are accepted as known limitations instead of iterated further), and from round 2 on Codex receives the previous rounds' findings including their disposition as review context, so settled or deliberately rejected points are not re-reported. At the cap: open P1 → escalation, otherwise accept + known-limitations report. Safeguards:</p>
     <ul>
       <li><b>Prior-content check:</b> Pre-existing content (e.g. merged artifacts from an earlier run) does not vindicate an idle agent — the artifact must change on the first run, otherwise escalation.</li>
       <li><b>Protected files:</b> <code>.adw/config.yaml</code> and (from phase 2 on) the reviewed spec are restored byte-exactly after <i>every</i> agent run — agents can technically write to them, but never effectively change them.</li>
@@ -186,7 +186,7 @@
   <summary>Phases 5–6 — Codex review + final review + Triage</summary>
   <div class="inner">
     <p>Before every review: <code>_resume_pending_lanes</code> sends <b>every</b> Lane through <code>_run_lane</code> — unfinished fixes (crash windows) catch up on Gates + commit, finished ones are revalidated via tree hash. No ungated state ever reaches a review.</p>
-    <p><b>Phase 5:</b> <code>codex.review("code", &lt;changed files via three-dot diff&gt;, cwd=review worktree)</code>. <code>needs_fixes</code> → persist the round, limit check <i>before</i> the Dispatch (no "terminal fix" that no review ever checks again), Circuit-Breaker on identical Finding sets, Dispatch into the Lanes, re-review.</p>
+    <p><b>Phase 5:</b> <code>codex.review("code", &lt;changed files via three-dot diff&gt;, cwd=review worktree)</code>. <code>needs_fixes</code> → persist the round, limit check <i>before</i> the Dispatch (no "terminal fix" that no review ever checks again), Circuit-Breaker on identical Finding sets, Dispatch into the Lanes, re-review. The same <b>review-loop policy</b> as in authoring applies: max. 5 rounds (<code>MAX_REVIEW_ROUNDS</code>), descending severity threshold per round (1: all, 2: P1+P2, from 3: P1 only — dropped findings go to <code>followups.md</code>), previous rounds' findings + dispositions are passed to Codex as context; Circuit-Breaker and Dispatch operate on the actionable finding set only.</p>
     <p><b>Phase 6:</b> Final reviewer (Fable, read-only) responds in the Findings JSON <b>with mandatory <code>category</code></b> (if it is missing, no Triage is possible → escalation instead of a silent default). <code>triage_final_review</code> (pure code) separates: <code>scope_gap</code> → deduplicated follow-up report; the rest → fix cycles per Lane (max. 3). The cycle increment is persisted <b>in the same save</b> as the staged fix task (<code>mutate_staged</code> hook in the Dispatch) — a crash cannot burn budget without the associated fix being caught up on resume.</p>
   </div>
 </details>
@@ -238,12 +238,12 @@
   <div class="inner">
     <table>
       <tr><th>Field</th><th>Level</th><th>What it survives</th></tr>
-      <tr><td><code>authoring_session / _pending_task / _last_findings</code></td><td>Run</td><td>Crash in the middle of the spec/plan review cycle: session, open fix task, and Circuit-Breaker baseline</td></tr>
+      <tr><td><code>authoring_session / _pending_task / _last_findings / _rounds / _prior_context</code></td><td>Run</td><td>Crash in the middle of the spec/plan review cycle: session, open fix task, Circuit-Breaker baseline, round budget, findings history</td></tr>
       <tr><td><code>pending_task</code>, <code>last_failures</code></td><td>Lane</td><td>Crash between Gate failure and fix run</td></tr>
       <tr><td><code>gates_passed</code> + <code>gates_tree</code></td><td>Lane</td><td>Crash between "Gates green" and commit — the evidence is bound to the exact tree hash and thus not forgeable</td></tr>
       <tr><td><code>expected_head</code></td><td>Lane</td><td>Detection of foreign commits across a crash window (orchestrator-only commit invariant)</td></tr>
       <tr><td><code>base_sha</code></td><td>Lane</td><td>Fork point of the Lane — restorations use the immovable state, not the advancing base branch</td></tr>
-      <tr><td><code>integration_rounds / review_rounds / fix_cycles / ci_reentries</code> (+ <code>*_last_failures</code>)</td><td>Run/Lane</td><td>All loop budgets — a restart grants no extra attempts; limit checks come <i>before</i> expensive work</td></tr>
+      <tr><td><code>integration_rounds / review_rounds / fix_cycles / ci_reentries</code> (+ <code>*_last_failures</code>, <code>review_prior_context</code>)</td><td>Run/Lane</td><td>All loop budgets — a restart grants no extra attempts; limit checks come <i>before</i> expensive work</td></tr>
       <tr><td><code>dry_run</code>, <code>skip_approval</code>, <code>pinned_base_branch</code></td><td>Run</td><td>CLI decisions that the resume invocation no longer knows</td></tr>
     </table>
     <p>The consistent pattern: <b>budget increments are persisted atomically with the work that justifies them</b> (via the <code>mutate_staged</code> hook in the fix Dispatch), and <b>Circuit-Breaker baselines are advanced only <i>after</i> the fix Dispatch</b> — otherwise a crash in between would mis-escalate on resume as an "identical round".</p>
@@ -255,7 +255,8 @@
   <tr><th>Loop</th><th>Limit (constant)</th><th>Additionally</th></tr>
   <tr><td>Gate loop per Lane</td><td>10 (<code>MAX_GATE_ITERATIONS</code>) — per task, reset on a new fix task</td><td rowspan="5">Circuit-Breaker <code>check_progress</code>: exactly the same failure/Finding set as in the previous round → immediate escalation instead of exhausting the limit</td></tr>
   <tr><td>Integration/E2E</td><td>10 rounds (<code>MAX_E2E_ROUNDS</code>, run-wide)</td></tr>
-  <tr><td>Codex code review</td><td>10 rounds (<code>MAX_REVIEW_ROUNDS</code>)</td></tr>
+  <tr><td>Authoring loop (spec/plan)</td><td>5 rounds (<code>AUTHORING_MAX_ROUNDS</code>) — severity threshold per round: 1 all, 2 P1+P2, from 3 P1 only; at the cap P1 → escalation, otherwise accept + known limitations</td></tr>
+  <tr><td>Codex code review</td><td>5 rounds (<code>MAX_REVIEW_ROUNDS</code>) — same severity threshold; previous rounds' findings + dispositions as Codex context, below-threshold findings → <code>followups.md</code></td></tr>
   <tr><td>Fix cycles after final review</td><td>3 per Lane (<code>MAX_FIX_CYCLES</code>)</td></tr>
   <tr><td>CI re-entry</td><td>1 (<code>MAX_CI_REENTRIES</code>)</td></tr>
   <tr><td>Gate/Codex/glab subprocesses</td><td>Timeout per Gate from the config; Codex 900 s; glab 120 s; CI budget 2700 s</td><td>Process-group kill (<code>start_new_session</code> + <code>killpg</code>) on all exit paths — no zombie processes</td></tr>

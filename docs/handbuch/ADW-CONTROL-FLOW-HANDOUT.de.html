@@ -265,7 +265,7 @@
   <text x="440" y="140" text-anchor="middle" font-size="12.5" fill="#46586b">Was soll gebaut werden? → .adw/spec.md</text>
   <path d="M 624 112 C 668 100, 668 150, 624 138" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
   <text x="682" y="122" font-size="11.5" fill="#2563a8">Codex prüft,</text>
-  <text x="682" y="137" font-size="11.5" fill="#2563a8">bis „ok"</text>
+  <text x="682" y="137" font-size="11.5" fill="#2563a8">bis „ok", max. 5×</text>
   <line x1="440" y1="154" x2="440" y2="188" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
 
   <!-- P2 -->
@@ -274,7 +274,7 @@
   <text x="440" y="236" text-anchor="middle" font-size="12.5" fill="#46586b">Wie wird gebaut? → plan.md + contract.yaml</text>
   <path d="M 624 208 C 668 196, 668 246, 624 234" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
   <text x="682" y="218" font-size="11.5" fill="#2563a8">Codex prüft,</text>
-  <text x="682" y="233" font-size="11.5" fill="#2563a8">bis „ok"</text>
+  <text x="682" y="233" font-size="11.5" fill="#2563a8">bis „ok", max. 5×</text>
   <line x1="440" y1="250" x2="440" y2="284" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
 
   <!-- Approval gate -->
@@ -307,7 +307,7 @@
   <text x="440" y="620" text-anchor="middle" font-size="12.5" fill="#46586b">Ist der Code gut gemacht? Findings → Lanes fixen</text>
   <path d="M 624 592 C 668 580, 668 630, 624 618" fill="none" stroke="#2563a8" stroke-width="1.8" marker-end="url(#arr-blue)"/>
   <text x="682" y="602" font-size="11.5" fill="#2563a8">Review-Loop,</text>
-  <text x="682" y="617" font-size="11.5" fill="#2563a8">bis „ok"</text>
+  <text x="682" y="617" font-size="11.5" fill="#2563a8">bis „ok", max. 5×</text>
   <line x1="440" y1="634" x2="440" y2="668" stroke="#46586b" stroke-width="2" marker-end="url(#arr)"/>
 
   <!-- P6 -->
@@ -350,7 +350,7 @@
 <!-- ============ 3 Prüf-Schleife ============ -->
 <h2 id="pruefschleife">3 · Das Grundmuster: die Prüf-Schleife</h2>
 
-<p>Ein Muster kehrt im ADW immer wieder — in Phase&nbsp;1 (Spec), Phase&nbsp;2 (Plan) und Phase&nbsp;5 (Code-Review): Ein Agent <em>erstellt</em> etwas, ein unabhängiger Prüfer <em>bewertet</em> es, und Mängel gehen so lange zurück, bis das Urteil <strong>„ok"</strong> lautet. Entscheidend: Der Agent behält dabei sein „Gedächtnis" aus den vorherigen Runden (<strong>Session-Resume</strong>) — er muss sich nicht jedes Mal neu einarbeiten.</p>
+<p>Ein Muster kehrt im ADW immer wieder — in Phase&nbsp;1 (Spec), Phase&nbsp;2 (Plan) und Phase&nbsp;5 (Code-Review): Ein Agent <em>erstellt</em> etwas, ein unabhängiger Prüfer <em>bewertet</em> es, und Mängel gehen so lange zurück, bis das Urteil <strong>„ok"</strong> lautet. Entscheidend: Der Agent behält dabei sein „Gedächtnis" aus den vorherigen Runden (<strong>Session-Resume</strong>) — er muss sich nicht jedes Mal neu einarbeiten. Damit die Schleife garantiert konvergiert, gilt überall dieselbe <strong>Review-Loop-Policy</strong>: höchstens <strong>5 Runden</strong>, und die Messlatte sinkt pro Runde — Runde 1 behandelt alle Findings, Runde 2 nur noch kritische und mittlere (P1+P2), ab Runde 3 nur noch kritische (P1); kleinere Punkte werden als bekannte Einschränkungen dokumentiert. Außerdem bekommt der Prüfer ab Runde 2 die Findings der Vorrunden samt Begründung mit („behoben" bzw. „bewusst nicht übernommen, weil …"), damit er nicht dieselben Punkte immer wieder anmerkt.</p>
 
 <figure>
 <div class="svgbox">
@@ -393,7 +393,7 @@
   <text x="410" y="60" text-anchor="middle" font-size="13.5" fill="#1c2733">aber der Lektor schreibt nie selbst am Aufsatz mit.</text>
 </svg>
 </div>
-<figcaption>Abb. 2 — Das Grundmuster „Erstellen → Prüfen → Nachbessern", das in den Phasen 1, 2 und 5 identisch arbeitet.</figcaption>
+<figcaption>Abb. 2 — Das Grundmuster „Erstellen → Prüfen → Nachbessern", das in den Phasen 1, 2 und 5 identisch arbeitet — maximal 5 Runden, mit pro Runde sinkender Severity-Schwelle und Findings-Gedächtnis ab Runde 2.</figcaption>
 </figure>
 
 <!-- ============ Phase 1 ============ -->
@@ -406,7 +406,7 @@
     <li>Der <strong>Spec-Agent</strong> (KI) liest das Issue und das Projekt und schreibt eine <strong>Spezifikation</strong> (<code>.adw/spec.md</code>): Ziel, was dazugehört, was ausdrücklich <em>nicht</em> dazugehört, und woran man erkennt, dass es fertig ist („Akzeptanzkriterien", „Definition of Done"). Er darf dabei <strong>nur lesen und diese eine Datei schreiben</strong> — bauen darf er nichts.</li>
     <li>Der <strong>Codex-Reviewer</strong> (eine zweite, unabhängige KI) prüft die Spezifikation.</li>
     <li>Findet er Mängel, gehen sie <strong>an denselben Spec-Agenten zurück</strong> — der behält sein Gedächtnis aus der ersten Runde (Session-Resume) und bessert nach.</li>
-    <li>Das wiederholt sich, bis der Prüfer <strong>„ok"</strong> sagt (Prüf-Schleife, siehe Abb.&nbsp;2).</li>
+    <li>Das wiederholt sich, bis der Prüfer <strong>„ok"</strong> sagt — höchstens <strong>5 Runden</strong>, mit pro Runde sinkender Messlatte (Prüf-Schleife, siehe Abb.&nbsp;2).</li>
   </ol>
   <details>
     <summary>Mehr Details (aus der SPEC)</summary>
@@ -421,7 +421,7 @@
   <p class="frage">„Wie wird es gebaut?"</p>
   <ol>
     <li>Der <strong>Plan-Agent</strong> (KI) verwandelt die Spezifikation in einen <strong>Schritt-für-Schritt-Bauplan</strong> (<code>.adw/plan.md</code>) und einen <strong>Kontrakt</strong> (<code>.adw/contract.yaml</code>). Der Kontrakt ist wie eine verbindliche <strong>Steckdosen-Norm</strong>: Er legt exakt fest, wie die Teile (z.&nbsp;B. Oberfläche und Server-Logik) später zusammenpassen müssen — damit zwei getrennt arbeitende Teams am Ende keine inkompatiblen Teile abliefern.</li>
-    <li>Der Codex-Reviewer prüft Plan und Kontrakt <strong>gemeinsam</strong>, wieder in der Schleife bis „ok".</li>
+    <li>Der Codex-Reviewer prüft Plan und Kontrakt <strong>gemeinsam</strong>, wieder in der Schleife bis „ok" (gleiche 5-Runden-Regel).</li>
     <li><strong>Plan-Approval-Gate — der eingebaute STOPP:</strong> Der Workflow <strong>hält an</strong>, speichert seinen kompletten Zustand und beendet sich. Jetzt liest ein <strong>Mensch</strong> den Plan und entscheidet. Erst der Befehl <code>adw approve</code> (bzw. <code>adw resume</code>) lässt den Lauf exakt an dieser Stelle weiterlaufen.</li>
   </ol>
   <div class="callout amber">
@@ -522,7 +522,8 @@
     <li>Der <strong>Codex-Reviewer</strong> liest den gesamten neuen Code (nur lesend!) und liefert eine strukturierte Mängelliste: Was ist das Problem, wie schwer ist es (<strong>P1</strong>&nbsp;=&nbsp;kritisch … <strong>P3</strong>&nbsp;=&nbsp;klein), welche Lane ist zuständig — und einen <strong>Reparatur-Vorschlag</strong> (<code>remediation_plan</code>).</li>
     <li>Ein festes Programm <strong>verteilt</strong> die Mängel anhand der Lane-Angabe an die richtigen Build-Agents.</li>
     <li>Wichtig: Der Reparatur-Vorschlag ist eine <strong>Empfehlung, kein Befehl</strong>. Der Build-Agent prüft ihn gegen Spezifikation und Projektregeln und darf <strong>begründet anders</strong> reparieren — der Prüfer sieht den Code ja nur von außen.</li>
-    <li>Nach jeder Reparatur: alle Gates, dann erneutes Review — <strong>bis „ok"</strong>.</li>
+    <li>Nach jeder Reparatur: alle Gates, dann erneutes Review — <strong>bis „ok"</strong>, höchstens <strong>5 Runden</strong>. Dabei sinkt die Messlatte pro Runde: Runde 1 behebt alle Mängel, Runde 2 nur noch kritische und mittlere (P1+P2), ab Runde 3 nur noch kritische (P1) — kleinere Punkte werden als bekannte Einschränkungen festgehalten statt endlos nachpoliert.</li>
+    <li>Damit der Prüfer nicht immer wieder dasselbe anmerkt, bekommt er ab Runde 2 die <strong>Mängelliste der Vorrunden samt Begründung</strong> mit („behoben" bzw. „bewusst nicht übernommen, weil …").</li>
   </ol>
   <details>
     <summary>Mehr Details (aus der SPEC)</summary>
@@ -616,7 +617,7 @@
 <div class="table-scroll">
 <table>
   <tr><th>Mechanismus</th><th>Was er bedeutet</th></tr>
-  <tr><td><strong>Limits</strong></td><td>Phase 3: max. 10 Fix-Iterationen · Phase 4: max. 10 Runden · Phase 6: max. 3 Zyklen · Phase 7: max. 45 min Warten</td></tr>
+  <tr><td><strong>Limits</strong></td><td>Phase 3: max. 10 Fix-Iterationen · Phase 4: max. 10 Runden · Phase 5: max. 5 Review-Runden · Phase 6: max. 3 Zyklen · Phase 7: max. 45 min Warten</td></tr>
   <tr><td><strong>Circuit-Breaker</strong></td><td>Löst eine Reparatur-Runde <em>nichts</em> auf → sofortiger Abbruch statt sinnlosem Weiterdrehen — wie eine Sicherung im Stromkasten</td></tr>
   <tr><td><strong>Eskalations-Bericht</strong></td><td>Bei jedem Abbruch entsteht <code>escalation.md</code>: was erreicht, was offen, warum — die Übergabe an den Menschen</td></tr>
   <tr><td><strong>Speicherpunkte</strong></td><td>Nach <strong>jedem Phasenübergang</strong> wird der komplette Zustand gespeichert. <code>adw resume</code> setzt nach Absturz, Pause oder erschöpftem KI-Kontingent <strong>exakt dort</strong> fort — wie ein Spielstand im Videospiel</td></tr>

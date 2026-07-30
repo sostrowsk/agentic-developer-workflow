@@ -221,7 +221,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;path&gt;]   <span class="c"># show runs
 <details open>
   <summary>Phases 1–2: Spec and plan are created — and independently reviewed</summary>
   <div class="inner">
-    <p>The <b>Spec agent</b> turns your issue into a specification following a fixed template (goal, scope, non-goals, acceptance criteria, definition of done) written to <code>.adw/spec.md</code>. <b>Codex</b> reviews it; Findings go back <b>to the same agent session</b> as a follow-up task until the verdict is <code>ok</code>. Then the <b>Plan agent</b> analogously produces <code>.adw/plan.md</code> (workstreams) and <code>.adw/contract.yaml</code> (interface contract: OpenAPI/types/events) — Codex checks both <b>together against the spec</b>. The run then pauses for your approval (section 6).</p>
+    <p>The <b>Spec agent</b> turns your issue into a specification following a fixed template (goal, scope, non-goals, acceptance criteria, definition of done) written to <code>.adw/spec.md</code>. <b>Codex</b> reviews it; Findings go back <b>to the same agent session</b> as a follow-up task until the verdict is <code>ok</code> — at most 5 rounds. The severity threshold descends per round (round 1: all findings, round 2: P1+P2, from round 3: P1 only), and from round 2 on Codex receives the previous rounds' findings including their disposition, so it does not re-report settled or deliberately rejected points. Then the <b>Plan agent</b> analogously produces <code>.adw/plan.md</code> (workstreams) and <code>.adw/contract.yaml</code> (interface contract: OpenAPI/types/events) — Codex checks both <b>together against the spec</b>. The run then pauses for your approval (section 6).</p>
   </div>
 </details>
 <details>
@@ -239,7 +239,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;path&gt;]   <span class="c"># show runs
 <details>
   <summary>Phases 5–6: Two independent reviews + Triage</summary>
   <div class="inner">
-    <p><b>Codex</b> reviews the integrated diff (Findings with a fix plan, routed per Lane, until <code>ok</code>). Then the <b>final reviewer</b> (Fable 5, strictly read-only) checks the implementation against the spec. The <b>Triage is code</b>: Findings of category <code>scope_gap</code> ("was never part of the plan") end up as follow-ups in <code>followups.md</code> — they trigger <i>no</i> rework. <code>implementation</code>/<code>trivial</code> Findings go into the responsible Lane as a fix cycle (max. 3 cycles per Lane), including a fresh Gate run and re-review. Important: Build agents may <b>deviate from fix plans with justification</b> — the reviewer describes the problem, the builder decides the solution.</p>
+    <p><b>Codex</b> reviews the integrated diff (Findings with a fix plan, routed per Lane, until <code>ok</code> — same review-loop policy as in phases 1–2: max. 5 rounds, descending severity threshold, findings memory; P2/P3 below the threshold go to <code>followups.md</code>). Then the <b>final reviewer</b> (Fable 5, strictly read-only) checks the implementation against the spec. The <b>Triage is code</b>: Findings of category <code>scope_gap</code> ("was never part of the plan") end up as follow-ups in <code>followups.md</code> — they trigger <i>no</i> rework. <code>implementation</code>/<code>trivial</code> Findings go into the responsible Lane as a fix cycle (max. 3 cycles per Lane), including a fresh Gate run and re-review. Important: Build agents may <b>deviate from fix plans with justification</b> — the reviewer describes the problem, the builder decides the solution. If a fix cycle leaves the worktree untouched and the triggering Findings were <b>P3 only</b>, that is not a failure: the finding is deferred to <code>followups.md</code> as well and the run continues (idleness on P1/P2 still escalates).</p>
   </div>
 </details>
 <details>
@@ -267,7 +267,7 @@ $ uv run adw approve 3f9a12c4 --repo ~/projekte/shop    <span class="c"># contin
   <tr><td><code>.adw/runs/&lt;run_id&gt;/state.json</code></td><td>Complete run state (phase, Lanes, sessions, counters) — the basis for <code>resume</code>.</td><td rowspan="5">gitignored (ADW creates the ignore rule itself)</td></tr>
   <tr><td><code>.adw/runs/&lt;run_id&gt;/spec.md</code> etc.</td><td>Archived, reviewed artifact states of this run.</td></tr>
   <tr><td><code>.adw/runs/&lt;run_id&gt;/escalation.md</code></td><td>Escalation report: state reached, phase, concrete reason.</td></tr>
-  <tr><td><code>.adw/runs/&lt;run_id&gt;/followups.md</code></td><td>Follow-up issues from <code>scope_gap</code> Findings (deduplicated).</td></tr>
+  <tr><td><code>.adw/runs/&lt;run_id&gt;/followups.md</code></td><td>Follow-up issues from <code>scope_gap</code> Findings, deferred P3 Findings, and P2/P3 dropped below the review-round threshold (deduplicated).</td></tr>
   <tr><td><code>.adw/runs/&lt;run_id&gt;/trees/&lt;lane&gt;</code></td><td>Lane Worktrees (+ <code>trees/integration</code> with <code>--parallel</code>).</td></tr>
 </table>
 
@@ -294,7 +294,7 @@ Run 3f9a12c4 wird fortgesetzt (Phase: build)</code></pre>
   <tr><td>Circuit breaker</td><td>2× exactly the same failure</td><td>The agent is going in circles — immediate abort instead of exhausting the limit</td></tr>
   <tr><td>Integration/E2E</td><td>10 rounds per run</td><td>Cross-Lane incompatibility, contract gap</td></tr>
   <tr><td>Merge conflict</td><td>immediately</td><td>Lanes changed the same files in contradictory ways</td></tr>
-  <tr><td>Review loops</td><td>10 Codex rounds / 3 fix cycles per Lane</td><td>Fundamental problem that reviews cannot "fix away"</td></tr>
+  <tr><td>Review loops</td><td>5 Codex rounds (severity threshold: round 1 all, 2 P1+P2, from 3 P1 only) / 3 fix cycles per Lane</td><td>Fundamental problem that reviews cannot "fix away"</td></tr>
   <tr><td>CI</td><td>1 re-entry, 45 min budget</td><td>Infrastructure/pipeline problem, environment difference</td></tr>
   <tr><td>Unreadable reviewer response</td><td>immediately</td><td>Agent/Codex did not comply with the Findings JSON schema</td></tr>
 </table>
