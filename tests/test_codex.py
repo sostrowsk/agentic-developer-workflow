@@ -79,6 +79,25 @@ def test_spec_and_plan_review_flag_process_requirements(captured_run, tmp_path):
         assert "commit" in prompt, kind
 
 
+def test_prompt_contains_review_context_between_refs_and_schema(captured_run, tmp_path):
+    """Review-Policy v2: der Kontext der Vorrunden steht zwischen den Refs und
+    der Schema-Instruktion — das Antwortformat bleibt die letzte Anweisung."""
+    context = "This is review round 2 of max 5.\n- [P2] a.py: kaputt — disposition: fix dispatched"
+    CodexRunner().review("code", ["src.py"], cwd=tmp_path, context=context)
+    prompt = captured_run["argv"][-1]
+    assert context in prompt
+    assert prompt.index("- src.py") < prompt.index(context) < prompt.index('"verdict"')
+
+
+def test_prompt_without_context_is_unchanged(captured_run, tmp_path):
+    CodexRunner().review("code", ["src.py"], cwd=tmp_path)
+    without_context = captured_run["argv"][-1]
+    CodexRunner().review("code", ["src.py"], cwd=tmp_path, context=None)
+    assert captured_run["argv"][-1] == without_context
+    CodexRunner().review("code", ["src.py"], cwd=tmp_path, context="   ")
+    assert captured_run["argv"][-1] == without_context
+
+
 def test_broken_codex_output_raises_parse_error(captured_run, tmp_path):
     captured_run["stdout"] = "Ich bin nur Prosa ohne JSON."
     with pytest.raises(FindingsParseError):
@@ -265,6 +284,16 @@ def test_mock_codex_returns_scripted_results_in_order(tmp_path):
     assert first.verdict == "needs_fixes"
     assert second.verdict == "ok"
     assert [call.kind for call in mock.calls] == ["code", "code"]
+
+
+def test_mock_codex_records_the_review_context(tmp_path):
+    from adw.findings import ReviewResult
+
+    mock = MockCodexRunner()
+    mock.script(ReviewResult(verdict="ok", findings=[]), ReviewResult(verdict="ok", findings=[]))
+    mock.review("code", ["x"], cwd=tmp_path)
+    mock.review("code", ["x"], cwd=tmp_path, context="Runde 2 von 5")
+    assert [call.context for call in mock.calls] == [None, "Runde 2 von 5"]
 
 
 def test_mock_codex_without_script_raises(tmp_path):

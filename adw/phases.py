@@ -67,7 +67,7 @@ ISSUE_FILE = "issue.md"
 # Runden-Cap des Authoring-Loops: eine Runde = ein Agent-Lauf + ein
 # Codex-Review. Nach so vielen erfolglosen Runden wird abgebrochen (P1 offen)
 # bzw. das Artefakt mit dokumentierten Known Limitations akzeptiert (nur P2/P3).
-AUTHORING_MAX_ROUNDS = 3
+AUTHORING_MAX_ROUNDS = 5
 
 logger = logging.getLogger(__name__)
 
@@ -339,6 +339,8 @@ def _reviewed_authoring_loop(
     # Runden-Zähler aus dem State (überlebt Crash+Resume): eine Runde =
     # ein Agent-Lauf + ein Codex-Review, das mit Verdict ≠ ok endet.
     rounds = ctx.state.authoring_rounds
+    # Findings-Verlauf der Vorrunden inkl. Disposition (Review-Policy v2).
+    prior_context = list(ctx.state.authoring_prior_context)
     # Prior-Snapshot: Altbestand (z. B. gemergte Artefakte früherer Runs) darf
     # einen untätigen Agenten nicht adeln — das Artefakt muss sich ÄNDERN.
     prior: dict[str, bytes | None] = {}
@@ -381,11 +383,13 @@ def _reviewed_authoring_loop(
                     "als neues Artefakt durchgehen",
                 )
             first_iteration = False
+        round_no = rounds + 1
         try:
             review = ctx.codex.review(
                 review_kind,
                 [f".adw/{name}" for name in (review_refs or artifacts)],
                 cwd=ctx.repo,
+                context=_severity_context(round_no, AUTHORING_MAX_ROUNDS, prior_context),
             )
         except (FindingsParseError, ValidationError) as exc:
             raise escalate(ctx, f"Codex-{review_kind}-Review unlesbar: {exc}") from exc
@@ -398,7 +402,6 @@ def _reviewed_authoring_loop(
             return
         # Eine Runde (Agent-Lauf + Review) endete mit Verdict ≠ ok.
         rounds += 1
-        failures = _finding_keys(review)
         if rounds >= AUTHORING_MAX_ROUNDS:
             if any(f.severity == "P1" for f in review.findings):
                 known_findings_path.unlink(missing_ok=True)  # kein stale Report
@@ -410,7 +413,13 @@ def _reviewed_authoring_loop(
                 )
             # Nur P2/P3 offen: Artefakt akzeptieren, verbleibende Findings als
             # Known Limitations dokumentieren und wie ein ok-Verdict beenden.
-            known_path = _write_known_findings(ctx, review_kind, review)
+            known_path = _write_known_findings(
+                ctx,
+                review_kind,
+                review,
+                f"Runden-Cap ({AUTHORING_MAX_ROUNDS}) erreicht, nur P2/P3 offen — "
+                "Artefakt akzeptiert.",
+            )
             logger.warning(
                 "Authoring-%s: Runden-Cap (%d) erreicht, nur P2/P3 offen — "
                 "Artefakt akzeptiert, Known Limitations unter %s",
@@ -420,6 +429,32 @@ def _reviewed_authoring_loop(
             )
             _clear_authoring_checkpoint(ctx)
             return
+        actionable, dropped = _split_by_severity(review.findings, round_no)
+        if not actionable:
+            # Alle Findings liegen unter der Schwelle dieser Runde: wie am Cap
+            # das Artefakt akzeptieren und die Findings dokumentieren.
+            severities = "/".join(sorted(_actionable_severities(round_no)))
+            known_path = _write_known_findings(
+                ctx,
+                review_kind,
+                review,
+                f"Runde {round_no}: alle Findings unter der Severity-Schwelle "
+                f"({severities}) — Artefakt akzeptiert.",
+            )
+            logger.warning(
+                "Authoring-%s: Runde %d, alle Findings unter der Severity-Schwelle "
+                "(%s) — Artefakt akzeptiert, Known Limitations unter %s",
+                review_kind,
+                round_no,
+                severities,
+                known_path,
+            )
+            _clear_authoring_checkpoint(ctx)
+            return
+        if dropped:
+            _write_followups(ctx, dropped)
+        review = ReviewResult(verdict="needs_fixes", findings=actionable)
+        failures = _finding_keys(review)
         try:
             check_progress(previous_failures, failures)
         except NoProgressError as exc:
@@ -429,6 +464,11 @@ def _reviewed_authoring_loop(
                 f"Circuit-Breaker.\n\n{_findings_text(review)}",
             ) from exc
         previous_failures = failures
+        prior_context = _extend_context(
+            prior_context,
+            [_disposition_line(item, _below_threshold_disposition(round_no)) for item in dropped]
+            + [_disposition_line(item, _dispatched_disposition(round_no)) for item in actionable],
+        )
         task = (
             f"The Codex review of {', '.join(f'.adw/{a}' for a in artifacts)} has "
             f"Findings. Incorporate them and update the artifacts:\n\n"
@@ -436,10 +476,12 @@ def _reviewed_authoring_loop(
         )
         with ctx.state_lock:
             # Checkpoint des Fix-Zyklus — überlebt einen Crash vor dem Fix-Lauf.
-            # authoring_rounds im SELBEN Save wie der Fix-Task persistieren.
+            # authoring_rounds und der Findings-Verlauf gehen im SELBEN Save wie
+            # der Fix-Task raus.
             ctx.state.authoring_pending_task = task
             ctx.state.authoring_last_findings = failures
             ctx.state.authoring_rounds = rounds
+            ctx.state.authoring_prior_context = prior_context
             ctx.save()
 
 
@@ -492,18 +534,20 @@ def _clear_authoring_checkpoint(ctx: RunContext) -> None:
     ctx.state.authoring_pending_task = None
     ctx.state.authoring_last_findings = []
     ctx.state.authoring_rounds = 0
+    ctx.state.authoring_prior_context = []
 
 
-def _write_known_findings(ctx: RunContext, review_kind: str, review: ReviewResult) -> Path:
-    """Persist the remaining P2/P3 findings as Known Limitations when the
-    authoring round cap is reached — the artifact is accepted, but the open
-    findings stay documented."""
+def _write_known_findings(
+    ctx: RunContext, review_kind: str, review: ReviewResult, reason: str
+) -> Path:
+    """Persist the remaining findings as Known Limitations when the authoring
+    loop accepts the artifact anyway (round cap or severity threshold) — the
+    open findings stay documented."""
     ctx.run_dir.mkdir(parents=True, exist_ok=True)
     path = ctx.run_dir / f"authoring-{review_kind}-known-findings.md"
     path.write_text(
         f"# Known Limitations — Authoring-{review_kind} (Run {ctx.state.run_id})\n\n"
-        f"Runden-Cap ({AUTHORING_MAX_ROUNDS}) erreicht, nur P2/P3 offen — Artefakt "
-        f"akzeptiert.\n\n"
+        f"{reason}\n\n"
         f"{_findings_text(review)}\n",
         encoding="utf-8",
     )
@@ -535,6 +579,72 @@ def _without_deferred(ctx: RunContext, findings: list[Finding]) -> list[Finding]
     return [
         item for item in findings if item.severity != "P3" or _finding_key(item) not in deferred
     ]
+
+
+def _actionable_severities(round_no: int) -> set[str]:
+    """Descending severity floor per review round (Review-Policy v2).
+
+    Round 1 takes everything, from round 2 P3 drops out, from round 3 P2 as
+    well. Without this floor the loop never converges: a deterministic
+    reviewer keeps finding new edge cases at the lowest severity."""
+    if round_no <= 1:
+        return {"P1", "P2", "P3"}
+    if round_no == 2:
+        return {"P1", "P2"}
+    return {"P1"}
+
+
+def _split_by_severity(
+    findings: list[Finding], round_no: int
+) -> tuple[list[Finding], list[Finding]]:
+    """(actionable, dropped) for this round's severity floor."""
+    allowed = _actionable_severities(round_no)
+    actionable = [item for item in findings if item.severity in allowed]
+    dropped = [item for item in findings if item.severity not in allowed]
+    return actionable, dropped
+
+
+def _disposition_line(item: Finding, disposition: str) -> str:
+    return f"- [{item.severity}] {item.file}: {item.issue} — disposition: {disposition}"
+
+
+def _dispatched_disposition(round_no: int) -> str:
+    return f"fix dispatched (round {round_no})"
+
+
+def _below_threshold_disposition(round_no: int) -> str:
+    return f"not adopted, below severity threshold (round {round_no}); recorded as follow-up"
+
+
+_DEFERRED_DISPOSITION = "rejected by a fix run as unactionable; recorded as follow-up"
+
+
+def _severity_context(round_no: int, cap: int, prior: list[str]) -> str | None:
+    """Review context from round 2 on: severity floor of THIS round plus the
+    findings of previous rounds with their dispositions.
+
+    None without prior findings — round 1 acts on everything, so the prompt
+    stays exactly as it was before the policy."""
+    if not prior:
+        return None
+    severities = "/".join(sorted(_actionable_severities(round_no)))
+    lines = "\n".join(prior)
+    return (
+        f"This is review round {round_no} of max {cap}. Only findings of severity "
+        f"{severities} will be acted on in this round; anything below is recorded "
+        f"as a follow-up, not fixed.\n"
+        f"Findings from previous rounds and their dispositions:\n{lines}\n"
+        f"Do NOT report these findings again unless the problem demonstrably "
+        f"persists in the current version."
+    )
+
+
+def _extend_context(prior: list[str], lines: list[str]) -> list[str]:
+    """Append new disposition lines without duplicates — a deterministic
+    reviewer reports the same finding again in every round."""
+    merged = list(prior)
+    merged.extend(line for line in lines if line not in merged)
+    return merged
 
 
 def _findings_text(review: ReviewResult) -> str:
@@ -1192,7 +1302,10 @@ def _dispatch_lane_fixes(
 
 # --- Phase 5+6: Codex-Code-Review, finaler Review + Triage --------------------
 
-MAX_REVIEW_ROUNDS = 10
+# Runden-Cap der Codex-Code-Review-Phase. Zusammen mit der absteigenden
+# Severity-Schwelle (_actionable_severities) konvergiert der Loop: ab Runde 3
+# blockt nur noch P1, alles andere wird als Follow-up dokumentiert.
+MAX_REVIEW_ROUNDS = 5
 
 
 def _resume_pending_lanes(ctx: RunContext, lanes: list[str]) -> None:
@@ -1222,6 +1335,25 @@ def _changed_files(ctx: RunContext, worktree: Path) -> list[str]:
     return [name for name in changed if name]
 
 
+def _advance_review_round(
+    ctx: RunContext, round_no: int, context: list[str], failures: list[str]
+) -> Callable[[list[str]], None]:
+    """``mutate_staged`` callback: round counter, findings history and
+    Circuit-Breaker baseline land in the SAME save as the staged fix task.
+
+    A crash between the two would book the round as "fix dispatched" without a
+    pending fix — the next round's higher severity threshold would then drop
+    exactly that finding silently. The baseline is narrowed to the
+    non-deferred Findings again AFTER the dispatch."""
+
+    def advance(fix_lanes: list[str]) -> None:
+        ctx.state.review_rounds = round_no
+        ctx.state.review_prior_context = context
+        ctx.state.review_last_failures = failures
+
+    return advance
+
+
 def run_codex_review_phase(ctx: RunContext) -> None:
     """Phase 5: Codex reviews the integrated diff; Findings are routed via the
     lane field into the build Lanes, until the verdict is ok."""
@@ -1230,6 +1362,7 @@ def run_codex_review_phase(ctx: RunContext) -> None:
     lanes = _active_lanes(ctx)
     _resume_pending_lanes(ctx, lanes)
     previous: list[str] | None = ctx.state.review_last_failures or None
+    prior_context = list(ctx.state.review_prior_context)
     while True:
         # Limit VOR dem Review: Crash zwischen Runden-Save und Eskalation darf
         # beim Resume keine weitere Runde starten.
@@ -1239,9 +1372,15 @@ def run_codex_review_phase(ctx: RunContext) -> None:
                 f"Codex-Code-Review: {ctx.state.review_rounds} Runden erreicht "
                 f"(Limit {MAX_REVIEW_ROUNDS}) — Eskalation",
             )
+        round_no = ctx.state.review_rounds + 1
         worktree = _review_worktree(ctx, lanes)
         try:
-            review = ctx.codex.review("code", _changed_files(ctx, worktree), cwd=worktree)
+            review = ctx.codex.review(
+                "code",
+                _changed_files(ctx, worktree),
+                cwd=worktree,
+                context=_severity_context(round_no, MAX_REVIEW_ROUNDS, prior_context),
+            )
         except (FindingsParseError, ValidationError) as exc:
             raise escalate(ctx, f"Codex-Code-Review unlesbar: {exc}") from exc
         if review.verdict == "ok":
@@ -1249,16 +1388,25 @@ def run_codex_review_phase(ctx: RunContext) -> None:
         findings = _without_deferred(ctx, review.findings)
         if not findings:
             break  # nur bereits vertagte Findings — sie stehen im Follow-up-Report
-        review = ReviewResult(verdict="needs_fixes", findings=findings)
-        with ctx.state_lock:
-            ctx.state.review_rounds += 1
-            ctx.save()
-        if ctx.state.review_rounds >= MAX_REVIEW_ROUNDS:
+        already_deferred = [item for item in review.findings if item not in findings]
+        actionable, dropped = _split_by_severity(findings, round_no)
+        if dropped:
+            _write_followups(ctx, dropped)
+        if not actionable:
+            break  # nur Findings unter der Schwelle — dokumentiert statt gefixt
+        review = ReviewResult(verdict="needs_fixes", findings=actionable)
+        prior_context = _extend_context(
+            prior_context,
+            [_disposition_line(item, _DEFERRED_DISPOSITION) for item in already_deferred]
+            + [_disposition_line(item, _below_threshold_disposition(round_no)) for item in dropped]
+            + [_disposition_line(item, _dispatched_disposition(round_no)) for item in actionable],
+        )
+        if round_no >= MAX_REVIEW_ROUNDS:
             # VOR dem Dispatch eskalieren: ein Fix, den nie wieder ein Review
             # prüfen kann, ist verschwendete (teure) Arbeit.
             raise escalate(
                 ctx,
-                f"Codex-Code-Review: {ctx.state.review_rounds} Runden erreicht "
+                f"Codex-Code-Review: {round_no} Runden erreicht "
                 f"(Limit {MAX_REVIEW_ROUNDS}) — Eskalation.\n\n{_findings_text(review)}",
             )
         failures = _finding_keys(review)
@@ -1270,16 +1418,25 @@ def run_codex_review_phase(ctx: RunContext) -> None:
                 f"Codex-Code-Review meldet unverändert dieselben Findings — "
                 f"Circuit-Breaker.\n\n{_findings_text(review)}",
             ) from exc
-        _dispatch_lane_fixes(ctx, review.findings, lanes, source="Codex-Code-Review")
+        _dispatch_lane_fixes(
+            ctx,
+            review.findings,
+            lanes,
+            source="Codex-Code-Review",
+            mutate_staged=_advance_review_round(ctx, round_no, prior_context, failures),
+        )
         with ctx.state_lock:
             # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4. Der
             # Dispatch kann Findings vertagt haben; die fallen aus der Basis.
+            # Basis sind NUR die actionable Findings: ein neues, dauerhaft
+            # gedropptes P3 würde sonst ein stehengebliebenes P1 kaschieren.
             failures = _circuit_breaker_keys(ctx, review.findings)
             ctx.state.review_last_failures = failures
             ctx.save()
         previous = failures
     with ctx.state_lock:
         ctx.state.review_last_failures = []
+        ctx.state.review_prior_context = []  # Verlauf gehört zu dieser Phase
         ctx.state.phase = "final_review"
         ctx.save()
 

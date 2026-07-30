@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from adw.state import LaneState, RunState, StateNotFoundError
@@ -29,6 +31,29 @@ def test_save_load_round_trip_is_identical(target_repo):
     state.save(target_repo)
     loaded = RunState.load(target_repo, "ab12cd34")
     assert loaded == state
+
+
+def test_prior_review_context_survives_the_round_trip(target_repo):
+    """Review-Policy v2: der Findings-Verlauf beider Loops überlebt einen Crash."""
+    line = "- [P2] a.py: kaputt — disposition: fix dispatched (round 1)"
+    state = make_state(review_prior_context=[line], authoring_prior_context=[line])
+    state.save(target_repo)
+    loaded = RunState.load(target_repo, "ab12cd34")
+    assert loaded.review_prior_context == [line]
+    assert loaded.authoring_prior_context == [line]
+
+
+def test_state_file_without_prior_context_fields_still_loads(target_repo):
+    """Rückwärtskompatibel: State-Files aus der Zeit vor der Review-Policy v2."""
+    data = json.loads(make_state().model_dump_json())
+    del data["review_prior_context"]
+    del data["authoring_prior_context"]
+    path = target_repo / ".adw" / "runs" / "ab12cd34" / "state.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    loaded = RunState.load(target_repo, "ab12cd34")
+    assert loaded.review_prior_context == []
+    assert loaded.authoring_prior_context == []
 
 
 def test_load_unknown_run_id_raises(target_repo):

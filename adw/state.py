@@ -102,6 +102,10 @@ class RunState(BaseModel):
     # Review (Phase 6, nur Circuit-Breaker — das Limit sind die fix_cycles).
     review_rounds: int = 0
     review_last_failures: list[str] = Field(default_factory=list)
+    # Findings der Vorrunden inkl. Disposition (Review-Policy v2). Codex bekommt
+    # sie ab Runde 2 als Kontext, damit behandelte oder abgewiesene Punkte nicht
+    # erneut gemeldet werden. Überlebt Crash+Resume wie der Runden-Zähler.
+    review_prior_context: list[str] = Field(default_factory=list)
     final_review_last_failures: list[str] = Field(default_factory=list)
     # Findings-Keys, die ein Fix-Lauf nachweislich nicht umsetzen konnte
     # (reine P3-Beobachtungen, im Follow-up-Report vermerkt). Ein
@@ -118,6 +122,8 @@ class RunState(BaseModel):
     # Runden-Zähler des Authoring-Loops (Agent-Lauf + Codex-Review = 1 Runde) —
     # persistiert, damit ein Crash das Runden-Cap nicht zurücksetzt.
     authoring_rounds: int = 0
+    # Findings-Verlauf des Authoring-Loops (Pendant zu review_prior_context).
+    authoring_prior_context: list[str] = Field(default_factory=list)
     # Monotone Speicher-Sequenz für find_latest — Datei-mtimes haben nur
     # Kernel-Tick-Granularität und produzieren Gleichstände.
     seq: int = 0

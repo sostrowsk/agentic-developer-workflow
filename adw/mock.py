@@ -82,6 +82,7 @@ class CodexCall:
     kind: str
     content_refs: tuple[str, ...]
     cwd: Path
+    context: str | None = None
 
 
 @dataclass
@@ -94,8 +95,12 @@ class MockCodexRunner:
     def script(self, *results: ReviewResult) -> None:
         self.results.extend(results)
 
-    def review(self, kind: str, content_refs: list[str], cwd: Path) -> ReviewResult:
-        self.calls.append(CodexCall(kind=kind, content_refs=tuple(content_refs), cwd=Path(cwd)))
+    def review(
+        self, kind: str, content_refs: list[str], cwd: Path, context: str | None = None
+    ) -> ReviewResult:
+        self.calls.append(
+            CodexCall(kind=kind, content_refs=tuple(content_refs), cwd=Path(cwd), context=context)
+        )
         if not self.results:
             raise AssertionError(f"Kein gescriptetes Codex-Ergebnis (kind={kind!r})")
         return self.results.popleft()

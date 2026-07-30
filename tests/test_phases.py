@@ -199,9 +199,9 @@ def test_plan_review_always_sees_the_reviewed_spec(ctx):
     seen_specs = []
 
     class SpyCodex(MockCodexRunner):
-        def review(self, kind, content_refs, cwd):
+        def review(self, kind, content_refs, cwd, context=None):
             seen_specs.append((kind, (cwd / ".adw" / "spec.md").read_text()))
-            return super().review(kind, content_refs, cwd)
+            return super().review(kind, content_refs, cwd, context)
 
     ctx.codex = SpyCodex()
     plan_files = dict(ctx.agents.file_writes["plan_agent"])
@@ -1104,9 +1104,9 @@ def test_archived_spec_takes_precedence_on_plan_resume(ctx):
     seen_specs = []
 
     class SpyCodex(MockCodexRunner):
-        def review(self, kind, content_refs, cwd):
+        def review(self, kind, content_refs, cwd, context=None):
             seen_specs.append((kind, (cwd / ".adw" / "spec.md").read_text()))
-            return super().review(kind, content_refs, cwd)
+            return super().review(kind, content_refs, cwd, context)
 
     ctx.codex = SpyCodex()
     # Crash-Fenster nachbauen: Phase 'plan', archivierte reviewte Spec im
@@ -1704,6 +1704,140 @@ def test_identical_codex_code_findings_escalate(ctx):
     assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
 
 
+def code_findings(*items: tuple[str, str]) -> ReviewResult:
+    """Code-Review-Ergebnis aus (severity, issue)-Paaren."""
+    return ReviewResult(
+        verdict="needs_fixes",
+        findings=[
+            Finding(
+                severity=severity,
+                lane="backend",
+                file="src_neu.py",
+                issue=issue,
+                remediation_plan=["Ursache beheben"],
+            )
+            for severity, issue in items
+        ],
+    )
+
+
+def test_code_review_drops_p3_from_round_two_into_followups(ctx):
+    """Review-Policy v2: ab Runde 2 sind P3-Findings nicht mehr actionable —
+    sie werden dokumentiert statt gefixt und beenden den Loop."""
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", "gefixt")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2')\n"}
+    ctx.codex.script(
+        code_findings(("P1", "Race Condition")),
+        code_findings(("P3", "Namensdetail")),
+    )
+    run_codex_review_phase(ctx)
+    assert ctx.state.phase == "final_review"
+    build_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert len(build_calls) == 2  # Build + EIN Fix — für das P3 kein Fix-Lauf
+    assert "Namensdetail" in (ctx.run_dir / "followups.md").read_text()
+
+
+def test_code_review_drops_p2_from_round_three(ctx):
+    """Ab Runde 3 ist nur noch P1 actionable."""
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", "fix 1", "fix 2")
+    ctx.agents.file_writes["build_agent"] = lambda cwd: {
+        "src_neu.py": f"print('v{len(ctx.agents.calls)}')\n"
+    }
+    ctx.codex.script(
+        code_findings(("P1", "Race Condition")),
+        code_findings(("P1", "Nullpointer")),
+        code_findings(("P2", "unsauberer Name")),
+    )
+    run_codex_review_phase(ctx)
+    assert ctx.state.phase == "final_review"
+    build_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+    assert len(build_calls) == 3  # Build + 2 Fixes, das P2 der Runde 3 nicht mehr
+    assert "unsauberer Name" in (ctx.run_dir / "followups.md").read_text()
+
+
+def test_code_review_passes_prior_findings_with_dispositions_as_context(ctx):
+    """Ab Runde 2 kennt Codex die Findings der Vorrunden inkl. Disposition."""
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", "gefixt")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2')\n"}
+    ctx.codex.script(code_findings(("P1", "Race Condition")), OK)
+    run_codex_review_phase(ctx)
+    code_calls = [c for c in ctx.codex.calls if c.kind == "code"]
+    assert code_calls[0].context is None  # Runde 1: Prompt unverändert
+    context = code_calls[1].context
+    assert "round 2 of max 5" in context
+    assert "Race Condition" in context
+    assert "fix dispatched (round 1)" in context
+
+
+def test_review_context_survives_a_crash_and_is_cleared_on_transition(ctx):
+    """Der Verlauf wird im selben Save wie review_rounds persistiert und beim
+    Phasenübergang geleert."""
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", "gefixt")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2')\n"}
+    ctx.codex.script(code_findings(("P1", "Race Condition")))  # Runde 2: Queue leer
+    with pytest.raises(AssertionError):
+        run_codex_review_phase(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.review_rounds == 1
+    assert any("fix dispatched (round 1)" in line for line in saved.review_prior_context)
+
+    resumed = RunContext(
+        repo=ctx.repo,
+        config=ctx.config,
+        state=saved,
+        agents=ctx.agents,
+        codex=ctx.codex,
+    )
+    ctx.codex.script(OK)
+    run_codex_review_phase(resumed)
+    assert resumed.state.phase == "final_review"
+    assert RunState.load(ctx.repo, ctx.state.run_id).review_prior_context == []
+
+
+def test_review_round_increment_is_persisted_with_the_staged_fix(ctx, monkeypatch):
+    """Regression (Codex P1): Runden-Zähler und Findings-Verlauf dürfen erst mit
+    dem gestagten Fix-Task in EINEM Save landen. Sonst überspringt ein Crash in
+    diesem Fenster die Runde samt Fix — die Severity-Schwelle steigt weiter und
+    das Finding wäre still verloren."""
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", "Fix")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2')\n"}
+    ctx.codex.script(code_findings(("P1", "Race Condition")), OK)
+    snapshots = []
+    real_save = RunState.save
+
+    def spy(self, repo):
+        real_save(self, repo)
+        snapshots.append(self.model_dump())
+
+    monkeypatch.setattr(RunState, "save", spy)
+    run_codex_review_phase(ctx)
+    first = next(s for s in snapshots if s["review_rounds"] == 1)
+    assert first["lanes"]["backend"]["pending_task"]  # im selben Save gestaged
+    assert first["review_prior_context"]  # Verlauf ebenfalls im selben Save
+    # Und die Circuit-Breaker-Basis: ein Crash im Dispatch-Fenster darf ein
+    # unverändertes Finding nicht eine Runde länger überleben lassen.
+    assert first["review_last_failures"]
+
+
+def test_circuit_breaker_ignores_findings_below_the_threshold(ctx):
+    """Regression: gedroppte P2/P3 dürfen die Circuit-Breaker-Basis nicht
+    auffüllen — sonst kaschiert ein neues P3 ein stehengebliebenes P1."""
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", "angeblich gefixt")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2')\n"}
+    ctx.codex.script(
+        code_findings(("P1", "immer dasselbe")),
+        code_findings(("P1", "immer dasselbe"), ("P3", "neue Kleinigkeit")),
+    )
+    with pytest.raises(EscalationError, match="Circuit|unverändert"):
+        run_codex_review_phase(ctx)
+
+
 def test_parallel_codex_review_runs_on_integration_worktree(pctx):
     prepare_built_parallel(pctx)
     run_integration_phase(pctx)
@@ -1835,8 +1969,8 @@ def test_pending_lane_fix_is_resumed_before_codex_review(ctx):
 
 
 def test_review_round_limit_escalates_without_terminal_fix_dispatch(ctx):
-    """Regression (Codex P2): the 10th needs_fixes review must not dispatch a fix
-    that no review can ever check again."""
+    """Regression (Codex P2): the review of the last round (cap 5) must not
+    dispatch a fix that no review can ever check again."""
     prepare_reviewable(ctx)
     ctx.agents.script("build_agent", *["Fix"] * 12)
 
@@ -1845,12 +1979,12 @@ def test_review_round_limit_escalates_without_terminal_fix_dispatch(ctx):
 
     ctx.agents.file_writes["build_agent"] = writes
     ctx.codex.script(*[code_finding("backend", f"Problem {i}") for i in range(12)])
-    with pytest.raises(EscalationError, match="Runden|[Ll]imit"):
+    with pytest.raises(EscalationError, match="Limit 5"):
         run_codex_review_phase(ctx)
     code_calls = [c for c in ctx.codex.calls if c.kind == "code"]
     build_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
-    assert len(code_calls) == 10
-    assert len(build_calls) == 1 + 9  # Build + 9 Fixes — kein 10. Terminal-Fix
+    assert len(code_calls) == 5
+    assert len(build_calls) == 1 + 4  # Build + 4 Fixes — kein 5. Terminal-Fix
 
 
 def test_final_review_finding_for_inactive_lane_routes_to_active_lanes(ctx):
@@ -2467,7 +2601,61 @@ def test_ci_phase_escalates_when_forge_is_undetectable(ctx, target_repo):
         run_ci_phase(ctx)
 
 
-# --- B1: Runden-Cap im Authoring-Loop ---------------------------------------
+# --- Review-Policy v2: absteigende Severity-Schwelle -------------------------
+
+
+def severity_finding(severity: str, issue: str = "x") -> Finding:
+    return Finding(
+        severity=severity,
+        lane="backend",
+        file="src_neu.py",
+        issue=issue,
+        remediation_plan=["fixen"],
+    )
+
+
+def test_actionable_severities_descend_per_round():
+    from adw.phases import _actionable_severities
+
+    assert _actionable_severities(1) == {"P1", "P2", "P3"}
+    assert _actionable_severities(2) == {"P1", "P2"}
+    assert _actionable_severities(3) == {"P1"}
+    assert _actionable_severities(7) == {"P1"}
+
+
+def test_split_by_severity_returns_actionable_and_dropped():
+    from adw.phases import _split_by_severity
+
+    findings = [severity_finding("P1"), severity_finding("P2"), severity_finding("P3")]
+    actionable, dropped = _split_by_severity(findings, 1)
+    assert [f.severity for f in actionable] == ["P1", "P2", "P3"]
+    assert dropped == []
+    actionable, dropped = _split_by_severity(findings, 2)
+    assert [f.severity for f in actionable] == ["P1", "P2"]
+    assert [f.severity for f in dropped] == ["P3"]
+    actionable, dropped = _split_by_severity(findings, 3)
+    assert [f.severity for f in actionable] == ["P1"]
+    assert [f.severity for f in dropped] == ["P2", "P3"]
+
+
+def test_severity_context_lists_prior_findings_and_threshold():
+    from adw.phases import _severity_context
+
+    prior = ["- [P2] a.py: kaputt — disposition: fix dispatched (round 1)"]
+    context = _severity_context(2, 5, prior)
+    assert "round 2 of max 5" in context
+    assert "P1/P2" in context
+    assert prior[0] in context
+    assert "Do NOT report these findings again" in context
+
+
+def test_severity_context_is_none_without_prior_findings():
+    from adw.phases import _severity_context
+
+    assert _severity_context(1, 5, []) is None
+
+
+# --- B1: Runden-Cap + Severity-Schwelle im Authoring-Loop --------------------
 
 
 def p1_finding(issue: str = "kritisch", lane: str = "backend") -> ReviewResult:
@@ -2485,8 +2673,26 @@ def p1_finding(issue: str = "kritisch", lane: str = "backend") -> ReviewResult:
     )
 
 
-def test_authoring_accepts_after_round_cap_with_only_p2_p3(ctx):
-    """B1(a): 3 Runden mit nur P2/P3 → Artefakt akzeptiert, Known-Findings-Datei."""
+def spec_findings(*items: tuple[str, str]) -> ReviewResult:
+    """Spec-Review-Ergebnis aus (severity, issue)-Paaren."""
+    return ReviewResult(
+        verdict="needs_fixes",
+        findings=[
+            Finding(
+                severity=severity,
+                lane="backend",
+                file=".adw/spec.md",
+                issue=issue,
+                remediation_plan=["nachschärfen"],
+            )
+            for severity, issue in items
+        ],
+    )
+
+
+def test_authoring_accepts_when_all_findings_are_below_the_threshold(ctx):
+    """B1(a)/v2: In Runde 3 sind P2-Findings nicht mehr actionable → Artefakt
+    akzeptiert, Known-Findings-Datei mit der Schwellen-Begründung."""
     ctx.agents.script("spec_agent", "v1", "v2", "v3")
     ctx.agents.script("plan_agent", "Plan")
     ctx.codex.script(needs_fixes("A"), needs_fixes("B"), needs_fixes("C"), OK)
@@ -2495,20 +2701,85 @@ def test_authoring_accepts_after_round_cap_with_only_p2_p3(ctx):
     assert ctx.state.phase == "build"
     known = ctx.run_dir / "authoring-spec-known-findings.md"
     assert known.is_file()
-    assert "C" in known.read_text()
-    # Genau 3 Spec-Runden (kein 4. Agent-Lauf nach dem Cap):
+    text = known.read_text()
+    assert "C" in text
+    assert "Severity-Schwelle" in text
+    # Genau 3 Spec-Runden (kein 4. Agent-Lauf nach dem Schwellen-Accept):
     assert len([c for c in ctx.agents.calls if c.agent == "spec_agent"]) == 3
 
 
 def test_authoring_escalates_after_round_cap_with_p1(ctx):
-    """B1(b): 3 Runden, in der dritten ein P1 → Eskalation, keine Known-Findings."""
-    ctx.agents.script("spec_agent", "v1", "v2", "v3")
-    ctx.codex.script(needs_fixes("A"), needs_fixes("B"), p1_finding("C"))
+    """B1(b)/v2: 5 Runden mit offenem P1 → Eskalation, keine Known-Findings."""
+    ctx.agents.script("spec_agent", "v1", "v2", "v3", "v4", "v5")
+    ctx.codex.script(*[p1_finding(issue) for issue in "ABCDE"])
     with pytest.raises(EscalationError, match="[Rr]unden-Cap"):
         run_spec_and_plan(ctx)
     saved = RunState.load(ctx.repo, ctx.state.run_id)
     assert saved.phase == "escalated"
     assert not (ctx.run_dir / "authoring-spec-known-findings.md").is_file()
+    assert len([c for c in ctx.agents.calls if c.agent == "spec_agent"]) == 5
+
+
+def test_authoring_fix_task_carries_only_actionable_findings(ctx):
+    """v2: In Runde 2 gehen nur P1/P2 in den Fix-Task; das P3 wird als
+    Follow-up dokumentiert."""
+    ctx.agents.script("spec_agent", "v1", "v2", "v3")
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(
+        needs_fixes("Runde 1"),
+        spec_findings(("P1", "kritische Lücke"), ("P3", "Formulierungsdetail")),
+        OK,
+        OK,
+    )
+    ctx.skip_approval = True
+    run_spec_and_plan(ctx)
+    spec_calls = [c for c in ctx.agents.calls if c.agent == "spec_agent"]
+    assert "kritische Lücke" in spec_calls[2].task
+    assert "Formulierungsdetail" not in spec_calls[2].task
+    assert "Formulierungsdetail" in (ctx.run_dir / "followups.md").read_text()
+
+
+def test_authoring_passes_prior_findings_with_dispositions_as_context(ctx):
+    """v2: Ab Runde 2 kennt Codex die Findings der Vorrunde inkl. Disposition."""
+    ctx.agents.script("spec_agent", "v1", "v2")
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(needs_fixes("Akzeptanzkriterien fehlen"), OK, OK)
+    ctx.skip_approval = True
+    run_spec_and_plan(ctx)
+    spec_reviews = [c for c in ctx.codex.calls if c.kind == "spec"]
+    assert spec_reviews[0].context is None  # Runde 1: Prompt unverändert
+    context = spec_reviews[1].context
+    assert "round 2 of max 5" in context
+    assert "Akzeptanzkriterien fehlen" in context
+    assert "fix dispatched (round 1)" in context
+    # Der Plan-Loop startet mit leerem Verlauf — Checkpoint wurde zurückgesetzt.
+    assert [c for c in ctx.codex.calls if c.kind == "plan"][0].context is None
+
+
+def test_authoring_context_survives_crash_and_resume(ctx):
+    """v2: Der Findings-Verlauf liegt im selben Save wie der Checkpoint."""
+    ctx.agents.script("spec_agent", "v1", "v2", "v3")
+    ctx.codex.script(needs_fixes("A"))  # Runde 2: Codex-Queue leer → Crash
+    with pytest.raises(AssertionError):
+        run_spec_and_plan(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert any("fix dispatched (round 1)" in line for line in saved.authoring_prior_context)
+
+    resumed = RunContext(
+        repo=ctx.repo,
+        config=ctx.config,
+        state=saved,
+        agents=ctx.agents,
+        codex=ctx.codex,
+        skip_approval=True,
+    )
+    ctx.agents.script("plan_agent", "Plan")
+    ctx.codex.script(OK, OK)
+    run_spec_and_plan(resumed)
+    spec_reviews = [c for c in ctx.codex.calls if c.kind == "spec"]
+    # Der Review nach dem Resume kennt den Verlauf aus dem State.
+    assert "fix dispatched (round 1)" in spec_reviews[2].context
+    assert resumed.state.authoring_prior_context == []  # beim Übergang geleert
 
 
 def test_authoring_ok_before_cap_writes_no_known_findings(ctx):
@@ -2539,7 +2810,8 @@ def test_authoring_round_counter_survives_resume(ctx):
         skip_approval=True,
     )
     ctx.agents.script("plan_agent", "Plan")
-    ctx.codex.script(needs_fixes("B"), needs_fixes("C"), OK)  # Runde 2+3 → Cap, Plan ok
+    # Runde 2 fixt, Runde 3 liegt unter der Schwelle → Accept; Plan ok
+    ctx.codex.script(needs_fixes("B"), needs_fixes("C"), OK)
     run_spec_and_plan(resumed)
     assert resumed.state.phase == "build"
     assert (resumed.run_dir / "authoring-spec-known-findings.md").is_file()
@@ -2718,12 +2990,12 @@ def test_resume_in_plan_phase_regenerates_issue_md(ctx):
     seen = {}
 
     class SpyCodex(MockCodexRunner):
-        def review(self, kind, content_refs, cwd):
+        def review(self, kind, content_refs, cwd, context=None):
             if kind == "plan":
                 path = cwd / ".adw" / "issue.md"
                 seen["exists"] = path.is_file()
                 seen["content"] = path.read_text() if path.is_file() else ""
-            return super().review(kind, content_refs, cwd)
+            return super().review(kind, content_refs, cwd, context)
 
     ctx.agents.script("spec_agent", "Spec")  # Plan-Agent NICHT gescriptet → Crash
     ctx.codex.script(OK)

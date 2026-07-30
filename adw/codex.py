@@ -81,7 +81,13 @@ class CodexError(Exception):
 
 
 class CodexReviewer(Protocol):
-    def review(self, kind: ReviewKind, content_refs: list[str], cwd: Path) -> ReviewResult: ...
+    def review(
+        self,
+        kind: ReviewKind,
+        content_refs: list[str],
+        cwd: Path,
+        context: str | None = None,
+    ) -> ReviewResult: ...
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
@@ -166,8 +172,14 @@ def _sync_rotated_auth(isolated: Path, source: Path, original: bytes | None) -> 
 class CodexRunner:
     """Invokes the Codex CLI as a read-only subprocess and parses strictly."""
 
-    def review(self, kind: ReviewKind, content_refs: list[str], cwd: Path) -> ReviewResult:
-        prompt = self._build_prompt(kind, content_refs)
+    def review(
+        self,
+        kind: ReviewKind,
+        content_refs: list[str],
+        cwd: Path,
+        context: str | None = None,
+    ) -> ReviewResult:
+        prompt = self._build_prompt(kind, content_refs, context)
         argv = [
             "codex",
             "exec",
@@ -245,10 +257,13 @@ class CodexRunner:
         return extract_review_result(stdout)
 
     @staticmethod
-    def _build_prompt(kind: ReviewKind, content_refs: list[str]) -> str:
+    def _build_prompt(kind: ReviewKind, content_refs: list[str], context: str | None = None) -> str:
         refs = "\n".join(f"- {ref}" for ref in content_refs)
+        # Kontextblock (Runde, Severity-Schwelle, Findings der Vorrunden) zwischen
+        # Refs und Schema — die Antwortformat-Instruktion bleibt die letzte.
+        block = f"{context.strip()}\n\n" if context and context.strip() else ""
         return (
             f"You are an independent reviewer in an Agentic Developer Workflow "
             f"(review kind: {kind}).\n{_KIND_INSTRUCTIONS[kind]}\n\n"
-            f"To review:\n{refs}\n\n{_SCHEMA_INSTRUCTION}"
+            f"To review:\n{refs}\n\n{block}{_SCHEMA_INSTRUCTION}"
         )
