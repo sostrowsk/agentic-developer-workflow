@@ -1,10 +1,13 @@
 """Tests of the phase orchestration — entirely with mocks, 0 tokens, real git."""
 
 import json
+import logging
 import re
+import threading
 
 import pytest
 
+from adw.codex import CodexError
 from adw.config import AdwConfig
 from adw.findings import Finding, ReviewResult
 from adw.mock import MockAgentRunner, MockCodexRunner
@@ -12,6 +15,7 @@ from adw.phases import (
     AwaitingApproval,
     EscalationError,
     RunContext,
+    _draft_stage,
     run_build_phase,
     run_ci_phase,
     run_codex_review_phase,
@@ -266,6 +270,234 @@ def test_parallel_run_requires_parallel_capable_config(target_repo):
     )
     with pytest.raises(EscalationError, match="frontend"):
         run_spec_and_plan(ctx)
+
+
+# --- Draft-Stage: zwei unabhängige Entwürfe je Authoring-Phase ---------------
+
+SPEC_DRAFT_TASK = "Erstelle die Spezifikation zu ISSUE-1 als .adw/spec.md."
+PLAN_DRAFT_TASK = "Erstelle aus .adw/spec.md den Plan .adw/plan.md und .adw/contract.yaml."
+
+
+def spec_draft(ctx, protected=None):
+    return _draft_stage(
+        ctx,
+        kind="spec",
+        agent_name="spec_agent",
+        task=SPEC_DRAFT_TASK,
+        artifacts=("spec.md",),
+        protected=protected,
+    )
+
+
+class BarrierCodex(MockCodexRunner):
+    """Codex-Mock, der an einer Barriere wartet — belegt die Überlappung
+    beider Autoren ohne Timing-Sleeps."""
+
+    def __init__(self, barrier):
+        super().__init__()
+        self.barrier = barrier
+
+    def author(self, kind, task, cwd):
+        self.barrier.wait()
+        return super().author(kind, task, cwd)
+
+
+def test_draft_stage_writes_both_drafts(ctx):
+    ctx.agents.script("spec_agent", "Entwurf geschrieben")
+    ctx.codex.script_artifacts("spec", {"spec.md": "# Codex-Spec\n"})
+    result = spec_draft(ctx)
+    drafts = ctx.run_dir / "drafts"
+    assert (drafts / "spec.claude.md").read_text() == "# Spec\nZiel: Demo\n"
+    assert (drafts / "spec.codex.md").read_text() == "# Codex-Spec\n"
+    run_id = ctx.state.run_id
+    assert result.claude == (f".adw/runs/{run_id}/drafts/spec.claude.md",)
+    assert result.codex == (f".adw/runs/{run_id}/drafts/spec.codex.md",)
+    # Der Entwurf lebt nur im Run-Ordner — der Checkout bleibt sauber.
+    assert not (ctx.repo / ".adw" / "spec.md").exists()
+    assert ctx.codex.author_calls[0].task == SPEC_DRAFT_TASK
+
+
+def test_draft_stage_covers_plan_and_contract(ctx):
+    ctx.agents.script("plan_agent", "Entwurf geschrieben")
+    ctx.codex.script_artifacts(
+        "plan", {"plan.md": "# Codex-Plan\n", "contract.yaml": "openapi: 3.1.0\n"}
+    )
+    result = _draft_stage(
+        ctx,
+        kind="plan",
+        agent_name="plan_agent",
+        task=PLAN_DRAFT_TASK,
+        artifacts=("plan.md", "contract.yaml"),
+    )
+    drafts = ctx.run_dir / "drafts"
+    assert (drafts / "plan.claude.md").read_text() == "# Plan\nWorkstream backend\n"
+    assert (drafts / "contract.claude.yaml").read_text() == "openapi: 3.1.0\n"
+    assert (drafts / "plan.codex.md").read_text() == "# Codex-Plan\n"
+    assert (drafts / "contract.codex.yaml").read_text() == "openapi: 3.1.0\n"
+    assert len(result.claude) == 2 and len(result.codex) == 2
+
+
+def test_both_authors_run_at_the_same_time(ctx):
+    barrier = threading.Barrier(2, timeout=10)
+
+    def writes(_cwd):
+        barrier.wait()  # löst nur auf, wenn Codex gleichzeitig läuft
+        return {".adw/spec.md": "# Spec\nZiel: Demo\n"}
+
+    ctx.agents.file_writes["spec_agent"] = writes
+    ctx.agents.script("spec_agent", "Entwurf geschrieben")
+    ctx.codex = BarrierCodex(barrier)
+    ctx.codex.script_artifacts("spec", {"spec.md": "# Codex-Spec\n"})
+    result = spec_draft(ctx)
+    assert result.claude and result.codex
+
+
+def test_existing_drafts_skip_both_authors(ctx):
+    drafts = ctx.run_dir / "drafts"
+    drafts.mkdir(parents=True)
+    (drafts / "spec.claude.md").write_text("# Entwurf aus der Vorrunde\n")
+    (drafts / "spec.codex.md").write_text("# Codex-Entwurf aus der Vorrunde\n")
+    result = spec_draft(ctx)
+    assert ctx.agents.calls == []
+    assert ctx.codex.author_calls == []
+    assert (drafts / "spec.claude.md").read_text() == "# Entwurf aus der Vorrunde\n"
+    assert result.claude and result.codex
+
+
+def test_existing_drafts_still_clean_the_checkout(ctx):
+    """Crash zwischen Draft-Kopie und Aufräumen: der Resume überspringt die
+    Autoren, muss den Rest im Checkout aber trotzdem wegräumen."""
+    drafts = ctx.run_dir / "drafts"
+    drafts.mkdir(parents=True)
+    (drafts / "spec.claude.md").write_text("# Entwurf\n")
+    (drafts / "spec.codex.md").write_text("# Codex-Entwurf\n")
+    (ctx.repo / ".adw" / "spec.md").write_text("# Entwurf\n")
+    spec_draft(ctx)
+    assert ctx.agents.calls == []
+    assert not (ctx.repo / ".adw" / "spec.md").exists()
+
+
+def test_empty_draft_files_are_written_again(ctx):
+    """Abgebrochener Draft-Write: eine leere Datei ist keine Entwurfsquelle."""
+    drafts = ctx.run_dir / "drafts"
+    drafts.mkdir(parents=True)
+    (drafts / "spec.claude.md").write_text("")
+    (drafts / "spec.codex.md").write_text("  \n")
+    ctx.agents.script("spec_agent", "Entwurf geschrieben")
+    ctx.codex.script_artifacts("spec", {"spec.md": "# Codex-Spec\n"})
+    result = spec_draft(ctx)
+    assert (drafts / "spec.claude.md").read_text() == "# Spec\nZiel: Demo\n"
+    assert (drafts / "spec.codex.md").read_text() == "# Codex-Spec\n"
+    assert result.claude and result.codex
+
+
+def test_empty_claude_draft_escalates(ctx):
+    ctx.agents.script_files("spec_agent", {".adw/spec.md": "   \n"})
+    ctx.agents.script("spec_agent", "behauptet fertig zu sein")
+    ctx.codex.script_artifacts("spec", {"spec.md": "# Codex-Spec\n"})
+    with pytest.raises(EscalationError, match="spec.md"):
+        spec_draft(ctx)
+    assert not (ctx.run_dir / "drafts" / "spec.claude.md").exists()
+
+
+def test_incomplete_draft_set_reruns_its_author(ctx):
+    """Crash zwischen plan.md und contract.yaml: der Autor muss erneut laufen."""
+    drafts = ctx.run_dir / "drafts"
+    drafts.mkdir(parents=True)
+    (drafts / "plan.codex.md").write_text("# halber Codex-Entwurf\n")
+    ctx.agents.script("plan_agent", "Entwurf geschrieben")
+    ctx.codex.script_artifacts(
+        "plan", {"plan.md": "# Codex-Plan\n", "contract.yaml": "openapi: 3.1.0\n"}
+    )
+    _draft_stage(
+        ctx,
+        kind="plan",
+        agent_name="plan_agent",
+        task=PLAN_DRAFT_TASK,
+        artifacts=("plan.md", "contract.yaml"),
+    )
+    assert len(ctx.codex.author_calls) == 1
+    assert (drafts / "plan.codex.md").read_text() == "# Codex-Plan\n"
+    assert (drafts / "contract.codex.yaml").is_file()
+
+
+def test_codex_draft_failure_degrades_instead_of_escalating(ctx, caplog):
+    ctx.agents.script("spec_agent", "Entwurf geschrieben")
+    ctx.codex.script_author_error("spec", CodexError("codex exec: Exit 1 — kaputt"))
+    with caplog.at_level(logging.WARNING):
+        result = spec_draft(ctx)
+    marker = ctx.run_dir / "drafts" / "spec.codex.FAILED"
+    assert "Exit 1 — kaputt" in marker.read_text()
+    assert result.codex == ()
+    assert result.claude  # der Claude-Entwurf trägt die Synthese allein
+    assert "Codex" in caplog.text
+
+
+def test_failed_codex_draft_is_not_retried_on_resume(ctx):
+    drafts = ctx.run_dir / "drafts"
+    drafts.mkdir(parents=True)
+    (drafts / "spec.codex.FAILED").write_text("codex exec: Exit 1\n")
+    ctx.agents.script("spec_agent", "Entwurf geschrieben")
+    result = spec_draft(ctx)
+    assert ctx.codex.author_calls == []
+    assert result.codex == ()
+    assert result.claude
+
+
+def test_missing_claude_draft_escalates(ctx):
+    ctx.agents.file_writes.pop("spec_agent")  # Agent schreibt nichts
+    ctx.agents.script("spec_agent", "behauptet fertig zu sein")
+    ctx.codex.script_artifacts("spec", {"spec.md": "# Codex-Spec\n"})
+    with pytest.raises(EscalationError, match="spec.md"):
+        spec_draft(ctx)
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
+    assert not (ctx.run_dir / "drafts" / "spec.claude.md").exists()
+
+
+def test_stale_tracked_artifact_does_not_become_a_draft(ctx):
+    """Altbestand eines gemergten Runs darf einen untätigen Autor nicht adeln."""
+    from tests.conftest import git
+
+    (ctx.repo / ".adw" / "spec.md").write_text("# Spec des VORHERIGEN Runs\n")
+    git(ctx.repo, "add", ".adw/spec.md")
+    git(ctx.repo, "commit", "-m", "adw(alt): Spec")
+    ctx.agents.file_writes.pop("spec_agent")
+    ctx.agents.script("spec_agent", "behauptet fertig zu sein")
+    ctx.codex.script_artifacts("spec", {"spec.md": "# Codex-Spec\n"})
+    with pytest.raises(EscalationError, match="spec.md"):
+        spec_draft(ctx)
+    assert not (ctx.run_dir / "drafts" / "spec.claude.md").exists()
+
+
+def test_crash_leftovers_in_the_checkout_do_not_block(ctx):
+    """.adw/spec.md eines gecrashten Draft-Laufs ohne Draft-Datei im Run-Ordner."""
+    (ctx.repo / ".adw" / "spec.md").write_text("# Rest eines gecrashten Laufs\n")
+    ctx.agents.script("spec_agent", "Entwurf geschrieben")
+    ctx.codex.script_artifacts("spec", {"spec.md": "# Codex-Spec\n"})
+    result = spec_draft(ctx)
+    assert (ctx.run_dir / "drafts" / "spec.claude.md").read_text() == "# Spec\nZiel: Demo\n"
+    assert not (ctx.repo / ".adw" / "spec.md").exists()
+    assert result.claude and result.codex
+
+
+def test_protected_files_survive_the_draft_stage(ctx):
+    config = ctx.repo / ".adw" / "config.yaml"
+    issue = ctx.repo / ".adw" / "issue.md"
+    issue.write_text("# Issue\nISSUE-1\n")
+    protected = {config: config.read_bytes(), issue: issue.read_bytes()}
+    ctx.agents.script_files(
+        "spec_agent",
+        {
+            ".adw/spec.md": "# Spec\nZiel: Demo\n",
+            ".adw/config.yaml": "base_branch: gekapert\n",
+            ".adw/issue.md": "# gefälschtes Issue\n",
+        },
+    )
+    ctx.agents.script("spec_agent", "Entwurf geschrieben")
+    ctx.codex.script_artifacts("spec", {"spec.md": "# Codex-Spec\n"})
+    spec_draft(ctx, protected=protected)
+    assert config.read_bytes() == protected[config]
+    assert issue.read_bytes() == protected[issue]
 
 
 # --- 10c: Build-Lane-Loop -------------------------------------------------

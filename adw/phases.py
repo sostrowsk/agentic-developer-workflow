@@ -11,10 +11,12 @@ disabled repo hooks; configured filters/signers run as with any
 manual git invocation by the user.
 """
 
+import contextlib
 import logging
 import os
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -26,7 +28,7 @@ from pydantic import ValidationError
 
 from adw import ci, github
 from adw.agents import REGISTRY, AgentRunner
-from adw.codex import CodexClient
+from adw.codex import CodexAuthorError, CodexClient, CodexError
 from adw.config import AdwConfig, Gate
 from adw.env import safe_env
 from adw.findings import (
@@ -313,6 +315,213 @@ def _active_lanes(ctx: RunContext) -> list[str]:
     if ctx.state.parallel:
         return list(ctx.config.lanes)
     return ["backend"] if "backend" in ctx.config.lanes else list(ctx.config.lanes)[:1]
+
+
+# --- Draft-Stage: zwei unabhängige Entwürfe je Authoring-Phase ---------------
+
+DRAFTS_DIR = "drafts"
+
+
+@dataclass(frozen=True)
+class DraftSet:
+    """Draft paths of one authoring phase, relative to the repo root.
+
+    ``codex`` is empty when the Codex draft failed — the synthesis then works
+    from a single source. The Claude draft never degrades: it escalates."""
+
+    claude: tuple[str, ...]
+    codex: tuple[str, ...]
+
+
+def _draft_name(artifact: str, author: str) -> str:
+    """spec.md + claude -> spec.claude.md"""
+    path = Path(artifact)
+    return f"{path.stem}.{author}{path.suffix}"
+
+
+def _write_draft(target: Path, data: bytes) -> None:
+    """Publish a draft atomically (tmp + rename).
+
+    A crash mid-write must never leave a truncated draft behind — the resume
+    would take it for a finished one and skip its author."""
+    fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+        os.replace(tmp_name, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
+
+
+def _draft_present(path: Path) -> bool:
+    """A draft counts only with content — an empty file is no synthesis source."""
+    return path.is_file() and bool(path.read_bytes().strip())
+
+
+def _draft_stage(
+    ctx: RunContext,
+    kind: str,
+    agent_name: str,
+    task: str,
+    artifacts: tuple[str, ...],
+    protected: dict[Path, bytes | None] | None = None,
+) -> DraftSet:
+    """Two independent drafts for one authoring phase, written in PARALLEL.
+
+    Claude (agent, writes into the checkout, the orchestrator copies the result
+    into the run folder) and Codex (read-only, returns the content) run at the
+    same time. Idempotent over FILES, not over state: an existing draft skips
+    its author, a `<kind>.codex.FAILED` marker skips the failed Codex attempt
+    for good."""
+    drafts = ctx.run_dir / DRAFTS_DIR
+    drafts.mkdir(parents=True, exist_ok=True)
+    claude_paths = [drafts / _draft_name(name, "claude") for name in artifacts]
+    codex_paths = [drafts / _draft_name(name, "codex") for name in artifacts]
+    marker = drafts / f"{kind}.codex.FAILED"
+    # Crash-Reste dieser Phase im Hauptthread wegräumen, BEVOR ein Autor läuft:
+    # ein Rest darf weder als frischer Entwurf durchgehen noch dem parallel
+    # lesenden Codex als Zwischenstand erscheinen. Unbedingt — ein Crash
+    # zwischen Draft-Kopie und Aufräumen überspringt sonst beide Autoren und
+    # ließe den Rest im Checkout liegen.
+    for name in artifacts:
+        _reset_checkout_artifact(ctx, name)
+    prior = {name: _artifact_bytes(ctx, name) for name in artifacts}
+    # Vollständigkeit je Autor: ein Crash zwischen zwei Draft-Writes (plan.md
+    # geschrieben, contract.yaml nicht) lässt den Autor erneut laufen.
+    need_claude = not all(_draft_present(path) for path in claude_paths)
+    need_codex = not all(_draft_present(path) for path in codex_paths) and not marker.is_file()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        codex_future = (
+            pool.submit(_codex_draft, ctx, kind, task, artifacts, codex_paths, marker)
+            if need_codex
+            else None
+        )
+        claude_future = (
+            pool.submit(
+                _claude_draft, ctx, agent_name, task, artifacts, claude_paths, prior, protected
+            )
+            if need_claude
+            else None
+        )
+        if codex_future:
+            codex_future.result()  # degradiert selbst, wirft nur Unerwartetes
+        if claude_future:
+            claude_future.result()  # Eskalation propagieren
+    return DraftSet(
+        claude=tuple(_repo_relative(ctx, path) for path in claude_paths),
+        # Fehlender Codex-Entwurf (degradiert oder Marker aus einem Vorlauf):
+        # die Synthese darf keinen Pfad genannt bekommen, den es nicht gibt.
+        codex=(
+            tuple(_repo_relative(ctx, path) for path in codex_paths)
+            if all(_draft_present(path) for path in codex_paths)
+            else ()
+        ),
+    )
+
+
+def _claude_draft(
+    ctx: RunContext,
+    agent_name: str,
+    task: str,
+    artifacts: tuple[str, ...],
+    targets: list[Path],
+    prior: dict[str, bytes | None],
+    protected: dict[Path, bytes | None] | None,
+) -> None:
+    """Claude draft: the agent writes into the checkout, the orchestrator copies
+    the result into the run folder and cleans the checkout again.
+
+    ``prior`` is the checkout snapshot taken by the caller BEFORE both authors
+    started — an idle agent run must not pass off leftovers as a draft."""
+    ctx.agents.run(REGISTRY[agent_name], task, cwd=ctx.repo)
+    if protected:
+        _restore_all(protected)
+    # Leer wie fehlend behandeln: ein weißraum-Artefakt ist keine Entwurfsquelle,
+    # die Synthese hätte daraus nichts zu mergen.
+    missing = [name for name in artifacts if not (_artifact_bytes(ctx, name) or b"").strip()]
+    if missing:
+        raise escalate(
+            ctx,
+            f"{agent_name} hat {', '.join(f'.adw/{m}' for m in missing)} nicht "
+            "erzeugt (oder leer gelassen) — ohne Entwurf gibt es nichts zu synthetisieren",
+        )
+    # Getrackter Altbestand (gemergter Vorlauf) überlebt das Aufräumen — er darf
+    # einen untätigen Agent-Lauf nicht als Entwurf adeln.
+    unchanged = [
+        name
+        for name in artifacts
+        if prior[name] is not None and _artifact_bytes(ctx, name) == prior[name]
+    ]
+    if unchanged:
+        raise escalate(
+            ctx,
+            f"{agent_name} hat {', '.join(f'.adw/{u}' for u in unchanged)} nicht "
+            "verändert — Altbestand eines früheren Runs würde sonst als Entwurf "
+            "durchgehen",
+        )
+    for name, target in zip(artifacts, targets, strict=True):
+        _write_draft(target, (ctx.repo / ".adw" / name).read_bytes())
+    # Der Entwurf lebt ab jetzt im Run-Ordner; die Synthese schreibt das
+    # Artefakt selbst — der Checkout darf keinen Entwurf behalten.
+    for name in artifacts:
+        _reset_checkout_artifact(ctx, name)
+
+
+def _codex_draft(
+    ctx: RunContext,
+    kind: str,
+    task: str,
+    artifacts: tuple[str, ...],
+    targets: list[Path],
+    marker: Path,
+) -> None:
+    """Codex draft — degrades instead of escalating.
+
+    Codex is the SECOND opinion: without it the synthesis still has the Claude
+    draft. A failure is therefore logged and marked; the marker keeps a resume
+    from burning another Codex run on the same broken input."""
+    try:
+        files = ctx.codex.author(kind, task, cwd=ctx.repo)
+        empty = [name for name in artifacts if not files.get(name, "").strip()]
+        if empty:
+            raise CodexAuthorError(f"Codex-Entwurf ohne Inhalt für {', '.join(empty)}")
+    except CodexError as exc:
+        marker.write_text(
+            f"# Codex-Entwurf ({kind}) fehlgeschlagen — Run {ctx.state.run_id}\n\n{exc}\n",
+            encoding="utf-8",
+        )
+        logger.warning(
+            "Codex-Entwurf (%s) fehlgeschlagen — die Synthese arbeitet einquellig: %s",
+            kind,
+            exc,
+        )
+        return
+    for name, target in zip(artifacts, targets, strict=True):
+        _write_draft(target, files[name].encode())
+
+
+def _artifact_bytes(ctx: RunContext, name: str) -> bytes | None:
+    path = ctx.repo / ".adw" / name
+    return path.read_bytes() if path.is_file() else None
+
+
+def _repo_relative(ctx: RunContext, path: Path) -> str:
+    return path.relative_to(ctx.repo).as_posix()
+
+
+def _reset_checkout_artifact(ctx: RunContext, name: str) -> None:
+    """Remove the artifact from the checkout — tracked ones are reset to the
+    checked-in state instead (a tracked deletion would stay in the checkout)."""
+    path = ctx.repo / ".adw" / name
+    if _git(ctx, ctx.repo, "ls-files", "--", f".adw/{name}").strip():
+        _git(ctx, ctx.repo, "checkout", "--", f".adw/{name}")
+    elif path.is_symlink() or path.is_file():
+        # Symlink NIE folgen: unlink trifft den Link, nicht den Referenten.
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
 
 
 def _reviewed_authoring_loop(
@@ -676,10 +885,7 @@ def _archive_artifacts(ctx: RunContext, overwrite_existing_archive: bool = True)
             continue
         if overwrite_existing_archive or not (ctx.run_dir / name).is_file():
             shutil.copy2(source, ctx.run_dir / name)
-        if _git(ctx, ctx.repo, "ls-files", "--", f".adw/{name}").strip():
-            _git(ctx, ctx.repo, "checkout", "--", f".adw/{name}")
-        else:
-            source.unlink()
+        _reset_checkout_artifact(ctx, name)
 
 
 # --- Phase 3: Build-Lanes ---------------------------------------------------
