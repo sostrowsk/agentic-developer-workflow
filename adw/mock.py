@@ -98,21 +98,33 @@ class MockCodexRunner:
 
     results: deque[ReviewResult] = field(default_factory=deque)
     calls: list[CodexCall] = field(default_factory=list)
-    # Authoring liefert Datei-Inhalte (Name -> Inhalt) statt eines Verdicts.
-    artifacts: deque[dict[str, str]] = field(default_factory=deque)
+    # Authoring liefert Datei-Inhalte (Name -> Inhalt) statt eines Verdicts —
+    # je kind eine eigene Queue, damit Spec- und Plan-Aufrufe sich nicht
+    # gegenseitig die Reihenfolge verschieben. Eine gescriptete Exception in
+    # der Queue wird geworfen statt zurückgegeben (Degradations-Tests).
+    artifacts: dict[str, deque[dict[str, str] | Exception]] = field(
+        default_factory=lambda: defaultdict(deque)
+    )
     author_calls: list[CodexAuthorCall] = field(default_factory=list)
 
     def script(self, *results: ReviewResult) -> None:
         self.results.extend(results)
 
-    def script_artifacts(self, *artifacts: dict[str, str]) -> None:
-        self.artifacts.extend(artifacts)
+    def script_artifacts(self, kind: str, *artifacts: dict[str, str]) -> None:
+        self.artifacts[kind].extend(artifacts)
+
+    def script_author_error(self, kind: str, *errors: Exception) -> None:
+        self.artifacts[kind].extend(errors)
 
     def author(self, kind: str, task: str, cwd: Path) -> dict[str, str]:
         self.author_calls.append(CodexAuthorCall(kind=kind, task=task, cwd=Path(cwd)))
-        if not self.artifacts:
+        queue = self.artifacts[kind]
+        if not queue:
             raise AssertionError(f"Keine gescripteten Codex-Artefakte (kind={kind!r})")
-        return self.artifacts.popleft()
+        scripted = queue.popleft()
+        if isinstance(scripted, Exception):
+            raise scripted
+        return scripted
 
     def review(
         self, kind: str, content_refs: list[str], cwd: Path, context: str | None = None

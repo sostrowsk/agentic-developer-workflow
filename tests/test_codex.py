@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from adw.codex import CodexRunner
+from adw.codex import CodexAuthorError, CodexRunner
 from adw.findings import FindingsParseError
 from adw.mock import MockCodexRunner
 
@@ -499,20 +499,38 @@ def test_mock_codex_without_script_raises(tmp_path):
         mock.review("spec", ["x"], cwd=tmp_path)
 
 
-def test_mock_codex_authors_scripted_artifacts_in_order(tmp_path):
+def test_mock_codex_authors_scripted_artifacts_per_kind_in_order(tmp_path):
     mock = MockCodexRunner()
-    mock.script_artifacts({"spec.md": "# Ziel"}, {"plan.md": "## Plan", "contract.yaml": "{}"})
+    mock.script_artifacts("spec", {"spec.md": "# Ziel"}, {"spec.md": "# Ziel v2"})
+    mock.script_artifacts("plan", {"plan.md": "## Plan", "contract.yaml": "{}"})
+    # Die Queues sind je kind unabhängig — ein Plan-Aufruf dazwischen
+    # verschiebt die Spec-Reihenfolge nicht.
     first = mock.author("spec", "Issue #7", cwd=tmp_path)
-    second = mock.author("plan", "Aus .adw/spec.md", cwd=tmp_path)
+    plan = mock.author("plan", "Aus .adw/spec.md", cwd=tmp_path)
+    second = mock.author("spec", "Issue #7 (Retry)", cwd=tmp_path)
     assert first == {"spec.md": "# Ziel"}
-    assert second == {"plan.md": "## Plan", "contract.yaml": "{}"}
+    assert second == {"spec.md": "# Ziel v2"}
+    assert plan == {"plan.md": "## Plan", "contract.yaml": "{}"}
     assert [(call.kind, call.task) for call in mock.author_calls] == [
         ("spec", "Issue #7"),
         ("plan", "Aus .adw/spec.md"),
+        ("spec", "Issue #7 (Retry)"),
     ]
+
+
+def test_mock_codex_author_raises_scripted_error(tmp_path):
+    mock = MockCodexRunner()
+    mock.script_author_error("spec", CodexAuthorError("Block fehlt"))
+    mock.script_artifacts("spec", {"spec.md": "# Ziel"})
+    with pytest.raises(CodexAuthorError, match="Block fehlt"):
+        mock.author("spec", "Issue #7", cwd=tmp_path)
+    # Der Fehlversuch ist aufgezeichnet, die Queue läuft danach weiter.
+    assert mock.author("spec", "Issue #7", cwd=tmp_path) == {"spec.md": "# Ziel"}
+    assert [call.kind for call in mock.author_calls] == ["spec", "spec"]
 
 
 def test_mock_codex_author_without_script_raises(tmp_path):
     mock = MockCodexRunner()
-    with pytest.raises(AssertionError):
+    mock.script_artifacts("plan", {"plan.md": "## Plan"})
+    with pytest.raises(AssertionError, match="spec"):
         mock.author("spec", "Issue #7", cwd=tmp_path)
