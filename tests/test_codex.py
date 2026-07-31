@@ -348,6 +348,20 @@ def test_author_spec_prompt_mirrors_the_spec_agent_requirements(captured_run, tm
     assert "acceptance criteria" in prompt
 
 
+def test_author_prompts_carry_the_shared_content_rules_verbatim(captured_run, tmp_path):
+    """Claude-Autor und Codex-Autor müssen nach demselben Maßstab schreiben:
+    die Regeln stammen aus adw.agents, nicht aus einer zweiten Kopie."""
+    from adw.agents import _PLAN_CONTENT_RULES, _SPEC_CONTENT_RULES
+
+    captured_run["stdout"] = _blocks(**{"spec.md": "x"})
+    CodexRunner().author("spec", "Issue", cwd=tmp_path)
+    assert _SPEC_CONTENT_RULES in captured_run["argv"][-1]
+
+    captured_run["stdout"] = _blocks(**{"plan.md": "x", "contract.yaml": "y"})
+    CodexRunner().author("plan", "Aus .adw/spec.md", cwd=tmp_path)
+    assert _PLAN_CONTENT_RULES in captured_run["argv"][-1]
+
+
 def test_author_plan_prompt_requires_plan_and_contract_blocks(captured_run, tmp_path):
     captured_run["stdout"] = _blocks(
         **{"plan.md": "## Workstream backend", "contract.yaml": "routes: []"}

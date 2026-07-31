@@ -28,6 +28,7 @@ import threading
 from pathlib import Path
 from typing import Literal, Protocol
 
+from adw.agents import _PLAN_CONTENT_RULES, _SPEC_CONTENT_RULES
 from adw.env import safe_env
 from adw.findings import SCHEMA_INSTRUCTION, ReviewResult, extract_review_result
 
@@ -85,44 +86,22 @@ _AUTHOR_BLOCKS: dict[AuthorKind, tuple[str, ...]] = {
     "plan": ("plan.md", "contract.yaml"),
 }
 
-# Inhaltlich identische Vorgaben wie die Autor-System-Prompts der
-# entsprechenden Agents in adw/agents.py — beide Autoren müssen dieselbe
-# Spec/Plan-Qualität liefern, sonst driften die Artefakte je Autor.
+# Dieselbe Quelle wie die Autor-System-Prompts der entsprechenden Agents in
+# adw/agents.py — nur der Rollen-Rahmen ist codex-spezifisch. Beide Autoren
+# müssen dieselbe Spec/Plan-Qualität liefern, sonst driften die Artefakte.
 _AUTHOR_INSTRUCTIONS: dict[AuthorKind, str] = {
     "spec": (
         "You are the Spec author of an Agentic Developer Workflow. You write "
         "EXCLUSIVELY the specification following a fixed template (goal, scope, "
         "non-goals, acceptance criteria, Definition of Done). "
-        "Proportionality is binding: every acceptance criterion must trace "
-        "back to the issue or to a concrete failure with real damage; prefer "
-        "existing backstops (TTLs, webhooks, logs) over new mechanisms or "
-        "persistent states. Honor explicit non-goals and scope ceilings in "
-        "the issue. Put defensible-but-disproportionate hardening ideas into "
-        "a 'Deferred (deliberately not built)' section instead of acceptance "
-        "criteria. The spec describes PRODUCT behavior only — observable "
-        "behavior, data states, interfaces. It never normalizes the "
-        "development process: no requirements on commit messages, commit "
-        "prefixes, branch topology, commit order or git history, neither in "
-        "acceptance criteria nor in the Definition of Done. Implementation "
-        "agents do not commit — the orchestrator commits for them, so such "
-        "criteria are structurally unsatisfiable and unverifiable. This "
-        "concerns the WORKFLOW's own process; git behavior that the product "
-        "under change itself produces (e.g. commits written by the code) is "
-        "observable product behavior and belongs in the spec. TDD is "
-        "the agents' way of working and needs no acceptance criterion. "
-        "You never implement and never change production code."
+        f"{_SPEC_CONTENT_RULES}"
     ),
     "plan": (
         "You are the Plan author of an Agentic Developer Workflow. From "
         ".adw/spec.md you produce the implementation plan with the "
         "Workstreams 'backend' and 'frontend' (if the lane exists) as well as "
-        "the interface contract (OpenAPI/types/events). Both lanes will later "
-        "build strictly against the contract. Keep the contract minimal: with "
-        "a single Workstream it pins only externally observable surfaces "
-        "(HTTP routes, events, template behavior), never internal helper "
-        "signatures. Do not add plan steps or tests beyond the spec's scope; "
-        "carry the spec's 'Deferred' section through unchanged. You never "
-        "implement."
+        "the interface contract (OpenAPI/types/events). "
+        f"{_PLAN_CONTENT_RULES}"
     ),
 }
 
