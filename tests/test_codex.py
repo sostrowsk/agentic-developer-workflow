@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -21,9 +22,10 @@ def captured_run(monkeypatch):
 
             captured["argv"] = argv
             captured["kwargs"] = kwargs
-            self.stdout = io.BytesIO(
-                captured.get("stdout", '{"verdict": "ok", "findings": []}').encode()
-            )
+            stdout = captured.get("stdout", '{"verdict": "ok", "findings": []}')
+            # Callable-Stdout: Authoring-Marker tragen eine Nonce aus dem
+            # Prompt — die Antwort kann erst beim Aufruf gebaut werden.
+            self.stdout = io.BytesIO((stdout(argv) if callable(stdout) else stdout).encode())
             self.stderr = io.BytesIO(captured.get("stderr", "").encode())
             self._timed_out_once = False
 
@@ -258,6 +260,201 @@ def test_default_codex_home_is_also_isolated(captured_run, tmp_path, monkeypatch
     assert captured_run["home_files"] == ["auth.json"]
 
 
+def _marker_id(prompt: str) -> str:
+    """Nonce der Marker aus dem Authoring-Prompt (pro Aufruf frisch)."""
+    match = re.search(r"===BEGIN [^\s=]+ ([0-9a-f]+)===", prompt)
+    assert match, f"Kein Marker mit Nonce im Prompt: {prompt[-500:]!r}"
+    return match.group(1)
+
+
+def _blocks(**named: str):
+    """Stdout-Builder: baut die Marker-Blöcke mit der Nonce des echten Prompts."""
+
+    def build(argv: list[str]) -> str:
+        nonce = _marker_id(argv[-1])
+        return "\n".join(
+            f"===BEGIN {name} {nonce}===\n{body}\n===END {name} {nonce}==="
+            for name, body in named.items()
+        )
+
+    return build
+
+
+def _join(*parts):
+    def build(argv: list[str]) -> str:
+        return "\n".join(part(argv) if callable(part) else part for part in parts)
+
+    return build
+
+
+def test_author_is_invoked_read_only_in_cwd(captured_run, tmp_path):
+    captured_run["stdout"] = _blocks(**{"spec.md": "# Ziel\nDas Issue lösen."})
+    artifacts = CodexRunner().author("spec", "Setze Issue #7 um", cwd=tmp_path)
+    argv = captured_run["argv"]
+    assert argv[:2] == ["codex", "exec"]
+    assert "--sandbox" in argv and argv[argv.index("--sandbox") + 1] == "read-only"
+    assert "-C" in argv and argv[argv.index("-C") + 1] == str(tmp_path)
+    assert artifacts == {"spec.md": "# Ziel\nDas Issue lösen."}
+
+
+def test_author_prompt_carries_task_and_marker_contract(captured_run, tmp_path):
+    captured_run["stdout"] = _blocks(**{"spec.md": "x"})
+    CodexRunner().author("spec", "Setze Issue #7 um", cwd=tmp_path)
+    prompt = captured_run["argv"][-1]
+    nonce = _marker_id(prompt)
+    assert "Setze Issue #7 um" in prompt
+    assert f"===BEGIN spec.md {nonce}===" in prompt and f"===END spec.md {nonce}===" in prompt
+
+
+def test_author_markers_carry_a_fresh_nonce_per_call(captured_run, tmp_path):
+    """Die Nonce macht die Marker kollisionssicher: Inhalte, die selbst über
+    das Marker-Format schreiben, können den Block nicht früh beenden."""
+    captured_run["stdout"] = _blocks(**{"spec.md": "x"})
+    CodexRunner().author("spec", "Issue", cwd=tmp_path)
+    first = _marker_id(captured_run["argv"][-1])
+    CodexRunner().author("spec", "Issue", cwd=tmp_path)
+    assert _marker_id(captured_run["argv"][-1]) != first
+
+
+def test_author_keeps_content_that_mentions_the_bare_markers(captured_run, tmp_path):
+    """Regression: eine Spec ÜBER dieses Protokoll darf nicht abgeschnitten werden."""
+    body = "# Ziel\n===END spec.md===\nsteht mitten im Text.\n===BEGIN spec.md===\nauch."
+    captured_run["stdout"] = _blocks(**{"spec.md": body})
+    assert CodexRunner().author("spec", "Issue", cwd=tmp_path) == {"spec.md": body}
+
+
+def test_author_rejects_a_pure_prompt_echo_as_answer(captured_run, tmp_path):
+    """Regression: echot codex nur den Prompt (leere Vorlage-Blöcke), ist das
+    keine Antwort — sonst landeten Platzhalter als Artefakte auf der Platte."""
+    from adw.codex import CodexAuthorError
+
+    captured_run["stdout"] = lambda argv: argv[-1]
+    with pytest.raises(CodexAuthorError, match="[Ll]eer"):
+        CodexRunner().author("spec", "Issue", cwd=tmp_path)
+    captured_run["stdout"] = lambda argv: argv[-1]
+    with pytest.raises(CodexAuthorError, match="[Ll]eer"):
+        CodexRunner().author("plan", "Aus .adw/spec.md", cwd=tmp_path)
+
+
+def test_author_spec_prompt_mirrors_the_spec_agent_requirements(captured_run, tmp_path):
+    """Same content requirements as the spec_agent system prompt: proportionality,
+    'Deferred' section, no process/git requirements."""
+    captured_run["stdout"] = _blocks(**{"spec.md": "x"})
+    CodexRunner().author("spec", "Issue", cwd=tmp_path)
+    prompt = captured_run["argv"][-1].lower()
+    assert "proportionality" in prompt
+    assert "deferred" in prompt
+    assert "commit" in prompt
+    assert "acceptance criteria" in prompt
+
+
+def test_author_plan_prompt_requires_plan_and_contract_blocks(captured_run, tmp_path):
+    captured_run["stdout"] = _blocks(
+        **{"plan.md": "## Workstream backend", "contract.yaml": "routes: []"}
+    )
+    artifacts = CodexRunner().author("plan", "Aus .adw/spec.md", cwd=tmp_path)
+    prompt = captured_run["argv"][-1]
+    nonce = _marker_id(prompt)
+    assert f"===BEGIN plan.md {nonce}===" in prompt
+    assert f"===BEGIN contract.yaml {nonce}===" in prompt
+    assert "contract" in prompt.lower() and "workstream" in prompt.lower()
+    assert artifacts == {"plan.md": "## Workstream backend", "contract.yaml": "routes: []"}
+
+
+def test_author_takes_the_last_block_when_the_transcript_echoes_markers(captured_run, tmp_path):
+    """The tool transcript may echo the prompt (incl. markers) — only the final
+    block counts, as with the review JSON."""
+    captured_run["stdout"] = _join(
+        _blocks(**{"spec.md": "Entwurf, verworfen."}),
+        "Jetzt die echte Antwort:",
+        _blocks(**{"spec.md": "# Ziel\nEcht."}),
+    )
+    assert CodexRunner().author("spec", "Issue", cwd=tmp_path) == {"spec.md": "# Ziel\nEcht."}
+
+
+def test_author_without_block_raises_author_error(captured_run, tmp_path):
+    from adw.codex import CodexAuthorError
+
+    captured_run["stdout"] = "Ich bin nur Prosa ohne Marker."
+    with pytest.raises(CodexAuthorError, match="spec.md"):
+        CodexRunner().author("spec", "Issue", cwd=tmp_path)
+
+
+def test_author_with_empty_block_raises_author_error(captured_run, tmp_path):
+    from adw.codex import CodexAuthorError
+
+    captured_run["stdout"] = _blocks(**{"spec.md": "   \n  "})
+    with pytest.raises(CodexAuthorError, match="[Ll]eer"):
+        CodexRunner().author("spec", "Issue", cwd=tmp_path)
+
+
+def test_author_with_one_missing_block_raises_author_error(captured_run, tmp_path):
+    from adw.codex import CodexAuthorError
+
+    captured_run["stdout"] = _blocks(**{"plan.md": "## Workstream backend"})
+    with pytest.raises(CodexAuthorError, match="contract.yaml"):
+        CodexRunner().author("plan", "Aus .adw/spec.md", cwd=tmp_path)
+
+
+def test_author_never_mixes_blocks_from_prompt_echo_and_answer(captured_run, tmp_path):
+    """Regression: fehlt contract.yaml in der finalen Antwort, darf NICHT der
+    Platzhalter aus dem echoten Prompt einspringen."""
+    from adw.codex import CodexAuthorError
+
+    captured_run["stdout"] = _join(
+        _blocks(**{"plan.md": "Entwurf", "contract.yaml": "Entwurf"}),
+        "Jetzt die echte Antwort:",
+        _blocks(**{"plan.md": "## Workstream backend"}),
+    )
+    with pytest.raises(CodexAuthorError, match="contract.yaml"):
+        CodexRunner().author("plan", "Aus .adw/spec.md", cwd=tmp_path)
+
+
+def test_author_takes_the_last_coherent_block_set(captured_run, tmp_path):
+    captured_run["stdout"] = _join(
+        _blocks(**{"plan.md": "Entwurf", "contract.yaml": "Entwurf"}),
+        "Jetzt die echte Antwort:",
+        _blocks(**{"plan.md": "## Workstream backend", "contract.yaml": "routes: []"}),
+    )
+    assert CodexRunner().author("plan", "Aus .adw/spec.md", cwd=tmp_path) == {
+        "plan.md": "## Workstream backend",
+        "contract.yaml": "routes: []",
+    }
+
+
+def test_author_error_is_a_codex_error():
+    """Callers that catch CodexError must not have to know the authoring subclass."""
+    from adw.codex import CodexAuthorError, CodexError
+
+    assert issubclass(CodexAuthorError, CodexError)
+
+
+def test_author_nonzero_exit_raises(captured_run, tmp_path):
+    from adw.codex import CodexError
+
+    captured_run["returncode"] = 2
+    captured_run["stderr"] = "kaputt"
+    with pytest.raises(CodexError, match="kaputt"):
+        CodexRunner().author("spec", "Issue", cwd=tmp_path)
+
+
+def test_author_uses_isolated_codex_home_and_sanitized_env(captured_run, tmp_path, monkeypatch):
+    """Same isolation as review(): auth.json only, no config.toml, no secrets."""
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "geheim")
+    src = tmp_path / "codex-home"
+    src.mkdir()
+    (src / "auth.json").write_text('{"token": "x"}')
+    (src / "config.toml").write_text('[mcp_servers.evil]\ncommand = "x"\n')
+    monkeypatch.setenv("CODEX_HOME", str(src))
+    captured_run["stdout"] = _blocks(**{"spec.md": "x"})
+    CodexRunner().author("spec", "Issue", cwd=tmp_path)
+    env = captured_run["kwargs"]["env"]
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+    assert env["CODEX_HOME"] != str(src)
+    assert captured_run["home_files"] == ["auth.json"]
+    assert not Path(env["CODEX_HOME"]).exists()  # Temp-Home wird aufgeräumt
+
+
 def test_mock_codex_returns_scripted_results_in_order(tmp_path):
     from adw.findings import ReviewResult
 
@@ -300,3 +497,22 @@ def test_mock_codex_without_script_raises(tmp_path):
     mock = MockCodexRunner()
     with pytest.raises(AssertionError):
         mock.review("spec", ["x"], cwd=tmp_path)
+
+
+def test_mock_codex_authors_scripted_artifacts_in_order(tmp_path):
+    mock = MockCodexRunner()
+    mock.script_artifacts({"spec.md": "# Ziel"}, {"plan.md": "## Plan", "contract.yaml": "{}"})
+    first = mock.author("spec", "Issue #7", cwd=tmp_path)
+    second = mock.author("plan", "Aus .adw/spec.md", cwd=tmp_path)
+    assert first == {"spec.md": "# Ziel"}
+    assert second == {"plan.md": "## Plan", "contract.yaml": "{}"}
+    assert [(call.kind, call.task) for call in mock.author_calls] == [
+        ("spec", "Issue #7"),
+        ("plan", "Aus .adw/spec.md"),
+    ]
+
+
+def test_mock_codex_author_without_script_raises(tmp_path):
+    mock = MockCodexRunner()
+    with pytest.raises(AssertionError):
+        mock.author("spec", "Issue #7", cwd=tmp_path)

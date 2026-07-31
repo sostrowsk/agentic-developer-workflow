@@ -1,4 +1,5 @@
-"""Codex reviewer: independent review via `codex exec` (read-only sandbox).
+"""Codex client: independent review AND artifact authoring via `codex exec`
+(read-only sandbox).
 
 Known Limitations:
 - The read-only sandbox of the Codex CLI prevents mutations, but not reads
@@ -17,6 +18,7 @@ import collections
 import contextlib
 import fcntl
 import os
+import secrets
 import shutil
 import signal
 import subprocess
@@ -75,12 +77,65 @@ _KIND_INSTRUCTIONS: dict[ReviewKind, str] = {
 
 _SCHEMA_INSTRUCTION = SCHEMA_INSTRUCTION
 
+AuthorKind = Literal["spec", "plan"]
+
+# Artefakte je Authoring-Auftrag — zugleich die Marker-Namen im Output.
+_AUTHOR_BLOCKS: dict[AuthorKind, tuple[str, ...]] = {
+    "spec": ("spec.md",),
+    "plan": ("plan.md", "contract.yaml"),
+}
+
+# Inhaltlich identische Vorgaben wie die Autor-System-Prompts der
+# entsprechenden Agents in adw/agents.py — beide Autoren müssen dieselbe
+# Spec/Plan-Qualität liefern, sonst driften die Artefakte je Autor.
+_AUTHOR_INSTRUCTIONS: dict[AuthorKind, str] = {
+    "spec": (
+        "You are the Spec author of an Agentic Developer Workflow. You write "
+        "EXCLUSIVELY the specification following a fixed template (goal, scope, "
+        "non-goals, acceptance criteria, Definition of Done). "
+        "Proportionality is binding: every acceptance criterion must trace "
+        "back to the issue or to a concrete failure with real damage; prefer "
+        "existing backstops (TTLs, webhooks, logs) over new mechanisms or "
+        "persistent states. Honor explicit non-goals and scope ceilings in "
+        "the issue. Put defensible-but-disproportionate hardening ideas into "
+        "a 'Deferred (deliberately not built)' section instead of acceptance "
+        "criteria. The spec describes PRODUCT behavior only — observable "
+        "behavior, data states, interfaces. It never normalizes the "
+        "development process: no requirements on commit messages, commit "
+        "prefixes, branch topology, commit order or git history, neither in "
+        "acceptance criteria nor in the Definition of Done. Implementation "
+        "agents do not commit — the orchestrator commits for them, so such "
+        "criteria are structurally unsatisfiable and unverifiable. This "
+        "concerns the WORKFLOW's own process; git behavior that the product "
+        "under change itself produces (e.g. commits written by the code) is "
+        "observable product behavior and belongs in the spec. TDD is "
+        "the agents' way of working and needs no acceptance criterion. "
+        "You never implement and never change production code."
+    ),
+    "plan": (
+        "You are the Plan author of an Agentic Developer Workflow. From "
+        ".adw/spec.md you produce the implementation plan with the "
+        "Workstreams 'backend' and 'frontend' (if the lane exists) as well as "
+        "the interface contract (OpenAPI/types/events). Both lanes will later "
+        "build strictly against the contract. Keep the contract minimal: with "
+        "a single Workstream it pins only externally observable surfaces "
+        "(HTTP routes, events, template behavior), never internal helper "
+        "signatures. Do not add plan steps or tests beyond the spec's scope; "
+        "carry the spec's 'Deferred' section through unchanged. You never "
+        "implement."
+    ),
+}
+
 
 class CodexError(Exception):
     """codex exec failed (exit code, timeout, not installed)."""
 
 
-class CodexReviewer(Protocol):
+class CodexAuthorError(CodexError):
+    """codex exec produced no usable marker block for a requested artifact."""
+
+
+class CodexClient(Protocol):
     def review(
         self,
         kind: ReviewKind,
@@ -88,6 +143,8 @@ class CodexReviewer(Protocol):
         cwd: Path,
         context: str | None = None,
     ) -> ReviewResult: ...
+
+    def author(self, kind: AuthorKind, task: str, cwd: Path) -> dict[str, str]: ...
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
@@ -169,6 +226,49 @@ def _sync_rotated_auth(isolated: Path, source: Path, original: bytes | None) -> 
         return False
 
 
+def _markers(name: str, marker_id: str) -> tuple[str, str]:
+    """Begin/end marker of a block. The per-call nonce makes them
+    collision-safe: an artifact may write ABOUT this protocol without its
+    prose accidentally terminating its own block."""
+    return f"===BEGIN {name} {marker_id}===", f"===END {name} {marker_id}==="
+
+
+def _extract_blocks(stdout: str, names: tuple[str, ...], marker_id: str) -> dict[str, str]:
+    """Contents between the begin/end markers, one block per name.
+
+    Like the review JSON, only the LAST answer counts: the tool transcript may
+    echo the prompt (incl. its empty marker template) before the actual answer.
+    All blocks must therefore come from ONE coherent answer — parsing starts at
+    the last block of the first name and then moves strictly FORWARD in the
+    prompted order. Mixing an answer block with one from the echoed prompt
+    would silently persist half a template as an artifact; the prompt's own
+    blocks are empty and thus rejected."""
+    first_begin, _ = _markers(names[0], marker_id)
+    start = stdout.rfind(first_begin)
+    if start == -1:
+        raise CodexAuthorError(
+            f"codex exec: Block {names[0]!r} fehlt im Output\n"
+            f"--- Roh-Output (gekürzt) ---\n{stdout[-2000:]}"
+        )
+    blocks: dict[str, str] = {}
+    cursor = start
+    for name in names:
+        begin, end = _markers(name, marker_id)
+        begin_at = stdout.find(begin, cursor)
+        end_at = stdout.find(end, begin_at + len(begin)) if begin_at != -1 else -1
+        if begin_at == -1 or end_at == -1:
+            raise CodexAuthorError(
+                f"codex exec: Block {name!r} fehlt in der finalen Antwort\n"
+                f"--- Roh-Output (gekürzt) ---\n{stdout[-2000:]}"
+            )
+        content = stdout[begin_at + len(begin) : end_at].strip("\n")
+        if not content.strip():
+            raise CodexAuthorError(f"codex exec: Block {name!r} ist leer")
+        blocks[name] = content
+        cursor = end_at + len(end)
+    return blocks
+
+
 class CodexRunner:
     """Invokes the Codex CLI as a read-only subprocess and parses strictly."""
 
@@ -180,6 +280,18 @@ class CodexRunner:
         context: str | None = None,
     ) -> ReviewResult:
         prompt = self._build_prompt(kind, content_refs, context)
+        return extract_review_result(self._run(prompt, cwd))
+
+    def author(self, kind: AuthorKind, task: str, cwd: Path) -> dict[str, str]:
+        """Have Codex author the artifacts of `kind`; returns file name -> content.
+
+        Nothing is written: the read-only sandbox forbids it, so Codex returns the
+        content in marker blocks and the caller persists it."""
+        marker_id = secrets.token_hex(8)
+        stdout = self._run(self._build_author_prompt(kind, task, marker_id), cwd)
+        return _extract_blocks(stdout, _AUTHOR_BLOCKS[kind], marker_id)
+
+    def _run(self, prompt: str, cwd: Path) -> str:
         argv = [
             "codex",
             "exec",
@@ -216,7 +328,7 @@ class CodexRunner:
                 )
 
     @staticmethod
-    def _execute(argv: list[str], env: dict[str, str]) -> ReviewResult:
+    def _execute(argv: list[str], env: dict[str, str]) -> str:
         try:
             # Eigene Session: Bei Timeout/Interrupt stirbt die GANZE
             # Prozessgruppe (Codex spawnt Shell-Kommandos/MCP-Server).
@@ -254,7 +366,25 @@ class CodexRunner:
         stderr = b"".join(err_tail).decode("utf-8", errors="replace")
         if returncode != 0:
             raise CodexError(f"codex exec: Exit {returncode} — {stderr.strip()[:2000]}")
-        return extract_review_result(stdout)
+        return stdout
+
+    @staticmethod
+    def _build_author_prompt(kind: AuthorKind, task: str, marker_id: str) -> str:
+        # Vorlage bewusst OHNE Platzhalter-Inhalt: Echot codex nur den Prompt,
+        # sind die Blöcke leer — und leere Blöcke sind ein CodexAuthorError
+        # statt eines stillschweigend übernommenen Templates.
+        blocks = "\n\n".join(
+            "\n".join(_markers(name, marker_id)) for name in _AUTHOR_BLOCKS[kind]
+        )
+        return (
+            f"{_AUTHOR_INSTRUCTIONS[kind]}\n\n"
+            f"Task:\n{task.strip()}\n\n"
+            f"You run in a read-only sandbox and write no files — read the repository "
+            f"yourself and respond EXCLUSIVELY with the complete file content placed "
+            f"between the marker lines below, each artifact in its own block, in this "
+            f"order (no prose before, between or after the blocks, no markdown fence "
+            f"around them, and repeat the markers verbatim including their id):\n{blocks}"
+        )
 
     @staticmethod
     def _build_prompt(kind: ReviewKind, content_refs: list[str], context: str | None = None) -> str:

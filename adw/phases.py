@@ -26,7 +26,7 @@ from pydantic import ValidationError
 
 from adw import ci, github
 from adw.agents import REGISTRY, AgentRunner
-from adw.codex import CodexReviewer
+from adw.codex import CodexClient
 from adw.config import AdwConfig, Gate
 from adw.env import safe_env
 from adw.findings import (
@@ -86,7 +86,7 @@ class RunContext:
     config: AdwConfig
     state: RunState
     agents: AgentRunner
-    codex: CodexReviewer
+    codex: CodexClient
     run_glab: ci.RunGlab = ci.run_glab
     run_gh: github.RunGh = github.run_gh
     sleep: Callable[[float], None] = time.sleep

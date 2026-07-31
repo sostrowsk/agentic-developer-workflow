@@ -85,15 +85,34 @@ class CodexCall:
     context: str | None = None
 
 
+@dataclass(frozen=True)
+class CodexAuthorCall:
+    kind: str
+    task: str
+    cwd: Path
+
+
 @dataclass
 class MockCodexRunner:
-    """Scriptable Codex review results in call order, 0 tokens."""
+    """Scriptable Codex review results and authored artifacts in call order, 0 tokens."""
 
     results: deque[ReviewResult] = field(default_factory=deque)
     calls: list[CodexCall] = field(default_factory=list)
+    # Authoring liefert Datei-Inhalte (Name -> Inhalt) statt eines Verdicts.
+    artifacts: deque[dict[str, str]] = field(default_factory=deque)
+    author_calls: list[CodexAuthorCall] = field(default_factory=list)
 
     def script(self, *results: ReviewResult) -> None:
         self.results.extend(results)
+
+    def script_artifacts(self, *artifacts: dict[str, str]) -> None:
+        self.artifacts.extend(artifacts)
+
+    def author(self, kind: str, task: str, cwd: Path) -> dict[str, str]:
+        self.author_calls.append(CodexAuthorCall(kind=kind, task=task, cwd=Path(cwd)))
+        if not self.artifacts:
+            raise AssertionError(f"Keine gescripteten Codex-Artefakte (kind={kind!r})")
+        return self.artifacts.popleft()
 
     def review(
         self, kind: str, content_refs: list[str], cwd: Path, context: str | None = None
