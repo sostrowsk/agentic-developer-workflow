@@ -35,10 +35,12 @@ Git Worktrees.
 
 | Agent | Model | Tools | Mission |
 |---|---|---|---|
-| Spec agent | Fable 5 | Read/Grep/Glob + Write (only `.adw/`) | `.adw/spec.md` per template; never implements |
-| Plan agent | Fable 5 | Read/Grep/Glob + Write (only `.adw/`) | `.adw/plan.md` (workstreams FE/BE) + `.adw/contract.yaml` |
+| Spec agent (draft author) | Opus 4.8 | Read/Grep/Glob + Write (only `.adw/spec.md`) | Independent draft of the specification; never implements |
+| Plan agent (draft author) | Opus 4.8 | Read/Grep/Glob + Write (only `.adw/plan.md` + `.adw/contract.yaml`) | Independent draft of plan (workstreams FE/BE) + contract |
+| Spec synthesis | Fable 5 | Read/Grep/Glob + Write (only `.adw/spec.md` + `.adw/spec-summary.md`) | Best-of merge of both spec drafts + summary for the approval gate |
+| Plan synthesis | Fable 5 | Read/Grep/Glob + Write (only `.adw/plan.md`, `.adw/contract.yaml` + `.adw/plan-summary.md`) | Best-of merge of both plan/contract drafts + summary |
 | Build agent (per lane) | Opus 4.8 | Read/Write/Edit/Bash, `cwd` = lane Worktree | Workstream strictly against the contract; fix plans = recommendation |
-| Codex reviewer | Codex (CLI) | `codex exec --sandbox read-only` | Reviews of spec, plan, code; Findings + `remediation_plan` as JSON |
+| Codex | Codex (CLI) | `codex exec --sandbox read-only` | **Second draft author** of spec and plan (`author`) **and** reviewer of spec, plan, code (`review`); Findings + `remediation_plan` as JSON |
 | E2E Triage | Sonnet 5 (workhorse) | Read | Assign Playwright failures to a lane; fixes nothing |
 | Log analyst | Sonnet 5 (workhorse) | Read | CI logs → structured Findings with lane assignment |
 | Final reviewer | Fable 5 | Read/Grep/Glob (strictly read-only) | Check implementation against spec; Findings only |
@@ -46,15 +48,28 @@ Git Worktrees.
 Ground rules: **Reviewers never fix.** Every fix goes through the build agents and again through
 all Gates — no shortcut for "trivial" fixes.
 
+**Dual authoring (phases 1–2):** Every authoring artifact is written twice, independently —
+once by the Claude draft author (Opus), once by Codex (`codex exec --sandbox read-only`,
+returns the file contents in marker blocks because the sandbox may not write). Both drafts run
+**in parallel** and land in `.adw/runs/<run_id>/drafts/`. The synthesis agent (Fable) then merges
+them into ONE best-of artifact — per section the stronger formulation wins, never a union;
+contradictions are resolved in favor of the issue. Both draft authors and the synthesis share the
+same content rules (proportionality, scope ceilings, "Deferred" section), so the synthesis does
+not undo the authors' scope counterweight.
+
 ## 4. The Seven Phases (target behavior)
 
-1. **Spec:** Issue (CLI text, GitLab issue via `glab` or GitHub issue via `gh`) → spec agent writes `.adw/spec.md`
-   (goal, scope, non-goals, acceptance criteria, definition of done). Codex reviews; Findings
-   go back to the spec agent (session resume) until verdict `ok`.
-2. **Plan + contract:** Plan agent produces `.adw/plan.md` + `.adw/contract.yaml`
-   (OpenAPI/types/events). Codex reviews both together until `ok`.
-   **Plan approval gate:** Workflow pauses (state persisted, exit); Stefan reads plan +
-   contract and continues via `adw resume <run_id>` or `adw approve <run_id>`.
+1. **Spec:** Issue (CLI text, GitLab issue via `glab` or GitHub issue via `gh`) → **draft stage:**
+   spec agent and Codex each write an independent draft of `.adw/spec.md` (goal, scope,
+   non-goals, acceptance criteria, definition of done), in parallel, into
+   `.adw/runs/<run_id>/drafts/`. Then the **spec synthesis** merges both drafts into
+   `.adw/spec.md` and writes the summary `.adw/spec-summary.md`. Codex reviews the artifact;
+   Findings go back to the synthesis agent (session resume) until verdict `ok`.
+2. **Plan + contract:** Same two-step: draft stage (plan agent + Codex, each with
+   `.adw/plan.md` + `.adw/contract.yaml`, OpenAPI/types/events), then **plan synthesis** →
+   best-of artifacts + `.adw/plan-summary.md`. Codex reviews plan and contract together until `ok`.
+   **Plan approval gate:** Workflow pauses (state persisted, exit); Stefan reads the summary,
+   plan + contract and continues via `adw resume <run_id>` or `adw approve <run_id>`.
    Can be disabled with `--no-approval`.
 3. **Build:** Dispatch (code) splits the plan into workstreams. Per lane: own Git Worktree
    (branch off base branch), own SDK session, own ports. Lane loop: build agent works →
@@ -74,6 +89,13 @@ all Gates — no shortcut for "trivial" fixes.
    45-min timeout) until pipeline + staging deploy are green — GitLab via `glab`, GitHub
    Actions via `gh` (forge from `ci.provider` or origin URL). On a red pipeline:
    log analyst reads logs → Findings → back to phase 3/4.
+
+**Degradation and escalation in the draft stage (phases 1–2):** A failed Codex draft only
+**degrades** — a warning plus a `<kind>.codex.FAILED` marker is written and the synthesis works
+from the single remaining source (which it states in the summary); the marker prevents a resume
+from burning another Codex run on the same broken input. A missing, empty or unchanged Claude
+draft **escalates** — without it there is nothing to synthesize. The stage is idempotent over the
+draft FILES, not over the state: an existing, non-empty draft skips its author on resume.
 
 **Codex review-loop policy** (spec/plan authoring loops in phases 1–2 and the code review in
 phase 5): round 1 acts on all findings (P1–P3), round 2 only on P1+P2, from round 3 only on P1 —
@@ -156,8 +178,19 @@ a parse error is safe, a false "ok" is not. Validation strictly via Pydantic
 
 - `.adw/spec.md`, `.adw/plan.md`, `.adw/contract.yaml` — in the target repo, are
   **committed along** on the feature branch (traceability).
+- `.adw/spec-summary.md`, `.adw/plan-summary.md` — the synthesis summary of the phase, the
+  decision basis at the approval gate: short, in the language of the issue text, with what/why,
+  key decisions, scope boundaries/deferred, provenance (what came from which draft, where the
+  drafts disagreed) and open questions. It runs along as a loop artifact (it must exist and be
+  non-empty, otherwise escalation; fix rounds keep it current) but is **never** a Codex review
+  reference and is **not** seeded into any build lane. It is archived into the run folder, so it
+  is not committed.
 - `.adw/runs/<run_id>/` — gitignored: `state.json` (RunState), agent transcripts,
-  Gate outputs, `escalation.md`.
+  Gate outputs, `escalation.md`, the archived artifacts + summaries, and
+  `drafts/` with both authors' drafts per authoring phase
+  (`spec.claude.md` / `spec.codex.md`, `plan.claude.md` / `plan.codex.md`,
+  `contract.claude.yaml` / `contract.codex.yaml`, plus a `<kind>.codex.FAILED` marker
+  when a Codex draft failed).
 - `RunState` (Pydantic): run_id, issue, phase, lanes (worktree, branch, session_id, ports,
   iterations), approval status, ci status. Persisted after every phase transition →
   `adw resume` continues exactly there.
@@ -169,7 +202,8 @@ a parse error is safe, a false "ok" is not. Validation strictly via Pydantic
 2. **Reviewer ≠ fixer.**
 3. **Every fix takes the validated path** (all Gates, no exception).
 4. **Structured handovers:** JSON/Pydantic between all nodes, no free-text parsing.
-5. **Model economy:** Fable 5 only spec/plan/final review; Opus builds; Sonnet 5 triages.
+5. **Model economy:** Opus writes the spec/plan drafts and builds; Fable 5 only synthesis and
+   final review; Sonnet 5 triages.
 6. **Security:** `allowed_tools` per agent from the registry; build agents limited to their
    Worktree via `cwd`; env whitelist for all subprocesses (no secret leakage);
    never blanket permission skipping.
@@ -185,18 +219,22 @@ a parse error is safe, a false "ok" is not. Validation strictly via Pydantic
   blanking the API key env variables; no token-by-token API path. Failed
   agent calls (e.g. limit exhausted) end the run in a controlled way WITHOUT escalation
   — `adw resume` continues at the checkpoint after the reset.
-- Codex as a CLI subprocess (`codex exec --sandbox read-only`), no second SDK.
+- Codex as a CLI subprocess (`codex exec --sandbox read-only`), no second SDK — both for
+  reviews (`review`) and as a draft author (`author`); because the read-only sandbox may not
+  write, the author call returns the file contents in marker blocks with a per-call nonce,
+  and the orchestrator persists them.
 - `glab` for GitLab or `gh` for GitHub (read issue, pipeline/Actions status),
   `git worktree` for lanes,
   ports deterministic from run_id (base port + hash offset, socket bind check as fallback).
-- Agent and Codex calls each behind an interface (`AgentRunner`, `CodexRunner`);
+- Agent and Codex calls each behind an interface (`AgentRunner`, `CodexClient`);
   `--dry-run` injects mocks with canonical fixtures (simulated Gate fails,
   review Findings) — complete v1/v2 control flow testable without tokens.
 
 ## 8. Acceptance Criteria (Definition of Done)
 
 1. `adw run --repo <test-repo> --issue "…" --dry-run` passes through all 7 phases (single lane)
-   without token consumption; `--dry-run --parallel` passes through both lanes incl. the E2E Triage path.
+   without token consumption — including both drafts and both summaries per authoring phase in
+   the run folder; `--dry-run --parallel` passes through both lanes incl. the E2E Triage path.
 2. A simulated Gate fail leads to a fix task to the same session; after 10 unsuccessful
    iterations or on zero progress (circuit breaker), `escalation.md` is created and
    exit code ≠ 0.

@@ -191,7 +191,7 @@ Danach der echte Lauf:
 
 <div class="phase-flow">
 
-<span class="ph">1 Spec<span class="small">Fable 5 + Codex</span></span><span class="arrow">→</span> <span class="ph">2 Plan + Kontrakt<span class="small">Fable 5 + Codex · Approval</span></span><span class="arrow">→</span> <span class="ph">3 Build<span class="small">Opus 4.8 je Lane + Gates</span></span><span class="arrow">→</span> <span class="ph">4 Integration + E2E<span class="small">nur --parallel</span></span><span class="arrow">→</span> <span class="ph">5 Codex-Review<span class="small">Code-Diff</span></span><span class="arrow">→</span> <span class="ph">6 Finaler Review<span class="small">Fable 5 + Triage</span></span><span class="arrow">→</span> <span class="ph">7 Push + CI<span class="small">glab-/gh-Polling</span></span>
+<span class="ph">1 Spec<span class="small">2 Entwürfe + Synthese + Codex</span></span><span class="arrow">→</span> <span class="ph">2 Plan + Kontrakt<span class="small">2 Entwürfe + Synthese · Approval</span></span><span class="arrow">→</span> <span class="ph">3 Build<span class="small">Opus 4.8 je Lane + Gates</span></span><span class="arrow">→</span> <span class="ph">4 Integration + E2E<span class="small">nur --parallel</span></span><span class="arrow">→</span> <span class="ph">5 Codex-Review<span class="small">Code-Diff</span></span><span class="arrow">→</span> <span class="ph">6 Finaler Review<span class="small">Fable 5 + Triage</span></span><span class="arrow">→</span> <span class="ph">7 Push + CI<span class="small">glab-/gh-Polling</span></span>
 
 </div>
 
@@ -199,7 +199,7 @@ Phase 1–2: Spec und Plan entstehen — und werden unabhängig reviewt
 
 <div class="inner">
 
-Der **Spec-Agent** schreibt aus deinem Issue eine Spezifikation nach fester Vorlage (Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, Definition of Done) nach `.adw/spec.md`. **Codex** reviewt sie; Findings gehen als Folge-Task **an dieselbe Agent-Session** zurück, bis das Verdict `ok` ist — maximal 5 Runden. Pro Runde sinkt die Severity-Schwelle (Runde 1: alle Findings, Runde 2: P1+P2, ab Runde 3: nur P1), und Codex bekommt ab Runde 2 die Vorrunden-Findings samt Disposition mit, damit er erledigte oder bewusst abgewiesene Punkte nicht erneut anmerkt. Danach erzeugt der **Plan-Agent** analog `.adw/plan.md` (Workstreams) und `.adw/contract.yaml` (Schnittstellen-Kontrakt: OpenAPI/Typen/Events) — Codex prüft beides **gemeinsam gegen die Spec**. Anschließend pausiert der Run für dein Approval (Abschnitt 6).
+Jedes der beiden Artefakte entsteht **zweimal unabhängig**: Der **Spec-Agent** (Opus 4.8) und **Codex** schreiben je einen eigenen Entwurf der Spezifikation nach fester Vorlage (Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, Definition of Done) — parallel, beide Entwürfe landen in `.adw/runs/<run_id>/drafts/`. Die **Spec-Synthese** (Fable 5) merged sie danach zu EINEM Best-of-`.adw/spec.md` (je Abschnitt gewinnt die stärkere Formulierung, nie die Vereinigungsmenge) und schreibt die kurze Zusammenfassung `.adw/spec-summary.md` — deine Entscheidungsgrundlage am Approval-Gate. **Codex** reviewt das gemergte Artefakt; Findings gehen als Folge-Task **an dieselbe Synthese-Session** zurück, bis das Verdict `ok` ist — maximal 5 Runden. Pro Runde sinkt die Severity-Schwelle (Runde 1: alle Findings, Runde 2: P1+P2, ab Runde 3: nur P1), und Codex bekommt ab Runde 2 die Vorrunden-Findings samt Disposition mit, damit er erledigte oder bewusst abgewiesene Punkte nicht erneut anmerkt. Danach erzeugen **Plan-Agent** + Codex + **Plan-Synthese** analog `.adw/plan.md` (Workstreams), `.adw/contract.yaml` (Schnittstellen-Kontrakt: OpenAPI/Typen/Events) und `.adw/plan-summary.md` — Codex prüft Plan und Kontrakt **gemeinsam gegen die Spec**. Fällt Codex als *Autor* aus, bricht der Run nicht ab: die Synthese arbeitet dann allein mit dem Claude-Entwurf und schreibt das in die Zusammenfassung. Anschließend pausiert der Run für dein Approval (Abschnitt 6).
 
 </div>
 
@@ -241,13 +241,16 @@ Nach Phase 2 hält der Run standardmäßig an (<span class="exitcode ec2">Exit 2
 
     $ uv run adw run --repo ~/projekte/shop --issue "Warenkorb-Rabatte"
     Run 3f9a12c4 gestartet (Phase: spec)
-    Plan-Approval ausstehend: .adw/runs/3f9a12c4/plan.md lesen, dann `adw approve 3f9a12c4`
+    Plan-Approval ausstehend: .adw/runs/3f9a12c4/plan-summary.md und .adw/runs/3f9a12c4/plan.md lesen, dann `adw approve 3f9a12c4`
 
+    $ less ~/projekte/shop/.adw/runs/3f9a12c4/plan-summary.md # zuerst die Zusammenfassung der Synthese
     $ less ~/projekte/shop/.adw/runs/3f9a12c4/plan.md      # Plan prüfen
     $ less ~/projekte/shop/.adw/runs/3f9a12c4/contract.yaml # Kontrakt prüfen
     $ uv run adw approve 3f9a12c4 --repo ~/projekte/shop    # weiter mit Phase 3–7
 
 <div class="hint">
+
+Fang mit der Zusammenfassung an: Sie sagt in wenigen Zeilen, was warum gebaut werden soll, welche Entscheidungen gefallen sind, was bewusst wegblieb und wo die beiden Entwürfe auseinanderlagen — Plan und Kontrakt sind die Detailebene dahinter.
 
 Das Approval-Gate ist der billigste Ort, um falsche Richtungen zu stoppen: Eine korrigierte Annahme auf Plan-Ebene kostet nichts, auf Code-Ebene kostet sie Build-, Review- und Fix-Zyklen. Für kleine, risikoarme Aufgaben: `--no-approval`.
 
@@ -260,6 +263,8 @@ Das Approval-Gate ist der billigste Ort, um falsche Richtungen zu stoppen: Eine 
 | `.adw/spec.md`, `.adw/plan.md`, `.adw/contract.yaml` | Spec, Plan, Kontrakt — werden in die Lane-Worktrees kopiert und **auf dem Feature-Branch mitcommittet** (Traceability). | auf dem Feature-Branch getrackt; der Haupt-Checkout bleibt sauber |
 | `.adw/runs/<run_id>/state.json`                      | Kompletter Run-Zustand (Phase, Lanes, Sessions, Zähler) — Grundlage für `resume`.                                       | gitignored (ADW legt die Ignore-Regel selbst an)                  |
 | `.adw/runs/<run_id>/spec.md` etc.                    | Archivierte, reviewte Artefakt-Stände dieses Runs.                                                                      |                                                                   |
+| `.adw/runs/<run_id>/spec-summary.md`, `plan-summary.md` | Die Zusammenfassung der Synthese je Authoring-Phase — deine Entscheidungsgrundlage am Approval-Gate (Was/Warum, Kernentscheidungen, Deferred, welcher Entwurf was beisteuerte, offene Punkte). |                                                                   |
+| `.adw/runs/<run_id>/drafts/`                         | Die beiden unabhängigen Entwürfe je Authoring-Phase (`spec.claude.md` / `spec.codex.md`, `plan.*`, `contract.*`), dazu ein `<kind>.codex.FAILED`-Marker, falls der Codex-Entwurf fehlschlug. |                                                                   |
 | `.adw/runs/<run_id>/escalation.md`                   | Eskalations-Report: erreichter Stand, Phase, konkreter Grund.                                                           |                                                                   |
 | `.adw/runs/<run_id>/followups.md`                    | Follow-up-Issues aus `scope_gap`-Findings und vertagten P3-Findings (dedupliziert).                                                               |                                                                   |
 | `.adw/runs/<run_id>/trees/<lane>`                    | Lane-Worktrees (+ `trees/integration` bei `--parallel`).                                                                |                                                                   |
@@ -378,6 +383,8 @@ Das Abo-Fenster ist leer oder die Claude-CLI konnte nicht antworten. Kein Handlu
 | Begriff             | Bedeutung                                                                                                                        |
 |---------------------|----------------------------------------------------------------------------------------------------------------------------------|
 | **Lane**            | Ein Workstream (backend/frontend) mit eigenem Git-Worktree, eigenem Branch, eigener Agent-Session und eigenen Ports.             |
+| **Draft-Stage**     | Phase 1–2: Claude-Agent und Codex schreiben parallel je einen eigenen Entwurf des Artefakts nach `.adw/runs/<run_id>/drafts/`.   |
+| **Synthese**        | Der Agent, der beide Entwürfe zu EINEM Best-of-Artefakt merged und die Zusammenfassung fürs Approval-Gate schreibt.              |
 | **Gate**            | Ein konfiguriertes Prüfkommando (Linter, Tests, …) mit hartem Timeout. Alle Gates grün = Bedingung für jeden Commit.             |
 | **Kontrakt**        | `.adw/contract.yaml` — die vereinbarte Schnittstelle (OpenAPI/Typen/Events), gegen die beide Lanes unabhängig bauen.             |
 | **Finding**         | Strukturiertes Review-Ergebnis (JSON): Severity P1–P3, Lane, Datei, Problem, Fix-Empfehlung, ggf. Kategorie.                     |

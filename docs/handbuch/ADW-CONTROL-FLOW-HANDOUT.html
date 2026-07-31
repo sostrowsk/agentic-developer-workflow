@@ -218,7 +218,8 @@
 <table>
   <tr><th>Role on the construction site</th><th>Role in the ADW</th><th>Who does it?</th></tr>
   <tr><td>Site manager — organizes everything, makes no technical decisions</td><td>The <strong>Orchestrator</strong> — a fixed program</td><td>Deterministic code</td></tr>
-  <tr><td>Architect — writes the blueprint</td><td>Spec agent &amp; Plan agent</td><td>AI (Fable&nbsp;5)</td></tr>
+  <tr><td>Two architects who draw the blueprint independently</td><td>Spec/Plan agent &amp; Codex as a second author</td><td>AI (Opus&nbsp;4.8 / Codex)</td></tr>
+  <tr><td>Lead architect — makes one blueprint out of the two drafts</td><td>Spec/Plan synthesis</td><td>AI (Fable&nbsp;5)</td></tr>
   <tr><td>Construction workers — actually build</td><td>Build agents</td><td>AI (Opus&nbsp;4.8)</td></tr>
   <tr><td>Building inspectors — inspect, but never build themselves</td><td>Codex reviewer &amp; final reviewer</td><td>AI (Codex / Fable&nbsp;5)</td></tr>
   <tr><td>Checklists &amp; measuring devices — always the same checks</td><td><strong>Gates</strong> (automated tests)</td><td>Deterministic code</td></tr>
@@ -403,14 +404,19 @@
   <p class="frage">"What should be built in the first place?"</p>
   <p><strong>Input:</strong> the issue — a text, either typed in directly or fetched from GitLab/GitHub.</p>
   <ol>
-    <li>The <strong>Spec agent</strong> (AI) reads the issue and the project and writes a <strong>specification</strong> (<code>.adw/spec.md</code>): the goal, what is in scope, what is explicitly <em>not</em> in scope, and how you can tell it is done ("acceptance criteria", "definition of done"). It may <strong>only read and write this one file</strong> — it is not allowed to build anything.</li>
-    <li>The <strong>Codex reviewer</strong> (a second, independent AI) checks the specification.</li>
-    <li>If it finds defects, they go <strong>back to the same Spec agent</strong> — which keeps its memory from the first round (session resume) and reworks.</li>
+    <li><strong>Two drafts at the same time:</strong> the <strong>Spec agent</strong> (AI) reads the issue and the project and writes a <strong>draft specification</strong>: the goal, what is in scope, what is explicitly <em>not</em> in scope, and how you can tell it is done ("acceptance criteria", "definition of done"). <strong>In parallel, Codex writes its own draft</strong> of the same specification — from the same issue, but without seeing the other draft. Both drafts are stored side by side in the run folder (<code>.adw/runs/&lt;run_id&gt;/drafts/</code>). Neither author is allowed to build anything.</li>
+    <li>The <strong>synthesis</strong> (AI) reads the issue and <em>both</em> drafts and makes <strong>one</strong> specification out of them (<code>.adw/spec.md</code>): per section the better formulation wins, and a point that only one draft saw is kept if it holds up against the issue — deliberately <strong>not</strong> a merge of everything. In addition it writes a short <strong>summary</strong> (<code>.adw/spec-summary.md</code>): what and why, key decisions, what was deliberately left out, which draft contributed what, and what is still open — that is what you read at the approval stop.</li>
+    <li>The <strong>Codex reviewer</strong> (now in its reviewer role) checks the finished specification.</li>
+    <li>If it finds defects, they go <strong>back to the same synthesis agent</strong> — which keeps its memory from the first round (session resume) and reworks.</li>
     <li>This repeats until the reviewer says <strong>"ok"</strong> — at most <strong>5 rounds</strong>, with the bar descending per round (review loop, see Fig.&nbsp;2).</li>
   </ol>
+  <div class="callout amber">
+    <span class="label">If Codex fails as an author</span>
+    Nothing breaks: a note is recorded and the synthesis works from the Claude draft alone — and says so in the summary. Only the <em>missing Claude draft</em> aborts the run: without any draft there is nothing to synthesize.
+  </div>
   <details>
     <summary>More details (from the SPEC)</summary>
-    <p>The Spec agent runs on <strong>Fable&nbsp;5</strong> and has only the tools Read/Grep/Glob plus Write — the latter restricted to the directory <code>.adw/</code>. The issue arrives either as CLI text (<code>--issue "…"</code>), as a GitLab issue via <code>glab</code> (<code>--gitlab-issue &lt;id&gt;</code>) or as a GitHub issue via <code>gh</code> (<code>--github-issue &lt;nr&gt;</code>). The spec is later <strong>committed along</strong> on the feature branch — so it remains traceable what was built and reviewed against (traceability).</p>
+    <p>The Spec agent runs as a draft author on <strong>Opus&nbsp;4.8</strong>, the synthesis on <strong>Fable&nbsp;5</strong>; both have only the tools Read/Grep/Glob plus Write — the latter restricted artifact-exactly (<code>.adw/spec.md</code>, for the synthesis additionally <code>.adw/spec-summary.md</code>). Codex writes its draft with <code>codex exec --sandbox read-only</code> and therefore returns the file content in marker blocks, which the orchestrator saves. The issue arrives either as CLI text (<code>--issue "…"</code>), as a GitLab issue via <code>glab</code> (<code>--gitlab-issue &lt;id&gt;</code>) or as a GitHub issue via <code>gh</code> (<code>--github-issue &lt;nr&gt;</code>). The spec is later <strong>committed along</strong> on the feature branch — so it remains traceable what was built and reviewed against (traceability); the drafts and the summary stay in the (gitignored) run folder.</p>
   </details>
 </div>
 
@@ -420,9 +426,10 @@
   <h3><span class="phase-num">2</span> Plan + Contract</h3>
   <p class="frage">"How will it be built?"</p>
   <ol>
-    <li>The <strong>Plan agent</strong> (AI) turns the specification into a <strong>step-by-step blueprint</strong> (<code>.adw/plan.md</code>) and a <strong>contract</strong> (<code>.adw/contract.yaml</code>). The contract is like a binding <strong>power-socket standard</strong>: it defines exactly how the parts (e.g.&nbsp;the interface and the server logic) must fit together later — so that two teams working separately don't deliver incompatible parts in the end.</li>
+    <li>Exactly the same two-step as in phase 1: the <strong>Plan agent</strong> (AI) and <strong>Codex</strong> each turn the specification into their own draft of a <strong>step-by-step blueprint</strong> (<code>.adw/plan.md</code>) and a <strong>contract</strong> (<code>.adw/contract.yaml</code>) — in parallel and independently. The contract is like a binding <strong>power-socket standard</strong>: it defines exactly how the parts (e.g.&nbsp;the interface and the server logic) must fit together later — so that two teams working separately don't deliver incompatible parts in the end.</li>
+    <li>The <strong>plan synthesis</strong> merges both drafts into the final plan and contract and writes the summary <code>.adw/plan-summary.md</code>.</li>
     <li>The Codex reviewer checks plan and contract <strong>together</strong>, again in the loop until "ok" (same 5-round rule).</li>
-    <li><strong>Plan approval gate — the built-in STOP:</strong> The workflow <strong>halts</strong>, saves its complete state and exits. Now a <strong>human</strong> reads the plan and decides. Only the command <code>adw approve</code> (or <code>adw resume</code>) lets the run continue at exactly this point.</li>
+    <li><strong>Plan approval gate — the built-in STOP:</strong> The workflow <strong>halts</strong>, saves its complete state and exits. Now a <strong>human</strong> reads the summary and the plan and decides. Only the command <code>adw approve</code> (or <code>adw resume</code>) lets the run continue at exactly this point.</li>
   </ol>
   <div class="callout amber">
     <span class="label">The only planned stop</span>
@@ -430,7 +437,7 @@
   </div>
   <details>
     <summary>More details (from the SPEC)</summary>
-    <p>The Plan agent also runs on <strong>Fable&nbsp;5</strong> with Read/Grep/Glob + Write (only <code>.adw/</code>). The plan structures the work into <strong>workstreams</strong> (e.g.&nbsp;frontend/backend); the contract contains OpenAPI definitions, types and events. When pausing, the <code>RunState</code> is persisted and the process terminates with an exit — the run "sleeps" until <code>adw approve &lt;run_id&gt;</code> or <code>adw resume &lt;run_id&gt;</code> wakes it up.</p>
+    <p>The Plan agent runs, like the spec draft author, on <strong>Opus&nbsp;4.8</strong>, the plan synthesis on <strong>Fable&nbsp;5</strong> — both with Read/Grep/Glob + Write, restricted artifact-exactly (<code>.adw/plan.md</code>, <code>.adw/contract.yaml</code>, for the synthesis additionally <code>.adw/plan-summary.md</code>). The plan structures the work into <strong>workstreams</strong> (e.g.&nbsp;frontend/backend); the contract contains OpenAPI definitions, types and events. When pausing, the <code>RunState</code> is persisted and the process terminates with an exit — the run "sleeps" until <code>adw approve &lt;run_id&gt;</code> or <code>adw resume &lt;run_id&gt;</code> wakes it up.</p>
   </details>
 </div>
 
@@ -628,7 +635,7 @@
 
 <div class="satz">
   <span class="label">The whole thing in one sentence</span>
-  A fixed program takes a task through seven stations — describing, planning (with human approval), building, integrating, two independent reviews, delivering — and lets AI work only where judgment is needed, while every loop has a limit, every finding has a fixed way back, and every abort has a report.
+  A fixed program takes a task through seven stations — describing and planning (each twice independently, merged into a best-of version, with human approval), building, integrating, two independent reviews, delivering — and lets AI work only where judgment is needed, while every loop has a limit, every finding has a fixed way back, and every abort has a report.
 </div>
 
 <!-- ============ Technischer Anhang ============ -->
@@ -640,16 +647,18 @@
   <div class="table-scroll">
   <table>
     <tr><th>Agent</th><th>Model</th><th>Tools</th><th>Mission</th></tr>
-    <tr><td>Spec agent</td><td>Fable 5</td><td>Read/Grep/Glob + Write (only <code>.adw/</code>)</td><td><code>.adw/spec.md</code> per template; never implements</td></tr>
-    <tr><td>Plan agent</td><td>Fable 5</td><td>Read/Grep/Glob + Write (only <code>.adw/</code>)</td><td><code>.adw/plan.md</code> (workstreams FE/BE) + <code>.adw/contract.yaml</code></td></tr>
+    <tr><td>Spec agent (draft author)</td><td>Opus 4.8</td><td>Read/Grep/Glob + Write (only <code>.adw/spec.md</code>)</td><td>Independent draft of the specification; never implements</td></tr>
+    <tr><td>Plan agent (draft author)</td><td>Opus 4.8</td><td>Read/Grep/Glob + Write (only <code>.adw/plan.md</code> + <code>.adw/contract.yaml</code>)</td><td>Independent draft of plan (workstreams FE/BE) + contract</td></tr>
+    <tr><td>Spec synthesis</td><td>Fable 5</td><td>Read/Grep/Glob + Write (only <code>.adw/spec.md</code> + <code>.adw/spec-summary.md</code>)</td><td>Best-of merge of both spec drafts + summary for the approval gate</td></tr>
+    <tr><td>Plan synthesis</td><td>Fable 5</td><td>Read/Grep/Glob + Write (only <code>.adw/plan.md</code>, <code>.adw/contract.yaml</code> + <code>.adw/plan-summary.md</code>)</td><td>Best-of merge of both plan/contract drafts + summary</td></tr>
     <tr><td>Build agent (per lane)</td><td>Opus 4.8</td><td>Read/Write/Edit/Bash, <code>cwd</code> = lane worktree</td><td>Workstream strictly against the contract; fix plans = recommendation</td></tr>
-    <tr><td>Codex reviewer</td><td>Codex (CLI)</td><td><code>codex exec --sandbox read-only</code></td><td>Reviews of spec, plan, code; findings + <code>remediation_plan</code> as JSON</td></tr>
+    <tr><td>Codex</td><td>Codex (CLI)</td><td><code>codex exec --sandbox read-only</code></td><td>Second draft author of spec and plan <em>and</em> reviewer of spec, plan, code; findings + <code>remediation_plan</code> as JSON</td></tr>
     <tr><td>E2E triage</td><td>Sonnet 5</td><td>Read</td><td>Assign Playwright failures to a lane; fixes nothing</td></tr>
     <tr><td>Log analyst</td><td>Sonnet 5</td><td>Read</td><td>CI logs → structured findings with lane assignment</td></tr>
     <tr><td>Final reviewer</td><td>Fable 5</td><td>Read/Grep/Glob (strictly read-only)</td><td>Check implementation against the spec; findings only</td></tr>
   </table>
   </div>
-  <p><strong>Model economics:</strong> Fable&nbsp;5 only for spec/plan/final review (thinking, broad); Opus builds (deep); Sonnet&nbsp;5 triages (workhorse).</p>
+  <p><strong>Model economics:</strong> Opus writes the spec/plan drafts and builds (deep); Fable&nbsp;5 merges the drafts and does the final review (thinking, broad); Sonnet&nbsp;5 triages (workhorse).</p>
 </details>
 
 <details>
@@ -718,6 +727,8 @@ ci:
   <dt>Orchestrator</dt><dd>The fixed program that controls the entire process — the "site manager". Decides who acts when, but builds nothing itself.</dd>
   <dt>Agent</dt><dd>An AI with a clearly defined mission and limited tools (e.g. Spec agent, Build agent).</dd>
   <dt>Spec (specification)</dt><dd>The document that records <em>what</em> should be built — including what is explicitly not in scope.</dd>
+  <dt>Draft</dt><dd>One of the two independent first versions of spec or plan — one written by the Claude agent, one by Codex, in parallel and without knowledge of each other.</dd>
+  <dt>Synthesis</dt><dd>The AI that makes ONE best-of version out of both drafts and writes the short summary for the approval stop.</dd>
   <dt>Contract</dt><dd>The binding "power-socket standard": defines how the separately built parts (frontend/backend) must fit together exactly.</dd>
   <dt>Lane</dt><dd>An independent work track with its own folder (Git worktree), its own AI session and its own ports — lanes don't interfere with each other.</dd>
   <dt>Git worktree</dt><dd>An additional, independent working folder of the same project — each lane works in its own.</dd>

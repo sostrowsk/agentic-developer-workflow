@@ -218,7 +218,8 @@
 <table>
   <tr><th>Rolle auf der Baustelle</th><th>Rolle im ADW</th><th>Wer macht das?</th></tr>
   <tr><td>Bauleiter — organisiert alles, entscheidet nichts Fachliches</td><td>Der <strong>Orchestrator</strong> — festes Programm</td><td>Deterministischer Code</td></tr>
-  <tr><td>Architekt — schreibt den Bauplan</td><td>Spec-Agent &amp; Plan-Agent</td><td>KI (Fable&nbsp;5)</td></tr>
+  <tr><td>Zwei Architekten — zeichnen den Bauplan unabhängig voneinander</td><td>Spec-/Plan-Agent &amp; Codex als zweiter Autor</td><td>KI (Opus&nbsp;4.8 / Codex)</td></tr>
+  <tr><td>Chefarchitekt — macht aus beiden Entwürfen einen Bauplan</td><td>Spec-/Plan-Synthese</td><td>KI (Fable&nbsp;5)</td></tr>
   <tr><td>Handwerker — bauen tatsächlich</td><td>Build-Agents</td><td>KI (Opus&nbsp;4.8)</td></tr>
   <tr><td>Bauprüfer / TÜV — kontrollieren, bauen aber nie selbst</td><td>Codex-Reviewer &amp; finaler Reviewer</td><td>KI (Codex / Fable&nbsp;5)</td></tr>
   <tr><td>Checklisten &amp; Messgeräte — immer gleiche Prüfungen</td><td><strong>Gates</strong> (automatische Tests)</td><td>Deterministischer Code</td></tr>
@@ -403,14 +404,19 @@
   <p class="frage">„Was soll überhaupt gebaut werden?"</p>
   <p><strong>Eingabe:</strong> das Issue — ein Text, entweder direkt eingetippt oder aus GitLab/GitHub geholt.</p>
   <ol>
-    <li>Der <strong>Spec-Agent</strong> (KI) liest das Issue und das Projekt und schreibt eine <strong>Spezifikation</strong> (<code>.adw/spec.md</code>): Ziel, was dazugehört, was ausdrücklich <em>nicht</em> dazugehört, und woran man erkennt, dass es fertig ist („Akzeptanzkriterien", „Definition of Done"). Er darf dabei <strong>nur lesen und diese eine Datei schreiben</strong> — bauen darf er nichts.</li>
-    <li>Der <strong>Codex-Reviewer</strong> (eine zweite, unabhängige KI) prüft die Spezifikation.</li>
-    <li>Findet er Mängel, gehen sie <strong>an denselben Spec-Agenten zurück</strong> — der behält sein Gedächtnis aus der ersten Runde (Session-Resume) und bessert nach.</li>
+    <li><strong>Zwei Entwürfe gleichzeitig:</strong> Der <strong>Spec-Agent</strong> (KI) liest das Issue und das Projekt und schreibt einen <strong>Entwurf der Spezifikation</strong>: Ziel, was dazugehört, was ausdrücklich <em>nicht</em> dazugehört, und woran man erkennt, dass es fertig ist („Akzeptanzkriterien", „Definition of Done"). <strong>Parallel dazu schreibt Codex einen eigenen Entwurf</strong> derselben Spezifikation — aus demselben Issue, aber ohne den anderen Entwurf zu sehen. Beide Entwürfe liegen nebeneinander im Run-Ordner (<code>.adw/runs/&lt;run_id&gt;/drafts/</code>). Bauen darf keiner der beiden Autoren etwas.</li>
+    <li>Die <strong>Synthese</strong> (KI) liest das Issue und <em>beide</em> Entwürfe und macht <strong>eine</strong> Spezifikation daraus (<code>.adw/spec.md</code>): je Abschnitt gewinnt die bessere Formulierung, und ein Punkt, den nur ein Entwurf gesehen hat, bleibt drin, wenn er gegen das Issue standhält — bewusst <strong>keine</strong> Zusammenlegung von allem. Zusätzlich schreibt sie eine kurze <strong>Zusammenfassung</strong> (<code>.adw/spec-summary.md</code>): was und warum, Kernentscheidungen, was bewusst wegblieb, welcher Entwurf was beisteuerte und was offen ist — genau die liest du am Freigabe-Stopp.</li>
+    <li>Der <strong>Codex-Reviewer</strong> (jetzt in seiner Prüfer-Rolle) prüft die fertige Spezifikation.</li>
+    <li>Findet er Mängel, gehen sie <strong>an denselben Synthese-Agenten zurück</strong> — der behält sein Gedächtnis aus der ersten Runde (Session-Resume) und bessert nach.</li>
     <li>Das wiederholt sich, bis der Prüfer <strong>„ok"</strong> sagt — höchstens <strong>5 Runden</strong>, mit pro Runde sinkender Messlatte (Prüf-Schleife, siehe Abb.&nbsp;2).</li>
   </ol>
+  <div class="callout amber">
+    <span class="label">Fällt Codex als Autor aus</span>
+    Es bricht nichts ab: Der Ausfall wird vermerkt, und die Synthese arbeitet allein mit dem Claude-Entwurf weiter — und schreibt das in die Zusammenfassung. Nur ein <em>fehlender Claude-Entwurf</em> bricht den Lauf ab: ohne Entwurf gibt es nichts zu synthetisieren.
+  </div>
   <details>
     <summary>Mehr Details (aus der SPEC)</summary>
-    <p>Der Spec-Agent läuft auf <strong>Fable&nbsp;5</strong> und hat nur die Werkzeuge Read/Grep/Glob plus Write — Letzteres beschränkt auf das Verzeichnis <code>.adw/</code>. Das Issue kommt wahlweise als CLI-Text (<code>--issue "…"</code>), als GitLab-Issue via <code>glab</code> (<code>--gitlab-issue &lt;id&gt;</code>) oder als GitHub-Issue via <code>gh</code> (<code>--github-issue &lt;nr&gt;</code>). Die Spec wird später auf dem Feature-Branch <strong>mitcommittet</strong> — so bleibt nachvollziehbar, wogegen gebaut und geprüft wurde (Traceability).</p>
+    <p>Der Spec-Agent läuft als Entwurfs-Autor auf <strong>Opus&nbsp;4.8</strong>, die Synthese auf <strong>Fable&nbsp;5</strong>; beide haben nur die Werkzeuge Read/Grep/Glob plus Write — Letzteres artefakt-exakt beschränkt (<code>.adw/spec.md</code>, bei der Synthese zusätzlich <code>.adw/spec-summary.md</code>). Codex schreibt seinen Entwurf mit <code>codex exec --sandbox read-only</code> und liefert den Dateiinhalt deshalb in Marker-Blöcken zurück, die der Orchestrator speichert. Das Issue kommt wahlweise als CLI-Text (<code>--issue "…"</code>), als GitLab-Issue via <code>glab</code> (<code>--gitlab-issue &lt;id&gt;</code>) oder als GitHub-Issue via <code>gh</code> (<code>--github-issue &lt;nr&gt;</code>). Die Spec wird später auf dem Feature-Branch <strong>mitcommittet</strong> — so bleibt nachvollziehbar, wogegen gebaut und geprüft wurde (Traceability); Entwürfe und Zusammenfassung bleiben im (gitignorierten) Run-Ordner.</p>
   </details>
 </div>
 
@@ -420,9 +426,10 @@
   <h3><span class="phase-num">2</span> Plan + Kontrakt</h3>
   <p class="frage">„Wie wird es gebaut?"</p>
   <ol>
-    <li>Der <strong>Plan-Agent</strong> (KI) verwandelt die Spezifikation in einen <strong>Schritt-für-Schritt-Bauplan</strong> (<code>.adw/plan.md</code>) und einen <strong>Kontrakt</strong> (<code>.adw/contract.yaml</code>). Der Kontrakt ist wie eine verbindliche <strong>Steckdosen-Norm</strong>: Er legt exakt fest, wie die Teile (z.&nbsp;B. Oberfläche und Server-Logik) später zusammenpassen müssen — damit zwei getrennt arbeitende Teams am Ende keine inkompatiblen Teile abliefern.</li>
+    <li>Genau derselbe Zweischritt wie in Phase 1: Der <strong>Plan-Agent</strong> (KI) und <strong>Codex</strong> verwandeln die Spezifikation je in einen eigenen Entwurf eines <strong>Schritt-für-Schritt-Bauplans</strong> (<code>.adw/plan.md</code>) und eines <strong>Kontrakts</strong> (<code>.adw/contract.yaml</code>) — parallel und unabhängig. Der Kontrakt ist wie eine verbindliche <strong>Steckdosen-Norm</strong>: Er legt exakt fest, wie die Teile (z.&nbsp;B. Oberfläche und Server-Logik) später zusammenpassen müssen — damit zwei getrennt arbeitende Teams am Ende keine inkompatiblen Teile abliefern.</li>
+    <li>Die <strong>Plan-Synthese</strong> merged beide Entwürfe zum endgültigen Plan und Kontrakt und schreibt die Zusammenfassung <code>.adw/plan-summary.md</code>.</li>
     <li>Der Codex-Reviewer prüft Plan und Kontrakt <strong>gemeinsam</strong>, wieder in der Schleife bis „ok" (gleiche 5-Runden-Regel).</li>
-    <li><strong>Plan-Approval-Gate — der eingebaute STOPP:</strong> Der Workflow <strong>hält an</strong>, speichert seinen kompletten Zustand und beendet sich. Jetzt liest ein <strong>Mensch</strong> den Plan und entscheidet. Erst der Befehl <code>adw approve</code> (bzw. <code>adw resume</code>) lässt den Lauf exakt an dieser Stelle weiterlaufen.</li>
+    <li><strong>Plan-Approval-Gate — der eingebaute STOPP:</strong> Der Workflow <strong>hält an</strong>, speichert seinen kompletten Zustand und beendet sich. Jetzt liest ein <strong>Mensch</strong> die Zusammenfassung und den Plan und entscheidet. Erst der Befehl <code>adw approve</code> (bzw. <code>adw resume</code>) lässt den Lauf exakt an dieser Stelle weiterlaufen.</li>
   </ol>
   <div class="callout amber">
     <span class="label">Der einzige geplante Stopp</span>
@@ -430,7 +437,7 @@
   </div>
   <details>
     <summary>Mehr Details (aus der SPEC)</summary>
-    <p>Auch der Plan-Agent läuft auf <strong>Fable&nbsp;5</strong> mit Read/Grep/Glob + Write (nur <code>.adw/</code>). Der Plan gliedert die Arbeit in <strong>Workstreams</strong> (z.&nbsp;B. Frontend/Backend); der Kontrakt enthält OpenAPI-Definitionen, Typen und Events. Beim Pausieren wird der <code>RunState</code> persistiert und der Prozess beendet sich mit Exit — der Lauf „schläft", bis <code>adw approve &lt;run_id&gt;</code> oder <code>adw resume &lt;run_id&gt;</code> ihn weckt.</p>
+    <p>Der Plan-Agent läuft wie der Spec-Entwurfs-Autor auf <strong>Opus&nbsp;4.8</strong>, die Plan-Synthese auf <strong>Fable&nbsp;5</strong> — beide mit Read/Grep/Glob + Write, artefakt-exakt beschränkt (<code>.adw/plan.md</code>, <code>.adw/contract.yaml</code>, bei der Synthese zusätzlich <code>.adw/plan-summary.md</code>). Der Plan gliedert die Arbeit in <strong>Workstreams</strong> (z.&nbsp;B. Frontend/Backend); der Kontrakt enthält OpenAPI-Definitionen, Typen und Events. Beim Pausieren wird der <code>RunState</code> persistiert und der Prozess beendet sich mit Exit — der Lauf „schläft", bis <code>adw approve &lt;run_id&gt;</code> oder <code>adw resume &lt;run_id&gt;</code> ihn weckt.</p>
   </details>
 </div>
 
@@ -628,7 +635,7 @@
 
 <div class="satz">
   <span class="label">Das Ganze in einem Satz</span>
-  Ein festes Programm führt eine Aufgabe durch sieben Stationen — Beschreiben, Planen (mit menschlicher Freigabe), Bauen, Zusammenfügen, zweimal unabhängig Prüfen, Ausliefern — und lässt KI nur dort arbeiten, wo Urteilsvermögen gebraucht wird, während jede Schleife ein Limit, jeder Befund einen festen Rückweg und jeder Abbruch einen Bericht hat.
+  Ein festes Programm führt eine Aufgabe durch sieben Stationen — Beschreiben und Planen (jeweils zweimal unabhängig, zu einer Best-of-Fassung verschmolzen, mit menschlicher Freigabe), Bauen, Zusammenfügen, zweimal unabhängig Prüfen, Ausliefern — und lässt KI nur dort arbeiten, wo Urteilsvermögen gebraucht wird, während jede Schleife ein Limit, jeder Befund einen festen Rückweg und jeder Abbruch einen Bericht hat.
 </div>
 
 <!-- ============ Technischer Anhang ============ -->
@@ -640,16 +647,18 @@
   <div class="table-scroll">
   <table>
     <tr><th>Agent</th><th>Modell</th><th>Werkzeuge</th><th>Auftrag</th></tr>
-    <tr><td>Spec-Agent</td><td>Fable 5</td><td>Read/Grep/Glob + Write (nur <code>.adw/</code>)</td><td><code>.adw/spec.md</code> nach Vorlage; implementiert nie</td></tr>
-    <tr><td>Plan-Agent</td><td>Fable 5</td><td>Read/Grep/Glob + Write (nur <code>.adw/</code>)</td><td><code>.adw/plan.md</code> (Workstreams FE/BE) + <code>.adw/contract.yaml</code></td></tr>
+    <tr><td>Spec-Agent (Entwurfs-Autor)</td><td>Opus 4.8</td><td>Read/Grep/Glob + Write (nur <code>.adw/spec.md</code>)</td><td>Unabhängiger Entwurf der Spezifikation; implementiert nie</td></tr>
+    <tr><td>Plan-Agent (Entwurfs-Autor)</td><td>Opus 4.8</td><td>Read/Grep/Glob + Write (nur <code>.adw/plan.md</code> + <code>.adw/contract.yaml</code>)</td><td>Unabhängiger Entwurf von Plan (Workstreams FE/BE) + Kontrakt</td></tr>
+    <tr><td>Spec-Synthese</td><td>Fable 5</td><td>Read/Grep/Glob + Write (nur <code>.adw/spec.md</code> + <code>.adw/spec-summary.md</code>)</td><td>Best-of-Merge beider Spec-Entwürfe + Zusammenfassung fürs Freigabe-Gate</td></tr>
+    <tr><td>Plan-Synthese</td><td>Fable 5</td><td>Read/Grep/Glob + Write (nur <code>.adw/plan.md</code>, <code>.adw/contract.yaml</code> + <code>.adw/plan-summary.md</code>)</td><td>Best-of-Merge beider Plan-/Kontrakt-Entwürfe + Zusammenfassung</td></tr>
     <tr><td>Build-Agent (je Lane)</td><td>Opus 4.8</td><td>Read/Write/Edit/Bash, <code>cwd</code> = Lane-Worktree</td><td>Workstream strikt gegen Kontrakt; Fix-Pläne = Empfehlung</td></tr>
-    <tr><td>Codex-Reviewer</td><td>Codex (CLI)</td><td><code>codex exec --sandbox read-only</code></td><td>Reviews von Spec, Plan, Code; Findings + <code>remediation_plan</code> als JSON</td></tr>
+    <tr><td>Codex</td><td>Codex (CLI)</td><td><code>codex exec --sandbox read-only</code></td><td>Zweiter Entwurfs-Autor von Spec und Plan <em>und</em> Reviewer von Spec, Plan, Code; Findings + <code>remediation_plan</code> als JSON</td></tr>
     <tr><td>E2E-Triage</td><td>Sonnet 5</td><td>Read</td><td>Playwright-Fehler einer Lane zuordnen; fixt nichts</td></tr>
     <tr><td>Log-Analyst</td><td>Sonnet 5</td><td>Read</td><td>CI-Logs → strukturierte Findings mit Lane-Zuordnung</td></tr>
     <tr><td>Finaler Reviewer</td><td>Fable 5</td><td>Read/Grep/Glob (strikt read-only)</td><td>Implementierung gegen Spec prüfen; nur Findings</td></tr>
   </table>
   </div>
-  <p><strong>Modell-Ökonomie:</strong> Fable&nbsp;5 nur für Spec/Plan/finalen Review (denken, breit); Opus baut (tief); Sonnet&nbsp;5 triagiert (Workhorse).</p>
+  <p><strong>Modell-Ökonomie:</strong> Opus schreibt die Spec-/Plan-Entwürfe und baut (tief); Fable&nbsp;5 merged die Entwürfe und macht den finalen Review (denken, breit); Sonnet&nbsp;5 triagiert (Workhorse).</p>
 </details>
 
 <details>
@@ -718,6 +727,8 @@ ci:
   <dt>Orchestrator</dt><dd>Das feste Programm, das den gesamten Ablauf steuert — der „Bauleiter". Entscheidet, wer wann drankommt, aber baut nichts selbst.</dd>
   <dt>Agent</dt><dd>Eine KI mit einem klar umrissenen Auftrag und begrenzten Werkzeugen (z. B. Spec-Agent, Build-Agent).</dd>
   <dt>Spec (Spezifikation)</dt><dd>Das Dokument, das festhält, <em>was</em> gebaut werden soll — inklusive dem, was ausdrücklich nicht dazugehört.</dd>
+  <dt>Entwurf (Draft)</dt><dd>Eine der beiden unabhängigen ersten Fassungen von Spec oder Plan — eine vom Claude-Agenten, eine von Codex, parallel und ohne Kenntnis voneinander geschrieben.</dd>
+  <dt>Synthese</dt><dd>Die KI, die aus beiden Entwürfen EINE Best-of-Fassung macht und die kurze Zusammenfassung für den Freigabe-Stopp schreibt.</dd>
   <dt>Kontrakt</dt><dd>Die verbindliche „Steckdosen-Norm": legt fest, wie die getrennt gebauten Teile (Frontend/Backend) exakt zusammenpassen müssen.</dd>
   <dt>Lane</dt><dd>Eine eigenständige Arbeitsspur mit eigenem Ordner (Git-Worktree), eigener KI-Sitzung und eigenen Ports — Lanes stören sich nicht gegenseitig.</dd>
   <dt>Git-Worktree</dt><dd>Ein zusätzlicher, unabhängiger Arbeitsordner desselben Projekts — jede Lane arbeitet in ihrem eigenen.</dd>

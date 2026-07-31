@@ -15,7 +15,8 @@ You can think of it like a **construction site**:
 | Role on the construction site | Role in the ADW | Who does it? |
 |---|---|---|
 | Site manager (organizes everything, makes no technical decisions) | The **Orchestrator** — a fixed program | Deterministic code |
-| Architect (writes the blueprint) | Spec agent & Plan agent | AI (Fable 5) |
+| Two architects who draw the blueprint independently | Spec/Plan agent **and** Codex as a second author | AI (Opus 4.8 / Codex) |
+| Lead architect who makes one blueprint out of the two drafts | Spec/Plan synthesis | AI (Fable 5) |
 | Construction workers (actually build) | Build agents | AI (Opus 4.8) |
 | Building inspectors / TÜV (inspect, but never build themselves) | Codex reviewer & final reviewer | AI (Codex / Fable 5) |
 | Checklists & measuring devices (always the same checks) | **Gates** (automated tests) | Deterministic code |
@@ -60,34 +61,51 @@ phase by phase.
 
 **Input:** the issue — a text, either typed in directly or fetched from GitLab/GitHub.
 
-1. The **Spec agent** (AI) reads the issue and the project and writes a
-   **specification** (`.adw/spec.md`): the goal, what is in scope, what is explicitly
-   *not* in scope, and how you can tell it is done
-   ("acceptance criteria"). It may **only read and write this one file**
-   — it is not allowed to build anything.
-2. The **Codex reviewer** (a second, independent AI) checks the specification.
-3. If it finds defects, they go **back to the same Spec agent** — which keeps
+1. **Two drafts at the same time:** the **Spec agent** (AI) reads the issue and the
+   project and writes a **draft specification**: the goal, what is in scope, what is
+   explicitly *not* in scope, and how you can tell it is done ("acceptance criteria").
+   **In parallel, Codex writes its own draft** of the same specification, from the same
+   issue but without seeing the other draft. Both drafts are stored side by side in the
+   run folder (`.adw/runs/<run_id>/drafts/`). Neither author is allowed to build anything.
+2. **The synthesis** (AI) reads the issue and *both* drafts and makes **one**
+   specification out of them (`.adw/spec.md`): per section the better formulation wins,
+   and a point that only one draft saw is kept if it holds up against the issue. It is
+   deliberately **not** a merge of everything — everything carried over has to earn its
+   place. In addition, the synthesis writes a short **summary**
+   (`.adw/spec-summary.md`): what and why, key decisions, what was deliberately left out,
+   which draft contributed what, and what is still open. That summary is what you read
+   later at the approval stop.
+3. The **Codex reviewer** (now in its reviewer role) checks the finished specification.
+4. If it finds defects, they go **back to the same synthesis agent** — which keeps
    its "memory" from the first round (session resume) and reworks.
-4. This repeats until the reviewer says **"ok"** — at most **5 rounds**, with
+5. This repeats until the reviewer says **"ok"** — at most **5 rounds**, with
    the bar descending per round (details in phase 5).
 
-> Like an essay that an editor keeps handing back until it is clean —
-> but the editor never writes on the essay himself.
+> Like two editors each writing their own version of a text, an editor-in-chief making the
+> best version out of both — and a proofreader who keeps handing it back until it is
+> clean, but never writes on it himself.
+
+> **If Codex fails as an author** (e.g. the tool is unavailable), nothing breaks: a note
+> is recorded and the synthesis works from the Claude draft alone — and says so in the
+> summary. Only the *missing Claude draft* aborts the run: without any draft there is
+> nothing to synthesize.
 
 ### Phase 2 — Plan + Contract: "How will it be built?"
 
-1. The **Plan agent** (AI) turns the specification into a
-   **step-by-step blueprint** (`.adw/plan.md`) and a **contract**
-   (`.adw/contract.yaml`). The contract is like a binding
-   power-socket standard: it defines exactly how the parts (e.g. the interface and
-   the server logic) must fit together later — so that two teams working separately
-   don't deliver incompatible parts in the end.
-2. The Codex reviewer checks plan and contract **together**, again in the
+1. Exactly the same two-step as in phase 1: the **Plan agent** (AI) and **Codex** each
+   turn the specification into their own draft of a **step-by-step blueprint**
+   (`.adw/plan.md`) and a **contract** (`.adw/contract.yaml`) — in parallel and
+   independently. The contract is like a binding power-socket standard: it defines
+   exactly how the parts (e.g. the interface and the server logic) must fit together
+   later — so that two teams working separately don't deliver incompatible parts in the end.
+2. The **plan synthesis** merges both drafts into the final plan and contract and writes
+   the summary `.adw/plan-summary.md`.
+3. The Codex reviewer checks plan and contract **together**, again in the
    loop until "ok" (same 5-round rule).
-3. **Plan approval gate — the built-in STOP:** The workflow **halts**,
+4. **Plan approval gate — the built-in STOP:** The workflow **halts**,
    saves its complete state and exits. Now a
-   **human** reads the plan and decides. Only the command `adw approve` (or
-   `adw resume`) lets the run continue at exactly this point.
+   **human** reads the summary and the plan and decides. Only the command `adw approve`
+   (or `adw resume`) lets the run continue at exactly this point.
    (Anyone who fully trusts the automation can disable the stop with
    `--no-approval`.)
 
@@ -191,8 +209,9 @@ specification says?*
 
 ## The whole thing in one sentence
 
-> A fixed program takes a task through seven stations — describing,
-> planning (with human approval), building, integrating, two independent
+> A fixed program takes a task through seven stations — describing and
+> planning (each twice independently, merged into a best-of version, with human
+> approval), building, integrating, two independent
 > reviews, delivering — and lets AI work only where judgment
 > is needed, while every loop has a limit, every finding has a fixed
 > way back, and every abort has a report.

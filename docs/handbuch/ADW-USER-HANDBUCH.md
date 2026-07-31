@@ -191,7 +191,7 @@ Then the real run:
 
 <div class="phase-flow">
 
-<span class="ph">1 Spec<span class="small">Fable 5 + Codex</span></span><span class="arrow">→</span> <span class="ph">2 Plan + Contract<span class="small">Fable 5 + Codex · Approval</span></span><span class="arrow">→</span> <span class="ph">3 Build<span class="small">Opus 4.8 per Lane + Gates</span></span><span class="arrow">→</span> <span class="ph">4 Integration + E2E<span class="small">--parallel only</span></span><span class="arrow">→</span> <span class="ph">5 Codex review<span class="small">code diff</span></span><span class="arrow">→</span> <span class="ph">6 Final review<span class="small">Fable 5 + Triage</span></span><span class="arrow">→</span> <span class="ph">7 Push + CI<span class="small">glab/gh polling</span></span>
+<span class="ph">1 Spec<span class="small">2 drafts + synthesis + Codex</span></span><span class="arrow">→</span> <span class="ph">2 Plan + Contract<span class="small">2 drafts + synthesis · Approval</span></span><span class="arrow">→</span> <span class="ph">3 Build<span class="small">Opus 4.8 per Lane + Gates</span></span><span class="arrow">→</span> <span class="ph">4 Integration + E2E<span class="small">--parallel only</span></span><span class="arrow">→</span> <span class="ph">5 Codex review<span class="small">code diff</span></span><span class="arrow">→</span> <span class="ph">6 Final review<span class="small">Fable 5 + Triage</span></span><span class="arrow">→</span> <span class="ph">7 Push + CI<span class="small">glab/gh polling</span></span>
 
 </div>
 
@@ -199,7 +199,7 @@ Phases 1–2: Spec and plan are created — and independently reviewed
 
 <div class="inner">
 
-The **Spec agent** turns your issue into a specification following a fixed template (goal, scope, non-goals, acceptance criteria, definition of done) written to `.adw/spec.md`. **Codex** reviews it; Findings go back **to the same agent session** as a follow-up task until the verdict is `ok` — at most 5 rounds. The severity threshold descends per round (round 1: all findings, round 2: P1+P2, from round 3: P1 only), and from round 2 on Codex receives the previous rounds' findings including their disposition, so it does not re-report settled or deliberately rejected points. Then the **Plan agent** analogously produces `.adw/plan.md` (workstreams) and `.adw/contract.yaml` (interface contract: OpenAPI/types/events) — Codex checks both **together against the spec**. The run then pauses for your approval (section 6).
+Each of the two artifacts is written **twice, independently**: the **Spec agent** (Opus 4.8) and **Codex** each produce their own draft of the specification following a fixed template (goal, scope, non-goals, acceptance criteria, definition of done) — in parallel, both drafts land in `.adw/runs/<run_id>/drafts/`. The **Spec synthesis** (Fable 5) then merges them into ONE best-of `.adw/spec.md` (per section the stronger formulation wins, never a union) and writes the short summary `.adw/spec-summary.md` — your decision basis at the approval Gate. **Codex** reviews the merged artifact; Findings go back **to the same synthesis session** as a follow-up task until the verdict is `ok` — at most 5 rounds. The severity threshold descends per round (round 1: all findings, round 2: P1+P2, from round 3: P1 only), and from round 2 on Codex receives the previous rounds' findings including their disposition, so it does not re-report settled or deliberately rejected points. Then the **Plan agent** + Codex + **Plan synthesis** analogously produce `.adw/plan.md` (workstreams), `.adw/contract.yaml` (interface contract: OpenAPI/types/events) and `.adw/plan-summary.md` — Codex checks plan and contract **together against the spec**. If Codex fails as an *author*, the run does not abort: the synthesis works from the Claude draft alone and states that in the summary. The run then pauses for your approval (section 6).
 
 </div>
 
@@ -241,13 +241,16 @@ After phase 2, the run pauses by default (<span class="exitcode ec2">exit 2</spa
 
     $ uv run adw run --repo ~/projekte/shop --issue "Warenkorb-Rabatte"
     Run 3f9a12c4 gestartet (Phase: spec)
-    Plan-Approval ausstehend: .adw/runs/3f9a12c4/plan.md lesen, dann `adw approve 3f9a12c4`
+    Plan-Approval ausstehend: .adw/runs/3f9a12c4/plan-summary.md und .adw/runs/3f9a12c4/plan.md lesen, dann `adw approve 3f9a12c4`
 
+    $ less ~/projekte/shop/.adw/runs/3f9a12c4/plan-summary.md # the synthesis summary first
     $ less ~/projekte/shop/.adw/runs/3f9a12c4/plan.md      # check the plan
     $ less ~/projekte/shop/.adw/runs/3f9a12c4/contract.yaml # check the contract
     $ uv run adw approve 3f9a12c4 --repo ~/projekte/shop    # continue with phases 3–7
 
 <div class="hint">
+
+Start with the summary: it states in a few lines what is to be built and why, which decisions were made, what was deliberately left out, and where the two drafts disagreed — plan and contract are the detail level behind it.
 
 The approval Gate is the cheapest place to stop wrong directions: a corrected assumption at plan level costs nothing; at code level it costs build, review and fix cycles. For small, low-risk tasks: `--no-approval`.
 
@@ -260,6 +263,8 @@ The approval Gate is the cheapest place to stop wrong directions: a corrected as
 | `.adw/spec.md`, `.adw/plan.md`, `.adw/contract.yaml` | Spec, plan, contract — copied into the Lane Worktrees and **committed along on the feature branch** (traceability). | tracked on the feature branch; the main checkout stays clean |
 | `.adw/runs/<run_id>/state.json`                      | Complete run state (phase, Lanes, sessions, counters) — the basis for `resume`.                                     | gitignored (ADW creates the ignore rule itself)              |
 | `.adw/runs/<run_id>/spec.md` etc.                    | Archived, reviewed artifact states of this run.                                                                     |                                                              |
+| `.adw/runs/<run_id>/spec-summary.md`, `plan-summary.md` | The synthesis summary per authoring phase — your decision basis at the approval Gate (what/why, key decisions, deferred items, which draft contributed what, open questions). |                                                              |
+| `.adw/runs/<run_id>/drafts/`                         | The two independent drafts per authoring phase (`spec.claude.md` / `spec.codex.md`, `plan.*`, `contract.*`), plus a `<kind>.codex.FAILED` marker if the Codex draft failed. |                                                              |
 | `.adw/runs/<run_id>/escalation.md`                   | Escalation report: state reached, phase, concrete reason.                                                           |                                                              |
 | `.adw/runs/<run_id>/followups.md`                    | Follow-up issues from `scope_gap` Findings and deferred P3 Findings (deduplicated).                                                          |                                                              |
 | `.adw/runs/<run_id>/trees/<lane>`                    | Lane Worktrees (+ `trees/integration` with `--parallel`).                                                           |                                                              |
@@ -378,6 +383,8 @@ The subscription window is empty or the Claude CLI could not respond. No action 
 | Term                | Meaning                                                                                                                                       |
 |---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
 | **Lane**            | A workstream (backend/frontend) with its own Git Worktree, its own branch, its own agent session and its own ports.                           |
+| **Draft stage**     | Phases 1–2: Claude agent and Codex write their own draft of the artifact in parallel, into `.adw/runs/<run_id>/drafts/`.                       |
+| **Synthesis**       | The agent that merges both drafts into ONE best-of artifact and writes the summary for the approval Gate.                                     |
 | **Gate**            | A configured check command (linter, tests, …) with a hard timeout. All Gates green = condition for every commit.                              |
 | **Contract**        | `.adw/contract.yaml` — the agreed interface (OpenAPI/types/events) against which both Lanes build independently.                              |
 | **Finding**         | Structured review result (JSON): severity P1–P3, Lane, file, problem, fix recommendation, possibly category.                                  |

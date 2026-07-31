@@ -15,7 +15,8 @@ Man kann sich das wie eine **Baustelle** vorstellen:
 | Rolle auf der Baustelle | Rolle im ADW | Wer macht das? |
 |---|---|---|
 | Bauleiter (organisiert alles, entscheidet nichts Fachliches) | Der **Orchestrator** — festes Programm | Deterministischer Code |
-| Architekt (schreibt Bauplan) | Spec-Agent & Plan-Agent | KI (Fable 5) |
+| Zwei Architekten, die den Bauplan unabhängig voneinander zeichnen | Spec-/Plan-Agent **und** Codex als zweiter Autor | KI (Opus 4.8 / Codex) |
+| Chefarchitekt, der aus beiden Entwürfen einen Bauplan macht | Spec-/Plan-Synthese | KI (Fable 5) |
 | Handwerker (bauen tatsächlich) | Build-Agents | KI (Opus 4.8) |
 | Bauprüfer / TÜV (kontrollieren, bauen aber nie selbst) | Codex-Reviewer & finaler Reviewer | KI (Codex / Fable 5) |
 | Checklisten & Messgeräte (immer gleiche Prüfungen) | **Gates** (automatische Tests) | Deterministischer Code |
@@ -60,33 +61,52 @@ Phase für Phase.
 
 **Eingabe:** das Issue — ein Text, entweder direkt eingetippt oder aus GitLab/GitHub geholt.
 
-1. Der **Spec-Agent** (KI) liest das Issue und das Projekt und schreibt eine
-   **Spezifikation** (`.adw/spec.md`): Ziel, was dazugehört, was ausdrücklich
-   *nicht* dazugehört, und woran man erkennt, dass es fertig ist
-   („Akzeptanzkriterien"). Er darf dabei **nur lesen und diese eine Datei
-   schreiben** — bauen darf er nichts.
-2. Der **Codex-Reviewer** (eine zweite, unabhängige KI) prüft die Spezifikation.
-3. Findet er Mängel, gehen sie **an denselben Spec-Agenten zurück** — der behält
+1. **Zwei Entwürfe gleichzeitig:** Der **Spec-Agent** (KI) liest das Issue und das
+   Projekt und schreibt einen **Entwurf der Spezifikation**: Ziel, was dazugehört, was
+   ausdrücklich *nicht* dazugehört, und woran man erkennt, dass es fertig ist
+   („Akzeptanzkriterien"). **Parallel dazu schreibt Codex einen eigenen Entwurf**
+   derselben Spezifikation — aus demselben Issue, aber ohne den anderen Entwurf zu
+   sehen. Beide Entwürfe liegen nebeneinander im Run-Ordner
+   (`.adw/runs/<run_id>/drafts/`). Bauen darf keiner der beiden Autoren etwas.
+2. Die **Synthese** (KI) liest das Issue und *beide* Entwürfe und macht **eine**
+   Spezifikation daraus (`.adw/spec.md`): je Abschnitt gewinnt die bessere
+   Formulierung, und ein Punkt, den nur ein Entwurf gesehen hat, bleibt drin, wenn er
+   gegen das Issue standhält. Bewusst **keine** Zusammenlegung von allem — was
+   übernommen wird, muss sich rechtfertigen. Zusätzlich schreibt die Synthese eine
+   kurze **Zusammenfassung** (`.adw/spec-summary.md`): was und warum,
+   Kernentscheidungen, was bewusst weggelassen wurde, welcher Entwurf was beigesteuert
+   hat und was offen ist. Genau diese Zusammenfassung liest du später am Freigabe-Stopp.
+3. Der **Codex-Reviewer** (jetzt in seiner Prüfer-Rolle) prüft die fertige Spezifikation.
+4. Findet er Mängel, gehen sie **an denselben Synthese-Agenten zurück** — der behält
    sein „Gedächtnis" aus der ersten Runde (Session-Resume) und bessert nach.
-4. Das wiederholt sich, bis der Prüfer **„ok"** sagt — höchstens **5 Runden**,
+5. Das wiederholt sich, bis der Prüfer **„ok"** sagt — höchstens **5 Runden**,
    und die Messlatte sinkt pro Runde (Details bei Phase 5).
 
-> Wie ein Aufsatz, den ein Lektor so lange zurückgibt, bis er sauber ist —
-> aber der Lektor schreibt nie selbst am Aufsatz mit.
+> Wie zwei Lektoren, die je eine eigene Fassung eines Textes schreiben, ein
+> Chefredakteur, der daraus die beste Fassung macht — und ein Korrektor, der so lange
+> zurückgibt, bis es sauber ist, aber nie selbst mitschreibt.
+
+> **Fällt Codex als Autor aus** (z. B. weil das Werkzeug nicht erreichbar ist), bricht
+> nichts ab: Es wird vermerkt, und die Synthese arbeitet allein mit dem Claude-Entwurf
+> weiter — und schreibt das in die Zusammenfassung. Nur ein *fehlender Claude-Entwurf*
+> bricht den Lauf ab: ohne Entwurf gibt es nichts zu synthetisieren.
 
 ### Phase 2 — Plan + Kontrakt: „Wie wird es gebaut?"
 
-1. Der **Plan-Agent** (KI) verwandelt die Spezifikation in einen
-   **Schritt-für-Schritt-Bauplan** (`.adw/plan.md`) und einen **Kontrakt**
-   (`.adw/contract.yaml`). Der Kontrakt ist wie eine verbindliche
-   Steckdosen-Norm: Er legt exakt fest, wie die Teile (z. B. Oberfläche und
+1. Genau derselbe Zweischritt wie in Phase 1: Der **Plan-Agent** (KI) und **Codex**
+   verwandeln die Spezifikation je in einen eigenen Entwurf eines
+   **Schritt-für-Schritt-Bauplans** (`.adw/plan.md`) und eines **Kontrakts**
+   (`.adw/contract.yaml`) — parallel und unabhängig. Der Kontrakt ist wie eine
+   verbindliche Steckdosen-Norm: Er legt exakt fest, wie die Teile (z. B. Oberfläche und
    Server-Logik) später zusammenpassen müssen — damit zwei getrennt arbeitende
    Teams am Ende keine inkompatiblen Teile abliefern.
-2. Der Codex-Reviewer prüft Plan und Kontrakt **gemeinsam**, wieder in der
+2. Die **Plan-Synthese** merged beide Entwürfe zum endgültigen Plan und Kontrakt und
+   schreibt die Zusammenfassung `.adw/plan-summary.md`.
+3. Der Codex-Reviewer prüft Plan und Kontrakt **gemeinsam**, wieder in der
    Schleife bis „ok" (gleiche 5-Runden-Regel).
-3. **Plan-Approval-Gate — der eingebaute STOPP:** Der Workflow **hält an**,
+4. **Plan-Approval-Gate — der eingebaute STOPP:** Der Workflow **hält an**,
    speichert seinen kompletten Zustand und beendet sich. Jetzt liest ein
-   **Mensch** den Plan und entscheidet. Erst der Befehl `adw approve` (bzw.
+   **Mensch** die Zusammenfassung und den Plan und entscheidet. Erst der Befehl `adw approve` (bzw.
    `adw resume`) lässt den Lauf exakt an dieser Stelle weiterlaufen.
    (Wer der Automatik voll vertraut, kann den Stopp mit `--no-approval`
    abschalten.)
@@ -191,8 +211,9 @@ der Spezifikation steht?*
 
 ## Das Ganze in einem Satz
 
-> Ein festes Programm führt eine Aufgabe durch sieben Stationen — Beschreiben,
-> Planen (mit menschlicher Freigabe), Bauen, Zusammenfügen, zweimal unabhängig
+> Ein festes Programm führt eine Aufgabe durch sieben Stationen — Beschreiben und
+> Planen (jeweils zweimal unabhängig, zu einer Best-of-Fassung verschmolzen, mit
+> menschlicher Freigabe), Bauen, Zusammenfügen, zweimal unabhängig
 > Prüfen, Ausliefern — und lässt KI nur dort arbeiten, wo Urteilsvermögen
 > gebraucht wird, während jede Schleife ein Limit, jeder Befund einen festen
 > Rückweg und jeder Abbruch einen Bericht hat.
