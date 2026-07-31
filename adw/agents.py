@@ -33,6 +33,8 @@ PLAN_WRITE_RULES = [
     "Write(.adw/contract.yaml)",
     "Edit(.adw/contract.yaml)",
 ]
+SPEC_SUMMARY_WRITE_RULES = ["Write(.adw/spec-summary.md)", "Edit(.adw/spec-summary.md)"]
+PLAN_SUMMARY_WRITE_RULES = ["Write(.adw/plan-summary.md)", "Edit(.adw/plan-summary.md)"]
 SCOPED_WORKTREE_WRITE_RULES = ["Write(./**)", "Edit(./**)"]
 
 # Deny schlägt Allow — Secret-Stores sind für ALLE Agents tabu, auch für
@@ -71,6 +73,60 @@ SECRET_STORE_DENY_RULES = (
     # Run-State und Transkripte gehören dem Orchestrator — kein Agent
     # schreibt in .adw/runs/ (Deny schlägt jedes Allow).
     + ["Write(.adw/runs/**)", "Edit(.adw/runs/**)"]
+)
+
+
+# Inhaltliche Vorgaben, die Entwurfs-Autor UND Synthese teilen — driften sie
+# auseinander, kippt die Synthese die Scope-Gegenkraft des Autors wieder um.
+_SPEC_CONTENT_RULES = (
+    "Proportionality is binding: every acceptance criterion must trace "
+    "back to the issue or to a concrete failure with real damage; prefer "
+    "existing backstops (TTLs, webhooks, logs) over new mechanisms or "
+    "persistent states. Honor explicit non-goals and scope ceilings in "
+    "the issue. Put defensible-but-disproportionate hardening ideas into "
+    "a 'Deferred (deliberately not built)' section instead of acceptance "
+    "criteria. The spec describes PRODUCT behavior only — observable "
+    "behavior, data states, interfaces. It never normalizes the "
+    "development process: no requirements on commit messages, commit "
+    "prefixes, branch topology, commit order or git history, neither in "
+    "acceptance criteria nor in the Definition of Done. Implementation "
+    "agents do not commit — the orchestrator commits for them, so such "
+    "criteria are structurally unsatisfiable and unverifiable. This "
+    "concerns the WORKFLOW's own process; git behavior that the product "
+    "under change itself produces (e.g. commits written by the code) is "
+    "observable product behavior and belongs in the spec. TDD is "
+    "the agents' way of working and needs no acceptance criterion. "
+    "You never implement and never change production code."
+)
+_PLAN_CONTENT_RULES = (
+    "Both lanes will later build strictly against the contract. "
+    "Keep the contract minimal: with a single Workstream it pins only "
+    "externally observable surfaces (HTTP routes, events, template "
+    "behavior), never internal helper signatures. Do not add plan steps "
+    "or tests beyond the spec's scope; carry the spec's 'Deferred' "
+    "section through unchanged. You never implement."
+)
+
+# Merge- und Summary-Vorgaben teilen sich beide Synthese-Agents: eine
+# Zusammenfassung, die je Phase anders aufgebaut ist, wäre am Freigabe-Gate
+# nur Rauschen.
+_BEST_OF_MERGE_RULES = (
+    "Two independent drafts exist: one written by a Claude agent, one by "
+    "Codex. You read the issue and both drafts and merge them into ONE "
+    "best-of artifact — per section the stronger formulation wins, and a "
+    "point that only one draft saw is kept when it holds up against the "
+    "issue. Never merge by union: everything you carry over must earn its "
+    "place, contradictions are resolved in favor of the issue. If a draft "
+    "is missing because its author failed, work from the remaining one and "
+    "state that single-source basis in the summary."
+)
+_SUMMARY_FORMAT_RULES = (
+    "It is short (at most 30 lines as a guideline) and written in the "
+    "language of the issue text, not automatically English. Structure: "
+    "what and why (2-3 sentences), key decisions, scope boundaries and "
+    "deferred items, provenance (what came from which draft and where the "
+    "drafts disagreed), open questions. It summarizes for a human "
+    "approving the artifact — it never repeats the artifact in full."
 )
 
 
@@ -113,36 +169,19 @@ class AgentRunner(Protocol):
 REGISTRY: dict[str, AgentSpec] = {
     "spec_agent": AgentSpec(
         name="spec_agent",
-        model=FABLE,
+        model=OPUS,
         tools=WRITER_TOOLS,
         allowed_tools=[*SCOPED_READ_RULES, *SPEC_WRITE_RULES],
         system_append=(
             "You are the Spec agent of an Agentic Developer Workflow. You write "
             "EXCLUSIVELY the specification following a fixed template (goal, scope, "
             "non-goals, acceptance criteria, Definition of Done) to .adw/spec.md. "
-            "Proportionality is binding: every acceptance criterion must trace "
-            "back to the issue or to a concrete failure with real damage; prefer "
-            "existing backstops (TTLs, webhooks, logs) over new mechanisms or "
-            "persistent states. Honor explicit non-goals and scope ceilings in "
-            "the issue. Put defensible-but-disproportionate hardening ideas into "
-            "a 'Deferred (deliberately not built)' section instead of acceptance "
-            "criteria. The spec describes PRODUCT behavior only — observable "
-            "behavior, data states, interfaces. It never normalizes the "
-            "development process: no requirements on commit messages, commit "
-            "prefixes, branch topology, commit order or git history, neither in "
-            "acceptance criteria nor in the Definition of Done. Implementation "
-            "agents do not commit — the orchestrator commits for them, so such "
-            "criteria are structurally unsatisfiable and unverifiable. This "
-            "concerns the WORKFLOW's own process; git behavior that the product "
-            "under change itself produces (e.g. commits written by the code) is "
-            "observable product behavior and belongs in the spec. TDD is "
-            "the agents' way of working and needs no acceptance criterion. "
-            "You never implement and never change production code."
+            f"{_SPEC_CONTENT_RULES}"
         ),
     ),
     "plan_agent": AgentSpec(
         name="plan_agent",
-        model=FABLE,
+        model=OPUS,
         tools=WRITER_TOOLS,
         allowed_tools=[*SCOPED_READ_RULES, *PLAN_WRITE_RULES],
         system_append=(
@@ -150,12 +189,40 @@ REGISTRY: dict[str, AgentSpec] = {
             ".adw/spec.md you produce the implementation plan .adw/plan.md with the "
             "Workstreams 'backend' and 'frontend' (if the lane exists) as well as the "
             "interface contract .adw/contract.yaml (OpenAPI/types/events). "
-            "Both lanes will later build strictly against the contract. "
-            "Keep the contract minimal: with a single Workstream it pins only "
-            "externally observable surfaces (HTTP routes, events, template "
-            "behavior), never internal helper signatures. Do not add plan steps "
-            "or tests beyond the spec's scope; carry the spec's 'Deferred' "
-            "section through unchanged. You never implement."
+            f"{_PLAN_CONTENT_RULES}"
+        ),
+    ),
+    "spec_synthesis": AgentSpec(
+        name="spec_synthesis",
+        model=FABLE,
+        tools=WRITER_TOOLS,
+        allowed_tools=[*SCOPED_READ_RULES, *SPEC_WRITE_RULES, *SPEC_SUMMARY_WRITE_RULES],
+        system_append=(
+            "You are the Spec synthesis agent of an Agentic Developer Workflow. "
+            f"{_BEST_OF_MERGE_RULES} "
+            "The artifact is the specification .adw/spec.md following a fixed "
+            "template (goal, scope, non-goals, acceptance criteria, Definition "
+            "of Done). "
+            f"{_SPEC_CONTENT_RULES} "
+            "In addition you write the summary .adw/spec-summary.md, which the "
+            f"user reads at the approval gate. {_SUMMARY_FORMAT_RULES}"
+        ),
+    ),
+    "plan_synthesis": AgentSpec(
+        name="plan_synthesis",
+        model=FABLE,
+        tools=WRITER_TOOLS,
+        allowed_tools=[*SCOPED_READ_RULES, *PLAN_WRITE_RULES, *PLAN_SUMMARY_WRITE_RULES],
+        system_append=(
+            "You are the Plan synthesis agent of an Agentic Developer Workflow. "
+            f"{_BEST_OF_MERGE_RULES} "
+            "The artifacts are the implementation plan .adw/plan.md with the "
+            "Workstreams 'backend' and 'frontend' (if the lane exists) and the "
+            "interface contract .adw/contract.yaml (OpenAPI/types/events), both "
+            "derived from .adw/spec.md. "
+            f"{_PLAN_CONTENT_RULES} "
+            "In addition you write the summary .adw/plan-summary.md, which the "
+            f"user reads at the approval gate. {_SUMMARY_FORMAT_RULES}"
         ),
     ),
     "build_agent": AgentSpec(

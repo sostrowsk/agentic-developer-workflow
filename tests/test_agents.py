@@ -365,7 +365,7 @@ def test_registry_reviewers_are_read_only():
 
 
 def test_registry_spec_and_plan_write_only_adw_dir():
-    for name in ("spec_agent", "plan_agent"):
+    for name in ("spec_agent", "plan_agent", "spec_synthesis", "plan_synthesis"):
         tools = REGISTRY[name].allowed_tools
         assert any(t.startswith("Write") for t in tools)
         assert "Bash" not in tools
@@ -388,11 +388,78 @@ def test_all_read_rules_are_workspace_scoped():
 
 
 def test_registry_models_match_spec():
-    assert REGISTRY["spec_agent"].model == "claude-fable-5"
+    # Entwurfs-Autoren laufen auf Opus, die Best-of-Synthese auf Fable.
+    assert REGISTRY["spec_agent"].model == "claude-opus-4-8"
+    assert REGISTRY["plan_agent"].model == "claude-opus-4-8"
+    assert REGISTRY["spec_synthesis"].model == "claude-fable-5"
+    assert REGISTRY["plan_synthesis"].model == "claude-fable-5"
     assert REGISTRY["final_reviewer"].model == "claude-fable-5"
     assert REGISTRY["build_agent"].model == "claude-opus-4-8"
     assert REGISTRY["e2e_triage"].model == "claude-sonnet-5"
     assert REGISTRY["log_analyst"].model == "claude-sonnet-5"
+
+
+def test_synthesis_agents_may_write_exactly_artifact_and_summary():
+    """Artefakt-exakt inkl. Summary — .adw/** würde State und config.yaml öffnen."""
+    expected_rules = {
+        "spec_synthesis": {
+            "Write(.adw/spec.md)",
+            "Edit(.adw/spec.md)",
+            "Write(.adw/spec-summary.md)",
+            "Edit(.adw/spec-summary.md)",
+        },
+        "plan_synthesis": {
+            "Write(.adw/plan.md)",
+            "Edit(.adw/plan.md)",
+            "Write(.adw/contract.yaml)",
+            "Edit(.adw/contract.yaml)",
+            "Write(.adw/plan-summary.md)",
+            "Edit(.adw/plan-summary.md)",
+        },
+    }
+    for name, expected in expected_rules.items():
+        rules = set(REGISTRY[name].allowed_tools)
+        assert {rule for rule in rules if rule.startswith(("Write", "Edit"))} == expected
+        assert not any(".adw/**" in rule for rule in rules)
+
+
+def test_synthesis_agents_are_writers_without_bash():
+    for name in ("spec_synthesis", "plan_synthesis"):
+        spec = REGISTRY[name]
+        assert set(spec.tools) == {"Read", "Grep", "Glob", "Write", "Edit"}
+        assert "Bash" not in spec.allowed_tools
+
+
+def test_synthesis_prompts_demand_best_of_merge_from_both_drafts():
+    for name in ("spec_synthesis", "plan_synthesis"):
+        prompt = REGISTRY[name].system_append.lower()
+        assert "best-of" in prompt
+        assert "codex" in prompt and "claude" in prompt
+        assert "union" in prompt  # kein Zusammenkopieren beider Entwürfe
+
+
+def test_synthesis_prompts_pin_the_summary_file_and_its_format():
+    for name, summary_file in (
+        ("spec_synthesis", ".adw/spec-summary.md"),
+        ("plan_synthesis", ".adw/plan-summary.md"),
+    ):
+        prompt = REGISTRY[name].system_append
+        assert summary_file in prompt
+        lowered = prompt.lower()
+        # Format laut Spec §3: kurz, Sprache des Issue-Texts, feste Gliederung.
+        assert "language of the issue" in lowered
+        for section in ("key decisions", "deferred", "provenance", "open"):
+            assert section in lowered
+
+
+def test_synthesis_prompts_keep_the_authors_proportionality_rules():
+    """Die Synthese darf die Scope-Gegenkraft der Autor-Prompts nicht verlieren."""
+    spec_prompt = REGISTRY["spec_synthesis"].system_append
+    assert "Proportionality is binding" in spec_prompt
+    assert "Deferred (deliberately not built)" in spec_prompt
+    assert "commit" in spec_prompt  # Prozess-Anforderungen bleiben verbannt
+    plan_prompt = REGISTRY["plan_synthesis"].system_append
+    assert "Keep the contract minimal" in plan_prompt
 
 
 def test_mock_runner_returns_scripted_responses_in_order(tmp_path):
