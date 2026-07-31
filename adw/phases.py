@@ -66,6 +66,13 @@ ARTIFACTS = ("spec.md", "plan.md", "contract.yaml")
 # dagegen — es ist reine Review-Referenz.
 ISSUE_FILE = "issue.md"
 
+# Zusammenfassung der Synthese je Authoring-Phase — sie liegt dem Menschen am
+# Freigabe-Gate vor. NICHT in ARTIFACTS: keine Build-Lane baut dagegen, sie wird
+# nie in eine Lane geseedet und ist keine Codex-Review-Referenz.
+SPEC_SUMMARY = "spec-summary.md"
+PLAN_SUMMARY = "plan-summary.md"
+SUMMARIES = (SPEC_SUMMARY, PLAN_SUMMARY)
+
 # Runden-Cap des Authoring-Loops: eine Runde = ein Agent-Lauf + ein
 # Codex-Review. Nach so vielen erfolglosen Runden wird abgebrochen (P1 offen)
 # bzw. das Artefakt mit dokumentierten Known Limitations akzeptiert (nur P2/P3).
@@ -181,13 +188,13 @@ def run_spec_and_plan(ctx: RunContext) -> None:
         # getrackten Artefakten würde die Archivierung (git checkout --)
         # verwerfen. Ausnahme: die vom ADW selbst restaurierte Spec (siehe
         # Plan-Resume) ist kein Nutzer-Edit.
-        for name in ARTIFACTS:
+        for name in (*ARTIFACTS, *SUMMARIES):
             if ctx.state.phase == "plan" and (ctx.run_dir / name).is_file():
                 continue  # gehört diesem Run, wird gleich ohnehin überschrieben
             if (
                 ctx.state.phase == "plan"
                 and ctx.state.authoring_session
-                and name in ("plan.md", "contract.yaml")
+                and name in ("plan.md", "contract.yaml", PLAN_SUMMARY)
             ):
                 continue  # eigener, gecrashter Plan-Loop — kein User-Edit
             if not _git(ctx, ctx.repo, "ls-files", "--", f".adw/{name}").strip():
@@ -203,16 +210,25 @@ def run_spec_and_plan(ctx: RunContext) -> None:
         # damit ein Agent es nicht effektiv verändern kann (wie config.yaml).
         protected[ctx.repo / ".adw" / ISSUE_FILE] = _write_issue(ctx)
         if ctx.state.phase == "spec":
+            draft_task = _spec_draft_task(ctx)
+            drafts = _draft_stage(
+                ctx,
+                kind="spec",
+                agent_name="spec_agent",
+                task=draft_task,
+                artifacts=("spec.md",),
+                protected=protected,
+                summary=SPEC_SUMMARY,
+            )
             _reviewed_authoring_loop(
                 ctx,
-                agent_name="spec_agent",
-                initial_task=(
-                    f"Create the specification for this issue following the fixed "
-                    f"template (goal, scope, non-goals, acceptance criteria, Definition "
-                    f"of Done) as .adw/spec.md.\n\nIssue:\n{ctx.state.issue}"
+                agent_name="spec_synthesis",
+                initial_task=_synthesis_task(
+                    drafts, artifacts=("spec.md",), summary=SPEC_SUMMARY, goal=draft_task
                 ),
                 review_kind="spec",
                 artifacts=("spec.md",),
+                summary=SPEC_SUMMARY,
                 # Issue mitgeben: Codex prüft die Spec auf Proportionalität
                 # gegen die tatsächliche Anforderung.
                 review_refs=(ISSUE_FILE, "spec.md"),
@@ -221,9 +237,11 @@ def run_spec_and_plan(ctx: RunContext) -> None:
             with ctx.state_lock:
                 # Reviewte Spec SOFORT ins Run-Verzeichnis sichern: markiert sie
                 # als eigenen Output (Guard-Ausnahme beim Resume) und schützt
-                # sie vor dem Crash-Fenster bis zur Archivierung.
+                # sie vor dem Crash-Fenster bis zur Archivierung. Die Summary
+                # gehört zum Gate-Ergebnis und wird genauso gesichert.
                 ctx.run_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(ctx.repo / ".adw" / "spec.md", ctx.run_dir / "spec.md")
+                for name in ("spec.md", SPEC_SUMMARY):
+                    shutil.copy2(ctx.repo / ".adw" / name, ctx.run_dir / name)
                 # Spec-Gate: Phase + geleerter Checkpoint atomar. Ein Crash im
                 # Fenster darf nie phase="plan" hinterlassen, sonst würde der
                 # Stopp übersprungen (Runden-Zähler startet für den Plan bei 0).
@@ -236,34 +254,45 @@ def run_spec_and_plan(ctx: RunContext) -> None:
 
         if not paused_for_spec_approval:
             # Phase "plan" — frisch erreicht ODER Resume nach Crash in der Plan-Phase.
-            spec_path = ctx.repo / ".adw" / "spec.md"
-            archived = ctx.run_dir / "spec.md"
-            if archived.is_file():
-                # Die ARCHIVIERTE (reviewte) Spec hat immer Vorrang: Ein Crash
-                # mitten in der Archivierung kann .adw/spec.md bereits auf eine
-                # alte getrackte Version zurückgesetzt haben.
-                shutil.copy2(archived, spec_path)
-            elif not spec_path.is_file():
-                raise escalate(
-                    ctx,
-                    "Resume in Phase 'plan', aber .adw/spec.md fehlt — Spec-Ergebnis "
-                    "verloren, bitte Run neu starten",
-                )
-            # Die reviewte Spec ist ab hier fix — der Plan-Agent darf sie lesen,
-            # aber nicht umschreiben (Write(.adw/**) würde es technisch erlauben).
-            protected[spec_path] = spec_path.read_bytes()
+            # Spec UND Spec-Summary sind das Ergebnis der Vorphase: sie werden
+            # wiederhergestellt und sind ab hier fix — die Plan-Phase darf sie
+            # lesen, aber nicht umschreiben (Write(.adw/**) würde es erlauben).
+            for name in ("spec.md", SPEC_SUMMARY):
+                path = ctx.repo / ".adw" / name
+                archived = ctx.run_dir / name
+                if archived.is_file():
+                    # Die ARCHIVIERTE (reviewte) Fassung hat immer Vorrang: Ein
+                    # Crash mitten in der Archivierung kann die Checkout-Datei
+                    # bereits auf eine alte getrackte Version zurückgesetzt haben.
+                    shutil.copy2(archived, path)
+                elif not path.is_file():
+                    raise escalate(
+                        ctx,
+                        f"Resume in Phase 'plan', aber .adw/{name} fehlt — "
+                        "Spec-Ergebnis verloren, bitte Run neu starten",
+                    )
+                protected[path] = path.read_bytes()
 
-            lanes = ", ".join(_active_lanes(ctx))
+            draft_task = _plan_draft_task(ctx)
+            plan_artifacts = ("plan.md", "contract.yaml")
+            drafts = _draft_stage(
+                ctx,
+                kind="plan",
+                agent_name="plan_agent",
+                task=draft_task,
+                artifacts=plan_artifacts,
+                protected=protected,
+                summary=PLAN_SUMMARY,
+            )
             _reviewed_authoring_loop(
                 ctx,
-                agent_name="plan_agent",
-                initial_task=(
-                    f"From .adw/spec.md, create the implementation plan .adw/plan.md with "
-                    f"the Workstreams ({lanes}) and the interface contract "
-                    f".adw/contract.yaml."
+                agent_name="plan_synthesis",
+                initial_task=_synthesis_task(
+                    drafts, artifacts=plan_artifacts, summary=PLAN_SUMMARY, goal=draft_task
                 ),
                 review_kind="plan",
-                artifacts=("plan.md", "contract.yaml"),
+                artifacts=plan_artifacts,
+                summary=PLAN_SUMMARY,
                 # Issue + Spec mitgeben: Codex prüft Plan/Kontrakt GEGEN die
                 # Akzeptanzkriterien und die tatsächliche Anforderung.
                 review_refs=(ISSUE_FILE, "spec.md", "plan.md", "contract.yaml"),
@@ -367,6 +396,7 @@ def _draft_stage(
     task: str,
     artifacts: tuple[str, ...],
     protected: dict[Path, bytes | None] | None = None,
+    summary: str | None = None,
 ) -> DraftSet:
     """Two independent drafts for one authoring phase, written in PARALLEL.
 
@@ -374,7 +404,10 @@ def _draft_stage(
     into the run folder) and Codex (read-only, returns the content) run at the
     same time. Idempotent over FILES, not over state: an existing draft skips
     its author, a `<kind>.codex.FAILED` marker skips the failed Codex attempt
-    for good."""
+    for good.
+
+    ``summary`` is not drafted — it is only cleaned out of the checkout with
+    the artifacts, so no stale summary can pose as the one of this run."""
     drafts = ctx.run_dir / DRAFTS_DIR
     drafts.mkdir(parents=True, exist_ok=True)
     claude_paths = [drafts / _draft_name(name, "claude") for name in artifacts]
@@ -382,11 +415,14 @@ def _draft_stage(
     marker = drafts / f"{kind}.codex.FAILED"
     # Crash-Reste dieser Phase im Hauptthread wegräumen, BEVOR ein Autor läuft:
     # ein Rest darf weder als frischer Entwurf durchgehen noch dem parallel
-    # lesenden Codex als Zwischenstand erscheinen. Unbedingt — ein Crash
-    # zwischen Draft-Kopie und Aufräumen überspringt sonst beide Autoren und
-    # ließe den Rest im Checkout liegen.
-    for name in artifacts:
-        _reset_checkout_artifact(ctx, name)
+    # lesenden Codex als Zwischenstand erscheinen. Die Summary gehört dazu —
+    # sonst ginge eine fremde/alte Zusammenfassung als die dieses Runs durch.
+    # AUSNAHME: Ist der Authoring-Loop bereits gecheckpointet, stammen die
+    # Dateien im Checkout von der Synthese — das ist die reviewte
+    # Zwischenfassung, an der die Fix-Runde weiterarbeitet.
+    if ctx.state.authoring_session is None:
+        for name in (*artifacts, summary) if summary else artifacts:
+            _reset_checkout_artifact(ctx, name)
     prior = {name: _artifact_bytes(ctx, name) for name in artifacts}
     # Vollständigkeit je Autor: ein Crash zwischen zwei Draft-Writes (plan.md
     # geschrieben, contract.yaml nicht) lässt den Autor erneut laufen.
@@ -502,6 +538,44 @@ def _codex_draft(
         _write_draft(target, files[name].encode())
 
 
+def _spec_draft_task(ctx: RunContext) -> str:
+    return (
+        f"Create the specification for this issue following the fixed template "
+        f"(goal, scope, non-goals, acceptance criteria, Definition of Done) as "
+        f".adw/spec.md.\n\nIssue:\n{ctx.state.issue}"
+    )
+
+
+def _plan_draft_task(ctx: RunContext) -> str:
+    lanes = ", ".join(_active_lanes(ctx))
+    return (
+        f"From .adw/spec.md, create the implementation plan .adw/plan.md with "
+        f"the Workstreams ({lanes}) and the interface contract .adw/contract.yaml."
+    )
+
+
+def _synthesis_task(drafts: DraftSet, artifacts: tuple[str, ...], summary: str, goal: str) -> str:
+    """Task of the synthesis agent — the FIRST run of the authoring loop.
+
+    It merges both drafts into the best-of artifact and writes the summary the
+    human reads at the approval gate."""
+    targets = ", ".join(f".adw/{name}" for name in artifacts)
+    lines = [
+        goal,
+        f"Read .adw/{ISSUE_FILE} and the independent drafts listed below, then "
+        f"write the best-of merge to {targets} and the summary .adw/{summary}.",
+        f"Claude draft: {', '.join(drafts.claude)}",
+    ]
+    if drafts.codex:
+        lines.append(f"Codex draft: {', '.join(drafts.codex)}")
+    else:
+        lines.append(
+            "There is no Codex draft — its author failed. Work from the Claude "
+            "draft alone and state that single-source basis in the summary."
+        )
+    return "\n\n".join(lines)
+
+
 def _artifact_bytes(ctx: RunContext, name: str) -> bytes | None:
     path = ctx.repo / ".adw" / name
     return path.read_bytes() if path.is_file() else None
@@ -532,12 +606,20 @@ def _reviewed_authoring_loop(
     artifacts: tuple[str, ...],
     review_refs: tuple[str, ...] | None = None,
     protected: dict[Path, bytes | None] | None = None,
+    summary: str | None = None,
 ) -> None:
     """Agent writes artifact(s), Codex reviews, Findings go back to the SAME
     session — until the verdict is ok. Circuit-Breaker on identical Findings.
     ``protected`` is restored after EVERY agent run — even the reviewer
-    never sees a protected file rewritten by the agent."""
+    never sees a protected file rewritten by the agent.
+
+    ``summary`` is the phase summary: it must exist like an artifact and the fix
+    tasks keep it current, but it is never a Codex review reference."""
     spec = REGISTRY[agent_name]
+    review_targets = review_refs or artifacts
+    # Die Summary muss wie ein Artefakt entstehen; für Fix-Task und Review
+    # bleibt sie getrennt (Codex hat sie nicht reviewt).
+    loop_artifacts = (*artifacts, summary) if summary else artifacts
     # Resume mitten im Authoring: Session, offener Fix-Task und Findings-Basis
     # aus dem State — sonst startet der Loop kontextlos neu und der
     # Prior-Content-Check würde das vorhandene Artefakt fälschlich eskalieren.
@@ -553,7 +635,7 @@ def _reviewed_authoring_loop(
     # Prior-Snapshot: Altbestand (z. B. gemergte Artefakte früherer Runs) darf
     # einen untätigen Agenten nicht adeln — das Artefakt muss sich ÄNDERN.
     prior: dict[str, bytes | None] = {}
-    for name in artifacts:
+    for name in loop_artifacts:
         path = ctx.repo / ".adw" / name
         prior[name] = path.read_bytes() if path.is_file() else None
     first_iteration = not resuming
@@ -570,17 +652,26 @@ def _reviewed_authoring_loop(
             ctx.save()
         if protected:
             _restore_all(protected)
-        missing = [name for name in artifacts if not (ctx.repo / ".adw" / name).is_file()]
+        # Leer zählt wie fehlend: Die Summary reviewt niemand, eine weiße
+        # Summary fiele sonst erst dem Menschen am Freigabe-Gate auf.
+        missing = [
+            name for name in loop_artifacts if not (_artifact_bytes(ctx, name) or b"").strip()
+        ]
         if missing:
             raise escalate(
                 ctx,
                 f"{agent_name} hat {', '.join(f'.adw/{m}' for m in missing)} "
-                "nicht erzeugt — Lauf abgebrochen statt mit leerem Artefakt weiterzumachen",
+                "nicht erzeugt (oder leer gelassen) — Lauf abgebrochen statt mit "
+                "leerem Artefakt weiterzumachen",
             )
         if first_iteration:
+            # Auch die Summary muss frisch sein: Reste eines fremden oder
+            # gecrashten Laufs hat die Draft-Stage vorher entfernt, ein
+            # unveränderter Altbestand wäre also eine untergeschobene
+            # Zusammenfassung — und die reviewt niemand.
             unchanged = [
                 name
-                for name in artifacts
+                for name in loop_artifacts
                 if prior[name] is not None
                 and (ctx.repo / ".adw" / name).read_bytes() == prior[name]
             ]
@@ -596,7 +687,7 @@ def _reviewed_authoring_loop(
         try:
             review = ctx.codex.review(
                 review_kind,
-                [f".adw/{name}" for name in (review_refs or artifacts)],
+                [f".adw/{name}" for name in review_targets],
                 cwd=ctx.repo,
                 context=_severity_context(round_no, AUTHORING_MAX_ROUNDS, prior_context),
             )
@@ -683,6 +774,11 @@ def _reviewed_authoring_loop(
             f"Findings. Incorporate them and update the artifacts:\n\n"
             f"{_findings_text(review)}"
         )
+        if summary:
+            task += (
+                f"\n\nKeep .adw/{summary} current: when the fixes change the "
+                f"picture, update the summary accordingly."
+            )
         with ctx.state_lock:
             # Checkpoint des Fix-Zyklus — überlebt einen Crash vor dem Fix-Lauf.
             # authoring_rounds und der Findings-Verlauf gehen im SELBEN Save wie
@@ -877,9 +973,9 @@ def _archive_artifacts(ctx: RunContext, overwrite_existing_archive: bool = True)
     by an earlier archival and would clobber the reviewed archive. The stray
     checkout file is still cleaned up."""
     ctx.run_dir.mkdir(parents=True, exist_ok=True)
-    # issue.md wird mitarchiviert (B3) — nicht in ARTIFACTS, weil keine
-    # Build-Lane dagegen baut; hier aber wie die anderen aufgeräumt.
-    for name in (*ARTIFACTS, ISSUE_FILE):
+    # issue.md und die Summaries werden mitarchiviert — nicht in ARTIFACTS, weil
+    # keine Build-Lane dagegen baut; hier aber wie die anderen aufgeräumt.
+    for name in (*ARTIFACTS, ISSUE_FILE, *SUMMARIES):
         source = ctx.repo / ".adw" / name
         if not source.is_file():
             continue

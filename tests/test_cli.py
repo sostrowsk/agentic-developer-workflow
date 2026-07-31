@@ -560,6 +560,21 @@ def test_run_with_spec_approval_pauses_after_spec(target_repo):
     assert (state.run_dir(target_repo) / "spec.md").is_file()
 
 
+def test_gate_messages_point_to_the_summary(target_repo):
+    """Die Zusammenfassung ist die Entscheidungsgrundlage am Gate — sie liegt im
+    ignorierten Run-Ordner und muss deshalb im Hinweis stehen."""
+    spec_gate = runner.invoke(
+        app,
+        ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--spec-approval"],
+    )
+    assert spec_gate.exit_code == 2, spec_gate.output
+    assert "spec-summary.md" in spec_gate.output
+    state = RunState.find_latest(target_repo)
+    plan_gate = runner.invoke(app, ["approve", state.run_id, "--repo", str(target_repo)])
+    assert plan_gate.exit_code == 2, plan_gate.output
+    assert "plan-summary.md" in plan_gate.output
+
+
 def test_approve_spec_then_pauses_at_plan_approval(target_repo):
     runner.invoke(
         app,

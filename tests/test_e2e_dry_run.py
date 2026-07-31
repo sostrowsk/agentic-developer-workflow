@@ -47,6 +47,37 @@ ci:
 OK = ReviewResult(verdict="ok", findings=[])
 
 
+def script_authoring(agents: MockAgentRunner) -> None:
+    """Draft authors and synthesis agents of both authoring phases."""
+    agents.script_files("spec_agent", {".adw/spec.md": "# Spec-Entwurf\n"})
+    agents.script_files(
+        "plan_agent",
+        {".adw/plan.md": "# Plan-Entwurf\n", ".adw/contract.yaml": "openapi: 3.1.0\n"},
+    )
+    agents.script_files(
+        "spec_synthesis", {".adw/spec.md": "# Spec\n", ".adw/spec-summary.md": "# Spec-Summary\n"}
+    )
+    agents.script_files(
+        "plan_synthesis",
+        {
+            ".adw/plan.md": "# Plan\n",
+            ".adw/contract.yaml": "openapi: 3.1.0\ninfo:\n  title: Synthese\n",
+            ".adw/plan-summary.md": "# Plan-Summary\n",
+        },
+    )
+    agents.script("spec_agent", "Spec-Entwurf")
+    agents.script("plan_agent", "Plan-Entwurf")
+    agents.script("spec_synthesis", "Spec")
+    agents.script("plan_synthesis", "Plan")
+
+
+def script_draft_artifacts(codex: MockCodexRunner) -> None:
+    codex.script_artifacts("spec", {"spec.md": "# Codex-Spec-Entwurf\n"})
+    codex.script_artifacts(
+        "plan", {"plan.md": "# Codex-Plan-Entwurf\n", "contract.yaml": "openapi: 3.1.0\n"}
+    )
+
+
 def cli_run(repo, *extra):
     return runner.invoke(
         app, ["run", "--repo", str(repo), "--issue", "Akzeptanz-Demo", "--dry-run", *extra]
@@ -97,12 +128,7 @@ def test_dod2_gate_fail_fix_goes_to_same_session(target_repo):
     """The simulated Gate fail of the dry run creates a fix task that reuses
     the Lane's session (SDK resume instead of rebuilding context)."""
     agents = MockAgentRunner()
-    agents.script_files("spec_agent", {".adw/spec.md": "# Spec\n"})
-    agents.script_files(
-        "plan_agent", {".adw/plan.md": "# Plan\n", ".adw/contract.yaml": "openapi: 3.1.0\n"}
-    )
-    agents.script("spec_agent", "Spec")
-    agents.script("plan_agent", "Plan")
+    script_authoring(agents)
     agents.script("build_agent", "Versuch 1", "Fix")
 
     def writes(cwd):
@@ -124,6 +150,7 @@ lanes:
 """,
     )
     codex = MockCodexRunner()
+    script_draft_artifacts(codex)
     codex.script(OK, OK)
     ctx = RunContext(
         repo=target_repo,
@@ -192,15 +219,11 @@ def test_dod3_no_approval_skips_the_pause(target_repo):
 
 def prepare_final_review(target_repo):
     agents = MockAgentRunner()
-    agents.script_files("spec_agent", {".adw/spec.md": "# Spec\n"})
-    agents.script_files(
-        "plan_agent", {".adw/plan.md": "# Plan\n", ".adw/contract.yaml": "openapi: 3.1.0\n"}
-    )
-    agents.script("spec_agent", "Spec")
-    agents.script("plan_agent", "Plan")
+    script_authoring(agents)
     agents.script_files("build_agent", {"src.py": "pass\n"})
     agents.script("build_agent", *["gebaut"] * 8)
     codex = MockCodexRunner()
+    script_draft_artifacts(codex)
     codex.script(*[OK] * 8)
     ctx = RunContext(
         repo=target_repo,

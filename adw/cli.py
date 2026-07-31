@@ -193,14 +193,18 @@ def _execute(ctx: RunContext) -> None:
         run_final_review_phase(ctx)
         run_ci_phase(ctx)
     except AwaitingApproval:
+        # Die Zusammenfassung der Synthese ist die Entscheidungsgrundlage am
+        # Gate — sie liegt im ignorierten Run-Ordner und wäre sonst unsichtbar.
         if ctx.state.phase == "awaiting_spec_approval":
             typer.echo(
-                f"Spec-Approval ausstehend: .adw/runs/{ctx.state.run_id}/spec.md lesen, "
+                f"Spec-Approval ausstehend: .adw/runs/{ctx.state.run_id}/spec-summary.md "
+                f"und .adw/runs/{ctx.state.run_id}/spec.md lesen, "
                 f"dann `adw approve {ctx.state.run_id}`"
             )
         else:
             typer.echo(
-                f"Plan-Approval ausstehend: .adw/runs/{ctx.state.run_id}/plan.md lesen, "
+                f"Plan-Approval ausstehend: .adw/runs/{ctx.state.run_id}/plan-summary.md "
+                f"und .adw/runs/{ctx.state.run_id}/plan.md lesen, "
                 f"dann `adw approve {ctx.state.run_id}`"
             )
         raise typer.Exit(EXIT_AWAITING_APPROVAL) from None
@@ -329,6 +333,10 @@ def _build_context(
 _DRY_SPEC = "# Spec (Dry-Run)\n\nZiel: Demo-Durchlauf durch alle sieben Phasen.\n"
 _DRY_PLAN = "# Plan (Dry-Run)\n\n- Workstream backend\n- Workstream frontend (optional)\n"
 _DRY_CONTRACT = "openapi: 3.1.0\ninfo:\n  title: Dry-Run-Kontrakt\n  version: 0.0.1\n"
+_DRY_SPEC_DRAFT = "# Spec-Entwurf (Dry-Run)\n\nZiel: Demo-Durchlauf.\n"
+_DRY_PLAN_DRAFT = "# Plan-Entwurf (Dry-Run)\n\n- Workstream backend\n"
+_DRY_SPEC_SUMMARY = "# Zusammenfassung der Spec (Dry-Run)\n\nBest-of beider Entwuerfe.\n"
+_DRY_PLAN_SUMMARY = "# Zusammenfassung des Plans (Dry-Run)\n\nBest-of beider Entwuerfe.\n"
 _OK = ReviewResult(verdict="ok", findings=[])
 
 
@@ -349,9 +357,22 @@ def _dry_run_config(config: AdwConfig) -> AdwConfig:
 
 def _dry_run_runners() -> tuple[MockAgentRunner, MockCodexRunner]:
     agents = MockAgentRunner()
-    agents.script_files("spec_agent", {".adw/spec.md": _DRY_SPEC})
+    # Entwurfs-Autoren der Draft-Stage …
+    agents.script_files("spec_agent", {".adw/spec.md": _DRY_SPEC_DRAFT})
     agents.script_files(
-        "plan_agent", {".adw/plan.md": _DRY_PLAN, ".adw/contract.yaml": _DRY_CONTRACT}
+        "plan_agent", {".adw/plan.md": _DRY_PLAN_DRAFT, ".adw/contract.yaml": _DRY_CONTRACT}
+    )
+    # … und die Synthese, die daraus Best-of-Artefakt UND Summary baut.
+    agents.script_files(
+        "spec_synthesis", {".adw/spec.md": _DRY_SPEC, ".adw/spec-summary.md": _DRY_SPEC_SUMMARY}
+    )
+    agents.script_files(
+        "plan_synthesis",
+        {
+            ".adw/plan.md": _DRY_PLAN,
+            ".adw/contract.yaml": _DRY_CONTRACT,
+            ".adw/plan-summary.md": _DRY_PLAN_SUMMARY,
+        },
     )
 
     def build_writes(cwd: Path) -> dict[str, str]:
@@ -375,8 +396,10 @@ def _dry_run_runners() -> tuple[MockAgentRunner, MockCodexRunner]:
     agents.file_writes["build_agent"] = build_writes
     # Großzügig scripten: Restantworten in den Queues sind unschädlich,
     # eine LEERE Queue würde einen legitimen Folge-Aufruf abbrechen.
-    agents.script("spec_agent", *["Spec geschrieben"] * 3)
-    agents.script("plan_agent", *["Plan geschrieben"] * 3)
+    agents.script("spec_agent", *["Spec-Entwurf geschrieben"] * 3)
+    agents.script("plan_agent", *["Plan-Entwurf geschrieben"] * 3)
+    agents.script("spec_synthesis", *["Spec geschrieben"] * 3)
+    agents.script("plan_synthesis", *["Plan geschrieben"] * 3)
     agents.script("build_agent", *["gebaut"] * 12)
     triage = json.dumps(
         ReviewResult(
@@ -397,6 +420,10 @@ def _dry_run_runners() -> tuple[MockAgentRunner, MockCodexRunner]:
     agents.script("final_reviewer", *[json.dumps(_OK.model_dump())] * 3)
     codex = MockCodexRunner()
     codex.script(*[_OK] * 8)  # Spec-, Plan-, Code-Reviews — alle grün
+    codex.script_artifacts("spec", *[{"spec.md": _DRY_SPEC_DRAFT}] * 3)
+    codex.script_artifacts(
+        "plan", *[{"plan.md": _DRY_PLAN_DRAFT, "contract.yaml": _DRY_CONTRACT}] * 3
+    )
     return agents, codex
 
 
