@@ -299,6 +299,53 @@ def test_dod4_three_fix_cycles_escalate(target_repo):
     assert (ctx.run_dir / "escalation.md").is_file()
 
 
+# --- DoD 7: Dual-Authoring im Dry-Run -----------------------------------------
+
+DRAFT_PAIRS = (
+    ("spec.claude.md", "spec.codex.md"),
+    ("plan.claude.md", "plan.codex.md"),
+    ("contract.claude.yaml", "contract.codex.yaml"),
+)
+
+
+def test_dod7_dry_run_produces_both_drafts_and_both_summaries(target_repo):
+    """The dry run walks the full dual-authoring flow: two drafts per authoring
+    phase plus the summary the human reads at the gate — 0 tokens, exit 0."""
+    result = cli_run(target_repo, "--no-approval")
+    assert result.exit_code == 0, result.output
+    run_dir = RunState.find_latest(target_repo).run_dir(target_repo)
+    drafts = run_dir / "drafts"
+    for claude_name, codex_name in DRAFT_PAIRS:
+        for name in (claude_name, codex_name):
+            assert (drafts / name).read_text().strip(), f"{name} fehlt oder ist leer"
+    # Kein degradierter Codex-Entwurf: der Dry-Run fährt den vollen Pfad, sonst
+    # bliebe die zweite Entwurfsquelle im Smoke-Test ungetestet.
+    assert list(drafts.glob("*.FAILED")) == []
+    for summary in ("spec-summary.md", "plan-summary.md"):
+        assert (run_dir / summary).read_text().strip(), f"{summary} fehlt oder ist leer"
+
+
+def test_dod7_dry_run_drafts_are_distinguishable_per_author(target_repo):
+    """Identical fixtures would hide it if both draft files came from the same
+    author — the dry run must show two independent sources."""
+    cli_run(target_repo, "--no-approval")
+    drafts = RunState.find_latest(target_repo).run_dir(target_repo) / "drafts"
+    for claude_name, codex_name in DRAFT_PAIRS:
+        assert (drafts / claude_name).read_text() != (drafts / codex_name).read_text()
+
+
+def test_dod7_summaries_stay_out_of_the_lane_worktree(target_repo):
+    """SPEC acceptance criterion 6: the summaries are gate material, no Lane
+    builds against them — only spec/plan/contract are seeded."""
+    cli_run(target_repo, "--no-approval")
+    state = RunState.find_latest(target_repo)
+    lane_adw = target_repo / ".adw" / "runs" / state.run_id / "trees" / "backend" / ".adw"
+    assert (lane_adw / "spec.md").is_file()
+    assert not (lane_adw / "spec-summary.md").exists()
+    assert not (lane_adw / "plan-summary.md").exists()
+    assert not (lane_adw / "drafts").exists()
+
+
 # --- DoD 5: Resume setzt in derselben Phase fort -------------------------------
 
 

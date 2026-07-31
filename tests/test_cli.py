@@ -625,6 +625,58 @@ def test_resume_at_spec_approval_pauses_again(target_repo):
     assert RunState.load(target_repo, state.run_id).phase == "awaiting_spec_approval"
 
 
+def test_dry_run_authors_each_phase_exactly_once_across_invocations(target_repo, monkeypatch):
+    """Every CLI invocation builds fresh mocks — the draft stage must stay
+    idempotent over the FILES: after the spec gate, `approve` only authors the
+    plan, no second Codex run against the already written spec draft."""
+    import adw.cli as cli_mod
+
+    real = cli_mod._dry_run_runners
+    runners = []
+
+    def recording():
+        pair = real()
+        runners.append(pair)
+        return pair
+
+    monkeypatch.setattr(cli_mod, "_dry_run_runners", recording)
+    paused = runner.invoke(
+        app,
+        ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--spec-approval"],
+    )
+    assert paused.exit_code == 2, paused.output
+    state = RunState.find_latest(target_repo)
+    approved = runner.invoke(app, ["approve", state.run_id, "--repo", str(target_repo)])
+    assert approved.exit_code == 2, approved.output  # jetzt am Plan-Gate
+    assert [call.kind for _, codex in runners for call in codex.author_calls] == ["spec", "plan"]
+
+
+def test_dry_run_completes_when_the_codex_author_fails(target_repo, monkeypatch):
+    """SPEC acceptance criterion 3 at CLI level: a broken Codex author degrades
+    to a single source instead of killing the run."""
+    import adw.cli as cli_mod
+    from adw.codex import CodexAuthorError
+
+    real = cli_mod._dry_run_runners
+
+    def codex_spec_broken():
+        agents, codex = real()
+        codex.artifacts["spec"].clear()
+        codex.script_author_error("spec", CodexAuthorError("Dry-Run: Codex-Entwurf kaputt"))
+        return agents, codex
+
+    monkeypatch.setattr(cli_mod, "_dry_run_runners", codex_spec_broken)
+    result = runner.invoke(
+        app,
+        ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--no-approval"],
+    )
+    assert result.exit_code == 0, result.output
+    drafts = RunState.find_latest(target_repo).run_dir(target_repo) / "drafts"
+    assert (drafts / "spec.codex.FAILED").is_file()
+    assert not (drafts / "spec.codex.md").exists()
+    assert (drafts / "spec.claude.md").read_text().strip()  # einquellig weitergelaufen
+
+
 def test_status_shows_spec_approval_phase(target_repo):
     runner.invoke(
         app,

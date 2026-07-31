@@ -333,8 +333,14 @@ def _build_context(
 _DRY_SPEC = "# Spec (Dry-Run)\n\nZiel: Demo-Durchlauf durch alle sieben Phasen.\n"
 _DRY_PLAN = "# Plan (Dry-Run)\n\n- Workstream backend\n- Workstream frontend (optional)\n"
 _DRY_CONTRACT = "openapi: 3.1.0\ninfo:\n  title: Dry-Run-Kontrakt\n  version: 0.0.1\n"
-_DRY_SPEC_DRAFT = "# Spec-Entwurf (Dry-Run)\n\nZiel: Demo-Durchlauf.\n"
-_DRY_PLAN_DRAFT = "# Plan-Entwurf (Dry-Run)\n\n- Workstream backend\n"
+# Je Autor eigene Entwurfstexte: identische Fixtures würden verdecken, wenn
+# beide Draft-Dateien aus derselben Quelle stammten — der Dry-Run soll die zwei
+# unabhängigen Entwürfe zeigen, aus denen die Synthese mergt.
+_DRY_SPEC_DRAFT = "# Spec-Entwurf Claude (Dry-Run)\n\nZiel: Demo-Durchlauf.\n"
+_DRY_PLAN_DRAFT = "# Plan-Entwurf Claude (Dry-Run)\n\n- Workstream backend\n"
+_DRY_SPEC_CODEX_DRAFT = "# Spec-Entwurf Codex (Dry-Run)\n\nZiel: Demo-Durchlauf, zweite Sicht.\n"
+_DRY_PLAN_CODEX_DRAFT = "# Plan-Entwurf Codex (Dry-Run)\n\n- Workstream backend (zweite Sicht)\n"
+_DRY_CONTRACT_CODEX = "openapi: 3.1.0\ninfo:\n  title: Dry-Run-Kontrakt (Codex)\n  version: 0.0.1\n"
 _DRY_SPEC_SUMMARY = "# Zusammenfassung der Spec (Dry-Run)\n\nBest-of beider Entwuerfe.\n"
 _DRY_PLAN_SUMMARY = "# Zusammenfassung des Plans (Dry-Run)\n\nBest-of beider Entwuerfe.\n"
 _OK = ReviewResult(verdict="ok", findings=[])
@@ -420,9 +426,13 @@ def _dry_run_runners() -> tuple[MockAgentRunner, MockCodexRunner]:
     agents.script("final_reviewer", *[json.dumps(_OK.model_dump())] * 3)
     codex = MockCodexRunner()
     codex.script(*[_OK] * 8)  # Spec-, Plan-, Code-Reviews — alle grün
-    codex.script_artifacts("spec", *[{"spec.md": _DRY_SPEC_DRAFT}] * 3)
+    codex.script_artifacts("spec", *[{"spec.md": _DRY_SPEC_CODEX_DRAFT} for _ in range(3)])
     codex.script_artifacts(
-        "plan", *[{"plan.md": _DRY_PLAN_DRAFT, "contract.yaml": _DRY_CONTRACT}] * 3
+        "plan",
+        *[
+            {"plan.md": _DRY_PLAN_CODEX_DRAFT, "contract.yaml": _DRY_CONTRACT_CODEX}
+            for _ in range(3)
+        ],
     )
     return agents, codex
 
