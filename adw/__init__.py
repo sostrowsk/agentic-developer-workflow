@@ -1,3 +1,7 @@
 """Agentic Developer Workflow — orchestrator for the 7-phase ADW."""
 
-__version__ = "0.1.0"
+from importlib.metadata import version
+
+# Einzige Quelle ist pyproject.toml — eine zweite gepflegte Literal-Version
+# drifted beim Release-Bump zwangsläufig.
+__version__ = version("adw")
