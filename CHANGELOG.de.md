@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [0.3.0] — Unreleased
+## [0.3.0] — 2026-08-03
 
 ### Added
 - **Dual-Authoring mit Best-of-Synthese** für Spec- und Plan-Phase:
@@ -129,7 +129,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
-[0.3.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.2.1...HEAD
+[0.3.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.1.8...v0.2.0
 [0.1.8]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.1.7...v0.1.8
