@@ -57,6 +57,10 @@ class Gate(BaseModel):
     name: NonBlankStr
     cmd: NonBlankStr
     timeout: PositiveSeconds
+    # Markiert das Gate als TDD-Beweis: Fehlschlag NACH dem reinen Test-Lauf
+    # belegt RED. Nur markierte Gates laufen im RED-Check des Initial-Builds.
+    # strict=True: 1/"yes" sind keine gültigen Booleans (analog timeout).
+    tdd: bool = Field(default=False, strict=True)
 
 
 class LaneConfig(BaseModel):

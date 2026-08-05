@@ -56,6 +56,26 @@ def test_state_file_without_prior_context_fields_still_loads(target_repo):
     assert loaded.authoring_prior_context == []
 
 
+def test_red_confirmed_survives_the_round_trip(target_repo):
+    """RED-Gate: der orchestrator-eigene RED-Beweis überlebt einen Crash."""
+    state = make_state()
+    state.lanes["backend"].red_confirmed = True
+    state.save(target_repo)
+    loaded = RunState.load(target_repo, "ab12cd34")
+    assert loaded.lanes["backend"].red_confirmed is True
+
+
+def test_state_file_without_red_confirmed_still_loads(target_repo):
+    """Rückwärtskompatibel: State-Files aus der Zeit vor dem RED-Gate."""
+    data = json.loads(make_state().model_dump_json())
+    del data["lanes"]["backend"]["red_confirmed"]
+    path = target_repo / ".adw" / "runs" / "ab12cd34" / "state.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    loaded = RunState.load(target_repo, "ab12cd34")
+    assert loaded.lanes["backend"].red_confirmed is False
+
+
 def test_load_unknown_run_id_raises(target_repo):
     with pytest.raises(StateNotFoundError, match="deadbeef"):
         RunState.load(target_repo, "deadbeef")

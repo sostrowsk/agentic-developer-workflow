@@ -56,6 +56,11 @@ class LaneState(BaseModel):
     # bindet den Beweis an den EXAKTEN Baum-Inhalt (inkl. untracked Files).
     gates_passed: bool = False
     gates_tree: str | None = None
+    # Vom ORCHESTRATOR persistierter Beweis, dass die tdd-markierten Gates nach
+    # dem reinen Test-Lauf rot waren (TDD RED). Analog gates_passed nicht
+    # agent-fälschbar; überlebt Crash+Resume, damit der Test-Lauf sich nicht
+    # wiederholt und der Implementierungs-Lauf direkt weitergeht.
+    red_confirmed: bool = False
     # Offenes Gate-Feedback für den nächsten Fix-Lauf + Circuit-Breaker-Basis —
     # überlebt einen Crash zwischen Gate-Fail und Fix-Iteration.
     pending_task: str | None = None

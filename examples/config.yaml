@@ -8,11 +8,13 @@ lanes:
     gates: # Reihenfolge = Ausführungsreihenfolge; fail fast beim ersten Rot
       - { name: black, cmd: "black --check .", timeout: 120 }
       - { name: isort, cmd: "isort --check-only .", timeout: 120 }
-      - { name: pytest, cmd: "pytest -x -q", timeout: 1800 }
+      # tdd: true = RED-Beweis-Gate — nach dem reinen Test-Lauf des
+      # Initial-Builds muss mindestens ein markiertes Gate rot sein.
+      - { name: pytest, cmd: "pytest -x -q", timeout: 1800, tdd: true }
   frontend: # optional — fehlt die Lane, läuft v1-Single-Lane
     gates:
       - { name: eslint, cmd: "npm run lint", timeout: 300 }
-      - { name: vitest, cmd: "npm test -- --run", timeout: 900 }
+      - { name: vitest, cmd: "npm test -- --run", timeout: 900, tdd: true }
 
 e2e: # optional; nur mit --parallel relevant
   cmd: "npx playwright test"

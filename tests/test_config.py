@@ -267,6 +267,47 @@ lanes:
         AdwConfig.load(target_repo)
 
 
+def test_gate_tdd_flag_defaults_to_false(target_repo):
+    """Rückwärtskompatibel: eine Config ohne tdd-Key parst unverändert."""
+    cfg = AdwConfig.load(target_repo)
+    assert cfg.lanes["backend"].gates[0].tdd is False
+
+
+def test_gate_tdd_flag_is_parsed(target_repo):
+    write_config(
+        target_repo,
+        """\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - {name: lint, cmd: "true", timeout: 5}
+      - {name: pytest, cmd: "true", timeout: 5, tdd: true}
+""",
+    )
+    cfg = AdwConfig.load(target_repo)
+    lint, pytest_gate = cfg.lanes["backend"].gates
+    assert lint.tdd is False
+    assert pytest_gate.tdd is True
+
+
+@pytest.mark.parametrize("value", ['"vielleicht"', "1", '"yes"', "0"])
+def test_non_boolean_tdd_flag_raises(target_repo, value):
+    """Strikt wie timeout: nur echte YAML-Booleans, keine 1/'yes'-Coercion."""
+    write_config(
+        target_repo,
+        f"""\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - {{name: pytest, cmd: "true", timeout: 5, tdd: {value}}}
+""",
+    )
+    with pytest.raises(ConfigError, match="tdd"):
+        AdwConfig.load(target_repo)
+
+
 def test_ci_provider_accepts_gitlab_and_github(target_repo):
     write_config(
         target_repo,
