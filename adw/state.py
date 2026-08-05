@@ -61,6 +61,10 @@ class LaneState(BaseModel):
     # agent-fälschbar; überlebt Crash+Resume, damit der Test-Lauf sich nicht
     # wiederholt und der Implementierungs-Lauf direkt weitergeht.
     red_confirmed: bool = False
+    # Pfade, die der reine Test-Lauf angelegt/geändert hat. Sie binden den
+    # RED-Beweis an die Tests, die ihn geliefert haben: fehlen sie, wenn die
+    # Gates grün sind, war der schnellste Weg zu Grün das Löschen der Tests.
+    red_test_paths: list[str] = Field(default_factory=list)
     # Offenes Gate-Feedback für den nächsten Fix-Lauf + Circuit-Breaker-Basis —
     # überlebt einen Crash zwischen Gate-Fail und Fix-Iteration.
     pending_task: str | None = None

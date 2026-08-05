@@ -65,10 +65,20 @@ def test_red_confirmed_survives_the_round_trip(target_repo):
     assert loaded.lanes["backend"].red_confirmed is True
 
 
+def test_red_test_paths_survive_the_round_trip(target_repo):
+    """Die RED-Tests binden den Beweis — ihre Pfade müssen den Crash überleben."""
+    state = make_state()
+    state.lanes["backend"].red_test_paths = ["tests/test_feature.py"]
+    state.save(target_repo)
+    loaded = RunState.load(target_repo, "ab12cd34")
+    assert loaded.lanes["backend"].red_test_paths == ["tests/test_feature.py"]
+
+
 def test_state_file_without_red_confirmed_still_loads(target_repo):
     """Rückwärtskompatibel: State-Files aus der Zeit vor dem RED-Gate."""
     data = json.loads(make_state().model_dump_json())
     del data["lanes"]["backend"]["red_confirmed"]
+    del data["lanes"]["backend"]["red_test_paths"]
     path = target_repo / ".adw" / "runs" / "ab12cd34" / "state.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")

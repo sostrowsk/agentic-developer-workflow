@@ -1031,6 +1031,278 @@ lanes:
     assert all(pending is not None for pending in after_first_agent[1:])
 
 
+# --- 10d: RED-Gate im Initial-Build ---------------------------------------
+
+# Beide Gates sind rot, solange impl.py fehlt — nur das zweite ist als
+# RED-Beweis markiert. Damit zeigt der Gate-Output, WELCHE Gates im RED-Check
+# gelaufen sind (fail fast würde sonst zuerst das lint-Gate melden).
+TDD_CONFIG = """\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - name: lint
+        cmd: "sh -c 'test -f impl.py || { echo LINT-ROT; exit 1; }'"
+        timeout: 10
+      - name: pytest
+        cmd: "sh -c 'test -f impl.py || { echo TESTS-ROT; exit 1; }'"
+        timeout: 10
+        tdd: true
+"""
+
+GREEN_TDD_CONFIG = """\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - {name: pytest, cmd: "true", timeout: 10, tdd: true}
+"""
+
+TEST_FILES = {"test_feature.py": "def test_feature(): assert impl\n"}
+IMPL_FILES = {"impl.py": "impl = 1\n"}
+
+
+def prepare_tdd_lane(ctx, target_repo, config: str = TDD_CONFIG) -> None:
+    write_config(target_repo, config)
+    ctx.config = AdwConfig.load(target_repo)
+    prepare_approved(ctx)
+
+
+def files_per_build_call(ctx, *file_sets):
+    """Je Build-Agent-Lauf ein eigener Datei-Satz (Test-Lauf, dann Implementierung).
+
+    run() zeichnet den Call VOR dem file_writes-Lookup auf — beim ersten Lauf
+    steht der Zähler also schon auf 1."""
+
+    def choose(_cwd):
+        calls = len([c for c in ctx.agents.calls if c.agent == "build_agent"])
+        return file_sets[min(calls, len(file_sets)) - 1]
+
+    return choose
+
+
+def build_calls(ctx):
+    return [c for c in ctx.agents.calls if c.agent == "build_agent"]
+
+
+def test_initial_build_proves_red_before_implementing(ctx, target_repo):
+    prepare_tdd_lane(ctx, target_repo)
+    ctx.agents.file_writes["build_agent"] = files_per_build_call(ctx, TEST_FILES, IMPL_FILES)
+    ctx.agents.script("build_agent", "Tests geschrieben", "implementiert")
+    run_build_phase(ctx)
+    calls = build_calls(ctx)
+    assert len(calls) == 2
+    assert "ONLY the tests" in calls[0].task
+    assert calls[0].resume is None
+    # Implementierung setzt DIESELBE Session fort und kennt den roten Gate-Output:
+    assert "RED confirmed" in calls[1].task
+    assert "TESTS-ROT" in calls[1].task
+    assert "LINT-ROT" not in calls[1].task  # im RED-Check laufen nur tdd-Gates
+    assert calls[1].resume == ctx.state.lanes["backend"].session_id
+    lane = ctx.state.lanes["backend"]
+    assert lane.red_confirmed is True
+    assert lane.gate_iterations == 1  # der RED-Check verbraucht keine Iteration
+    assert ctx.state.phase == "codex_review"
+    worktree = ctx.repo / ".adw" / "runs" / ctx.state.run_id / "trees" / "backend"
+    assert (worktree / "test_feature.py").is_file()
+    assert (worktree / "impl.py").is_file()
+
+
+def test_green_gates_after_the_test_run_escalate(ctx, target_repo):
+    """Grün nach reinem Test-Lauf = kein RED-Beweis — kein Retry, Eskalation."""
+    prepare_tdd_lane(ctx, target_repo, GREEN_TDD_CONFIG)
+    ctx.agents.script_files("build_agent", dict(TEST_FILES))
+    ctx.agents.script("build_agent", "Tests geschrieben")
+    with pytest.raises(EscalationError, match="RED"):
+        run_build_phase(ctx)
+    assert len(build_calls(ctx)) == 1
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.phase == "escalated"
+    assert saved.lanes["backend"].red_confirmed is False
+
+
+def test_test_only_run_without_changes_escalates(ctx, target_repo):
+    prepare_tdd_lane(ctx, target_repo)
+    ctx.agents.file_writes.pop("build_agent", None)
+    ctx.agents.script("build_agent", "behauptet Tests geschrieben zu haben")
+    with pytest.raises(EscalationError, match="Test-Lauf"):
+        run_build_phase(ctx)
+    assert len(build_calls(ctx)) == 1
+
+
+def test_deleted_files_in_the_test_run_are_no_red_proof(ctx, target_repo):
+    """Rote Gates durch gelöschte Dateien wären ein gefälschter RED-Beweis."""
+    from pathlib import Path
+
+    class DeletingAgentRunner(MockAgentRunner):
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None):
+            result = super().run(agent, task, cwd, resume, deny_read_paths)
+            if agent.name == "build_agent":
+                (Path(cwd) / "README.md").unlink()  # getrackte Datei aus dem Base-Branch
+            return result
+
+    deleting = DeletingAgentRunner()
+    deleting.scripts = ctx.agents.scripts
+    deleting.file_writes = ctx.agents.file_writes
+    ctx.agents = deleting
+    prepare_tdd_lane(ctx, target_repo)
+    ctx.agents.script_files("build_agent", dict(TEST_FILES))
+    ctx.agents.script("build_agent", "Tests geschrieben (und aufgeräumt)")
+    with pytest.raises(EscalationError, match="gelöscht"):
+        run_build_phase(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.lanes["backend"].red_confirmed is False
+
+
+def test_implementation_deleting_the_red_tests_escalates(ctx, target_repo):
+    """Grüne Gates ohne die Tests, die RED bewiesen haben, sind kein Ergebnis."""
+    from pathlib import Path
+
+    class DeletingImplRunner(MockAgentRunner):
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None):
+            result = super().run(agent, task, cwd, resume, deny_read_paths)
+            if agent.name == "build_agent" and "RED confirmed" in task:
+                (Path(cwd) / "test_feature.py").unlink()
+            return result
+
+    deleting = DeletingImplRunner()
+    deleting.scripts = ctx.agents.scripts
+    deleting.file_writes = ctx.agents.file_writes
+    ctx.agents = deleting
+    prepare_tdd_lane(ctx, target_repo)
+    ctx.agents.file_writes["build_agent"] = files_per_build_call(ctx, TEST_FILES, IMPL_FILES)
+    ctx.agents.script("build_agent", "Tests geschrieben", "implementiert (und Tests entsorgt)")
+    with pytest.raises(EscalationError, match="RED-Tests"):
+        run_build_phase(ctx)
+
+
+def test_resume_without_any_test_changes_does_not_prove_red(ctx, target_repo):
+    """Crash zwischen Session-Checkpoint und Idle-Check: ein unveränderter
+    Worktree darf auch nach dem Resume kein RED beweisen."""
+    from adw.state import LaneState
+    from adw.worktrees import create_lane_worktree, ports_for
+
+    prepare_tdd_lane(ctx, target_repo)
+    worktree = create_lane_worktree(ctx.repo, ctx.state.run_id, "backend", "staging")
+    ctx.state.lanes["backend"] = LaneState(
+        worktree=str(worktree),
+        branch=f"adw/{ctx.state.run_id}/backend",
+        ports=ports_for(ctx.state.run_id, "backend"),
+        session_id="mock-session-build_agent-1",  # Checkpoint, aber keine Tests
+    )
+    ctx.agents.script("build_agent", "darf nicht laufen")
+    with pytest.raises(EscalationError, match="Test-Lauf"):
+        run_build_phase(ctx)
+    assert build_calls(ctx) == []
+    assert RunState.load(ctx.repo, ctx.state.run_id).lanes["backend"].red_confirmed is False
+
+
+def test_lane_without_tdd_gate_builds_in_a_single_pass(ctx):
+    """Ohne markiertes Gate bleibt der Build genau wie vor dem RED-Gate."""
+    prepare_approved(ctx)
+    ctx.agents.script_files("build_agent", {"neu.py": "pass\n"})
+    ctx.agents.script("build_agent", "gebaut")
+    run_build_phase(ctx)
+    calls = build_calls(ctx)
+    assert len(calls) == 1
+    assert "Implement the Workstream" in calls[0].task
+    assert ctx.state.lanes["backend"].red_confirmed is False
+
+
+def test_fix_dispatch_skips_the_red_stage(ctx, target_repo):
+    """Review-/E2E-Fix-Dispatches (pending_task gesetzt) bekommen keine RED-Stufe."""
+    from adw.state import LaneState
+    from adw.worktrees import create_lane_worktree, ports_for
+
+    prepare_tdd_lane(ctx, target_repo)
+    worktree = create_lane_worktree(ctx.repo, ctx.state.run_id, "backend", "staging")
+    ctx.state.lanes["backend"] = LaneState(
+        worktree=str(worktree),
+        branch=f"adw/{ctx.state.run_id}/backend",
+        ports=ports_for(ctx.state.run_id, "backend"),
+        pending_task="Review Findings for your Lane. Fix the root causes.",
+    )
+    ctx.agents.script_files("build_agent", dict(IMPL_FILES))
+    ctx.agents.script("build_agent", "gefixt")
+    run_build_phase(ctx)
+    calls = build_calls(ctx)
+    assert len(calls) == 1
+    assert calls[0].task.startswith("Review Findings")
+    assert ctx.state.lanes["backend"].red_confirmed is False
+
+
+def test_resume_after_the_test_run_repeats_only_the_red_check(ctx, target_repo):
+    """Crash zwischen Test-Lauf und RED-Check: kein zweiter Test-Lauf."""
+    from adw.state import LaneState
+    from adw.worktrees import create_lane_worktree, ports_for
+
+    prepare_tdd_lane(ctx, target_repo)
+    worktree = create_lane_worktree(ctx.repo, ctx.state.run_id, "backend", "staging")
+    for name, content in TEST_FILES.items():
+        (worktree / name).write_text(content)
+    ctx.state.lanes["backend"] = LaneState(
+        worktree=str(worktree),
+        branch=f"adw/{ctx.state.run_id}/backend",
+        ports=ports_for(ctx.state.run_id, "backend"),
+        session_id="mock-session-build_agent-1",  # Checkpoint nach dem Test-Lauf
+    )
+    ctx.agents.script_files("build_agent", dict(IMPL_FILES))
+    ctx.agents.script("build_agent", "implementiert")
+    run_build_phase(ctx)
+    calls = build_calls(ctx)
+    assert len(calls) == 1
+    assert "RED confirmed" in calls[0].task
+    assert calls[0].resume == "mock-session-build_agent-1"
+    assert ctx.state.lanes["backend"].red_confirmed is True
+
+
+def test_resume_after_red_confirmed_goes_straight_to_the_implementation(ctx, target_repo):
+    """Crash nach dem RED-Beweis: der Resume implementiert nur noch."""
+    from adw.state import LaneState
+    from adw.worktrees import create_lane_worktree, ports_for
+
+    prepare_tdd_lane(ctx, target_repo)
+    worktree = create_lane_worktree(ctx.repo, ctx.state.run_id, "backend", "staging")
+    for name, content in TEST_FILES.items():
+        (worktree / name).write_text(content)
+    ctx.state.lanes["backend"] = LaneState(
+        worktree=str(worktree),
+        branch=f"adw/{ctx.state.run_id}/backend",
+        ports=ports_for(ctx.state.run_id, "backend"),
+        session_id="mock-session-build_agent-1",
+        red_confirmed=True,
+        pending_task="RED confirmed — implementiere jetzt minimal.",
+    )
+    ctx.agents.script_files("build_agent", dict(IMPL_FILES))
+    ctx.agents.script("build_agent", "implementiert")
+    run_build_phase(ctx)
+    calls = build_calls(ctx)
+    assert len(calls) == 1
+    assert calls[0].task == "RED confirmed — implementiere jetzt minimal."
+    assert ctx.state.phase == "codex_review"
+
+
+def test_red_check_does_not_consume_a_gate_iteration(ctx, target_repo, monkeypatch):
+    prepare_tdd_lane(ctx, target_repo)
+    ctx.agents.file_writes["build_agent"] = files_per_build_call(ctx, TEST_FILES, IMPL_FILES)
+    ctx.agents.script("build_agent", "Tests geschrieben", "implementiert")
+
+    saves = []
+    original_save = RunState.save
+
+    def spy(self, repo):
+        lane = self.lanes.get("backend")
+        if lane is not None:
+            saves.append((lane.red_confirmed, lane.gate_iterations))
+        return original_save(self, repo)
+
+    monkeypatch.setattr(RunState, "save", spy)
+    run_build_phase(ctx)
+    after_red = [iterations for confirmed, iterations in saves if confirmed]
+    assert after_red and after_red[0] == 0  # RED-Beweis VOR der ersten Iteration
+    assert ctx.state.lanes["backend"].gate_iterations == 1
+
+
 def test_untracked_config_created_by_agent_is_not_committed(tmp_path):
     """Regression: if config.yaml is untracked, the agent must not smuggle in its own."""
     from tests.conftest import git, write_config

@@ -27,7 +27,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from adw import ci, github
-from adw.agents import REGISTRY, AgentRunner
+from adw.agents import REGISTRY, AgentRunner, AgentSpec
 from adw.codex import CodexAuthorError, CodexClient, CodexError
 from adw.config import AdwConfig, Gate
 from adw.env import safe_env
@@ -1059,6 +1059,10 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
         if other != lane
     ]
     spec = REGISTRY["build_agent"]
+    if _needs_red_stage(ctx, lane, lane_state):
+        # Setzt red_confirmed + den Implementierungs-Task als pending_task —
+        # der Loop unten startet damit im selben Agent-Kontext weiter.
+        _confirm_red(ctx, lane, worktree, lane_state, spec, deny)
     # Resume: offenes Gate-Feedback und Circuit-Breaker-Basis aus dem State —
     # sonst verliert ein Crash zwischen Gate-Fail und Fix-Lauf den Kontext.
     task = lane_state.pending_task or (
@@ -1074,15 +1078,7 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
     while True:
         current_head = _git(ctx, worktree, "rev-parse", "HEAD").strip()
         with ctx.state_lock:
-            # Agent-Commit aus einem Crash-Fenster erkennen: expected_head
-            # ist der persistierte HEAD VOR dem letzten Agent-Lauf.
-            if lane_state.expected_head and lane_state.expected_head != current_head:
-                raise escalate(
-                    ctx,
-                    f"Lane {lane}: HEAD hat sich außerhalb des Orchestrators bewegt "
-                    f"(Agent-Commit im Crash-Fenster?) — Commits sind Sache des "
-                    f"Orchestrators",
-                )
+            _require_expected_head(ctx, lane, lane_state, current_head)
             # Limit VOR dem Versuch prüfen — nach Crash+Resume bei Iteration 10
             # darf kein 11. Versuch starten.
             try:
@@ -1094,12 +1090,7 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             resume = lane_state.session_id
             ctx.save()  # Checkpoint VOR dem Agent-Lauf
         result = ctx.agents.run(spec, task, cwd=worktree, resume=resume, deny_read_paths=deny)
-        if _git(ctx, worktree, "rev-parse", "HEAD").strip() != current_head:
-            raise escalate(
-                ctx,
-                f"Lane {lane}: der Build-Agent hat selbst committet — Commits "
-                f"sind Sache des Orchestrators (Reviewer-/Gate-Invariante verletzt)",
-            )
+        _require_no_agent_commit(ctx, lane, worktree, current_head)
         _require_lane_branch(ctx, worktree, lane_state)
         with ctx.state_lock:
             lane_state.session_id = result.session_id or lane_state.session_id
@@ -1113,6 +1104,7 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
         # nach einem Gate-Fail muss pending_task/last_failures bereits tragen.
         report = _run_lane_gates(ctx, lane, worktree, lane_state)
         if report.passed:
+            _require_red_tests(ctx, lane, worktree, lane_state)
             break
         failures = [f"{f.gate}|{f.exit_code}|{f.output}" for f in report.failures]
         try:
@@ -1145,6 +1137,192 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
         lane_state.gates_tree = _worktree_tree_hash(ctx, worktree)  # an den Baum gebunden
         ctx.save()
     _finalize_lane(ctx, worktree, lane, lane_state)
+
+
+def _require_expected_head(ctx: RunContext, lane: str, lane_state: LaneState, head: str) -> None:
+    """Detect an agent commit from a crash window: expected_head is the HEAD
+    persisted BEFORE the last agent run."""
+    if lane_state.expected_head and lane_state.expected_head != head:
+        raise escalate(
+            ctx,
+            f"Lane {lane}: HEAD hat sich außerhalb des Orchestrators bewegt "
+            f"(Agent-Commit im Crash-Fenster?) — Commits sind Sache des "
+            f"Orchestrators",
+        )
+
+
+def _require_no_agent_commit(ctx: RunContext, lane: str, worktree: Path, head_before: str) -> None:
+    if _git(ctx, worktree, "rev-parse", "HEAD").strip() != head_before:
+        raise escalate(
+            ctx,
+            f"Lane {lane}: der Build-Agent hat selbst committet — Commits "
+            f"sind Sache des Orchestrators (Reviewer-/Gate-Invariante verletzt)",
+        )
+
+
+# Der rote Gate-Output geht gekürzt in den Implementierungs-Task: er soll die
+# fehlschlagenden Tests benennen, nicht die Session mit einem Log fluten.
+RED_OUTPUT_LINES = 40
+
+
+def _needs_red_stage(ctx: RunContext, lane: str, lane_state: LaneState) -> bool:
+    """RED proof only in the initial build of a Lane with tdd-marked Gates.
+
+    Fix dispatches (pending_task) and every resume after the proof skip it —
+    doubling every fix run would buy nothing."""
+    return (
+        bool(_tdd_gates(ctx, lane))
+        and not lane_state.pending_task
+        and not lane_state.red_confirmed
+        and lane_state.gate_iterations == 0
+    )
+
+
+def _tdd_gates(ctx: RunContext, lane: str) -> list[Gate]:
+    return [gate for gate in ctx.config.lanes[lane].gates if gate.tdd]
+
+
+def _confirm_red(
+    ctx: RunContext,
+    lane: str,
+    worktree: Path,
+    lane_state: LaneState,
+    spec: AgentSpec,
+    deny: list[str],
+) -> None:
+    """TDD RED, proven by the orchestrator: a test-only agent run, then the
+    tdd-marked Gates.
+
+    At least one red = proof; ``red_confirmed`` and the implementation task are
+    persisted in ONE save, so a resume goes straight into the implementation.
+    All green means the tests do not cover the required behaviour (or it already
+    exists) — that is an escalation, not a fix cycle. The check runs no Gate
+    iteration: the budget belongs to the implementation."""
+    current_head = _git(ctx, worktree, "rev-parse", "HEAD").strip()
+    with ctx.state_lock:
+        _require_expected_head(ctx, lane, lane_state, current_head)
+    if lane_state.session_id is None:
+        _run_test_only_pass(ctx, lane, worktree, lane_state, spec, deny, current_head)
+    # Crash zwischen Test-Lauf und RED-Check (session_id bereits gecheckpointet):
+    # der Worktree ist unverändert, es fehlt nur der Beweis — kein zweiter Lauf.
+    _restore_approved_artifacts(ctx, worktree, lane_state.base_sha or ctx.config.base_branch)
+    # Beide Prüfungen laufen NACH der Restauration und in beiden Pfaden (frischer
+    # Lauf wie Resume) — ein Crash darf keinen Beweis ohne Tests durchlassen.
+    red_tests = _changed_paths(ctx, worktree)
+    if not red_tests:
+        raise escalate(
+            ctx,
+            f"Lane {lane}: der Test-Lauf hat keine Änderungen im Worktree "
+            f"hinterlassen — ohne Tests ist RED nicht beweisbar",
+        )
+    _require_no_deletions(ctx, lane, worktree)
+    report = _run_lane_gates(ctx, lane, worktree, lane_state, _tdd_gates(ctx, lane))
+    if report.passed:
+        raise escalate(
+            ctx,
+            f"Lane {lane}: Tests nach reinem Test-Lauf grün — RED nicht bestätigt; "
+            f"die Tests decken das geforderte Verhalten nicht ab oder das Verhalten "
+            f"existiert bereits",
+        )
+    with ctx.state_lock:
+        # EIN Save: Beweis und Implementierungs-Task gehören zusammen — ein
+        # Crash dazwischen dürfte weder den Test-Lauf noch den Beweis verlieren.
+        lane_state.red_confirmed = True
+        # Die Pfade binden den Beweis an die Tests, die ihn geliefert haben —
+        # ohne sie wären grüne Gates am Ende per Löschen erreichbar.
+        lane_state.red_test_paths = red_tests
+        lane_state.pending_task = (
+            f"RED confirmed: the tests you just wrote fail as required (Gate output "
+            f"below, shortened). Now implement minimally until the Gates pass — do "
+            f"not weaken, skip, move or delete the tests ({', '.join(red_tests)}). "
+            f"You do not commit.\n\n"
+            f"{_shorten_tail(_gate_failure_text(report), RED_OUTPUT_LINES)}"
+        )
+        ctx.save()
+
+
+def _run_test_only_pass(
+    ctx: RunContext,
+    lane: str,
+    worktree: Path,
+    lane_state: LaneState,
+    spec: AgentSpec,
+    deny: list[str],
+    current_head: str,
+) -> None:
+    """The agent run that writes ONLY tests — same invariants as every build
+    run: no agent commit, Lane branch, checkpoint before and after."""
+    with ctx.state_lock:
+        lane_state.expected_head = current_head
+        ctx.save()  # Checkpoint VOR dem Agent-Lauf
+    task = (
+        f"Workstream '{lane}': Write ONLY the tests for your workstream (TDD RED "
+        f"step): derive them from .adw/plan.md, .adw/contract.yaml and .adw/spec.md. "
+        f"Do NOT write or modify any production code. You do not commit.\n\n"
+        f"Issue:\n{ctx.state.issue}"
+    )
+    result = ctx.agents.run(spec, task, cwd=worktree, resume=None, deny_read_paths=deny)
+    _require_no_agent_commit(ctx, lane, worktree, current_head)
+    _require_lane_branch(ctx, worktree, lane_state)
+    with ctx.state_lock:
+        # Checkpoint VOR den Gates: ohne die Session-ID auf Platte würde ein
+        # Resume den Test-Lauf wiederholen statt nur den RED-Check.
+        lane_state.session_id = result.session_id or lane_state.session_id
+        ctx.save()
+
+
+def _changed_paths(ctx: RunContext, worktree: Path) -> list[str]:
+    """Paths the test-only pass created or touched — the RED proof hangs on them.
+
+    -z instead of --porcelain: git quotes umlauts and spaces in the status
+    format, NUL-separated names come through verbatim."""
+    listings = (
+        _git(ctx, worktree, "ls-files", "--others", "--exclude-standard", "-z"),
+        _git(ctx, worktree, "diff", "--name-only", "-z", "HEAD"),
+    )
+    return sorted({name for listing in listings for name in listing.split("\0") if name})
+
+
+def _require_red_tests(ctx: RunContext, lane: str, worktree: Path, lane_state: LaneState) -> None:
+    """Green Gates count only with the tests that proved RED still in place —
+    deleting them would otherwise be the shortest path to green."""
+    missing = [name for name in lane_state.red_test_paths if not (worktree / name).exists()]
+    if missing:
+        raise escalate(
+            ctx,
+            f"Lane {lane}: Gates grün, aber die RED-Tests fehlen "
+            f"({', '.join(missing)}) — gelöschte oder verschobene Tests beweisen nichts",
+        )
+
+
+def _require_no_deletions(ctx: RunContext, lane: str, worktree: Path) -> None:
+    """A test-only pass ADDS tests — it deletes nothing.
+
+    Deleted files turn the marked Gates red without a single new test: the
+    cheapest way to forge the RED proof. Modified files stay allowed — new
+    tests often land in existing test files, and which paths are tests is
+    something the orchestrator cannot know in a stack-neutral way."""
+    deleted = [
+        name
+        for name in _git(
+            ctx, worktree, "diff", "--name-only", "--diff-filter=D", "HEAD"
+        ).splitlines()
+        if name
+    ]
+    if deleted:
+        raise escalate(
+            ctx,
+            f"Lane {lane}: der Test-Lauf hat Dateien gelöscht ({', '.join(deleted)}) — "
+            f"rote Gates wären dann kein RED-Beweis, sondern ein kaputter Baum",
+        )
+
+
+def _shorten_tail(text: str, max_lines: int) -> str:
+    """Last lines of an output — like the Gate tail, the end carries the result."""
+    lines = text.splitlines()
+    if len(lines) <= max_lines:
+        return text
+    return f"… ({len(lines) - max_lines} Zeilen gekappt)\n" + "\n".join(lines[-max_lines:])
 
 
 def _handle_idle_agent_run(ctx: RunContext, lane: str, findings: list[Finding]) -> None:
@@ -1263,8 +1441,15 @@ def _seed_artifacts(ctx: RunContext, worktree: Path) -> None:
         _git(ctx, worktree, "commit", "-m", f"adw({ctx.state.run_id}): Spec/Plan/Kontrakt")
 
 
-def _run_lane_gates(ctx: RunContext, lane: str, worktree: Path, lane_state: LaneState):
-    gates = ctx.config.lanes[lane].gates
+def _run_lane_gates(
+    ctx: RunContext,
+    lane: str,
+    worktree: Path,
+    lane_state: LaneState,
+    gates: list[Gate] | None = None,
+):
+    """All Gates of the Lane — or the passed subset (RED check: tdd Gates only)."""
+    gates = ctx.config.lanes[lane].gates if gates is None else gates
     extra_env = {f"{name.upper()}_PORT": str(port) for name, port in lane_state.ports.items()}
     return run_gates(gates, cwd=worktree, extra_env=extra_env)
 
