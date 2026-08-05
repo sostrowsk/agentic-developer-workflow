@@ -13,6 +13,37 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.4.0] — Unreleased
+
+### Added
+- **RED-Gate in der Build-Phase**: Ein Gate lässt sich in `.adw/config.yaml`
+  mit `tdd: true` markieren. Eine Lane mit mindestens einem markierten Gate
+  fährt ihren Initial-Build zweistufig — ein Agent-Lauf mit der Anweisung,
+  nur Tests zu schreiben („schreibe NUR die Tests, keinen Produktivcode"),
+  danach führt der
+  Orchestrator selbst genau die markierten Gates aus. Mindestens eines rot
+  ist der RED-Beweis (`red_confirmed` plus die Test-Pfade im Lane-State);
+  die Implementierung macht in **derselben Session** mit dem gekürzten roten
+  Gate-Output weiter und mündet in den bestehenden Gate-Loop. Alle
+  markierten Gates grün nach dem Test-Lauf eskaliert statt zu schleifen: Die
+  Tests decken das geforderte Verhalten nicht ab oder es existiert bereits.
+- Fälschungsschutz um den Beweis: Ein Test-Lauf, der Dateien löscht oder den
+  Worktree unverändert lässt, eskaliert; grüne Gates zählen nur, solange die
+  Tests, die RED bewiesen haben, noch da sind.
+- Dry-Run deckt beide Pfade mit 0 Tokens ab — die Default-Config (ohne
+  `tdd`-Gate) bleibt einstufig, eine Config mit `tdd`-Gate fährt den
+  kompletten RED-Pfad über die CLI.
+
+### Changed
+- Der RED-Check verbraucht keine Gate-Iteration; alle Limits und der
+  Circuit-Breaker bleiben unverändert. Fix-Dispatches aus den Review-/
+  E2E-Phasen (`pending_task` gesetzt) und Lanes ohne markiertes Gate
+  verhalten sich exakt wie bisher. `red_confirmed` überlebt Crash + Resume:
+  Ab dem gecheckpointeten Test-Lauf wiederholt ein Crash vor dem RED-Check
+  nur noch den Check.
+- Doku (SPEC, User-Handbuch, Kontrollfluss-Handbuch, technische Spec, EN+DE
+  inkl. HTML/DOCX-Exporte) beschreibt die RED-Stufe.
+
 ## [0.3.0] — 2026-08-03
 
 ### Added

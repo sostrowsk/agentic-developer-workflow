@@ -123,15 +123,27 @@ Phase für Phase.
    eigene Netzwerk-Ports. Die Lanes können sich so **nicht gegenseitig
    in die Quere kommen**. (Ohne `--parallel` gibt es einfach nur eine Lane —
    gleicher Ablauf, eine Spur.)
-2. In jeder Lane läuft der **Lane-Loop**:
+2. Hat das Projekt ein Gate als **Test-zuerst-Gate** markiert (`tdd: true`,
+   typisch: die Testsuite), startet die Lane mit der **RED-Stufe**: Der
+   Build-Agent schreibt zuerst **nur die Tests** — keinerlei Produktivcode.
+   Danach führt der Orchestrator selbst genau diese markierten Gates aus.
+   **Mindestens eines davon muss rot sein**: Das ist der Beweis, dass die Tests
+   wirklich etwas verlangen, das es noch nicht gibt. Alles grün vor der ersten
+   Zeile Code heißt entweder, dass die Tests nichts messen, oder dass das
+   geforderte Verhalten schon existiert — der Lauf stoppt und übergibt an den
+   Menschen. (Hier wird niemandem geglaubt: Den Beweis führt der Kontrollfluss,
+   nicht die KI.)
+3. In jeder Lane läuft der **Lane-Loop**:
    - Der **Build-Agent** (KI) schreibt Code — strikt nach Plan und Kontrakt.
+     Nach bewiesenem RED macht er in **derselben Sitzung** weiter und weiß
+     genau, welche Tests er grün bekommen muss.
    - Danach laufen die **Gates**: automatische Prüfungen (Formatierung,
      Code-Stil, Tests), fest im Projekt konfiguriert. Wie Kontrollstationen
      am Fließband.
    - **Rot?** Die Fehlermeldungen gehen als neue Aufgabe **an dieselbe
      KI-Sitzung** zurück — sie kennt ihren eigenen Code noch und bessert nach.
-   - Das wiederholt sich, **maximal 10-mal**. Danach: Eskalations-Bericht,
-     Abbruch, Mensch übernimmt.
+   - Das wiederholt sich, **maximal 10-mal** (der RED-Check verbraucht keinen
+     dieser Versuche). Danach: Eskalations-Bericht, Abbruch, Mensch übernimmt.
 
 ### Phase 4 — Integration + E2E: „Passen die Teile zusammen?" (nur bei `--parallel`)
 
@@ -203,6 +215,7 @@ der Spezifikation steht?*
 | Mechanismus | Was er bedeutet |
 |---|---|
 | **Limits** | Phase 3: max. 10 Fix-Iterationen · Phase 4: max. 10 Runden · Phase 5: max. 5 Review-Runden · Phase 6: max. 3 Zyklen · Phase 7: max. 45 min Warten |
+| **Beweis statt Behauptung (RED)** | Bei einem Test-zuerst-Gate (`tdd: true`) stellt der Kontrollfluss selbst fest, dass die markierten Gates nach dem reinen Test-Lauf fehlschlagen, bevor implementiert wird — und akzeptiert grüne Gates nur, solange diese Tests noch da sind |
 | **Circuit-Breaker** | Löst eine Reparatur-Runde *nichts* auf → sofortiger Abbruch statt sinnlosem Weiterdrehen |
 | **Eskalations-Bericht** | Bei jedem Abbruch entsteht `escalation.md`: was erreicht, was offen, warum — Übergabe an den Menschen |
 | **Speicherpunkte** | Nach **jedem Phasenübergang** wird der komplette Zustand gespeichert. `adw resume` setzt nach Absturz, Pause oder erschöpftem KI-Kontingent **exakt dort** fort — wie ein Spielstand im Videospiel |

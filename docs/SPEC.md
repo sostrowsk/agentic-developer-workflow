@@ -72,9 +72,15 @@ not undo the authors' scope counterweight.
    plan + contract and continues via `adw resume <run_id>` or `adw approve <run_id>`.
    Can be disabled with `--no-approval`.
 3. **Build:** Dispatch (code) splits the plan into workstreams. Per lane: own Git Worktree
-   (branch off base branch), own SDK session, own ports. Lane loop: build agent works →
+   (branch off base branch), own SDK session, own ports. **RED stage** (only for lanes with at
+   least one Gate marked `tdd: true`, and only in the initial build): the build agent first
+   writes ONLY the tests, then the orchestrator itself runs exactly the marked Gates — at least
+   one red is the RED proof (`red_confirmed` plus the test paths in the state), all green
+   escalates (the tests do not cover the required behavior, or it already exists). Then the lane
+   loop: build agent works (same session, with the shortened red Gate output as its task) →
    Gates run (commands from target-repo config) → on fail the error outputs go back as a
-   follow-up task to **the same session**. Max. 10 iterations.
+   follow-up task to **the same session**. Max. 10 iterations; the RED check consumes none of
+   them.
 4. **Integration + E2E** (only `--parallel`): Code merges lane branches onto an
    integration branch; E2E command (Playwright) runs. On red, the E2E Triage agent
    assigns each failure to a lane → fix in the lane → integrate again. Max. 10 rounds.
@@ -96,6 +102,15 @@ from the single remaining source (which it states in the summary); the marker pr
 from burning another Codex run on the same broken input. A missing, empty or unchanged Claude
 draft **escalates** — without it there is nothing to synthesize. The stage is idempotent over the
 draft FILES, not over the state: an existing, non-empty draft skips its author on resume.
+
+**RED proof in the build (phase 3):** the proof belongs to the orchestrator, not to the agent's
+claim — what it proves is that the marked Gates were red before the implementation run; "tests
+only" is an instruction to the agent, because the orchestrator cannot tell a test file from a
+production file in a stack-neutral way. It only applies to the initial build of a lane — fix dispatches from the review/E2E
+phases (a `pending_task` is set) and every resume after the proof skip the stage. Forged proofs
+are blocked: a test-only pass that deletes files or leaves the worktree untouched escalates, and
+green Gates count only while the tests that proved RED are still in place. Without a `tdd: true`
+Gate a lane builds in a single pass, exactly as before.
 
 **Codex review-loop policy** (spec/plan authoring loops in phases 1–2 and the code review in
 phase 5): round 1 acts on all findings (P1–P3), round 2 only on P1+P2, from round 3 only on P1 —
@@ -130,7 +145,8 @@ lanes:
     gates:                     # order = execution order; each: name + command + timeout
       - {name: black,  cmd: "black --check .", timeout: 120}
       - {name: isort,  cmd: "isort --check-only .", timeout: 120}
-      - {name: pytest, cmd: "pytest -x -q", timeout: 1800}
+      # tdd: true marks the Gate whose failure proves RED in the initial build
+      - {name: pytest, cmd: "pytest -x -q", timeout: 1800, tdd: true}
   frontend:                    # optional; if the lane is missing, v1 single-lane runs
     gates:
       - {name: eslint, cmd: "npm run lint", timeout: 300}
@@ -249,3 +265,8 @@ a parse error is safe, a false "ok" is not. Validation strictly via Pydantic
    flake8+isort+black) green.
 7. A real (token) run against a small test repo with a real issue is planned only **after**
    acceptance of the dry-run scaffold (not part of this DoD).
+8. RED gate: a lane with a `tdd: true` Gate runs test-only pass → RED check over exactly the
+   marked Gates → implementation in the same session → the normal Gate loop; all marked Gates
+   green after the test-only pass escalates; `red_confirmed` survives crash + resume, and once
+   the test pass is checkpointed a resume repeats only the RED check; without a marked Gate the build behaves exactly as before. The dry run
+   covers both paths (with and without a `tdd` Gate) at 0 tokens.

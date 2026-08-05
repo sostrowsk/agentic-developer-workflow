@@ -147,7 +147,8 @@ lanes:
     gates:                      <span class="c"># order = execution order, fail fast</span>
       - {name: black,  cmd: "black --check .",      timeout: 120}
       - {name: isort,  cmd: "isort --check-only .", timeout: 120}
-      - {name: pytest, cmd: "pytest -x -q",         timeout: 1800}</code></pre>
+      <span class="c"># tdd: true = at least one marked Gate has to be RED before implementing</span>
+      - {name: pytest, cmd: "pytest -x -q",         timeout: 1800, tdd: true}</code></pre>
 
 <details>
   <summary>Complete config reference (all keys)</summary>
@@ -156,6 +157,7 @@ lanes:
       <tr><th>Key</th><th>Required</th><th>Meaning</th></tr>
       <tr><td><code>base_branch</code></td><td>yes</td><td>Branch the Lanes fork from and against which diffs are computed.</td></tr>
       <tr><td><code>lanes.&lt;name&gt;.gates[]</code></td><td>yes (≥ 1 Lane)</td><td>Gate list per Lane. Each Gate needs <code>name</code>, <code>cmd</code> and <code>timeout</code> (seconds). Gates run in order; the first red Gate stops the pass.</td></tr>
+      <tr><td><code>…gates[].tdd</code></td><td>optional (false)</td><td>Marks a Gate (typically the test Gate) as a RED proof: in the initial build at least one marked Gate has to be red after the test-only pass, <b>before</b> the implementation run (section 5, phase 3).</td></tr>
       <tr><td><code>lanes.frontend</code></td><td>optional</td><td>If the Lane is missing, ADW runs in single-lane mode. <code>--parallel</code> requires <code>backend</code> <b>and</b> <code>frontend</code>.</td></tr>
       <tr><td><code>e2e.cmd</code> / <code>e2e.timeout</code></td><td>optional</td><td>E2E command (e.g. <code>npx playwright test</code>) — runs only with <code>--parallel</code> on the integration branch.</td></tr>
       <tr><td><code>ci.poll_interval</code></td><td>optional (60)</td><td>Seconds between two pipeline queries.</td></tr>
@@ -227,7 +229,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;path&gt;]   <span class="c"># show runs
 <details>
   <summary>Phase 3: Build in isolated Lanes with a Gate loop</summary>
   <div class="inner">
-    <p>Each Lane gets its own <b>Git Worktree</b> under <code>.adw/runs/&lt;run_id&gt;/trees/&lt;lane&gt;</code> with its own branch <code>adw/&lt;run_id&gt;/&lt;lane&gt;</code>, its own agent session and its own ports (injected into the Gates as <code>BACKEND_PORT</code>/<code>FRONTEND_PORT</code>). The <b>Build agent (Opus 4.8)</b> implements its workstream strictly against the contract, using TDD. Then your <b>Gates</b> run. Red? The error output goes to the same session as a follow-up task — at most 10 iterations; on two identical failures the circuit breaker aborts immediately. Green? <b>The orchestrator commits</b> (never the agent).</p>
+    <p>Each Lane gets its own <b>Git Worktree</b> under <code>.adw/runs/&lt;run_id&gt;/trees/&lt;lane&gt;</code> with its own branch <code>adw/&lt;run_id&gt;/&lt;lane&gt;</code>, its own agent session and its own ports (injected into the Gates as <code>BACKEND_PORT</code>/<code>FRONTEND_PORT</code>). If you marked at least one Gate with <code>tdd: true</code>, the initial build starts with the <b>RED stage</b>: the Build agent first writes <b>only the tests</b> (no production code), and then the orchestrator itself runs exactly the marked Gates. At least one red = RED proven, and the same agent session continues with the implementation, with the (shortened) red Gate output as its task. All green means the tests do not cover the required behavior — that escalates instead of building on a proof nobody has. The <b>Build agent (Opus 4.8)</b> implements its workstream strictly against the contract. Then your <b>Gates</b> run. Red? The error output goes to the same session as a follow-up task — at most 10 iterations (the RED check consumes none of them); on two identical failures the circuit breaker aborts immediately. Green? <b>The orchestrator commits</b> (never the agent) — but only while the tests that proved RED are still in place.</p>
   </div>
 </details>
 <details>
@@ -325,6 +327,10 @@ Run 3f9a12c4 wird fortgesetzt (Phase: build)</code></pre>
   <div class="inner"><p>Safety mechanism: only the orchestrator makes commits — after demonstrably green Gates. If foreign commits appear in the Lane Worktree (manually worked in? parallel tooling?), ADW aborts instead of passing on unchecked changes. Clarify the Worktree state, start a new run.</p></div>
 </details>
 <details>
+  <summary>Escalation "Tests green after the test-only pass — RED not confirmed"</summary>
+  <div class="inner"><p>The Lane has a <code>tdd: true</code> Gate, but the marked Gates were green right after the test-only pass. Then the new tests prove nothing: either they do not cover the required behavior, or that behavior already exists. ADW does not loop on this — it hands over to you. Sharpen the plan/contract (or drop the requirement), then start a new run. Related escalations from the same stage: the test-only pass left the Worktree untouched (no tests = no proof), it deleted files (red Gates through deletions are no proof), or the implementation removed the tests that proved RED.</p></div>
+</details>
+<details>
   <summary>Pipeline red "without usable job logs"</summary>
   <div class="inner"><p>The pipeline was <code>canceled</code>/<code>skipped</code> or failed without any failed jobs (e.g. a YAML error in the CI config). Without logs, the Log analyst would only be guessing — so this goes directly to you.</p></div>
 </details>
@@ -348,6 +354,7 @@ Run 3f9a12c4 wird fortgesetzt (Phase: build)</code></pre>
   <tr><td><b>Draft stage</b></td><td>Phases 1–2: Claude agent and Codex write their own draft of the artifact in parallel, into <code>.adw/runs/&lt;run_id&gt;/drafts/</code>.</td></tr>
   <tr><td><b>Synthesis</b></td><td>The agent that merges both drafts into ONE best-of artifact and writes the summary for the approval Gate.</td></tr>
   <tr><td><b>Gate</b></td><td>A configured check command (linter, tests, …) with a hard timeout. All Gates green = condition for every commit.</td></tr>
+  <tr><td><b>RED stage</b></td><td>Initial build of a Lane with a <code>tdd: true</code> Gate: the agent is told to write tests only, then the orchestrator proves the marked Gates are red — before the implementation run.</td></tr>
   <tr><td><b>Contract</b></td><td><code>.adw/contract.yaml</code> — the agreed interface (OpenAPI/types/events) against which both Lanes build independently.</td></tr>
   <tr><td><b>Finding</b></td><td>Structured review result (JSON): severity P1–P3, Lane, file, problem, fix recommendation, possibly category.</td></tr>
   <tr><td><b>scope_gap</b></td><td>Finding category "missing, but was never in the plan" → becomes a follow-up issue, no auto-rework.</td></tr>

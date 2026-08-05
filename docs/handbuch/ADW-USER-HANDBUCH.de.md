@@ -117,7 +117,8 @@ ADW arbeitet **gegen ein beliebiges Git-Repo** („Ziel-Repo"). Die gesamte proj
         gates:                      # Reihenfolge = Ausführungsreihenfolge, fail fast
           - {name: black,  cmd: "black --check .",      timeout: 120}
           - {name: isort,  cmd: "isort --check-only .", timeout: 120}
-          - {name: pytest, cmd: "pytest -x -q",         timeout: 1800}
+          # tdd: true = mindestens ein markiertes Gate muss rot sein, bevor implementiert wird
+          - {name: pytest, cmd: "pytest -x -q",         timeout: 1800, tdd: true}
 
 Vollständige Config-Referenz (alle Schlüssel)
 
@@ -127,6 +128,7 @@ Vollständige Config-Referenz (alle Schlüssel)
 |---------------------------|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `base_branch`             | ja              | Branch, von dem die Lanes forken und gegen den Diffs gerechnet werden.                                                                                                      |
 | `lanes.<name>.gates[]`    | ja (≥ 1 Lane)   | Gate-Liste je Lane. Jedes Gate braucht `name`, `cmd` und `timeout` (Sekunden). Gates laufen der Reihe nach; das erste rote Gate stoppt den Durchlauf.                       |
+| `…gates[].tdd`            | optional (false) | Markiert ein Gate (typisch: das Test-Gate) als RED-Beweis: Im Initial-Build muss mindestens ein markiertes Gate nach dem reinen Test-Lauf rot sein, **vor** dem Implementierungs-Lauf (Abschnitt 5, Phase 3).                   |
 | `lanes.frontend`          | optional        | Fehlt die Lane, läuft ADW im Single-Lane-Modus. `--parallel` verlangt `backend` **und** `frontend`.                                                                         |
 | `e2e.cmd` / `e2e.timeout` | optional        | E2E-Kommando (z. B. `npx playwright test`) — läuft nur mit `--parallel` auf dem Integrations-Branch.                                                                        |
 | `ci.poll_interval`        | optional (60)   | Sekunden zwischen zwei Pipeline-Abfragen.                                                                                                                                   |
@@ -207,7 +209,7 @@ Phase 3: Build in isolierten Lanes mit Gate-Loop
 
 <div class="inner">
 
-Je Lane entsteht ein eigener **Git-Worktree** unter `.adw/runs/<run_id>/trees/<lane>` mit eigenem Branch `adw/<run_id>/<lane>`, eigener Agent-Session und eigenen Ports (als `BACKEND_PORT`/`FRONTEND_PORT` in die Gates injiziert). Der **Build-Agent (Opus 4.8)** implementiert seinen Workstream strikt gegen den Kontrakt, mit TDD. Danach laufen deine **Gates**. Rot? Die Fehlerausgabe geht als Folge-Task an dieselbe Session — maximal 10 Iterationen, bei zweimal identischem Fehler bricht der Circuit-Breaker sofort ab. Grün? **Der Orchestrator committet** (nie der Agent).
+Je Lane entsteht ein eigener **Git-Worktree** unter `.adw/runs/<run_id>/trees/<lane>` mit eigenem Branch `adw/<run_id>/<lane>`, eigener Agent-Session und eigenen Ports (als `BACKEND_PORT`/`FRONTEND_PORT` in die Gates injiziert). Hast du mindestens ein Gate mit `tdd: true` markiert, beginnt der Initial-Build mit der **RED-Stufe**: Der Build-Agent schreibt zuerst **nur die Tests** (keinen Produktivcode), danach führt der Orchestrator selbst genau die markierten Gates aus. Mindestens eines rot = RED bewiesen, und dieselbe Agent-Session macht mit der Implementierung weiter — mit dem (gekürzten) roten Gate-Output als Task. Alle grün heißt: Die Tests decken das geforderte Verhalten nicht ab — das eskaliert, statt auf einem Beweis aufzubauen, den niemand hat. Der **Build-Agent (Opus 4.8)** implementiert seinen Workstream strikt gegen den Kontrakt. Danach laufen deine **Gates**. Rot? Die Fehlerausgabe geht als Folge-Task an dieselbe Session — maximal 10 Iterationen (der RED-Check verbraucht keine davon), bei zweimal identischem Fehler bricht der Circuit-Breaker sofort ab. Grün? **Der Orchestrator committet** (nie der Agent) — aber nur, solange die Tests, die RED bewiesen haben, noch da sind.
 
 </div>
 
@@ -346,6 +348,14 @@ Schutzmechanismus: Commits macht ausschließlich der Orchestrator — nach nachw
 
 </div>
 
+Eskalation „Tests nach reinem Test-Lauf grün — RED nicht bestätigt"
+
+<div class="inner">
+
+Die Lane hat ein `tdd: true`-Gate, aber die markierten Gates waren direkt nach dem reinen Test-Lauf grün. Dann beweisen die neuen Tests nichts: Entweder decken sie das geforderte Verhalten nicht ab, oder das Verhalten existiert bereits. ADW dreht darauf keine Schleife, sondern übergibt an dich — Plan/Kontrakt schärfen (oder die Anforderung streichen) und einen neuen Run starten. Verwandte Eskalationen aus derselben Stufe: Der Test-Lauf hat den Worktree unverändert gelassen (keine Tests = kein Beweis), er hat Dateien gelöscht (rote Gates durch Löschen sind kein Beweis), oder die Implementierung hat die Tests entfernt, die RED bewiesen haben.
+
+</div>
+
 Pipeline rot „ohne verwertbare Job-Logs"
 
 <div class="inner">
@@ -386,6 +396,7 @@ Das Abo-Fenster ist leer oder die Claude-CLI konnte nicht antworten. Kein Handlu
 | **Draft-Stage**     | Phase 1–2: Claude-Agent und Codex schreiben parallel je einen eigenen Entwurf des Artefakts nach `.adw/runs/<run_id>/drafts/`.   |
 | **Synthese**        | Der Agent, der beide Entwürfe zu EINEM Best-of-Artefakt merged und die Zusammenfassung fürs Approval-Gate schreibt.              |
 | **Gate**            | Ein konfiguriertes Prüfkommando (Linter, Tests, …) mit hartem Timeout. Alle Gates grün = Bedingung für jeden Commit.             |
+| **RED-Stufe**       | Initial-Build einer Lane mit `tdd: true`-Gate: Der Agent bekommt die Anweisung, nur Tests zu schreiben, danach beweist der Orchestrator die markierten Gates rot — vor dem Implementierungs-Lauf. |
 | **Kontrakt**        | `.adw/contract.yaml` — die vereinbarte Schnittstelle (OpenAPI/Typen/Events), gegen die beide Lanes unabhängig bauen.             |
 | **Finding**         | Strukturiertes Review-Ergebnis (JSON): Severity P1–P3, Lane, Datei, Problem, Fix-Empfehlung, ggf. Kategorie.                     |
 | **scope_gap**       | Finding-Kategorie „fehlt, war aber nie im Plan" → wird Follow-up-Issue, kein Auto-Umbau.                                         |

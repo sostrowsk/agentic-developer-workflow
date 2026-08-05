@@ -147,7 +147,8 @@ lanes:
     gates:                      <span class="c"># Reihenfolge = Ausführungsreihenfolge, fail fast</span>
       - {name: black,  cmd: "black --check .",      timeout: 120}
       - {name: isort,  cmd: "isort --check-only .", timeout: 120}
-      - {name: pytest, cmd: "pytest -x -q",         timeout: 1800}</code></pre>
+      <span class="c"># tdd: true = mindestens ein markiertes Gate muss rot sein, bevor implementiert wird</span>
+      - {name: pytest, cmd: "pytest -x -q",         timeout: 1800, tdd: true}</code></pre>
 
 <details>
   <summary>Vollständige Config-Referenz (alle Schlüssel)</summary>
@@ -156,6 +157,7 @@ lanes:
       <tr><th>Schlüssel</th><th>Pflicht</th><th>Bedeutung</th></tr>
       <tr><td><code>base_branch</code></td><td>ja</td><td>Branch, von dem die Lanes forken und gegen den Diffs gerechnet werden.</td></tr>
       <tr><td><code>lanes.&lt;name&gt;.gates[]</code></td><td>ja (≥ 1 Lane)</td><td>Gate-Liste je Lane. Jedes Gate braucht <code>name</code>, <code>cmd</code> und <code>timeout</code> (Sekunden). Gates laufen der Reihe nach; das erste rote Gate stoppt den Durchlauf.</td></tr>
+      <tr><td><code>…gates[].tdd</code></td><td>optional (false)</td><td>Markiert ein Gate (typisch: das Test-Gate) als RED-Beweis: Im Initial-Build muss mindestens ein markiertes Gate nach dem reinen Test-Lauf rot sein, <b>vor</b> dem Implementierungs-Lauf (Abschnitt 5, Phase 3).</td></tr>
       <tr><td><code>lanes.frontend</code></td><td>optional</td><td>Fehlt die Lane, läuft ADW im Single-Lane-Modus. <code>--parallel</code> verlangt <code>backend</code> <b>und</b> <code>frontend</code>.</td></tr>
       <tr><td><code>e2e.cmd</code> / <code>e2e.timeout</code></td><td>optional</td><td>E2E-Kommando (z.&nbsp;B. <code>npx playwright test</code>) — läuft nur mit <code>--parallel</code> auf dem Integrations-Branch.</td></tr>
       <tr><td><code>ci.poll_interval</code></td><td>optional (60)</td><td>Sekunden zwischen zwei Pipeline-Abfragen.</td></tr>
@@ -227,7 +229,7 @@ adw status  [&lt;run_id&gt;] [--repo &lt;pfad&gt;]   <span class="c"># Runs + Ph
 <details>
   <summary>Phase 3: Build in isolierten Lanes mit Gate-Loop</summary>
   <div class="inner">
-    <p>Je Lane entsteht ein eigener <b>Git-Worktree</b> unter <code>.adw/runs/&lt;run_id&gt;/trees/&lt;lane&gt;</code> mit eigenem Branch <code>adw/&lt;run_id&gt;/&lt;lane&gt;</code>, eigener Agent-Session und eigenen Ports (als <code>BACKEND_PORT</code>/<code>FRONTEND_PORT</code> in die Gates injiziert). Der <b>Build-Agent (Opus 4.8)</b> implementiert seinen Workstream strikt gegen den Kontrakt, mit TDD. Danach laufen deine <b>Gates</b>. Rot? Die Fehlerausgabe geht als Folge-Task an dieselbe Session — maximal 10 Iterationen, bei zweimal identischem Fehler bricht der Circuit-Breaker sofort ab. Grün? <b>Der Orchestrator committet</b> (nie der Agent).</p>
+    <p>Je Lane entsteht ein eigener <b>Git-Worktree</b> unter <code>.adw/runs/&lt;run_id&gt;/trees/&lt;lane&gt;</code> mit eigenem Branch <code>adw/&lt;run_id&gt;/&lt;lane&gt;</code>, eigener Agent-Session und eigenen Ports (als <code>BACKEND_PORT</code>/<code>FRONTEND_PORT</code> in die Gates injiziert). Hast du mindestens ein Gate mit <code>tdd: true</code> markiert, beginnt der Initial-Build mit der <b>RED-Stufe</b>: Der Build-Agent schreibt zuerst <b>nur die Tests</b> (keinen Produktivcode), danach führt der Orchestrator selbst genau die markierten Gates aus. Mindestens eines rot = RED bewiesen, und dieselbe Agent-Session macht mit der Implementierung weiter — mit dem (gekürzten) roten Gate-Output als Task. Alle grün heißt: Die Tests decken das geforderte Verhalten nicht ab — das eskaliert, statt auf einem Beweis aufzubauen, den niemand hat. Der <b>Build-Agent (Opus 4.8)</b> implementiert seinen Workstream strikt gegen den Kontrakt. Danach laufen deine <b>Gates</b>. Rot? Die Fehlerausgabe geht als Folge-Task an dieselbe Session — maximal 10 Iterationen (der RED-Check verbraucht keine davon), bei zweimal identischem Fehler bricht der Circuit-Breaker sofort ab. Grün? <b>Der Orchestrator committet</b> (nie der Agent) — aber nur, solange die Tests, die RED bewiesen haben, noch da sind.</p>
   </div>
 </details>
 <details>
@@ -325,6 +327,10 @@ Run 3f9a12c4 wird fortgesetzt (Phase: build)</code></pre>
   <div class="inner"><p>Schutzmechanismus: Commits macht ausschließlich der Orchestrator — nach nachweislich grünen Gates. Wenn im Lane-Worktree fremde Commits auftauchen (manuell hineingearbeitet? paralleles Tooling?), bricht ADW ab, statt ungeprüfte Änderungen weiterzureichen. Worktree-Stand klären, neuen Run starten.</p></div>
 </details>
 <details>
+  <summary>Eskalation „Tests nach reinem Test-Lauf grün — RED nicht bestätigt"</summary>
+  <div class="inner"><p>Die Lane hat ein <code>tdd: true</code>-Gate, aber die markierten Gates waren direkt nach dem reinen Test-Lauf grün. Dann beweisen die neuen Tests nichts: Entweder decken sie das geforderte Verhalten nicht ab, oder das Verhalten existiert bereits. ADW dreht darauf keine Schleife, sondern übergibt an dich — Plan/Kontrakt schärfen (oder die Anforderung streichen) und einen neuen Run starten. Verwandte Eskalationen aus derselben Stufe: Der Test-Lauf hat den Worktree unverändert gelassen (keine Tests = kein Beweis), er hat Dateien gelöscht (rote Gates durch Löschen sind kein Beweis), oder die Implementierung hat die Tests entfernt, die RED bewiesen haben.</p></div>
+</details>
+<details>
   <summary>Pipeline rot „ohne verwertbare Job-Logs"</summary>
   <div class="inner"><p>Die Pipeline war <code>canceled</code>/<code>skipped</code> oder scheiterte ohne fehlgeschlagene Jobs (z.&nbsp;B. YAML-Fehler in der CI-Config). Ohne Logs würde der Log-Analyst nur raten — deshalb geht das direkt an dich.</p></div>
 </details>
@@ -348,6 +354,7 @@ Run 3f9a12c4 wird fortgesetzt (Phase: build)</code></pre>
   <tr><td><b>Draft-Stage</b></td><td>Phase 1–2: Claude-Agent und Codex schreiben parallel je einen eigenen Entwurf des Artefakts nach <code>.adw/runs/&lt;run_id&gt;/drafts/</code>.</td></tr>
   <tr><td><b>Synthese</b></td><td>Der Agent, der beide Entwürfe zu EINEM Best-of-Artefakt merged und die Zusammenfassung fürs Approval-Gate schreibt.</td></tr>
   <tr><td><b>Gate</b></td><td>Ein konfiguriertes Prüfkommando (Linter, Tests, …) mit hartem Timeout. Alle Gates grün = Bedingung für jeden Commit.</td></tr>
+  <tr><td><b>RED-Stufe</b></td><td>Initial-Build einer Lane mit <code>tdd: true</code>-Gate: Der Agent bekommt die Anweisung, nur Tests zu schreiben, danach beweist der Orchestrator die markierten Gates rot — vor dem Implementierungs-Lauf.</td></tr>
   <tr><td><b>Kontrakt</b></td><td><code>.adw/contract.yaml</code> — die vereinbarte Schnittstelle (OpenAPI/Typen/Events), gegen die beide Lanes unabhängig bauen.</td></tr>
   <tr><td><b>Finding</b></td><td>Strukturiertes Review-Ergebnis (JSON): Severity P1–P3, Lane, Datei, Problem, Fix-Empfehlung, ggf. Kategorie.</td></tr>
   <tr><td><b>scope_gap</b></td><td>Finding-Kategorie „fehlt, war aber nie im Plan" → wird Follow-up-Issue, kein Auto-Umbau.</td></tr>

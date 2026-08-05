@@ -171,9 +171,11 @@
     <p>Lanes laufen sequenziell oder (bei <code>--parallel</code>) im <code>ThreadPoolExecutor</code>. Pro Lane:</p>
     <ol>
       <li>Worktree erzeugen (idempotent), Fork-Punkt als <code>base_sha</code> pinnen, Artefakte hineinkopieren und committen.</li>
+      <li><b>RED-Stufe</b> (<code>_confirm_red</code>, nur bei ≥ 1 Gate <code>tdd: true</code> und nur im Initial-Build — kein <code>pending_task</code>, <code>red_confirmed</code> false, <code>gate_iterations == 0</code>): ein reiner Test-Lauf des Agents mit denselben Invarianten wie jeder Build-Lauf, danach <code>_run_lane_gates</code> über <b>genau die markierten Gates</b>. Mindestens eines rot = Beweis: <code>red_confirmed</code>, die geänderten Pfade als <code>red_test_paths</code> und der Implementierungs-Task als <code>pending_task</code> landen in <b>einem</b> Save, sodass der folgende Loop dieselbe Session mit dem gekürzten roten Gate-Output fortsetzt. Alle grün → Eskalation (die Tests decken das geforderte Verhalten nicht ab), kein Retry-Loop.</li>
       <li><b>Loop:</b> Limit-Check → Checkpoint (HEAD als <code>expected_head</code>, Iteration++) → Build-Agent (Opus, Session-Resume, Nachbar-Lanes per Deny-Regel unsichtbar) → Invarianten-Checks (kein Agent-Commit, richtiger Branch) → Artefakt-Restore → Gates.</li>
-      <li>Gates rot: Fehlerausgabe + Circuit-Breaker-Basis als <code>pending_task</code>/<code>last_failures</code> persistieren, zurück zu 2. Gates grün: <code>gates_passed</code>-Beweis <b>mit Baum-Hash</b> persistieren, dann committet der Orchestrator.</li>
+      <li>Gates rot: Fehlerausgabe + Circuit-Breaker-Basis als <code>pending_task</code>/<code>last_failures</code> persistieren, zurück zu 3. Gates grün: <code>red_test_paths</code> noch vorhanden (sonst Eskalation), dann <code>gates_passed</code>-Beweis <b>mit Baum-Hash</b> persistieren, dann committet der Orchestrator.</li>
     </ol>
+    <p>Der RED-Beweis gehört dem Orchestrator, nicht der Behauptung des Agenten: Bewiesen wird, dass die markierten Gates vor dem Implementierungs-Lauf rot waren — „nur Tests" ist eine Anweisung an den Agenten, denn keine stack-neutrale Regel unterscheidet Test- von Produktivpfaden. Nach beiden Seiten ist er fälschungssicher: Ein Test-Lauf, der den Worktree unverändert lässt oder Dateien <b>löscht</b>, beweist nichts (beide Prüfungen laufen auch im Resume-Pfad, nach dem Artefakt-Restore), und grüne Gates zählen nur, solange die Tests, die RED bewiesen haben, noch da sind. Der RED-Check verbraucht <b>keine</b> Gate-Iteration — das Budget gehört der Implementierung. Fix-Dispatches aus Phase 4–7 (<code>pending_task</code> gesetzt) und Lanes ohne markiertes Gate behalten das einstufige Verhalten Byte für Byte.</p>
     <p>Der Baum-Hash entsteht über einen temporären Git-Index (<code>GIT_INDEX_FILE</code>, geseedet aus HEAD, dann <code>add -A</code> + <code>write-tree</code>) — er bindet den „Gates waren grün"-Beweis an exakt den geprüften Inhalt inklusive untracked Files. Beim Resume wird auch eine als <code>completed</code> markierte Lane dagegen revalidiert; stimmt der Baum nicht mehr, geht die Lane zurück in den Loop statt ungeprüft weitergereicht zu werden.</p>
   </div>
 </details>
@@ -247,6 +249,8 @@
       <tr><td><code>pending_task</code>, <code>last_failures</code></td><td>Lane</td><td>Crash zwischen Gate-Fail und Fix-Lauf</td></tr>
       <tr><td><code>gates_passed</code> + <code>gates_tree</code></td><td>Lane</td><td>Crash zwischen „Gates grün" und Commit — der Beweis ist an den exakten Baum-Hash gebunden und damit nicht fälschbar</td></tr>
       <tr><td><code>expected_head</code></td><td>Lane</td><td>Erkennung von Fremd-Commits über ein Crash-Fenster hinweg (Orchestrator-only-Commit-Invariante)</td></tr>
+      <tr><td><code>session_id</code> des Test-Laufs</td><td>Lane</td><td>Crash zwischen Test-Lauf und RED-Check: Die gecheckpointete Session markiert den Lauf als erledigt, ein Resume wiederholt nur den Check</td></tr>
+      <tr><td><code>red_confirmed</code> + <code>red_test_paths</code></td><td>Lane</td><td>Crash zwischen RED-Beweis und Implementierungs-Lauf (beide landen mit <code>pending_task</code> in einem Save); die Pfade binden den Beweis an die Tests, die ihn geliefert haben</td></tr>
       <tr><td><code>base_sha</code></td><td>Lane</td><td>Fork-Punkt der Lane — Restaurationen nutzen den unbeweglichen Stand, nicht den weiterrückenden Base-Branch</td></tr>
       <tr><td><code>integration_rounds / review_rounds / fix_cycles / ci_reentries</code> (+ <code>*_last_failures</code>, <code>review_prior_context</code>)</td><td>Run/Lane</td><td>Alle Loop-Budgets — ein Neustart verschafft keine Extra-Versuche; Limit-Checks stehen <i>vor</i> teurer Arbeit</td></tr>
       <tr><td><code>dry_run</code>, <code>skip_approval</code>, <code>pinned_base_branch</code></td><td>Run</td><td>CLI-Entscheidungen, die der Resume-Aufruf nicht mehr kennt</td></tr>
@@ -258,12 +262,13 @@
 <h2 id="limits">6. Limits &amp; Circuit-Breaker</h2>
 <table>
   <tr><th>Loop</th><th>Limit (Konstante)</th><th>Zusätzlich</th></tr>
-  <tr><td>Gate-Loop je Lane</td><td>10 (<code>MAX_GATE_ITERATIONS</code>) — pro Task, Reset bei neuem Fix-Task</td><td rowspan="5">Circuit-Breaker <code>check_progress</code>: exakt dieselbe Failure-/Finding-Menge wie in der Vorrunde → sofortige Eskalation statt Limit ausreizen</td></tr>
+  <tr><td>Gate-Loop je Lane</td><td>10 (<code>MAX_GATE_ITERATIONS</code>) — pro Task, Reset bei neuem Fix-Task; der RED-Check verbraucht keine Iteration</td><td rowspan="5">Circuit-Breaker <code>check_progress</code>: exakt dieselbe Failure-/Finding-Menge wie in der Vorrunde → sofortige Eskalation statt Limit ausreizen</td></tr>
   <tr><td>Integration/E2E</td><td>10 Runden (<code>MAX_E2E_ROUNDS</code>, run-weit)</td></tr>
   <tr><td>Authoring-Loop (Spec/Plan)</td><td>5 Runden (<code>AUTHORING_MAX_ROUNDS</code>) — Severity-Schwelle je Runde: 1 alle, 2 P1+P2, ab 3 nur P1; am Cap P1 → Eskalation, sonst Accept + Known Limitations</td></tr>
   <tr><td>Codex-Code-Review</td><td>5 Runden (<code>MAX_REVIEW_ROUNDS</code>) — gleiche Severity-Schwelle; Vorrunden-Findings + Disposition als Codex-Kontext, Sub-Schwellen-Findings → <code>followups.md</code></td></tr>
   <tr><td>Fix-Zyklen nach finalem Review</td><td>3 je Lane (<code>MAX_FIX_CYCLES</code>)</td></tr>
   <tr><td>CI-Re-Entry</td><td>1 (<code>MAX_CI_REENTRIES</code>)</td></tr>
+  <tr><td>RED-Stufe je Lane</td><td>genau 1 Durchlauf (kein Retry-Loop)</td><td>Kein Circuit-Breaker: markierte Gates nach dem Test-Lauf grün eskalieren statt einen Test-Nachbesserungs-Loop zu starten</td></tr>
   <tr><td>Gate-/Codex-/glab-Subprozesse</td><td>Timeout je Gate aus der Config; Codex 900 s; glab 120 s; CI-Budget 2700 s</td><td>Prozessgruppen-Kill (<code>start_new_session</code> + <code>killpg</code>) auf allen Exit-Pfaden — keine Zombie-Prozesse</td></tr>
 </table>
 
@@ -359,7 +364,7 @@ Das Agent SDK spawnt die Claude-Code-CLI als headless Subprocess; ADW erzwingt d
   <li><b>331 Tests, TDD-first entwickelt</b> (jeder Task/Bugfix begann mit einem roten Test). Kein Test braucht Netz oder Tokens: SDK, Codex und glab sind an ihren Interfaces gemockt — <b>git ist echt</b> (Wegwerf-Repos in <code>tmp_path</code>).</li>
   <li><b>Skriptbare Mocks als Test-Rückgrat:</b> <code>MockAgentRunner</code> (Antwort-Queues je Agent, simulierte Datei-Outputs statisch oder als <code>Callable(cwd)</code> für per-Lane-Verhalten, vollständige Aufruf-Aufzeichnung inkl. <code>resume</code>/<code>deny_read_paths</code>) und <code>MockCodexRunner</code>.</li>
   <li><b>Schwerpunkt Crash-Fenster:</b> Ein großer Teil der Phasen-Tests simuliert gezielt Abbrüche zwischen zwei Checkpoints (State manipulieren, Prozess „sterben lassen", Resume) sowie Agent-Manipulation (Fremd-Commits, Symlink-Artefakte, umgeschriebene Configs, manipulierte Worktrees nach dem completed-Checkpoint).</li>
-  <li><b>Akzeptanzebene:</b> <code>tests/test_e2e_dry_run.py</code> bildet die DoD-Kriterien 1–5 aus <code>docs/SPEC.de.md</code> §8 ab — komplette CLI-Dry-Runs (single + parallel), Gate-Fail→Same-Session-Fix, Approval-Gate, Triage-Pfade, Crash-Resume.</li>
+  <li><b>Akzeptanzebene:</b> <code>tests/test_e2e_dry_run.py</code> bildet die DoD-Kriterien aus <code>docs/SPEC.de.md</code> §8 ab — komplette CLI-Dry-Runs (single + parallel), Gate-Fail→Same-Session-Fix, Approval-Gate, Triage-Pfade, Crash-Resume, Dual-Authoring und beide RED-Gate-Pfade (mit und ohne <code>tdd</code>-Gate).</li>
   <li><b>Review-Gate im Entwicklungsprozess:</b> pro Task <code>uv run pytest</code> + <code>ruff check/format</code> + <code>codex review --uncommitted</code>; über die Tasks 10–13 wurden dabei 8 P1- und 19 P2-Findings gefunden und jeweils mit Regressionstest zuerst gefixt.</li>
 </ul>
 
@@ -372,6 +377,7 @@ Das Agent SDK spawnt die Claude-Code-CLI als headless Subprocess; ADW erzwingt d
   <tr><td>Codex-Token-Rücksync hält den Lock nicht über die gesamte Review-Dauer.</td><td>Bewusst — sonst würden parallele Reviews minutenlang serialisiert. Im Extremfall (zwei gleichzeitige Rotationen) einmalig <code>codex login</code>.</td></tr>
   <tr><td>Ein Crash zwischen CI-Re-Entry-Checkpoint und erneutem Poll kann dazu führen, dass der Resume ohne zweiten Fix-Versuch eskaliert.</td><td>Bounded und safe-seitig: lieber ein Re-Entry zu wenig als ein unbudgetierter Loop.</td></tr>
   <tr><td>Der Circuit-Breaker vergleicht exakte Fehlertexte — variierende Ausgaben (Timestamps, Zähler) umgehen ihn.</td><td>Dann greifen die harten Runden-Limits.</td></tr>
+  <tr><td>Der RED-Beweis hängt an den Test-<b>Pfaden</b>, nicht an ihrem Inhalt — ein Implementierungs-Lauf könnte einen Test an Ort und Stelle entschärfen; die Pfade werden auch nicht als Tests klassifiziert, ein Test-Lauf, der zusätzlich Produktivcode schreibt, fällt also nicht auf.</td><td>Bewusst: Inhalts-Immutabilität würde den legitimen Reparaturpfad des Gate-Loops (der Agent fixt seinen eigenen kaputten Test) zur Eskalation machen; entschärfte Tests fängt der nachgelagerte Codex-Code-Review ab. Ebenso fehlt ein Grün-Baseline-Lauf vor dem Test-Lauf — ein schon auf HEAD rotes Gate (fehlendes Tool, Timeout) zählt als RED, ist aber ein Projektfehler, den der Loop unmittelbar danach sichtbar macht. Ein Crash <b>vor</b> dem Session-Checkpoint des Test-Laufs wiederholt diesen Agent-Lauf einmal (die Worktree-Änderungen bleiben erhalten, der zweite Lauf sieht sie).</td></tr>
 </table>
 
 <h2 id="glossar">12. Glossar</h2>
@@ -382,6 +388,7 @@ Das Agent SDK spawnt die Claude-Code-CLI als headless Subprocess; ADW erzwingt d
   <tr><td><b>Draft-Stage (<code>_draft_stage</code>)</b></td><td>Phase 1–2: Claude-Autor und Codex schreiben ihre Entwürfe parallel nach <code>.adw/runs/&lt;id&gt;/drafts/</code>; idempotent über die Entwurfsdateien, ein Codex-Ausfall degradiert.</td></tr>
   <tr><td><b>Synthese (<code>spec_/plan_synthesis</code>)</b></td><td>Der Agent, der beide Entwürfe zu EINEM Best-of-Artefakt merged und die Zusammenfassung fürs Freigabe-Gate schreibt; er ist der erste Lauf des Authoring-Loops.</td></tr>
   <tr><td><b>Gate-Beweis (<code>gates_tree</code>)</b></td><td>Baum-Hash des kompletten Worktree-Inhalts (inkl. untracked) über einen temporären Git-Index — bindet „Gates grün" an exakt den geprüften Stand.</td></tr>
+  <tr><td><b>RED-Stufe (<code>_confirm_red</code>)</b></td><td>Initial-Build einer Lane mit <code>tdd: true</code>-Gate: reiner Test-Lauf, danach beweist der Orchestrator genau die markierten Gates rot — <code>red_confirmed</code> + <code>red_test_paths</code> als persistierter Beweis.</td></tr>
   <tr><td><b>Circuit-Breaker</b></td><td><code>check_progress</code>: identische Failure-/Finding-Menge wie in der Vorrunde → sofortige Eskalation.</td></tr>
   <tr><td><b>Dispatch (<code>_dispatch_lane_fixes</code>)</b></td><td>Zentrale Fix-Routing-Funktion: Findings je Lane gruppieren, Lane-State atomar stagen (optional mit Budget-Inkrement via <code>mutate_staged</code>), dann regulärer Lane-Loop.</td></tr>
   <tr><td><b>Session-Resume</b></td><td>SDK-Feature: Folge-Task an eine bestehende Agent-Session (<code>resume=session_id</code>) — voller Kontext ohne Neuaufbau.</td></tr>

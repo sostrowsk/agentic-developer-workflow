@@ -69,6 +69,7 @@ Vollständiges Beispiel: [`examples/config.yaml`](examples/config.yaml).
 | --- | --- | --- |
 | `base_branch` | ja | Branch, von dem Lanes forken und gegen den diffs laufen |
 | `lanes.<name>.gates[]` | ja (>= 1 Lane) | Gate-Liste je Lane: `name`, `cmd`, `timeout` (Sekunden). Reihenfolge = Ausführungsreihenfolge, fail fast |
+| `…gates[].tdd` | optional (false) | Markiert ein Gate als RED-Beweis: Im Initial-Build muss mindestens ein markiertes Gate nach dem reinen Test-Lauf rot sein, vor dem Implementierungs-Lauf |
 | `e2e.cmd` / `e2e.timeout` | optional | E2E-Kommando (Playwright o. ä.) — nur mit `--parallel` relevant |
 | `ci.poll_interval` | optional (60) | Sekunden zwischen Pipeline-Polls |
 | `ci.timeout` | optional (2700) | Gesamt-Budget fürs CI-Warten |

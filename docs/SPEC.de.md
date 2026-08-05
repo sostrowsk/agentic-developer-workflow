@@ -73,9 +73,15 @@ der Autoren nicht wieder umkippt.
    Zusammenfassung, Plan + Kontrakt und setzt fort via `adw resume <run_id>` bzw.
    `adw approve <run_id>`. Abschaltbar mit `--no-approval`.
 3. **Build:** Dispatch (Code) teilt den Plan in Workstreams. Je Lane: eigener Git-Worktree
-   (Branch von Base-Branch), eigene SDK-Session, eigene Ports. Lane-Loop: Build-Agent arbeitet →
-   Gates laufen (Kommandos aus Ziel-Repo-Config) → bei Fail gehen die Fehlerausgaben als
-   Folge-Task an **dieselbe Session** zurück. Max. 10 Iterationen.
+   (Branch von Base-Branch), eigene SDK-Session, eigene Ports. **RED-Stufe** (nur für Lanes mit
+   mindestens einem Gate `tdd: true` und nur im Initial-Build): der Build-Agent schreibt zuerst
+   NUR die Tests, dann führt der Orchestrator selbst genau die markierten Gates aus — mindestens
+   eines rot ist der RED-Beweis (`red_confirmed` plus die Test-Pfade im State), alle grün
+   eskaliert (die Tests decken das geforderte Verhalten nicht ab oder es existiert schon).
+   Danach der Lane-Loop: Build-Agent arbeitet (dieselbe Session, mit dem gekürzten roten
+   Gate-Output als Task) → Gates laufen (Kommandos aus Ziel-Repo-Config) → bei Fail gehen die
+   Fehlerausgaben als Folge-Task an **dieselbe Session** zurück. Max. 10 Iterationen; der
+   RED-Check verbraucht keine davon.
 4. **Integration + E2E** (nur `--parallel`): Code mergt Lane-Branches auf einen
    Integrations-Branch; E2E-Kommando (Playwright) läuft. Bei Rot ordnet der E2E-Triage-Agent
    jeden Fehler einer Lane zu → Fix in der Lane → erneut integrieren. Max. 10 Runden.
@@ -99,6 +105,15 @@ denselben kaputten Input verbrennt. Ein fehlender, leerer oder unveränderter Cl
 **eskaliert** — ohne ihn gibt es nichts zu synthetisieren. Die Stage ist über die
 Entwurfs-DATEIEN idempotent, nicht über den State: ein vorhandener, nicht leerer Entwurf
 überspringt seinen Autor beim Resume.
+
+**RED-Beweis im Build (Phase 3):** Der Beweis gehört dem Orchestrator, nicht der Behauptung des
+Agenten — bewiesen wird, dass die markierten Gates vor dem Implementierungs-Lauf rot waren; „nur
+Tests" ist eine Anweisung an den Agenten, denn der Orchestrator kann Test- und Produktivdateien
+nicht stack-neutral unterscheiden. Er gilt nur für den Initial-Build einer Lane — Fix-Dispatches aus den Review-/E2E-Phasen
+(`pending_task` gesetzt) und jeder Resume nach dem Beweis überspringen die Stufe. Gegen
+gefälschte Beweise: ein Test-Lauf, der Dateien löscht oder den Worktree unverändert lässt,
+eskaliert, und grüne Gates zählen nur, solange die Tests, die RED bewiesen haben, noch da sind.
+Ohne `tdd: true`-Gate baut eine Lane einstufig wie bisher.
 
 **Codex-Review-Loop-Policy** (Authoring-Loops in Phase 1–2 und Code-Review in Phase 5):
 Runde 1 behandelt alle Findings (P1–P3), Runde 2 nur noch P1+P2, ab Runde 3 nur noch P1 —
@@ -133,7 +148,8 @@ lanes:
     gates:                     # Reihenfolge = Ausführungsreihenfolge; jedes: Name + Kommando + Timeout
       - {name: black,  cmd: "black --check .", timeout: 120}
       - {name: isort,  cmd: "isort --check-only .", timeout: 120}
-      - {name: pytest, cmd: "pytest -x -q", timeout: 1800}
+      # tdd: true markiert das Gate, dessen Fehlschlag im Initial-Build RED beweist
+      - {name: pytest, cmd: "pytest -x -q", timeout: 1800, tdd: true}
   frontend:                    # optional; fehlt die Lane, läuft v1-Single-Lane
     gates:
       - {name: eslint, cmd: "npm run lint", timeout: 300}
@@ -253,3 +269,8 @@ ein Parse-Fehler ist safe, ein falsches „ok" nicht. Validierung strikt via Pyd
    flake8+isort+black) grün.
 7. Ein echter (Token-)Lauf gegen ein kleines Test-Repo mit echtem Issue ist erst **nach**
    Abnahme des Dry-Run-Gerüsts vorgesehen (nicht Teil dieser DoD).
+8. RED-Gate: Eine Lane mit `tdd: true`-Gate läuft Test-Lauf → RED-Check über genau die
+   markierten Gates → Implementierung in derselben Session → normaler Gate-Loop; alle
+   markierten Gates grün nach dem Test-Lauf eskaliert; `red_confirmed` überlebt Crash + Resume,
+   und ab dem gecheckpointeten Test-Lauf wiederholt ein Resume nur noch den RED-Check; ohne markiertes Gate verhält sich der Build exakt wie bisher. Der
+   Dry-Run deckt beide Pfade (mit und ohne `tdd`-Gate) mit 0 Tokens ab.

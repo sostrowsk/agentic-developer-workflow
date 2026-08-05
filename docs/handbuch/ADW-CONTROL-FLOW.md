@@ -121,15 +121,27 @@ phase by phase.
    its own network ports. This way the lanes **cannot get in each
    other's way**. (Without `--parallel` there is simply just one lane —
    same process, one track.)
-2. In each lane, the **lane loop** runs:
+2. If the project has marked a Gate as a **test-first Gate** (`tdd: true`,
+   typically the test suite), the lane starts with the **RED stage**:
+   the Build agent first writes **only the tests** — no production code at all.
+   Then the orchestrator itself runs exactly those marked Gates. **At least
+   one of them has to be red**: that is the proof that the tests really demand
+   something that does not exist yet. All green before the first line of code
+   means either that the tests measure nothing or that the requested behavior
+   already exists — the run stops and hands over to the human.
+   (Nobody is being taken at their word here: it is the control flow, not the
+   AI, that establishes the proof.)
+3. In each lane, the **lane loop** runs:
    - The **Build agent** (AI) writes code — strictly following plan and contract.
+     After a proven RED it continues in the **same session** and knows exactly
+     which tests it has to turn green.
    - Then the **Gates** run: automated checks (formatting,
      code style, tests), configured firmly in the project. Like inspection stations
      on an assembly line.
    - **Red?** The error messages go back **to the same
      AI session** as a new task — it still knows its own code and reworks.
-   - This repeats, **at most 10 times**. After that: escalation report,
-     abort, human takes over.
+   - This repeats, **at most 10 times** (the RED check does not use up any of
+     those attempts). After that: escalation report, abort, human takes over.
 
 ### Phase 4 — Integration + E2E: "Do the parts fit together?" (only with `--parallel`)
 
@@ -201,6 +213,7 @@ specification says?*
 | Mechanism | What it means |
 |---|---|
 | **Limits** | Phase 3: max. 10 fix iterations · Phase 4: max. 10 rounds · Phase 5: max. 5 review rounds · Phase 6: max. 3 cycles · Phase 7: max. 45 min waiting |
+| **Proof instead of a claim (RED)** | With a test-first Gate (`tdd: true`), the control flow itself establishes that the marked Gates fail after the test-only pass, before the implementation starts — and only accepts green Gates while those tests are still there |
 | **Circuit breaker** | If a repair round resolves *nothing* → immediate abort instead of pointless spinning |
 | **Escalation report** | Every abort produces `escalation.md`: what was achieved, what is open, why — the handover to the human |
 | **Checkpoints** | After **every phase transition** the complete state is saved. `adw resume` continues **exactly there** after a crash, a pause or an exhausted AI quota — like a save point in a video game |

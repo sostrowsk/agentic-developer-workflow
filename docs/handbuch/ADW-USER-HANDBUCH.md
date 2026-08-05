@@ -117,7 +117,8 @@ ADW works **against any Git repo** ("target repo"). All project-specific configu
         gates:                      # order = execution order, fail fast
           - {name: black,  cmd: "black --check .",      timeout: 120}
           - {name: isort,  cmd: "isort --check-only .", timeout: 120}
-          - {name: pytest, cmd: "pytest -x -q",         timeout: 1800}
+          # tdd: true = at least one marked Gate has to be RED before implementing
+          - {name: pytest, cmd: "pytest -x -q",         timeout: 1800, tdd: true}
 
 Complete config reference (all keys)
 
@@ -127,6 +128,7 @@ Complete config reference (all keys)
 |---------------------------|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `base_branch`             | yes             | Branch the Lanes fork from and against which diffs are computed.                                                                                                            |
 | `lanes.<name>.gates[]`    | yes (≥ 1 Lane)  | Gate list per Lane. Each Gate needs `name`, `cmd` and `timeout` (seconds). Gates run in order; the first red Gate stops the pass.                                           |
+| `…gates[].tdd`            | optional (false) | Marks a Gate (typically the test Gate) as a RED proof: in the initial build at least one marked Gate has to be red after the test-only pass, **before** the implementation run (section 5, phase 3).                 |
 | `lanes.frontend`          | optional        | If the Lane is missing, ADW runs in single-lane mode. `--parallel` requires `backend` **and** `frontend`.                                                                   |
 | `e2e.cmd` / `e2e.timeout` | optional        | E2E command (e.g. `npx playwright test`) — runs only with `--parallel` on the integration branch.                                                                           |
 | `ci.poll_interval`        | optional (60)   | Seconds between two pipeline queries.                                                                                                                                       |
@@ -207,7 +209,7 @@ Phase 3: Build in isolated Lanes with a Gate loop
 
 <div class="inner">
 
-Each Lane gets its own **Git Worktree** under `.adw/runs/<run_id>/trees/<lane>` with its own branch `adw/<run_id>/<lane>`, its own agent session and its own ports (injected into the Gates as `BACKEND_PORT`/`FRONTEND_PORT`). The **Build agent (Opus 4.8)** implements its workstream strictly against the contract, using TDD. Then your **Gates** run. Red? The error output goes to the same session as a follow-up task — at most 10 iterations; on two identical failures the circuit breaker aborts immediately. Green? **The orchestrator commits** (never the agent).
+Each Lane gets its own **Git Worktree** under `.adw/runs/<run_id>/trees/<lane>` with its own branch `adw/<run_id>/<lane>`, its own agent session and its own ports (injected into the Gates as `BACKEND_PORT`/`FRONTEND_PORT`). If you marked at least one Gate with `tdd: true`, the initial build starts with the **RED stage**: the Build agent first writes **only the tests** (no production code), and then the orchestrator itself runs exactly the marked Gates. At least one red = RED proven, and the same agent session continues with the implementation, with the (shortened) red Gate output as its task. All green means the tests do not cover the required behavior — that escalates instead of building on a proof nobody has. The **Build agent (Opus 4.8)** implements its workstream strictly against the contract. Then your **Gates** run. Red? The error output goes to the same session as a follow-up task — at most 10 iterations (the RED check consumes none of them); on two identical failures the circuit breaker aborts immediately. Green? **The orchestrator commits** (never the agent) — but only while the tests that proved RED are still in place.
 
 </div>
 
@@ -346,6 +348,14 @@ Safety mechanism: only the orchestrator makes commits — after demonstrably gre
 
 </div>
 
+Escalation "Tests green after the test-only pass — RED not confirmed"
+
+<div class="inner">
+
+The Lane has a `tdd: true` Gate, but the marked Gates were green right after the test-only pass. Then the new tests prove nothing: either they do not cover the required behavior, or that behavior already exists. ADW does not loop on this — it hands over to you. Sharpen the plan/contract (or drop the requirement), then start a new run. Related escalations from the same stage: the test-only pass left the Worktree untouched (no tests = no proof), it deleted files (red Gates through deletions are no proof), or the implementation removed the tests that proved RED.
+
+</div>
+
 Pipeline red "without usable job logs"
 
 <div class="inner">
@@ -386,6 +396,7 @@ The subscription window is empty or the Claude CLI could not respond. No action 
 | **Draft stage**     | Phases 1–2: Claude agent and Codex write their own draft of the artifact in parallel, into `.adw/runs/<run_id>/drafts/`.                       |
 | **Synthesis**       | The agent that merges both drafts into ONE best-of artifact and writes the summary for the approval Gate.                                     |
 | **Gate**            | A configured check command (linter, tests, …) with a hard timeout. All Gates green = condition for every commit.                              |
+| **RED stage**       | Initial build of a Lane with a `tdd: true` Gate: the agent is told to write tests only, then the orchestrator proves the marked Gates are red — before the implementation run.                 |
 | **Contract**        | `.adw/contract.yaml` — the agreed interface (OpenAPI/types/events) against which both Lanes build independently.                              |
 | **Finding**         | Structured review result (JSON): severity P1–P3, Lane, file, problem, fix recommendation, possibly category.                                  |
 | **scope_gap**       | Finding category "missing, but was never in the plan" → becomes a follow-up issue, no auto-rework.                                            |

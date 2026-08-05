@@ -12,6 +12,35 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.4.0] — Unreleased
+
+### Added
+- **RED gate in the build phase**: a Gate can be marked `tdd: true` in
+  `.adw/config.yaml`. A Lane with at least one marked Gate runs its initial
+  build in two stages — an agent pass instructed to write only tests ("write
+  ONLY the tests, no production code"), then the orchestrator itself runs
+  exactly the marked Gates. At least one red is the RED proof (`red_confirmed` plus the test
+  paths persisted in the Lane state); the implementation continues in the
+  **same session** with the shortened red Gate output and flows into the
+  existing Gate loop. All marked Gates green after the test-only pass
+  escalates instead of looping: the tests do not cover the required
+  behavior, or it already exists.
+- Forgery protection around the proof: a test-only pass that deletes files
+  or leaves the Worktree untouched escalates, and green Gates count only
+  while the tests that proved RED are still in place.
+- Dry run covers both paths at 0 tokens — the default config (no `tdd`
+  Gate) stays single-stage, a `tdd` Gate walks the full RED path through
+  the CLI.
+
+### Changed
+- The RED check consumes no Gate iteration; all limits and the circuit
+  breaker are unchanged. Fix dispatches from the review/E2E phases
+  (`pending_task` set) and Lanes without a marked Gate behave exactly as
+  before. `red_confirmed` survives crash + resume: once the test pass is
+  checkpointed, a crash before the RED check repeats only the check.
+- Docs (SPEC, user handbook, control-flow handbook, technical spec, EN+DE
+  incl. HTML/DOCX exports) describe the RED stage.
+
 ## [0.3.0] — 2026-08-03
 
 ### Added

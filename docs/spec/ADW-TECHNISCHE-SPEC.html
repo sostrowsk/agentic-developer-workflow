@@ -171,9 +171,11 @@
     <p>Lanes run sequentially or (with <code>--parallel</code>) in a <code>ThreadPoolExecutor</code>. Per Lane:</p>
     <ol>
       <li>Create the Worktree (idempotent), pin the fork point as <code>base_sha</code>, copy artifacts in and commit them.</li>
+      <li><b>RED stage</b> (<code>_confirm_red</code>, only with ≥ 1 Gate <code>tdd: true</code> and only in the initial build — no <code>pending_task</code>, <code>red_confirmed</code> false, <code>gate_iterations == 0</code>): a test-only agent run with the same invariants as every build run, then <code>_run_lane_gates</code> over <b>exactly the marked Gates</b>. At least one red = proof: <code>red_confirmed</code>, the changed paths as <code>red_test_paths</code> and the implementation task as <code>pending_task</code> are persisted in <b>one</b> save, so the following loop resumes the same session with the shortened red Gate output. All green → escalation (the tests do not cover the required behavior), no retry loop.</li>
       <li><b>Loop:</b> limit check → checkpoint (HEAD as <code>expected_head</code>, iteration++) → build agent (Opus, session resume, neighboring Lanes invisible via deny rule) → invariant checks (no agent commit, correct branch) → artifact restore → Gates.</li>
-      <li>Gates red: persist error output + Circuit-Breaker baseline as <code>pending_task</code>/<code>last_failures</code>, back to 2. Gates green: persist the <code>gates_passed</code> evidence <b>with tree hash</b>, then the orchestrator commits.</li>
+      <li>Gates red: persist error output + Circuit-Breaker baseline as <code>pending_task</code>/<code>last_failures</code>, back to 3. Gates green: <code>red_test_paths</code> still present (otherwise escalation), then persist the <code>gates_passed</code> evidence <b>with tree hash</b>, then the orchestrator commits.</li>
     </ol>
+    <p>The RED proof belongs to the orchestrator, not to the agent's claim: what it proves is that the marked Gates were red before the implementation run — "tests only" is an instruction to the agent, since no stack-neutral rule tells a test path from a production path. It is protected against forgery on both sides: a test-only pass that leaves the Worktree unchanged or <b>deletes</b> files proves nothing (both checks also run in the resume path, after the artifact restore), and green Gates count only while the tests that proved RED are still in place. The RED check runs <b>no</b> Gate iteration — the budget belongs to the implementation. Fix dispatches from phases 4–7 (<code>pending_task</code> set) and Lanes without a marked Gate keep the single-stage behavior byte for byte.</p>
     <p>The tree hash is produced via a temporary Git index (<code>GIT_INDEX_FILE</code>, seeded from HEAD, then <code>add -A</code> + <code>write-tree</code>) — it binds the "Gates were green" evidence to exactly the verified content including untracked files. On resume, even a Lane marked <code>completed</code> is revalidated against it; if the tree no longer matches, the Lane goes back into the loop instead of being passed on unverified.</p>
   </div>
 </details>
@@ -247,6 +249,8 @@
       <tr><td><code>pending_task</code>, <code>last_failures</code></td><td>Lane</td><td>Crash between Gate failure and fix run</td></tr>
       <tr><td><code>gates_passed</code> + <code>gates_tree</code></td><td>Lane</td><td>Crash between "Gates green" and commit — the evidence is bound to the exact tree hash and thus not forgeable</td></tr>
       <tr><td><code>expected_head</code></td><td>Lane</td><td>Detection of foreign commits across a crash window (orchestrator-only commit invariant)</td></tr>
+      <tr><td><code>session_id</code> of the test-only pass</td><td>Lane</td><td>Crash between the test-only pass and the RED check: the checkpointed session marks the pass as done, so a resume repeats only the check</td></tr>
+      <tr><td><code>red_confirmed</code> + <code>red_test_paths</code></td><td>Lane</td><td>Crash between the RED proof and the implementation run (both are written in one save with <code>pending_task</code>); the paths bind the proof to the tests that delivered it</td></tr>
       <tr><td><code>base_sha</code></td><td>Lane</td><td>Fork point of the Lane — restorations use the immovable state, not the advancing base branch</td></tr>
       <tr><td><code>integration_rounds / review_rounds / fix_cycles / ci_reentries</code> (+ <code>*_last_failures</code>, <code>review_prior_context</code>)</td><td>Run/Lane</td><td>All loop budgets — a restart grants no extra attempts; limit checks come <i>before</i> expensive work</td></tr>
       <tr><td><code>dry_run</code>, <code>skip_approval</code>, <code>pinned_base_branch</code></td><td>Run</td><td>CLI decisions that the resume invocation no longer knows</td></tr>
@@ -258,12 +262,13 @@
 <h2 id="limits">6. Limits &amp; Circuit-Breakers</h2>
 <table>
   <tr><th>Loop</th><th>Limit (constant)</th><th>Additionally</th></tr>
-  <tr><td>Gate loop per Lane</td><td>10 (<code>MAX_GATE_ITERATIONS</code>) — per task, reset on a new fix task</td><td rowspan="5">Circuit-Breaker <code>check_progress</code>: exactly the same failure/Finding set as in the previous round → immediate escalation instead of exhausting the limit</td></tr>
+  <tr><td>Gate loop per Lane</td><td>10 (<code>MAX_GATE_ITERATIONS</code>) — per task, reset on a new fix task; the RED check consumes no iteration</td><td rowspan="5">Circuit-Breaker <code>check_progress</code>: exactly the same failure/Finding set as in the previous round → immediate escalation instead of exhausting the limit</td></tr>
   <tr><td>Integration/E2E</td><td>10 rounds (<code>MAX_E2E_ROUNDS</code>, run-wide)</td></tr>
   <tr><td>Authoring loop (spec/plan)</td><td>5 rounds (<code>AUTHORING_MAX_ROUNDS</code>) — severity threshold per round: 1 all, 2 P1+P2, from 3 P1 only; at the cap P1 → escalation, otherwise accept + known limitations</td></tr>
   <tr><td>Codex code review</td><td>5 rounds (<code>MAX_REVIEW_ROUNDS</code>) — same severity threshold; previous rounds' findings + dispositions as Codex context, below-threshold findings → <code>followups.md</code></td></tr>
   <tr><td>Fix cycles after final review</td><td>3 per Lane (<code>MAX_FIX_CYCLES</code>)</td></tr>
   <tr><td>CI re-entry</td><td>1 (<code>MAX_CI_REENTRIES</code>)</td></tr>
+  <tr><td>RED stage per Lane</td><td>exactly 1 pass (no retry loop)</td><td>No Circuit-Breaker: green marked Gates after the test-only pass escalate instead of starting a test-improvement loop</td></tr>
   <tr><td>Gate/Codex/glab subprocesses</td><td>Timeout per Gate from the config; Codex 900 s; glab 120 s; CI budget 2700 s</td><td>Process-group kill (<code>start_new_session</code> + <code>killpg</code>) on all exit paths — no zombie processes</td></tr>
 </table>
 
@@ -359,7 +364,7 @@ The Agent SDK spawns the Claude Code CLI as a headless subprocess; ADW enforces 
   <li><b>331 tests, developed TDD-first</b> (every task/bugfix began with a red test). No test needs network or tokens: SDK, Codex, and glab are mocked at their interfaces — <b>git is real</b> (throwaway repos in <code>tmp_path</code>).</li>
   <li><b>Scriptable mocks as the test backbone:</b> <code>MockAgentRunner</code> (response queues per agent, simulated file outputs static or as <code>Callable(cwd)</code> for per-Lane behavior, complete call recording incl. <code>resume</code>/<code>deny_read_paths</code>) and <code>MockCodexRunner</code>.</li>
   <li><b>Focus on crash windows:</b> A large part of the phase tests deliberately simulates aborts between two checkpoints (manipulate state, "let the process die", resume) as well as agent manipulation (foreign commits, symlink artifacts, rewritten configs, manipulated worktrees after the completed checkpoint).</li>
-  <li><b>Acceptance level:</b> <code>tests/test_e2e_dry_run.py</code> maps the DoD criteria 1–5 from <code>docs/SPEC.md</code> §8 — complete CLI dry runs (single + parallel), Gate fail→same-session fix, approval gate, Triage paths, crash resume.</li>
+  <li><b>Acceptance level:</b> <code>tests/test_e2e_dry_run.py</code> maps the DoD criteria from <code>docs/SPEC.md</code> §8 — complete CLI dry runs (single + parallel), Gate fail→same-session fix, approval gate, Triage paths, crash resume, dual authoring, and both RED-gate paths (with and without a <code>tdd</code> Gate).</li>
   <li><b>Review gate in the development process:</b> per task <code>uv run pytest</code> + <code>ruff check/format</code> + <code>codex review --uncommitted</code>; across tasks 10–13 this found 8 P1 and 19 P2 Findings, each fixed with a regression test first.</li>
 </ul>
 
@@ -372,6 +377,7 @@ The Agent SDK spawns the Claude Code CLI as a headless subprocess; ADW enforces 
   <tr><td>The Codex token back-sync does not hold the lock for the entire review duration.</td><td>Deliberate — otherwise parallel reviews would be serialized for minutes. In the extreme case (two simultaneous rotations), a one-off <code>codex login</code>.</td></tr>
   <tr><td>A crash between the CI re-entry checkpoint and the renewed poll can cause the resume to escalate without a second fix attempt.</td><td>Bounded and on the safe side: better one re-entry too few than an unbudgeted loop.</td></tr>
   <tr><td>The Circuit-Breaker compares exact error texts — varying outputs (timestamps, counters) bypass it.</td><td>Then the hard round limits take over.</td></tr>
+  <tr><td>The RED proof hangs on the test <b>paths</b>, not on their content — an implementation pass could water a test down in place; the paths themselves are not classified as tests either, so a test-only pass that also writes production code is not detected.</td><td>Deliberate: content immutability would turn the legitimate repair path of the Gate loop (the agent fixes its own broken test) into an escalation; watered-down tests are caught by the downstream Codex code review. There is also no green baseline run before the test-only pass — a Gate that is already red on HEAD (missing tool, timeout) counts as RED, but that is a project defect the loop surfaces right afterwards. A crash <b>before</b> the session checkpoint of the test-only pass repeats that agent run once (the Worktree changes are kept, so the second pass sees them).</td></tr>
 </table>
 
 <h2 id="glossar">12. Glossary</h2>
@@ -382,6 +388,7 @@ The Agent SDK spawns the Claude Code CLI as a headless subprocess; ADW enforces 
   <tr><td><b>Draft stage (<code>_draft_stage</code>)</b></td><td>Phases 1–2: Claude author and Codex write their drafts in parallel into <code>.adw/runs/&lt;id&gt;/drafts/</code>; idempotent over the draft files, Codex failure degrades.</td></tr>
   <tr><td><b>Synthesis (<code>spec_/plan_synthesis</code>)</b></td><td>The agent that merges both drafts into ONE best-of artifact and writes the summary for the approval gate; it is the first run of the authoring loop.</td></tr>
   <tr><td><b>Gate evidence (<code>gates_tree</code>)</b></td><td>Tree hash of the complete Worktree content (incl. untracked) via a temporary Git index — binds "Gates green" to exactly the verified state.</td></tr>
+  <tr><td><b>RED stage (<code>_confirm_red</code>)</b></td><td>Initial build of a Lane with a <code>tdd: true</code> Gate: test-only agent pass, then the orchestrator proves exactly the marked Gates red — <code>red_confirmed</code> + <code>red_test_paths</code> as the persisted evidence.</td></tr>
   <tr><td><b>Circuit-Breaker</b></td><td><code>check_progress</code>: identical failure/Finding set as in the previous round → immediate escalation.</td></tr>
   <tr><td><b>Dispatch (<code>_dispatch_lane_fixes</code>)</b></td><td>Central fix-routing function: group Findings per Lane, stage Lane state atomically (optionally with budget increment via <code>mutate_staged</code>), then the regular Lane loop.</td></tr>
   <tr><td><b>Session resume</b></td><td>SDK feature: follow-up task to an existing agent session (<code>resume=session_id</code>) — full context without a rebuild.</td></tr>
