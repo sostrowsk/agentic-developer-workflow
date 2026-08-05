@@ -346,6 +346,77 @@ def test_dod7_summaries_stay_out_of_the_lane_worktree(target_repo):
     assert not (lane_adw / "drafts").exists()
 
 
+# --- DoD 8: RED-Gate im Dry-Run -----------------------------------------------
+
+# Das Lane-Gate ist als RED-Beweis markiert und wird — wie das synthetische
+# Dry-Run-Gate — erst durch die Marker-Datei der zweiten Mock-Stufe grün.
+TDD_CONFIG = """\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - {name: pytest, cmd: "test -f .adw-dry-run-fixed", timeout: 10, tdd: true}
+ci:
+  provider: gitlab
+  staging_job: deploy-staging
+"""
+
+
+def capture_dry_run_agents(monkeypatch) -> dict:
+    """Die Mocks der CLI abgreifen — nur so sind die Agent-Läufe eines
+    CLI-Dry-Runs zählbar."""
+    import adw.cli as cli_mod
+
+    captured: dict = {}
+    real = cli_mod._dry_run_runners
+
+    def capturing():
+        agents, codex = real()
+        captured["agents"] = agents
+        return agents, codex
+
+    monkeypatch.setattr(cli_mod, "_dry_run_runners", capturing)
+    return captured
+
+
+def dry_run_build_calls(captured: dict) -> list:
+    return [c for c in captured["agents"].calls if c.agent == "build_agent"]
+
+
+def test_dod8_default_dry_run_stays_single_stage_without_a_tdd_gate(target_repo, monkeypatch):
+    """SPEC acceptance criterion 3: without a marked Gate the dry run behaves
+    exactly as before — same two build runs, no extra agent round."""
+    captured = capture_dry_run_agents(monkeypatch)
+    result = cli_run(target_repo, "--no-approval")
+    assert result.exit_code == 0, result.output
+    calls = dry_run_build_calls(captured)
+    assert len(calls) == 2  # Erstlauf + Fix des simulierten Gate-Fails
+    assert not any("ONLY the tests" in call.task for call in calls)
+    assert RunState.find_latest(target_repo).lanes["backend"].red_confirmed is False
+
+
+def test_dod8_dry_run_walks_the_red_path_with_a_tdd_gate(target_repo, monkeypatch):
+    """A Lane with a tdd Gate runs the full RED path through the CLI: test-only
+    pass → orchestrator-proven RED → implementation in the same session → green."""
+    write_config(target_repo, TDD_CONFIG)
+    git(target_repo, "add", ".adw/config.yaml")
+    git(target_repo, "commit", "-m", "tdd gate")
+    captured = capture_dry_run_agents(monkeypatch)
+    result = cli_run(target_repo, "--no-approval")
+    assert result.exit_code == 0, result.output
+    calls = dry_run_build_calls(captured)
+    assert len(calls) == 2
+    assert "ONLY the tests" in calls[0].task and calls[0].resume is None
+    assert "RED confirmed" in calls[1].task
+    state = RunState.find_latest(target_repo)
+    assert state.phase == "done"
+    lane = state.lanes["backend"]
+    assert calls[1].resume == lane.session_id  # dieselbe Session, kein Neuaufbau
+    assert lane.red_confirmed and lane.completed and lane.gates_passed
+    assert lane.red_test_paths  # der Beweis hängt an den Test-Pfaden
+    assert lane.gate_iterations == 1  # der RED-Check verbraucht keine Iteration
+
+
 # --- DoD 5: Resume setzt in derselben Phase fort -------------------------------
 
 
