@@ -96,6 +96,12 @@ class EventEmitter:
         self._repo = None
         self._path = None
         self._key = None
+        # In-memory seq cache (no sidecar files — additional_persistent_state is
+        # forbidden): the seq this instance last wrote and the file size right
+        # after that write. Lets _append skip re-scanning the whole log when no
+        # other writer has appended since. Both are only touched under the flock.
+        self._cached_seq: int | None = None
+        self._cached_offset: int | None = None
         try:
             repo_path = Path(repo)
             try:
@@ -143,21 +149,36 @@ class EventEmitter:
         ensure_runs_gitignored(self._repo)
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
-    def _next_seq_locked(self, fh) -> int:
+    def _next_seq_locked(self, fh, size: int) -> int:
         """Highest seq of the complete existing records + 1 (1 when empty).
 
-        The caller holds the exclusive flock. Partial/corrupt trailing lines
-        are ignored, which also covers the resume scenario without any extra
-        persistent sequence state.
+        The caller holds the exclusive flock and passes the current file
+        ``size``. To keep emit O(1) instead of O(log-size) (GUI-SPEC §9), only
+        the region the instance has not yet accounted for is scanned:
+
+        - if nothing was appended since our last write (size unchanged), return
+          the cached seq + 1 without reading anything;
+        - if the file only grew, scan just the newly appended lines starting
+          from the cached offset, seeding the max with the cached seq;
+        - otherwise (cold cache, or the file unexpectedly shrank) fall back to a
+          full scan — this preserves the resume behavior of criterion 12.
+
+        Partial/corrupt lines are ignored (their seq stays unreadable), so a
+        crash-truncated tail never inflates the sequence.
         """
-        fh.seek(0)
-        max_seq = 0
-        for line in fh:
-            line = line.strip()
-            if not line:
+        if self._cached_offset is not None and size == self._cached_offset:
+            return self._cached_seq + 1
+        if self._cached_offset is not None and 0 < self._cached_offset < size:
+            start, max_seq = self._cached_offset, self._cached_seq
+        else:
+            start, max_seq = 0, 0
+        fh.seek(start)
+        for raw in fh:
+            raw = raw.strip()
+            if not raw:
                 continue
             try:
-                record = json.loads(line)
+                record = json.loads(raw)
             except ValueError:
                 continue
             seq = record.get("seq")
@@ -182,16 +203,30 @@ class EventEmitter:
         # os.open with mode 0600 sets the permissions on the *newly* created
         # file; the caller already holds the shared per-run lock (threads), and
         # flock serializes seq assignment + append across processes
-        # (GUI-SPEC §4.3). fsync is deliberately not called.
+        # (GUI-SPEC §4.3). Binary mode makes offset math and the trailing-byte
+        # check exact. fsync is deliberately not called.
         fd = os.open(self._path, os.O_CREAT | os.O_RDWR, 0o600)
-        fh = os.fdopen(fd, "r+", encoding="utf-8")
+        fh = os.fdopen(fd, "r+b")
         try:
             fcntl.flock(fh, fcntl.LOCK_EX)
-            record["seq"] = self._next_seq_locked(fh)
-            line = json.dumps(record, ensure_ascii=False)
+            size = os.fstat(fd).st_size
+            record["seq"] = self._next_seq_locked(fh, size)
+            data = json.dumps(record, ensure_ascii=False).encode("utf-8")
+            # Heal a crash-truncated trailing fragment: if the last byte is not
+            # a newline, start the new record on a fresh line so it stays "one
+            # JSON object per line" (criterion 1). Only adds bytes — append-only
+            # is preserved; the fragment remains an isolated, ignorable line.
+            prefix = b""
+            if size > 0:
+                fh.seek(size - 1)
+                if fh.read(1) != b"\n":
+                    prefix = b"\n"
+            chunk = prefix + data + b"\n"
             fh.seek(0, os.SEEK_END)
-            fh.write(line + "\n")
+            fh.write(chunk)
             fh.flush()
+            self._cached_seq = record["seq"]
+            self._cached_offset = size + len(chunk)
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
             fh.close()

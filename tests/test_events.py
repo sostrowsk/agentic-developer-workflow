@@ -138,6 +138,85 @@ def test_concurrent_threads_produce_no_gaps_and_no_partial_lines(target_repo):
     assert seqs == list(range(1, total + 1))
 
 
+def test_two_interleaving_emitters_keep_seq_gap_free(target_repo):
+    """Codex P2: the per-instance seq/offset cache must not break gap-free
+    numbering when two instances interleave writes on the same file."""
+    a = EventEmitter(target_repo, RUN_ID)
+    b = EventEmitter(target_repo, RUN_ID)
+    order = [a, b, a, a, b, b, a, b, a, b, a, a]
+    for i, emitter in enumerate(order):
+        emitter.emit("log", {"i": i})
+    seqs = [record["seq"] for record in read_events(target_repo)]
+    assert seqs == list(range(1, len(order) + 1))
+
+
+def test_warm_emit_does_not_reparse_the_whole_log(target_repo, monkeypatch):
+    """Codex P2: emit cost must not grow with log size. Once an instance has a
+    warm cache and no other writer has appended, the next emit assigns seq
+    without re-parsing the existing records."""
+
+    class CountingJson:
+        def __init__(self, real):
+            self._real = real
+            self.loads_calls = 0
+
+        def loads(self, *args, **kwargs):
+            self.loads_calls += 1
+            return self._real.loads(*args, **kwargs)
+
+        def dumps(self, *args, **kwargs):
+            return self._real.dumps(*args, **kwargs)
+
+    # Pre-seed a sizeable log with one emitter.
+    seeder = EventEmitter(target_repo, RUN_ID)
+    for i in range(200):
+        seeder.emit("log", {"i": i})
+
+    counting = CountingJson(events_module.json)
+    monkeypatch.setattr(events_module, "json", counting)
+
+    fresh = EventEmitter(target_repo, RUN_ID)
+    # First emit on a cold cache scans the log once to resume the sequence.
+    fresh.emit("log", {"cold": True})
+    assert counting.loads_calls > 0
+
+    # Second emit is warm: no other writer appended, so nothing is re-parsed.
+    counting.loads_calls = 0
+    fresh.emit("log", {"warm": True})
+    assert counting.loads_calls == 0
+
+    seqs = [record["seq"] for record in read_events(target_repo)]
+    assert seqs == list(range(1, 203))
+
+
+def test_partial_trailing_line_is_healed_before_the_new_record(target_repo):
+    """Codex P3: a crash-truncated trailing fragment must not be glued onto the
+    next record — the new record stays exactly one JSON object on its own line
+    with the correctly continued seq, and existing bytes are untouched."""
+    path = _events_path(target_repo)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    valid = json.dumps({
+        "seq": 1, "ts": "2026-08-05T14:02:20.117Z", "type": "log",
+        "kind": "point", "span": None, "parent": None, "phase": None,
+        "lane": None, "round": None, "payload": {},
+    })
+    fragment = '{"seq": 2, "ts": "2026'  # truncated, no trailing newline
+    path.write_text(valid + "\n" + fragment, encoding="utf-8")
+
+    EventEmitter(target_repo, RUN_ID).emit("log", {"ok": True})
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    # The pre-existing valid record and the fragment are byte-for-byte intact.
+    assert json.loads(lines[0])["seq"] == 1
+    assert lines[1] == fragment
+    # The new record is a parseable JSON object on its own line.
+    new = json.loads(lines[2])
+    assert new["payload"] == {"ok": True}
+    assert new["kind"] == "point"
+    # Highest COMPLETE seq was 1 (fragment ignored) — the new record continues.
+    assert new["seq"] == 2
+
+
 # --- §4.2/§4.4 span API -----------------------------------------------------
 
 def test_span_start_and_end_share_type_and_id_with_separate_payloads(target_repo):
