@@ -1,0 +1,207 @@
+# Interface contract — adw/events.py
+#
+# Single workstream (backend). No HTTP/events surface exists, so this contract
+# pins the only externally observable surfaces of this run:
+#   1. the public API of the module `adw/events.py`
+#   2. the on-disk line format of `.adw/runs/<run_id>/events.jsonl`
+# Internal helper signatures are deliberately NOT part of the contract.
+# On any conflict, docs/GUI-SPEC.md §4.1–§4.4 wins over this file.
+
+contract_version: 1
+name: adw-events
+kind: python-module-and-jsonl
+module: adw.events
+
+public_api:
+  EventEmitter:
+    doc: >
+      Active emitter bound to a target repo and a run. Appends events to
+      .adw/runs/<run_id>/events.jsonl. Fail-open: no internal error ever
+      reaches the caller.
+    constructor:
+      signature: "EventEmitter(repo: Path, run_id: str)"
+      behavior:
+        - Binds the emitter to the target repository root and run identifier.
+        - Construction is fail-open and does not expose emitter-internal errors.
+    methods:
+      emit:
+        signature: "emit(type: str, payload: dict | None = None, *, phase: str | None = None, lane: str | None = None, round: int | None = None, span: str | None = None, parent: str | None = None) -> None"
+        behavior:
+          kind: point
+          return: "None (always)"
+          context: >
+            Explicitly passed values are written unchanged; omitted context
+            values are written as JSON null. Unknown `type` values are
+            accepted unchanged (forward compatibility). Payload is serialized
+            raw and uncapped.
+      span:
+        signature: "span(type: str, payload: dict | None = None, *, phase: str | None = None, lane: str | None = None, round: int | None = None)"
+        returns: "context manager yielding a SpanHandle"
+  NoOpEmitter:
+    doc: >
+      No-op emitter with EXACTLY the same method signatures as EventEmitter,
+      so callers can emit unconditionally. Writes nothing, creates no file,
+      and no internally caused error reaches the caller.
+    constructor:
+      signature: "NoOpEmitter()"
+    methods:
+      emit:
+        signature: "same as EventEmitter.emit"
+        behavior:
+          return: "None (always)"
+          writes_events: false
+          creates_files: false
+      span:
+        signature: "same as EventEmitter.span"
+        returns: "context manager yielding a SpanHandle (with id)"
+        behavior:
+          writes_events: false
+          creates_files: false
+  SpanHandle:
+    doc: >
+      The value yielded by the span(...) context manager, for the active,
+      the disabled and the no-op emitter alike.
+    attributes:
+      id:
+        type: string
+        access: read
+        description: A generated span identifier unique within the run.
+      end_payload:
+        type: object
+        access: read-write
+        initial_value: {}
+        description: >
+          Its contents at context-manager exit become the end-event payload
+          (separate start/end payloads, GUI-SPEC §4.4).
+
+span_semantics:
+  active:
+    enter:
+      - Generates a per-run-unique span identifier and exposes it as SpanHandle.id.
+      - Writes one event with kind start, the requested type, the generated span identifier, and the payload passed to span().
+    exit:
+      - Writes one event with kind end, the SAME type and the SAME span identifier, and SpanHandle.end_payload as payload.
+    nesting:
+      outer_parent: null
+      inner_parent: The enclosing span identifier.
+      tracking: Thread-isolated; concurrent threads (lanes run as threads, §4.3) do not share enclosing-span context.
+    body_exception:
+      - The end event is still written.
+      - The original body exception is propagated unchanged.
+      - An emitter error while writing the end event stays fail-open and does not replace the body exception.
+  disabled_or_noop:
+    - Yields a functional SpanHandle with an identifier.
+    - Writes no events and creates no event file.
+    - Propagates body exceptions unchanged — never swallowed.
+
+event_log:
+  path: ".adw/runs/<run_id>/events.jsonl"
+  encoding: UTF-8
+  format: JSON Lines
+  line_termination: "\n"
+  append_only: true  # bytes already written are never modified or replaced
+  new_file_mode: "0600"
+  preparation: >
+    Before the first record is written, .adw/runs/ in the target repo is
+    git-ignored (the behavior owned by adw.worktrees.ensure_runs_gitignored,
+    observable as .adw/runs/.gitignore). Preparation failures stay fail-open.
+  durability: >
+    Each record is a complete line and visible to concurrent readers after
+    the emit call returns (flushed); fsync is deliberately NOT issued —
+    crash durability is traded away per GUI-SPEC §4.3, state.json remains
+    the resume authority.
+  additional_persistent_state: forbidden  # no index/offset/sidecar files, no RunState change
+
+record:
+  top_level_fields:
+    exact: true  # exactly these fields, no additions, no schema version
+    fields:
+      seq:
+        type: integer
+        minimum: 1
+        description: >
+          Strictly increasing, gap-free sequence number per run — also under
+          concurrent emitters.
+      ts:
+        type: string
+        pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'
+        description: >
+          Write time in UTC with millisecond precision
+          (e.g. 2026-08-05T14:02:20.117Z).
+      type:
+        type: string
+        description: Caller-provided event type; unknown values are accepted unchanged.
+      kind:
+        type: string
+        enum: [start, end, point]
+        description: Point events carry kind "point".
+      span:
+        type: [string, "null"]
+        description: Span id for start/end events; for point events the value passed by the caller, else null.
+      parent:
+        type: [string, "null"]
+        description: Enclosing span id for nested spans; outermost span has null.
+      phase:
+        type: [string, "null"]
+        description: Explicitly passed by caller, else null.
+      lane:
+        type: [string, "null"]
+        description: Explicitly passed by caller, else null.
+      round:
+        type: [integer, "null"]
+        description: Explicitly passed by caller, else null.
+      payload:
+        type: [object, "null"]
+        description: >
+          Serialized raw and uncapped; never redacted, filtered, truncated
+          or validated per type.
+  point_event:
+    kind: point
+  span_events:
+    start_and_end_share: [type, span]
+    start_payload: Payload passed to span().
+    end_payload: SpanHandle.end_payload at exit.
+
+sequence:
+  first: 1  # empty/new file starts at 1
+  scope: run
+  monotonic: strictly
+  gap_free: true
+  resume: >
+    An emitter opened on an existing non-empty file continues at one greater
+    than the highest seq found in complete existing records; no additional
+    persistent sequence state.
+  concurrency_outcome: >
+    Concurrent emits from multiple threads and/or processes on the same run
+    produce neither duplicate nor missing seq values, and every line in the
+    file is one complete, valid JSON record (no interleaved or partial
+    lines).
+  sidecar_state: forbidden
+
+fail_open:
+  invariant: >
+    No emitter-internal error ever reaches the caller or aborts a run:
+    construction, emit() and span() never raise because of the emitter
+    itself, regardless of the failure cause (e.g. disk full, permissions,
+    unserializable payload).
+  warning:
+    channel: logger.warning
+    count: 1
+    scope: per run per process  # keyed by (repo, run_id)
+    note: >
+      Implements the "once per run" guarantee of GUI-SPEC §4.3 to the extent
+      observable without forbidden persistent state: the once-guarantee
+      holds across ALL EventEmitter instances for the same repo/run within
+      one process. A fresh process starts with a clean slate and may warn
+      once again; persisting the disabled state would require sidecar state,
+      which is forbidden.
+  after_first_internal_error:  # observable outcomes, per run per process
+    - No further records are appended to that run's events.jsonl by this process.
+    - No further warnings are logged for that run by this process.
+    - emit() keeps returning None; span() keeps yielding a functional SpanHandle with an id.
+    - Body exceptions inside spans still propagate unchanged.
+  isolation: Emitters for other runs (different repo/run_id) are unaffected.
+  caller_body_exceptions:
+    swallowed: false
+    replaced: false
+    propagated_unchanged: true
