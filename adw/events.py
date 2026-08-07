@@ -11,6 +11,7 @@ deliberately not issued.
 
 import contextlib
 import fcntl
+import itertools
 import json
 import logging
 import os
@@ -36,6 +37,22 @@ _run_locks: dict[tuple[str, str], threading.Lock] = {}
 _registry_lock = threading.Lock()
 
 
+def _reset_registries_after_fork() -> None:
+    """After os.fork() a child inherits copies of the parent's registries and
+    locks — a run could stay wrongly disabled, or a run lock held by another
+    (now absent) thread at fork time would deadlock the child. A forked child
+    is a fresh process (GUI-SPEC §4.3), so recreate the mutex and clear the
+    inherited disabled-run and run-lock state."""
+    global _registry_lock
+    _registry_lock = threading.Lock()
+    _disabled_runs.clear()
+    _run_locks.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_reset_registries_after_fork)
+
+
 def _utc_millis() -> str:
     """Current UTC time as YYYY-MM-DDTHH:MM:SS.mmmZ (millisecond precision)."""
     now = datetime.now(UTC)
@@ -44,6 +61,16 @@ def _utc_millis() -> str:
 
 def _new_span_id() -> str:
     return uuid.uuid4().hex
+
+
+# Non-raising fallback id, used only when _new_span_id() itself fails. A plain
+# process-global counter (next() on itertools.count is atomic under the GIL)
+# cannot raise, keeping span-id generation inside the fail-open boundary.
+_fallback_span_counter = itertools.count(1)
+
+
+def _fallback_span_id() -> str:
+    return f"span-fallback-{next(_fallback_span_counter)}"
 
 
 class SpanHandle:
@@ -214,6 +241,16 @@ class EventEmitter:
             self._local.stack = stack
         return stack
 
+    def _safe_span_id(self) -> str:
+        """Fail-open span-id generation: on any failure disable the run (warning
+        once) and fall back to a non-raising identifier, so the caller always
+        gets a functional handle."""
+        try:
+            return _new_span_id()
+        except Exception as exc:
+            self._disable_with_warning(exc)
+            return _fallback_span_id()
+
     @contextlib.contextmanager
     def span(
         self,
@@ -224,7 +261,7 @@ class EventEmitter:
         lane: str | None = None,
         round: int | None = None,
     ):
-        handle = SpanHandle(_new_span_id())
+        handle = SpanHandle(self._safe_span_id())
 
         if self._is_disabled():
             # Functional handle, no events, body exceptions propagate.
@@ -285,4 +322,8 @@ class NoOpEmitter:
         lane: str | None = None,
         round: int | None = None,
     ):
-        yield SpanHandle(_new_span_id())
+        try:
+            span_id = _new_span_id()
+        except Exception:  # stay non-raising, like the active emitter
+            span_id = _fallback_span_id()
+        yield SpanHandle(span_id)

@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import signal
 import stat
 import threading
 import time
@@ -16,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+import adw.events as events_module
 from adw.events import EventEmitter, NoOpEmitter
 
 RUN_ID = "run01a2"
@@ -328,6 +330,127 @@ def test_disabling_a_waiting_instance_prevents_a_post_disable_record(target_repo
     thread.join(2)
     assert not thread.is_alive()
     assert read_events(target_repo) == []
+
+
+# --- Codex P2: span-id generation is fail-open ------------------------------
+
+def _boom_span_id():
+    raise RuntimeError("uuid unavailable")
+
+
+def test_active_span_stays_fail_open_when_id_generation_raises(
+    target_repo, monkeypatch, caplog
+):
+    monkeypatch.setattr(events_module, "_new_span_id", _boom_span_id)
+    emitter = EventEmitter(target_repo, RUN_ID)
+
+    with caplog.at_level(logging.WARNING, logger="adw.events"):
+        with emitter.span("phase") as handle:  # must not raise
+            assert isinstance(handle.id, str) and handle.id
+            handle.end_payload["done"] = True
+        # After an internal failure the run is disabled: emit is a silent no-op.
+        assert emitter.emit("log", {"ok": 1}) is None
+
+    warnings = [r for r in caplog.records
+                if r.name == "adw.events" and r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert read_events(target_repo) == []
+
+
+def test_disabled_span_stays_fail_open_when_id_generation_raises(
+    target_repo, monkeypatch, caplog
+):
+    emitter = EventEmitter(target_repo, RUN_ID)
+    with caplog.at_level(logging.WARNING, logger="adw.events"):
+        emitter.emit("log", {"bad": object()})  # disable the run (1 warning)
+        monkeypatch.setattr(events_module, "_new_span_id", _boom_span_id)
+        with emitter.span("phase") as handle:  # must not raise
+            assert isinstance(handle.id, str) and handle.id
+
+    warnings = [r for r in caplog.records
+                if r.name == "adw.events" and r.levelno == logging.WARNING]
+    assert len(warnings) == 1  # no extra warning once already disabled
+    assert read_events(target_repo) == []
+
+
+def test_noop_span_stays_fail_open_when_id_generation_raises(monkeypatch):
+    monkeypatch.setattr(events_module, "_new_span_id", _boom_span_id)
+    noop = NoOpEmitter()
+
+    with noop.span("phase") as handle:  # must not raise
+        assert isinstance(handle.id, str) and handle.id
+
+    boom = ValueError("boom")
+    with pytest.raises(ValueError) as excinfo:
+        with noop.span("phase"):
+            raise boom
+    assert excinfo.value is boom
+
+
+# --- Codex P2: fork must not inherit the process-local registries -----------
+
+def _wait_child(pid: int, timeout: float = 10.0) -> int:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        waited, status = os.waitpid(pid, os.WNOHANG)
+        if waited == pid:
+            return status
+        time.sleep(0.02)
+    os.kill(pid, signal.SIGKILL)
+    os.waitpid(pid, 0)
+    raise AssertionError("child did not exit — inherited state deadlocked it")
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
+def test_fork_child_starts_with_a_clean_disable_registry(target_repo):
+    emitter = EventEmitter(target_repo, RUN_ID)
+    emitter.emit("log", {"bad": object()})  # disable the run in the parent
+    assert read_events(target_repo) == []
+
+    pid = os.fork()
+    if pid == 0:  # child — a fresh process must be able to write again
+        try:
+            EventEmitter(target_repo, RUN_ID).emit("log", {"ok": 1})
+            records = read_events(target_repo)
+            ok = len(records) == 1 and records[0]["payload"] == {"ok": 1}
+            os._exit(0 if ok else 1)
+        except BaseException:
+            os._exit(2)
+    status = _wait_child(pid)
+    assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+
+
+@pytest.mark.skipif(not hasattr(os, "fork"), reason="requires os.fork")
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")  # forking with a held lock is the point
+def test_fork_child_does_not_inherit_a_held_run_lock(target_repo):
+    emitter = EventEmitter(target_repo, RUN_ID)
+    run_lock = emitter._run_lock()
+    holding = threading.Event()
+    release = threading.Event()
+
+    def holder():
+        with run_lock:
+            holding.set()
+            release.wait(10)
+
+    thread = threading.Thread(target=holder)
+    thread.start()
+    holding.wait()  # the run lock is now held by another thread
+
+    try:
+        pid = os.fork()
+        if pid == 0:  # child must not deadlock on the inherited, held lock
+            try:
+                EventEmitter(target_repo, RUN_ID).emit("log", {"ok": 1})
+                os._exit(0)
+            except BaseException:
+                os._exit(2)
+        status = _wait_child(pid)
+    finally:
+        release.set()
+        thread.join()
+
+    assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
 
 
 # --- §4 NoOpEmitter ---------------------------------------------------------
