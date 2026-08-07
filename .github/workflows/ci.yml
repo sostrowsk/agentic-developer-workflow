@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+
+      # --locked: pyproject und uv.lock müssen zusammenpassen. Lane-Gates
+      # laufen über `uv run` und schreiben den Lock bei neuen Dependencies
+      # selbst fort — ein vergessener Lock-Update fällt hier auf.
+      - run: uv sync --locked
+
+      - run: uv run ruff check .
+
+      - run: uv run pytest -q

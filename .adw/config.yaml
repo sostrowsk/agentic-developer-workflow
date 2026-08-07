@@ -1,0 +1,27 @@
+# .adw/config.yaml — ADW auf sich selbst.
+#
+# Single-Lane: Templates und CSS der GUI sind Teil des Python-Pakets, ein
+# eigener frontend-Worktree brächte hier nur Merge-Risiko. --parallel ist
+# damit bewusst nicht verfügbar (verlangt backend UND frontend).
+
+base_branch: main
+
+lanes:
+  backend:
+    gates:
+      # `uv run` statt der Binaries des Haupt-Checkouts: Lanes laufen in
+      # git-Worktrees, und nur so testet eine Lane gegen IHREN Code
+      # (eigenes, gitignoriertes .venv je Worktree) statt gegen main.
+      # `ruff format --check` ist bewusst KEIN Gate — es ist auf main
+      # bereits rot (adw/codex.py) und würde jeden Run sofort scheitern lassen.
+      - { name: ruff, cmd: "uv run ruff check .", timeout: 600 }
+      - { name: pytest, cmd: "uv run pytest -x -q", timeout: 1800, tdd: true }
+
+ci:
+  provider: github
+  poll_interval: 30
+  # Die Suite läuft lokal in ~35s; 15 Minuten decken Runner-Wartezeit und
+  # uv-Cache-Miss ab, ohne bei fehlender Pipeline 45 Minuten zu verbrennen.
+  timeout: 900
+  # staging_job bewusst leer: das Repo deployt nichts, der
+  # Pipeline-Gesamtstatus ist das vollständige Urteil.
