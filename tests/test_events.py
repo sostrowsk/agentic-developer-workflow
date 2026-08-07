@@ -11,9 +11,11 @@ import os
 import re
 import stat
 import threading
+import time
 from pathlib import Path
 
 import pytest
+
 from adw.events import EventEmitter, NoOpEmitter
 
 RUN_ID = "run01a2"
@@ -269,6 +271,63 @@ def test_fail_open_warns_once_then_disables_run_across_instances(target_repo, ca
 
     assert read_events(target_repo, RUN_ID) == []
     assert len(read_events(target_repo, other_run)) == 1
+
+
+def test_construction_with_bad_repo_stays_fail_open(caplog):
+    """Codex P2: a repo whose conversion raises must not escape the constructor,
+    and the resulting emitter must be a silent, functional no-op."""
+
+    class BadRepo:
+        def __fspath__(self):
+            raise RuntimeError("cannot convert")
+
+    with caplog.at_level(logging.WARNING, logger="adw.events"):
+        emitter = EventEmitter(BadRepo(), RUN_ID)  # must not raise
+
+        assert emitter.emit("log", {"ok": 1}) is None
+        with emitter.span("phase") as handle:
+            assert isinstance(handle.id, str) and handle.id
+            handle.end_payload["done"] = True
+
+        # A body exception in a broken emitter's span still propagates unchanged.
+        boom = ValueError("boom")
+        with pytest.raises(ValueError) as excinfo:
+            with emitter.span("phase"):
+                raise boom
+        assert excinfo.value is boom
+
+    warnings = [r for r in caplog.records
+                if r.name == "adw.events" and r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+
+
+def test_disabling_a_waiting_instance_prevents_a_post_disable_record(target_repo):
+    """Codex P2: once the run is disabled, a concurrent instance that was still
+    waiting to append must not write a post-disable record."""
+    writer = EventEmitter(target_repo, RUN_ID)
+    disabler = EventEmitter(target_repo, RUN_ID)
+    # The per-run write lock is shared across instances of the same repo/run.
+    run_lock = writer._run_lock()
+    assert run_lock is disabler._run_lock()
+
+    started = threading.Event()
+
+    def do_write():
+        started.set()
+        writer.emit("log", {"ok": 1})
+
+    with run_lock:
+        thread = threading.Thread(target=do_write)
+        thread.start()
+        started.wait()
+        # Give the writer time to pass admission and block on the shared lock.
+        time.sleep(0.05)
+        # Another instance disables the run while the writer is still waiting.
+        disabler._disable_with_warning(RuntimeError("boom"))
+
+    thread.join(2)
+    assert not thread.is_alive()
+    assert read_events(target_repo) == []
 
 
 # --- §4 NoOpEmitter ---------------------------------------------------------
