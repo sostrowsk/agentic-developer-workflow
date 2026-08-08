@@ -680,14 +680,17 @@ def test_round_spans_contain_their_child_spans_and_points(target_repo):
         assert set(end["payload"]) == {"outcome"}
 
 
-# Every §4.4 type except snapshot, split by the path that provably emits it.
+# Every §4.4 type, split by the path that provably emits it. Since step 5 the
+# agent.run/codex.review spans live at the call sites and the build lane takes
+# snapshots, so all three are reachable in a dry run; only the agent STREAM
+# (agent.message/agent.tool.*) stays real-runner-only.
 DRY_RUN_TYPES = {
     "run", "phase", "lane", "round", "gate", "ci.wait", "ci.poll",
     "state.saved", "triage.decision", "artifact", "commit", "merge",
+    "agent.run", "codex.review", "snapshot",
 }
 UNIT_OR_FOCUSED_TYPES = {
-    "agent.run", "agent.message", "agent.tool.call", "agent.tool.result",  # agent unit
-    "codex.review",          # codex unit
+    "agent.message", "agent.tool.call", "agent.tool.result",  # agent stream (real runner only)
     "red.check",             # tdd dry-run test
     "approval",              # approval test
     "escalation", "circuit_breaker",  # hopeless-gate test
@@ -696,26 +699,25 @@ UNIT_OR_FOCUSED_TYPES = {
     "log",                   # _log_warning test
     "ci.reentry",            # ci-reentry test
 }
-CONTRACT_TYPES_EXCEPT_SNAPSHOT = DRY_RUN_TYPES | UNIT_OR_FOCUSED_TYPES
+CONTRACT_TYPES = DRY_RUN_TYPES | UNIT_OR_FOCUSED_TYPES
 
 
-def test_contract_type_partition_is_complete_and_excludes_snapshot():
+def test_contract_type_partition_covers_every_event_type():
     """Guard against forgetting a type: the union of the dry-run-reachable and
-    the unit/focused-covered types is exactly the §4.4 set minus snapshot."""
-    assert len(CONTRACT_TYPES_EXCEPT_SNAPSHOT) == 25  # §4.4 has 26 incl. snapshot
-    assert "snapshot" not in CONTRACT_TYPES_EXCEPT_SNAPSHOT
+    the unit/focused-covered types is exactly the §4.4 set (26 types incl. snapshot)."""
+    assert len(CONTRACT_TYPES) == 26  # §4.4 has 26 event types
+    assert "snapshot" in DRY_RUN_TYPES  # step 5: snapshots are emitted in the build lane
 
 
-def test_dry_run_emits_all_structural_types_and_never_snapshot(target_repo):
-    """AC 2: a parallel dry run emits every structurally reachable type; snapshot
-    is emitted nowhere (deferred to step 5)."""
+def test_dry_run_emits_all_structural_types_including_snapshot(target_repo):
+    """AC 2 + step 5: a parallel dry run emits every structurally reachable type,
+    now including the relocated agent.run/codex.review spans and build snapshots."""
     make_parallel_repo(target_repo)
     result = cli_run(target_repo, "--no-approval", "--parallel")
     assert result.exit_code == 0, result.output
     _state, records = read_run_events(target_repo)
     seen = {r["type"] for r in records}
     assert DRY_RUN_TYPES <= seen, DRY_RUN_TYPES - seen
-    assert "snapshot" not in seen
 
 
 def test_dry_run_span_and_point_payloads_match_contract(target_repo):

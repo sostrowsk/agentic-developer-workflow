@@ -239,9 +239,9 @@ def test_plan_review_always_sees_the_reviewed_spec(ctx):
     seen_specs = []
 
     class SpyCodex(MockCodexRunner):
-        def review(self, kind, content_refs, cwd, context=None):
+        def review(self, kind, content_refs, cwd, context=None, emitter=None, span=None):
             seen_specs.append((kind, (cwd / ".adw" / "spec.md").read_text()))
-            return super().review(kind, content_refs, cwd, context)
+            return super().review(kind, content_refs, cwd, context, emitter, span)
 
     ctx.codex = SpyCodex()
     script_draft_artifacts(ctx.codex)
@@ -1135,8 +1135,8 @@ def test_deleted_files_in_the_test_run_are_no_red_proof(ctx, target_repo):
     from pathlib import Path
 
     class DeletingAgentRunner(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None):
-            result = super().run(agent, task, cwd, resume, deny_read_paths)
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
+            result = super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
             if agent.name == "build_agent":
                 (Path(cwd) / "README.md").unlink()  # getrackte Datei aus dem Base-Branch
             return result
@@ -1159,8 +1159,8 @@ def test_implementation_deleting_the_red_tests_escalates(ctx, target_repo):
     from pathlib import Path
 
     class DeletingImplRunner(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None):
-            result = super().run(agent, task, cwd, resume, deny_read_paths)
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
+            result = super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
             if agent.name == "build_agent" and "RED confirmed" in task:
                 (Path(cwd) / "test_feature.py").unlink()
             return result
@@ -1533,8 +1533,8 @@ def test_agent_side_commits_during_build_escalate(ctx):
     from tests.conftest import git
 
     class CommittingAgentRunner(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None):
-            result = super().run(agent, task, cwd, resume, deny_read_paths)
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
+            result = super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
             if agent.name == "build_agent":
                 git(cwd, "add", "-A")
                 git(cwd, "commit", "-m", "heimlicher Agent-Commit")
@@ -1658,9 +1658,9 @@ def test_archived_spec_takes_precedence_on_plan_resume(ctx):
     seen_specs = []
 
     class SpyCodex(MockCodexRunner):
-        def review(self, kind, content_refs, cwd, context=None):
+        def review(self, kind, content_refs, cwd, context=None, emitter=None, span=None):
             seen_specs.append((kind, (cwd / ".adw" / "spec.md").read_text()))
-            return super().review(kind, content_refs, cwd, context)
+            return super().review(kind, content_refs, cwd, context, emitter, span)
 
     ctx.codex = SpyCodex()
     script_draft_artifacts(ctx.codex)
@@ -1779,8 +1779,8 @@ def test_agent_branch_switch_is_detected(ctx):
     from tests.conftest import git
 
     class BranchSwitchingAgent(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None):
-            result = super().run(agent, task, cwd, resume, deny_read_paths)
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
+            result = super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
             if agent.name == "build_agent":
                 git(cwd, "switch", "--detach", "HEAD")
             return result
@@ -1837,8 +1837,8 @@ def test_config_symlink_to_directory_is_removed_safely(tmp_path):
     agents.script("plan_synthesis", "Plan")
 
     class SymlinkingAgent(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None):
-            result = super().run(agent, task, cwd, resume, deny_read_paths)
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
+            result = super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
             if agent.name == "build_agent":
                 victim = repo / "opfer-verzeichnis"
                 victim.mkdir(exist_ok=True)
@@ -3540,12 +3540,12 @@ def test_resume_in_plan_phase_regenerates_issue_md(ctx):
     seen = {}
 
     class SpyCodex(MockCodexRunner):
-        def review(self, kind, content_refs, cwd, context=None):
+        def review(self, kind, content_refs, cwd, context=None, emitter=None, span=None):
             if kind == "plan":
                 path = cwd / ".adw" / "issue.md"
                 seen["exists"] = path.is_file()
                 seen["content"] = path.read_text() if path.is_file() else ""
-            return super().review(kind, content_refs, cwd, context)
+            return super().review(kind, content_refs, cwd, context, emitter, span)
 
     ctx.agents.script("spec_synthesis", "Spec")  # Plan-Synthese NICHT gescriptet → Crash
     ctx.codex.script(OK)
@@ -3890,10 +3890,10 @@ def test_resume_keeps_the_checkpointed_synthesis_artifact(ctx):
     seen = {}
 
     class SpyAgents(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None):
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
             if agent.name == "spec_synthesis":
                 seen["spec"] = (cwd / ".adw" / "spec.md").read_text()
-            return super().run(agent, task, cwd, resume, deny_read_paths)
+            return super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
 
     spy = SpyAgents()
     script_authoring_agents(spy)

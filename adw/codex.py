@@ -123,9 +123,14 @@ class CodexClient(Protocol):
         cwd: Path,
         context: str | None = None,
         emitter=None,
+        span=None,
     ) -> ReviewResult: ...
 
     def author(self, kind: AuthorKind, task: str, cwd: Path) -> dict[str, str]: ...
+
+    def effective_argv(
+        self, kind: ReviewKind, content_refs: list[str], cwd: Path, context: str | None = None
+    ) -> list[str]: ...
 
 
 def _kill_group(proc: subprocess.Popen) -> None:
@@ -258,6 +263,14 @@ class CodexRunner:
         # review(emitter=...) arg still wins (used by unit tests).
         self._emitter = emitter
 
+    def effective_argv(
+        self, kind: ReviewKind, content_refs: list[str], cwd: Path, context: str | None = None
+    ) -> list[str]:
+        """The exact argv this runner will execute for such a review — a static,
+        side-effect-free builder so the call site can write the full argv into the
+        codex.review span start event before the subprocess runs (GUI-SPEC §6)."""
+        return self._argv(cwd, self._build_prompt(kind, content_refs, context))
+
     def review(
         self,
         kind: ReviewKind,
@@ -265,23 +278,33 @@ class CodexRunner:
         cwd: Path,
         context: str | None = None,
         emitter=None,
+        span=None,
     ) -> ReviewResult:
         emitter = emitter or self._emitter or NoOpEmitter()
         prompt = self._build_prompt(kind, content_refs, context)
+        # The codex.review SPAN lives at the call site in phases.py (GUI-SPEC §6):
+        # with a handle the runner only fills its end payload and opens no span.
+        # A direct call without a handle (unit tests) still gets a self-contained
+        # span so the runner stays usable on its own.
+        if span is not None:
+            return self._review_into(prompt, cwd, span)
         argv = self._argv(cwd, prompt)
         with emitter.span(
             "codex.review",
             {"kind": kind, "argv": argv, "cwd": str(cwd), "custom_prompt": context},
         ) as handle:
-            # Deterministic defaults BEFORE the subprocess: a parse failure or an
-            # unexpected exception still writes a complete end record.
-            handle.end_payload = {"findings": [], "raw_stdout": "", "parse_ok": False}
-            stdout = self._run(prompt, cwd)
-            handle.end_payload["raw_stdout"] = stdout
-            result = extract_review_result(stdout)
-            handle.end_payload["findings"] = [f.model_dump() for f in result.findings]
-            handle.end_payload["parse_ok"] = True
-            return result
+            return self._review_into(prompt, cwd, handle)
+
+    def _review_into(self, prompt: str, cwd: Path, handle) -> ReviewResult:
+        # Deterministic defaults BEFORE the subprocess: a parse failure or an
+        # unexpected exception still writes a complete end record.
+        handle.end_payload = {"findings": [], "raw_stdout": "", "parse_ok": False}
+        stdout = self._run(prompt, cwd)
+        handle.end_payload["raw_stdout"] = stdout
+        result = extract_review_result(stdout)
+        handle.end_payload["findings"] = [f.model_dump() for f in result.findings]
+        handle.end_payload["parse_ok"] = True
+        return result
 
     def author(self, kind: AuthorKind, task: str, cwd: Path) -> dict[str, str]:
         """Have Codex author the artifacts of `kind`; returns file name -> content.

@@ -178,6 +178,22 @@ class RunTotals:
             self.tokens += tokens or 0
 
 
+def agent_run_start_payload(agent: AgentSpec, task: str, cwd, resume: str | None) -> dict:
+    """The ``agent.run`` span start payload (GUI-SPEC §4.4) — built from values
+    known at the call site, so the span can live in ``phases.py`` (mock and real
+    runner alike) instead of in the runner."""
+    return {
+        "agent": agent.name,
+        "model": agent.model,
+        "tools": list(agent.tools),
+        "allowed_tools": list(agent.allowed_tools),
+        "cwd": str(cwd),
+        "resume_session": resume,
+        "prompt": task,
+        "system_append": agent.system_append,
+    }
+
+
 class AgentRunner(Protocol):
     """One method, few parameters — no node needs more interface than that."""
 
@@ -189,6 +205,7 @@ class AgentRunner(Protocol):
         resume: str | None = None,
         deny_read_paths: list[str] | None = None,
         emitter=None,
+        span=None,
     ) -> AgentResult: ...
 
 
@@ -445,6 +462,7 @@ class SdkAgentRunner:
         resume: str | None = None,
         deny_read_paths: list[str] | None = None,
         emitter=None,
+        span=None,
     ) -> AgentResult:
         _require_stored_login()
         emitter = emitter or self._emitter or NoOpEmitter()
@@ -485,38 +503,40 @@ class SdkAgentRunner:
                 "append": agent.system_append,
             },
         )
-        start_payload = {
-            "agent": agent.name,
-            "model": agent.model,
-            "tools": list(agent.tools),
-            "allowed_tools": list(agent.allowed_tools),
-            "cwd": str(cwd),
-            "resume_session": resume,
-            "prompt": task,
-            "system_append": agent.system_append,
+        # The agent.run SPAN lives at the call site in phases.py (GUI-SPEC §6):
+        # when a handle is passed the runner only fills its CONTENTS (stream
+        # mirroring, usage/cost) and opens no span. A direct call without a
+        # handle (unit tests) still gets a self-contained span so the runner
+        # stays usable on its own.
+        if span is not None:
+            return self._collect_into(task, options, emitter, span)
+        with emitter.span(
+            "agent.run", agent_run_start_payload(agent, task, cwd, resume)
+        ) as handle:
+            return self._collect_into(task, options, emitter, handle)
+
+    def _collect_into(self, task, options, emitter, handle) -> AgentResult:
+        # Deterministic end-payload BEFORE the run: an unexpected exception
+        # unwinding the span still writes a complete end record.
+        handle.end_payload = {
+            "session_id": None,
+            "result_text": "",
+            "usage": _map_usage(None),
+            "cost_usd": 0.0,
+            "is_error": True,
         }
-        with emitter.span("agent.run", start_payload) as handle:
-            # Deterministic end-payload BEFORE the run: an unexpected exception
-            # unwinding the span still writes a complete end record.
-            handle.end_payload = {
-                "session_id": None,
-                "result_text": "",
-                "usage": _map_usage(None),
-                "cost_usd": 0.0,
-                "is_error": True,
-            }
-            try:
-                return anyio.run(self._collect, task, options, emitter, handle)
-            finally:
-                # Accumulate the run's cost/tokens even on AgentRunError — the
-                # cost was incurred; handle.end_payload is set by _collect before
-                # it raises (or holds the defaults).
-                if self._totals is not None:
-                    usage = handle.end_payload.get("usage") or {}
-                    self._totals.add(
-                        handle.end_payload.get("cost_usd"),
-                        sum(v for v in usage.values() if isinstance(v, int)),
-                    )
+        try:
+            return anyio.run(self._collect, task, options, emitter, handle)
+        finally:
+            # Accumulate the run's cost/tokens even on AgentRunError — the
+            # cost was incurred; handle.end_payload is set by _collect before
+            # it raises (or holds the defaults).
+            if self._totals is not None:
+                usage = handle.end_payload.get("usage") or {}
+                self._totals.add(
+                    handle.end_payload.get("cost_usd"),
+                    sum(v for v in usage.values() if isinstance(v, int)),
+                )
 
     @staticmethod
     async def _collect(task: str, options: ClaudeAgentOptions, emitter, handle) -> AgentResult:

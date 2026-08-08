@@ -48,9 +48,13 @@ class MockAgentRunner:
         resume: str | None = None,
         deny_read_paths: list[str] | None = None,
         emitter=None,
+        span=None,
     ) -> AgentResult:
         # ``emitter`` is accepted for protocol parity (the orchestrator passes
-        # the run's emitter through); the mock writes no event log itself.
+        # the run's emitter through); the mock writes no event log itself. When
+        # the call site opens the agent.run span it passes ``span`` (the handle);
+        # the mock fills only the base end fields (no invented stream or usage/
+        # cost) so a dry run still shows the span's result (GUI-SPEC §6).
         self.calls.append(
             AgentCall(
                 agent=agent.name,
@@ -77,7 +81,14 @@ class MockAgentRunner:
         else:
             self._session_counter += 1
             session_id = f"mock-session-{agent.name}-{self._session_counter}"
-        return AgentResult(text=queue.popleft(), session_id=session_id)
+        result = AgentResult(text=queue.popleft(), session_id=session_id)
+        if span is not None:
+            span.end_payload = {
+                "session_id": result.session_id,
+                "result_text": result.text,
+                "is_error": False,
+            }
+        return result
 
 
 @dataclass(frozen=True)
@@ -129,6 +140,17 @@ class MockCodexRunner:
             raise scripted
         return scripted
 
+    def effective_argv(
+        self, kind: str, content_refs: list[str], cwd: Path, context: str | None = None
+    ) -> list[str]:
+        """A deterministic builder value mirroring the real runner's argv shape,
+        so the call site can put an ``argv`` into the codex.review span start
+        event in a dry run too (its exact content is not contract-pinned)."""
+        return [
+            "codex", "exec", "--sandbox", "read-only", "-c", "mcp_servers={}",
+            "-C", str(cwd), f"[mock:{kind}]",
+        ]
+
     def review(
         self,
         kind: str,
@@ -136,10 +158,18 @@ class MockCodexRunner:
         cwd: Path,
         context: str | None = None,
         emitter=None,
+        span=None,
     ) -> ReviewResult:
         self.calls.append(
             CodexCall(kind=kind, content_refs=tuple(content_refs), cwd=Path(cwd), context=context)
         )
         if not self.results:
             raise AssertionError(f"Kein gescriptetes Codex-Ergebnis (kind={kind!r})")
-        return self.results.popleft()
+        result = self.results.popleft()
+        if span is not None:
+            span.end_payload = {
+                "findings": [f.model_dump() for f in result.findings],
+                "raw_stdout": "",
+                "parse_ok": True,
+            }
+        return result

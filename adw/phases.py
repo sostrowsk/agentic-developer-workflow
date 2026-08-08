@@ -28,8 +28,8 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from adw import ci, github
-from adw.agents import REGISTRY, AgentRunner, AgentSpec
+from adw import ci, github, snapshots
+from adw.agents import REGISTRY, AgentRunner, AgentSpec, agent_run_start_payload
 from adw.codex import CodexAuthorError, CodexClient, CodexError
 from adw.config import AdwConfig, Gate
 from adw.env import safe_env
@@ -109,6 +109,28 @@ def _current_span_id(emitter) -> str | None:
         return current[-1] if current else None
     except Exception:
         return None
+
+
+def _agent_run(ctx, agent, task, cwd, resume=None, deny_read_paths=None):
+    """Run an agent wrapped in its ``agent.run`` span at THIS call site (GUI-SPEC
+    §6): the span lives here — mock and real runner alike — so a dry run produces
+    it too. The runner fills the handle's contents (real: stream + usage/cost;
+    mock: base result fields). Return value and exception semantics are unchanged
+    (the exception propagates through the span's end write, as before)."""
+    with ctx.emitter.span("agent.run", agent_run_start_payload(agent, task, cwd, resume)) as handle:
+        return ctx.agents.run(
+            agent, task, cwd=cwd, resume=resume, deny_read_paths=deny_read_paths, span=handle
+        )
+
+
+def _codex_review(ctx, kind, content_refs, cwd, context=None):
+    """Run a Codex review wrapped in its ``codex.review`` span at THIS call site
+    (GUI-SPEC §6). The full argv is built up front (shared builder) so it is
+    complete in the start event and identical to what the runner executes."""
+    argv = ctx.codex.effective_argv(kind, content_refs, cwd, context)
+    start = {"kind": kind, "argv": argv, "cwd": str(cwd), "custom_prompt": context}
+    with ctx.emitter.span("codex.review", start) as handle:
+        return ctx.codex.review(kind, content_refs, cwd=cwd, context=context, span=handle)
 
 
 def _emit_artifact(ctx, path: Path) -> None:
@@ -645,7 +667,7 @@ def _claude_draft(
 
     ``prior`` is the checkout snapshot taken by the caller BEFORE both authors
     started — an idle agent run must not pass off leftovers as a draft."""
-    ctx.agents.run(REGISTRY[agent_name], task, cwd=ctx.repo)
+    _agent_run(ctx, REGISTRY[agent_name], task, cwd=ctx.repo)
     if protected:
         _restore_all(protected)
     # Leer wie fehlend behandeln: ein weißraum-Artefakt ist keine Entwurfsquelle,
@@ -827,7 +849,7 @@ def _reviewed_authoring_loop(
             "round", {"loop": "authoring", "n": rounds + 1, "cap": AUTHORING_MAX_ROUNDS}
         ) as _round:
             _round.end_payload = {"outcome": "aborted"}
-            result = ctx.agents.run(spec, task, cwd=ctx.repo, resume=session)
+            result = _agent_run(ctx, spec, task, cwd=ctx.repo, resume=session)
             session = result.session_id or session
             with ctx.state_lock:
                 ctx.state.authoring_session = session
@@ -867,7 +889,8 @@ def _reviewed_authoring_loop(
                 first_iteration = False
             round_no = rounds + 1
             try:
-                review = ctx.codex.review(
+                review = _codex_review(
+                    ctx,
                     review_kind,
                     [f".adw/{name}" for name in review_targets],
                     cwd=ctx.repo,
@@ -1292,7 +1315,14 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             {"loop": "gates", "n": lane_state.gate_iterations, "cap": MAX_GATE_ITERATIONS},
         ) as _round:
             _round.end_payload = {"outcome": "aborted"}
-            result = ctx.agents.run(spec, task, cwd=worktree, resume=resume, deny_read_paths=deny)
+            # Snapshot the worktree BEFORE the agent run; after_agent only on a
+            # NORMAL return (an agent exception skips it — the before_agent
+            # snapshot stays as the diff basis, GUI-SPEC §5, AC 10).
+            snapshots.capture(ctx, worktree, "before_agent")
+            result = _agent_run(
+                ctx, spec, task, cwd=worktree, resume=resume, deny_read_paths=deny
+            )
+            snapshots.capture(ctx, worktree, "after_agent")
             _require_no_agent_commit(ctx, lane, worktree, current_head)
             _require_lane_branch(ctx, worktree, lane_state)
             with ctx.state_lock:
@@ -1308,6 +1338,8 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             # Kein Save zwischen Gates und Feedback-Persistenz — jeder Checkpoint
             # nach einem Gate-Fail muss pending_task/last_failures bereits tragen.
             report = _run_lane_gates(ctx, lane, worktree, lane_state)
+            # After EVERY gate iteration, regardless of the outcome (GUI-SPEC §5).
+            snapshots.capture(ctx, worktree, "after_gates")
             _round.end_payload["outcome"] = "passed" if report.passed else "failed"
             if report.passed:
                 _require_red_tests(ctx, lane, worktree, lane_state)
@@ -1446,6 +1478,8 @@ def _confirm_red(
             f"die Tests decken das geforderte Verhalten nicht ab oder das Verhalten "
             f"existiert bereits",
         )
+    # RED proven: snapshot the test-only worktree state (GUI-SPEC §5).
+    snapshots.capture(ctx, worktree, "red")
     with ctx.state_lock:
         # EIN Save: Beweis und Implementierungs-Task gehören zusammen — ein
         # Crash dazwischen dürfte weder den Test-Lauf noch den Beweis verlieren.
@@ -1483,7 +1517,10 @@ def _run_test_only_pass(
         f"Do NOT write or modify any production code. You do not commit.\n\n"
         f"Issue:\n{ctx.state.issue}"
     )
-    result = ctx.agents.run(spec, task, cwd=worktree, resume=None, deny_read_paths=deny)
+    # This is a build-lane agent run too — snapshot before and after it (§5).
+    snapshots.capture(ctx, worktree, "before_agent")
+    result = _agent_run(ctx, spec, task, cwd=worktree, resume=None, deny_read_paths=deny)
+    snapshots.capture(ctx, worktree, "after_agent")
     _require_no_agent_commit(ctx, lane, worktree, current_head)
     _require_lane_branch(ctx, worktree, lane_state)
     with ctx.state_lock:
@@ -1971,7 +2008,7 @@ def _triage_e2e(ctx: RunContext, worktree: Path, report: GateReport) -> ReviewRe
         "to a Lane (frontend/backend/unknown).\n\n"
         f"{SCHEMA_INSTRUCTION}\n\nE2E output:\n{_gate_failure_text(report)}"
     )
-    result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
+    result = _agent_run(ctx, spec, task, cwd=worktree, resume=None)
     try:
         return extract_review_result(result.text)
     except (FindingsParseError, ValidationError) as exc:
@@ -2112,7 +2149,8 @@ def run_codex_review_phase(ctx: RunContext) -> None:
             _round.end_payload = {"outcome": "aborted"}
             worktree = _review_worktree(ctx, lanes)
             try:
-                review = ctx.codex.review(
+                review = _codex_review(
+                    ctx,
                     "code",
                     _changed_files(ctx, worktree),
                     cwd=worktree,
@@ -2217,7 +2255,7 @@ def run_final_review_phase(ctx: RunContext) -> None:
                 "one of the values scope_gap | implementation | trivial "
                 "(triage basis)."
             )
-            result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
+            result = _agent_run(ctx, spec, task, cwd=worktree, resume=None)
             try:
                 review = extract_review_result(result.text)
             except (FindingsParseError, ValidationError) as exc:
@@ -2455,7 +2493,7 @@ def _analyze_ci_logs(ctx: RunContext, worktree: Path, log_excerpt: str) -> Revie
     )
     # cwd = der GEPUSHTE Worktree: der Analyst liest die Quellen, die die CI
     # getestet hat — nicht den Base-Checkout des Haupt-Repos.
-    result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
+    result = _agent_run(ctx, spec, task, cwd=worktree, resume=None)
     try:
         return extract_review_result(result.text)
     except (FindingsParseError, ValidationError) as exc:
