@@ -184,6 +184,7 @@ Span-bildend (`start`/`end`):
 | `agent.run` | `agent`, `model`, `tools[]`, `allowed_tools[]`, `cwd`, `resume_session`, **`prompt`** (voller Task-String), `system_append` | `session_id`, **`result_text`**, `usage` (`input`, `output`, `cache_read`, `cache_creation`), `cost_usd`, `is_error` |
 | `gate` | `name`, `cmd`, `timeout`, `cwd` | `passed`, `exit_code`, `timed_out`, **`output`** |
 | `codex.review` | `kind`, `argv[]`, `cwd`, `custom_prompt` | `findings[]` (vollständige `Finding`-Objekte), `raw_stdout`, `parse_ok` |
+| `codex.author` | `kind`, `argv[]`, `cwd`, `task` | `artifacts[]` (zurückgelieferte Dateinamen), `raw_stdout`, `parse_ok` — Dual Authoring ist ein erheblicher Zeit- und Kostenblock; ohne diesen Span zeigt die Timeline dort eine Lücke, wo der Codex-Entwurf entstand |
 | `ci.wait` | `provider`, `pipeline_ref` | `status`, `polls`, `duration` |
 
 Punkt-Events:
@@ -301,9 +302,12 @@ adw gui [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--lang de|en
   nie zum Absturz.
 - Stack: FastAPI + uvicorn + Jinja2 als optionales Extra `adw[gui]` — eine reine
   `adw run`-Installation bleibt frei von Web-Abhängigkeiten.
-- **Kein CDN.** htmx liegt vendored unter `adw/gui/static/`, CSS ist
-  handgeschrieben (keine node-Toolchain in einem Python-Repo), Fonts sind
-  System-Fonts.
+- **Kein CDN — und gar kein Frontend-Fremdasset.** Vanilla JS (`fetch`,
+  natives `EventSource` für SSE), handgeschriebenes CSS, System-Fonts.
+  Eine Bibliothek zu vendoren hiesse, sie einmal aus dem Netz zu holen, und
+  gebraucht wird hier keine: der ganze Client ist eine Run-Liste, ein
+  aufklappbarer Baum, ein Detail-Pane und ein Event-Stream. Keine Lieferkette,
+  nichts nachzuziehen.
 
 ### 7.2 Views
 
