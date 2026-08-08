@@ -30,7 +30,7 @@ from typing import Literal, Protocol
 
 from adw.agents import _PLAN_CONTENT_RULES, _SPEC_CONTENT_RULES
 from adw.env import safe_env
-from adw.events import NoOpEmitter
+from adw.events import SpanHandle
 from adw.findings import SCHEMA_INSTRUCTION, ReviewResult, extract_review_result
 
 CODEX_TIMEOUT = 900
@@ -259,8 +259,9 @@ class CodexRunner:
     """Invokes the Codex CLI as a read-only subprocess and parses strictly."""
 
     def __init__(self, emitter=None):
-        # Optional run emitter injected by the orchestrator; the explicit
-        # review(emitter=...) arg still wins (used by unit tests).
+        # Accepted for construction symmetry with SdkAgentRunner. The codex.review
+        # span is owned by the phases.py call site (GUI-SPEC §6, E4), so the runner
+        # no longer emits anything itself — it only fills the handle it is handed.
         self._emitter = emitter
 
     def effective_argv(
@@ -280,20 +281,13 @@ class CodexRunner:
         emitter=None,
         span=None,
     ) -> ReviewResult:
-        emitter = emitter or self._emitter or NoOpEmitter()
+        # The codex.review SPAN is owned by the phases.py call site (GUI-SPEC §6,
+        # E4): the runner never opens one, it only fills the end payload of the
+        # handle it is handed. A direct call without a handle (an uninstrumented
+        # caller) collects into a detached handle — no orphan span.
         prompt = self._build_prompt(kind, content_refs, context)
-        # The codex.review SPAN lives at the call site in phases.py (GUI-SPEC §6):
-        # with a handle the runner only fills its end payload and opens no span.
-        # A direct call without a handle (unit tests) still gets a self-contained
-        # span so the runner stays usable on its own.
-        if span is not None:
-            return self._review_into(prompt, cwd, span)
-        argv = self._argv(cwd, prompt)
-        with emitter.span(
-            "codex.review",
-            {"kind": kind, "argv": argv, "cwd": str(cwd), "custom_prompt": context},
-        ) as handle:
-            return self._review_into(prompt, cwd, handle)
+        handle = span if span is not None else SpanHandle("detached")
+        return self._review_into(prompt, cwd, handle)
 
     def _review_into(self, prompt: str, cwd: Path, handle) -> ReviewResult:
         # Deterministic defaults BEFORE the subprocess: a parse failure or an

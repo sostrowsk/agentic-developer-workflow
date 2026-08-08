@@ -32,7 +32,7 @@ from claude_agent_sdk import (
 from typer.testing import CliRunner
 
 import adw.events as events_module
-from adw.agents import REGISTRY, AgentRunError, SdkAgentRunner
+from adw.agents import REGISTRY, AgentRunError, SdkAgentRunner, agent_run_start_payload
 from adw.ci import CiConfig, CiTimeoutError, poll_pipeline
 from adw.cli import app
 from adw.codex import CodexRunner
@@ -176,14 +176,22 @@ def patched_query(monkeypatch):
     return install
 
 
+def _run_with_call_site_span(runner, emitter, spec, task, cwd, resume=None):
+    """The agent.run span is owned by the call site (GUI-SPEC §6, E4): open it
+    here and hand the runner the handle, exactly as phases.py does."""
+    with emitter.span("agent.run", agent_run_start_payload(spec, task, cwd, resume)) as handle:
+        return runner.run(spec, task, cwd=cwd, resume=resume, emitter=emitter, span=handle)
+
+
 def test_agent_run_span_start_payload_fields(target_repo, patched_query):
     patched_query(make_stream_factory())
-    SdkAgentRunner().run(
+    _run_with_call_site_span(
+        SdkAgentRunner(),
+        EventEmitter(target_repo, RUN_ID),
         REGISTRY["spec_agent"],
         "Meine Aufgabe",
-        cwd=target_repo,
+        target_repo,
         resume="old-sess",
-        emitter=EventEmitter(target_repo, RUN_ID),
     )
     (start,) = of_type(read_events(target_repo), "agent.run", "start")
     assert set(start["payload"]) == {
@@ -199,8 +207,9 @@ def test_agent_run_span_start_payload_fields(target_repo, patched_query):
 
 def test_agent_run_span_end_payload_usage_and_cost(target_repo, patched_query):
     patched_query(make_stream_factory())
-    SdkAgentRunner().run(
-        REGISTRY["spec_agent"], "task", cwd=target_repo, emitter=EventEmitter(target_repo, RUN_ID)
+    _run_with_call_site_span(
+        SdkAgentRunner(), EventEmitter(target_repo, RUN_ID), REGISTRY["spec_agent"], "task",
+        target_repo,
     )
     (end,) = of_type(read_events(target_repo), "agent.run", "end")
     assert set(end["payload"]) == {"session_id", "result_text", "usage", "cost_usd", "is_error"}
@@ -213,8 +222,9 @@ def test_agent_run_span_end_payload_usage_and_cost(target_repo, patched_query):
 
 def test_agent_stream_mirrors_message_and_tools_with_span_attribution(target_repo, patched_query):
     patched_query(make_stream_factory())
-    SdkAgentRunner().run(
-        REGISTRY["spec_agent"], "task", cwd=target_repo, emitter=EventEmitter(target_repo, RUN_ID)
+    _run_with_call_site_span(
+        SdkAgentRunner(), EventEmitter(target_repo, RUN_ID), REGISTRY["spec_agent"], "task",
+        target_repo,
     )
     records = read_events(target_repo)
     (start,) = of_type(records, "agent.run", "start")
@@ -301,9 +311,9 @@ def test_agent_run_error_semantics_preserved_and_end_marks_is_error(target_repo,
     emitter active, and the agent.run end event is written with is_error=True."""
     patched_query(make_stream_factory(is_error=True, result="Kaputt"))
     with pytest.raises(AgentRunError):
-        SdkAgentRunner().run(
-            REGISTRY["spec_agent"], "task", cwd=target_repo,
-            emitter=EventEmitter(target_repo, RUN_ID),
+        _run_with_call_site_span(
+            SdkAgentRunner(), EventEmitter(target_repo, RUN_ID), REGISTRY["spec_agent"], "task",
+            target_repo,
         )
     (end,) = of_type(read_events(target_repo), "agent.run", "end")
     assert end["payload"]["is_error"] is True
@@ -367,9 +377,14 @@ def test_codex_review_emits_span_with_findings_payload(target_repo, monkeypatch)
     monkeypatch.setattr(
         CodexRunner, "_execute", staticmethod(lambda argv, env: '{"verdict": "ok", "findings": []}')
     )
-    result = CodexRunner().review(
-        "code", ["a.py"], cwd=target_repo, emitter=EventEmitter(target_repo, RUN_ID)
-    )
+    # The codex.review span is owned by the call site (GUI-SPEC §6, E4): open it
+    # here and hand the runner the handle, exactly as phases.py does.
+    emitter = EventEmitter(target_repo, RUN_ID)
+    runner = CodexRunner()
+    argv = runner.effective_argv("code", ["a.py"], target_repo)
+    start_payload = {"kind": "code", "argv": argv, "cwd": str(target_repo), "custom_prompt": None}
+    with emitter.span("codex.review", start_payload) as handle:
+        result = runner.review("code", ["a.py"], cwd=target_repo, emitter=emitter, span=handle)
     assert result.verdict == "ok"  # behaviour unchanged
     records = read_events(target_repo)
     (start,) = of_type(records, "codex.review", "start")

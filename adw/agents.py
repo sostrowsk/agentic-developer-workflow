@@ -17,7 +17,7 @@ from claude_agent_sdk import (
 )
 
 from adw.env import safe_env
-from adw.events import NoOpEmitter
+from adw.events import NoOpEmitter, SpanHandle
 
 FABLE = "claude-fable-5"
 OPUS = "claude-opus-4-8"
@@ -503,17 +503,14 @@ class SdkAgentRunner:
                 "append": agent.system_append,
             },
         )
-        # The agent.run SPAN lives at the call site in phases.py (GUI-SPEC §6):
-        # when a handle is passed the runner only fills its CONTENTS (stream
-        # mirroring, usage/cost) and opens no span. A direct call without a
-        # handle (unit tests) still gets a self-contained span so the runner
-        # stays usable on its own.
+        # The agent.run SPAN is owned by the phases.py call site (GUI-SPEC §6,
+        # E4): the runner never opens one, it only fills the CONTENTS (stream
+        # mirroring, usage/cost) of the handle it is handed. A direct call
+        # without a handle (an uninstrumented caller) collects into a detached
+        # handle and mirrors to a NoOp — no orphan span or stream events.
         if span is not None:
             return self._collect_into(task, options, emitter, span)
-        with emitter.span(
-            "agent.run", agent_run_start_payload(agent, task, cwd, resume)
-        ) as handle:
-            return self._collect_into(task, options, emitter, handle)
+        return self._collect_into(task, options, NoOpEmitter(), SpanHandle("detached"))
 
     def _collect_into(self, task, options, emitter, handle) -> AgentResult:
         # Deterministic end-payload BEFORE the run: an unexpected exception
