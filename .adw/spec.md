@@ -1,205 +1,243 @@
-# Spec: `adw/events.py` — Event-Emitter für das ADW-Run-Event-Log
+# Spec — Instrumentierung des Orchestrators mit dem Event-Emitter
 
-Maßgeblich ist `docs/GUI-SPEC.md` (deutsche Fassung `docs/GUI-SPEC.de.md`),
-§4.1–§4.4. Bei Widerspruch zwischen dieser Spec und der GUI-SPEC gilt die
-GUI-SPEC.
+Umsetzungsreihenfolge-Schritte 2–4 aus `docs/GUI-SPEC.md` §11. Der in Lauf 1
+gebaute Emitter `adw/events.py` (`EventEmitter`, `NoOpEmitter`) wird verdrahtet
+und aufgerufen — nicht neu gebaut, nicht erweitert. Maßgeblich sind
+GUI-SPEC §4.3 (Fail-open), §4.4 (Event-Typen/Payloads) und §6
+(Instrumentierungs-Punkte); bei Widerspruch mit dieser Spec gilt die GUI-SPEC.
 
 ## Goal
 
-Ein eigenständiges Modul `adw/events.py`, das ADW-Run-Events als JSON-Lines
-append-only nach `.adw/runs/<run_id>/events.jsonl` schreibt — Schritt 1 der
-Umsetzungsreihenfolge aus GUI-SPEC §11. Dieser Lauf liefert **ausschließlich
-den Emitter samt öffentlicher API und Zeilenformat**, ohne einen einzigen
-Aufrufer. Die wichtigste Invariante: der Emitter ist fail-open — kein Fehler
-aus ihm darf einen Run abbrechen.
+Jeder ADW-Lauf schreibt ein vollständiges, strukturiertes Event-Log
+(`.adw/runs/<run_id>/events.jsonl`), das den Kontrollfluss des Orchestrators
+Span für Span abbildet — Phasen, Lanes, Loop-Runden, Agent-Läufe inklusive der
+gespiegelten SDK-Stream-Daten (Tool-Calls, Tool-Results, Nachrichten, Usage,
+Kosten). Das Log entsteht als reines Nebenprodukt: der Orchestrator verhält
+sich mit Instrumentierung an keiner Stelle anders als ohne. Ein Dry-Run
+erzeugt denselben vollständigen Trace ohne Tokenverbrauch und ist der
+Abnahmepfad.
 
 ## Scope
 
-- Neues Modul `adw/events.py` mit öffentlicher API für:
-  - einen aktiven, an `repo` und `run_id` gebundenen Emitter,
-  - das Emittieren einzelner Point-Events,
-  - einen Span-Kontextmanager mit start-/end-Event,
-  - einen No-Op-Emitter mit derselben aufrufbaren Oberfläche.
-- Der Emitter erhält alles, was er braucht (Repo, Run-ID, Event-Kontext),
-  als Parameter über seine öffentliche API; er liest keine Config.
-- Persistenz ausschließlich in `.adw/runs/<run_id>/events.jsonl`.
-- Neue Tests `tests/test_events.py` (Richtwert 12–18 Tests).
-- Kontrakt ist nur die extern beobachtbare Fläche: die unten festgelegte
-  öffentliche API von `adw/events.py` und das Zeilenformat von
-  `events.jsonl`. Interne Helper-Signaturen sind es nicht.
+- **Verdrahtung.** `RunContext` (`adw/phases.py`) trägt eine Emitter-Instanz.
+  Die Module ohne RunContext-Kenntnis — `adw/agents.py`, `adw/gates.py`,
+  `adw/codex.py`, `adw/ci.py`, `adw/github.py`, `adw/triage.py`,
+  `adw/state.py` — erhalten den Emitter als OPTIONALEN Parameter mit Default
+  `NoOpEmitter()`.
+- **Genau eine Emitter-Instanz je Run und Prozess.** Sie wird einmal beim
+  Run-Start erzeugt (bei `adw run` nach `RunState.new(...)`, bei
+  `adw resume`/`adw approve` nach dem State-Laden) und durchgereicht;
+  keine zweite Konstruktion irgendwo.
+- **Emit-Aufrufe** an den Stellen aus GUI-SPEC §6 mit den Payloads aus §4.4,
+  für alle dort genannten Event-Typen AUSSER `snapshot`.
+- **`run`-Span-Grenze** nach vorentschiedenem Punkt E1 (siehe unten).
+- **Behaviour-Erhalt** als bindender Vertrag inklusive Regressionstests.
+- **Dry-Run** schreibt ein vollständiges Event-Log (0 Tokens), obwohl seine
+  Agent-, Codex- und Forge-Aufrufe gemockt sind.
 
-### Öffentliche API (Kontrakt)
+### Betroffene Instrumentierungs-Punkte (GUI-SPEC §6, ohne `snapshot`)
 
-Die minimale öffentliche Fläche; weitere interne Helfer sind nicht Teil des
-Kontrakts:
+| Datei | Ort | Event-Typen |
+| --- | --- | --- |
+| `cli.py` | `run`/`resume`/`approve` Eintritt/Austritt | `run` start/end, `approval` |
+| `phases.py` | jede Phase-Funktion Eintritt/Austritt | `phase` start/end |
+| `phases.py` | `_reviewed_authoring_loop` | `round`, `codex.review`, `artifact` |
+| `phases.py` | `_draft_stage`, `_claude_draft`, `_codex_draft` | `agent.run`, `artifact` |
+| `phases.py` | `_run_lane`, `_run_lane_gates` | `lane`, `round`, `commit` |
+| `phases.py` | `_confirm_red`, `_run_test_only_pass`, `_require_red_tests` | `red.check` |
+| `phases.py` | `escalate()`, Limit- und Circuit-Breaker-Checks | `escalation`, `limit.hit`, `circuit_breaker` |
+| `phases.py` | Integration/Merge, `_record_followup` | `merge`, `followup` |
+| `agents.py` | `SdkAgentRunner.run` / `_collect` | `agent.run` start/end, `agent.message`, `agent.tool.call`, `agent.tool.result` |
+| `gates.py` | `run_gates` je Gate | `gate` start/end |
+| `codex.py` | Review-Subprozess | `codex.review` start/end |
+| `triage.py` | Entscheidungsfunktion | `triage.decision` |
+| `ci.py` / `github.py` | Poll-Schleife | `ci.wait`, `ci.poll`, `ci.reentry` |
+| `state.py` | `save`/`update` | `state.saved` |
+| überall | gespiegelte `logger.warning` des Orchestrators | `log` |
 
-- `EventEmitter(repo: Path, run_id: str)` — der aktive Emitter, gebunden an
-  Zielrepo und Run.
-- `NoOpEmitter()` — der No-Op-Emitter mit exakt denselben Methodensignaturen.
-- Beide bieten:
-  - `emit(type: str, payload: dict | None = None, *,
-    phase: str | None = None, lane: str | None = None,
-    round: int | None = None, span: str | None = None,
-    parent: str | None = None) -> None` — schreibt ein Point-Event
-    (`kind: "point"`); Rückgabewert ist immer `None`. Nicht übergebene
-    Kontextwerte landen als `null` im Record.
-  - `span(type: str, payload: dict | None = None, *,
-    phase: str | None = None, lane: str | None = None,
-    round: int | None = None)` — Kontextmanager, der dem Body ein
-    Span-Handle liefert.
-- Das Span-Handle trägt `id: str` (die erzeugte Span-ID) und ein
-  beschreibbares `end_payload: dict`: was der Body dort vor dem Verlassen
-  ablegt, wird als Payload des end-Events geschrieben — so werden die
-  getrennten Start-/End-Payloads aus §4.4 übergeben. Auch der No-Op-Emitter
-  und eine deaktivierte Instanz liefern ein funktionsfähiges Handle
-  (mit ID), schreiben aber nichts.
+Die `snapshot`-Zeile aus §6 (und die zugehörigen `snapshot`-Points bei
+`_run_lane`/`_confirm_red`/`_run_lane_gates`) sind hier NICHT enthalten —
+Schritt 5, eigener Lauf.
 
-## Non-Goals (in DIESEM Lauf bewusst nicht gebaut)
+Der tiefste Eingriff ist `agents.py:SdkAgentRunner._collect()`: dort werden
+`ToolUseBlock`, `ToolResultBlock`, `AssistantMessage.usage`,
+`ResultMessage.total_cost_usd` und `model_usage` ins Log gespiegelt.
 
-- **Keine Aufrufer.** `phases.py`, `agents.py`, `gates.py`, `codex.py`,
-  `state.py` und `cli.py` bleiben unverändert.
-- Kein Reader, kein Span-Baum-Modell, keine GUI, kein FastAPI, keine Registry.
-- Keine Snapshots und keine git-Refs (GUI-SPEC §5) — eigener späterer Lauf.
-- Kein `trace:`-Key in `adw/config.py`, kein `adw runs prune`, keine
-  Retention (GUI-SPEC §4.5) — eigener späterer Lauf.
-- Keine Redaction und keine Kappung von Payloads (GUI-SPEC §8) — roher
-  Mitschnitt ist gewollt.
-- Keine Validierung typspezifischer Payload-Inhalte: die Tabellen aus §4.4
-  definieren die spätere Nutzung; der Emitter akzeptiert beliebige, auch
-  unbekannte `type`-Werte unverändert (Vorwärtskompatibilität).
+## Non-Goals (explizite Scope-Deckel aus dem Issue)
+
+- Keine Änderung an `adw/events.py`. Reicht die öffentliche Emitter-API nicht,
+  ist das ein Befund für den Bericht, keine Erweiterung im Vorbeigehen.
+- Kein `snapshot`-Event, keine Snapshots, keine git-Refs, kein Schritt-Diff.
+- Kein Reader, kein Span-Baum-Modell, keine GUI, kein FastAPI, keine Registry,
+  kein `adw gui`.
+- Kein `trace:`-Key in `adw/config.py`, kein An-/Abschalten per Config, kein
+  `adw runs list`/`adw runs prune`, keine Kompression, keine Retention. Der
+  Emitter ist immer aktiv, sobald ein Run-Verzeichnis existiert.
+- Keine Redaction, keine Kappung von Payloads.
+- Keine Erweiterung von `RunState`, keine neuen Persistenzzustände außer
+  `events.jsonl`.
 - Keine neuen Laufzeit-Dependencies.
-- Keine neuen Persistenzzustände über `events.jsonl` hinaus: keine Index-,
-  Offset- oder Sidecar-Dateien, keine Erweiterung von `RunState`.
+- KEIN Refactoring von `phases.py`: keine Funktion aufteilen, umbenennen oder
+  umsortieren — nur emit-Aufrufe ergänzen und den Emitter durchreichen.
+- Kein Fix des offenen P2-Follow-ups aus Lauf 1 (Race in `_safe_span_id`),
+  keine neue API zur Übergabe von Parent-Spans über Thread-Grenzen.
+
+## Vorentschiedene Punkte (nicht erneut verhandeln)
+
+**E1 — Grenze des `run`-Spans.** Der `run`-Span umschließt den gesamten
+Lebenszyklus des CLI-Kommandos ab dem frühestmöglichen Punkt (Run-Identität
+steht fest UND der eine Emitter ist erzeugt) bis zum Kommando-Ende, bei JEDEM
+Ausgang (`done`, `awaiting_approval`, Eskalation, unerwartete Exception).
+- `adw run`: nach `RunState.new(...)` und VOR dem ersten `state.save(repo)` in
+  `cli.py:run()`. Das erste `state.saved`-Event liegt damit INNERHALB des
+  `run`-Spans.
+- `adw resume` / `adw approve`: nach dem Laden des States und der
+  Emitter-Erzeugung, vor der ersten Persistenz-Operation bzw. vor dem
+  `approval`-Event.
+- Der Span umschließt NICHT nur `_execute(ctx)`.
+- `_load_config`, `_fetch_gitlab_issue`, `_fetch_github_issue` liegen davor
+  und außerhalb; ein Fehlschlag dort erzeugt keinen Run und kein Event-Log.
+
+**E2 — Parallele Lane-Spans tragen `parent: null`.** `_run_lane` läuft bei
+`--parallel` in ThreadPoolExecutor-Workern; `EventEmitter.span()` leitet
+`parent` aus einem thread-lokalen Stack ab. Die Zuordnung eines Lane-Spans zu
+seiner Phase erfolgt über die Felder `phase` und `lane`, nicht über `parent`.
+`adw/events.py` wird dafür nicht erweitert; die fehlende
+Cross-Thread-Parent-API ist Befund für den Bericht. Bei Single-Lane-Läufen
+läuft `_run_lane` im Hauptthread; dort verschachtelt sich alles regulär.
+
+Ein Review-Finding gegen E1 oder E2 wird mit Verweis auf diesen Abschnitt
+abgewiesen und dokumentiert.
 
 ## Acceptance Criteria
 
-Beobachtbares Verhalten; jedes Kriterium ist über die öffentliche API und den
-Inhalt von `events.jsonl` prüfbar.
+Jedes Kriterium beschreibt beobachtbares Produktverhalten und ist per Test
+prüfbar.
 
-### Datei & Zeilenformat (§4.1)
+1. **Dry-Run-Log rekonstruiert den Kontrollfluss.** `uv run adw run --dry-run`
+   erzeugt `.adw/runs/<run_id>/events.jsonl`, aus dem sich der vollständige
+   Ablauf aller sieben Phasen rekonstruieren lässt. Ein Test läuft den
+   Span-Baum ab und prüft Phasenreihenfolge und Loop-Runden. (GUI-SPEC §10.1)
 
-1. Der Emitter schreibt nach `.adw/runs/<run_id>/events.jsonl` im Zielrepo.
-   Jedes Event ist genau ein JSON-Objekt pro Zeile, `\n`-terminiert, UTF-8,
-   append-only — bereits geschriebene Bytes werden nie verändert oder ersetzt.
-2. Eine neu angelegte `events.jsonl` erhält Dateirechte `0600`.
-3. Vor dem ersten Write ruft der Emitter `ensure_runs_gitignored(repo)` aus
-   `adw/worktrees.py` auf. Auch dieser vorbereitende Schritt unterliegt der
-   Fail-open-Garantie (Kriterien 17–18).
-4. Nach jedem Write wird `flush()` aufgerufen, `fsync()` **nicht** (bewusster
-   Trade-off, §4.3).
+2. **Vollständige Typ-Abdeckung.** Jeder Event-Typ aus §4.4 AUSSER `snapshot`
+   wird mindestens einmal emittiert — durch den Dry-Run-E2E-Test oder einen
+   gezielten Unit-Test. Ein `snapshot`-Event wird nirgends emittiert.
+   (GUI-SPEC §10.2)
 
-### Record-Schema (§4.2)
+3. **Payload-Treue.** Für jeden emittierten Typ enthält das Event genau die in
+   §4.4 für `start`/`end`/`point` genannten Payload-Felder (u. a. `run`-start
+   `issue`/`parallel`/`dry_run`/`repo`/`base_branch`/`adw_version`/`lanes[]`
+   und `run`-end `status`/`totals`; `agent.run`-start `prompt`/`system_append`
+   und -end `session_id`/`result_text`/`usage`/`cost_usd`/`is_error`;
+   `gate`-end `passed`/`exit_code`/`timed_out`/`output`;
+   `codex.review`-end `findings[]`/`raw_stdout`/`parse_ok`).
 
-5. Jeder geschriebene Record enthält exakt die Top-Level-Felder `seq`, `ts`,
-   `type`, `kind`, `span`, `parent`, `phase`, `lane`, `round`, `payload` —
-   keine zusätzlichen Top-Level-Felder, keine Schema-Version.
-6. `ts` ist der Schreibzeitpunkt in UTC mit Millisekunden-Genauigkeit und
-   endet auf `Z` (Form `YYYY-MM-DDTHH:MM:SS.mmmZ`, z. B.
-   `2026-08-05T14:02:20.117Z`).
-7. `kind` ist einer von `"start"`, `"end"`, `"point"`; einzelne Events tragen
-   `kind: "point"`.
-8. Nicht gesetzte Kontextwerte (`parent`, `phase`, `lane`, `round`, ggf.
-   `span`) werden als JSON `null` geschrieben; `phase`, `lane`, `round` und
-   der Span-Kontext für Point-Events werden vom Aufrufer explizit übergeben
-   (GUI-SPEC §6: explizite `emit()`-Aufrufe, keine Magie).
-9. `payload` wird roh und ungekürzt serialisiert; der Emitter redigiert,
-   filtert oder kappt nichts.
+4. **`_collect()` ist bit-identisch.** Für denselben (gemockten) SDK-Stream
+   liefert `SdkAgentRunner._collect()` mit aktivem Emitter und mit
+   `NoOpEmitter` bit-identische Ergebnisse — gleiches `AgentResult` (Text,
+   Session-ID), gleiche `AgentRunError`-Semantik. Ein Regressionstest weist
+   das nach. (Issue Aufgabe 4, GUI-SPEC §10.5)
 
-### seq: monoton, lückenlos, unter Lock (§4.3)
+5. **Emit ist wirkungsfrei auf den Kontrollfluss.** Kein emit-Aufruf ändert
+   einen Rückgabewert, verzweigt den Kontrollfluss abhängig vom Emit-Ergebnis
+   oder löst eine Exception aus bzw. verschluckt eine. Fail-open ist Sache des
+   realen `EventEmitter` (Backstop aus Lauf 1: einmal warnen, dann für den
+   Rest des Runs deaktivieren) — die Aufrufstellen bauen dafür KEINE eigene
+   try/except-Härtung und müssen keine Emitter-Implementierung tolerieren,
+   die diesen Vertrag verletzt. Regressionstest: ein Run mit realem
+   `EventEmitter` und induziertem Schreibfehler (unbeschreibbarer Pfad bzw.
+   Disk-full-Simulation) läuft mit unveränderter Semantik durch. (Issue
+   Aufgabe 4, GUI-SPEC §4.3, §10.4)
 
-10. `seq` ist je Run streng monoton steigend und lückenlos; bei leerer oder
-    neuer Datei beginnt die Sequenz bei `1` (nötig, damit ein Reader später
-    Kopf-Trunkierung als Lücke erkennen kann).
-11. `seq`-Vergabe und Write erfolgen unter einem exklusiven `fcntl.flock` auf
-    der Event-Datei (Muster analog `adw/state.py:_repo_lock`): `open("a")` →
-    `LOCK_EX` → seq zuweisen → write → flush → unlock.
-12. Wird ein Emitter auf eine bestehende, nicht-leere `events.jsonl` geöffnet
-    (resume, neuer Prozess), liest er die höchste vorhandene `seq` aus den
-    vollständigen Records und zählt lückenlos weiter — der erste neue Event
-    trägt `höchste + 1`. Es entsteht kein zusätzlicher persistenter
-    Sequenzzustand.
-13. Nebenläufige Emits aus mehreren Threads desselben Prozesses erzeugen
-    weder doppelte noch fehlende `seq`-Werte und keine ineinander
-    verschachtelten (halb geschriebenen) Zeilen. Prozessübergreifend
-    serialisiert derselbe Datei-Lock; das Resume-Szenario ist durch
-    Kriterium 12 abgedeckt.
+6. **Genau ein Emitter je Run und Prozess.** Der Emitter wird einmal beim
+   Run-Start erzeugt und durchgereicht; nirgends existiert eine zweite
+   Konstruktion für denselben Run. Als Folge gilt die Fail-open-Garantie
+   „genau eine Warnung pro Run" (GUI-SPEC §4.3): ein defektes Log erzeugt über
+   den ganzen Run höchstens ein `logger.warning`.
 
-### Span-API (§4.2, §4.4)
+7. **`run`-Span-Grenze nach E1.** Über einen `run`-Span-Anfang und ein
+   `run`-Span-Ende ist der Lauf beobachtbar, und zwar bei jedem Ausgang. Das
+   `status`-Feld des End-Events bleibt im §4.4-Wertebereich und wird
+   deterministisch abgebildet: regulärer Abschluss → `done`,
+   `AwaitingApproval` → `awaiting_approval`, jeder andere Ausgang —
+   `EscalationError`, `AgentRunError` und unerwartete Exceptions — →
+   `escalated`. Dieses Status-Feld klassifiziert nur den Kommando-Ausgang im
+   Log; `RunState.phase` und damit die Resume-Fähigkeit (z. B. nach
+   `AgentRunError`) bleiben unberührt. Bei einem Exception-Ausgang wird das
+   End-Event vor dem Weiterreichen emittiert; die Exception selbst propagiert
+   unverändert (gleicher Exit-Code, gleiche Traceback-Semantik). Für
+   `adw run` liegt das erste `state.saved`-Event innerhalb dieses Spans; für
+   `adw resume`/`adw approve` beginnt der Span vor der ersten
+   Persistenz-Operation bzw. vor dem `approval`-Event. Config- und
+   Issue-Beschaffung, die vor der Run-Identität scheitern, legen kein
+   Event-Log an.
 
-14. Der Kontextmanager `span(...)` bildet eine Span: beim Betreten wird ein
-    Event mit `kind: "start"` geschrieben und eine je Run eindeutige Span-ID
-    erzeugt (dem Body über das Span-Handle verfügbar); beim Verlassen ein
-    Event mit `kind: "end"`, **demselben** `type` und **derselben** Span-ID.
-    Der End-Payload wird über `end_payload` des Span-Handles übergeben
-    (getrennte Start-/End-Verträge, §4.4).
-15. Verschachtelte Spans setzen `parent` der inneren start-/end-Events auf
-    die Span-ID der umschließenden Span; die äußerste Span hat
-    `parent: null`. Die Verschachtelungs-Verfolgung ist thread-sicher:
-    parallel laufende Threads (Lanes laufen als Threads, §4.3) vermischen
-    ihre Span-Kontexte nicht.
-16. Tritt im Body des Kontextmanagers eine Exception auf, wird das
-    `end`-Event dennoch geschrieben und die Body-Exception unverändert
-    weiterpropagiert — die Span-API verschluckt oder ersetzt
-    Aufrufer-Exceptions nicht. Ein Fehler beim Schreiben des end-Events
-    selbst bleibt fail-open.
+8. **Additiv kompatible Signaturen.** `adw/agents.py`, `adw/gates.py`,
+   `adw/codex.py`, `adw/ci.py`, `adw/github.py`, `adw/triage.py`,
+   `adw/state.py` nehmen den Emitter ausschließlich als NEUEN, optionalen
+   Parameter mit Default `NoOpEmitter()` entgegen. Kontraktgepinnt ist
+   additive Kompatibilität, nicht wörtliche Signatur-Identität: alle
+   bestehenden Parameter behalten Name, Reihenfolge und Defaults; jede vor
+   der Änderung gültige Aufrufform (positional wie keyword, ohne Emitter)
+   bleibt gültig und liefert unveränderte Ergebnisse, Seiteneffekte und
+   Exception-Semantik. Der Kontrakttest ruft repräsentative bestehende
+   Aufrufformen ohne Emitter auf und weist unverändertes Verhalten nach.
 
-### Fail-open — die zentrale Invariante (§4.3)
+9. **Events beschreiben nur eingetretene Zustände.** Commit-, Merge-,
+   Triage-, Approval-, Eskalations-, Artefakt- und Follow-up-Events
+   protokollieren ausschließlich tatsächlich eingetretene Produktzustände;
+   die Instrumentierung löst keinen davon aus. `state.saved` wird erst nach
+   erfolgreicher Persistenz emittiert und trägt deren `seq` und `phase`;
+   `state.json` bleibt alleinige Resume-Autorität.
 
-17. Kein Fehler aus dem Emitter erreicht den Aufrufer — das gilt für
-    Konstruktion, Vorbereitung (`ensure_runs_gitignored`, Dateianlage),
-    Sequenzermittlung, Serialisierung, Locking, Write, Flush und
-    Span-Verarbeitung (Disk full, Permissions, Encoding, nicht
-    serialisierbare Payloads eingeschlossen).
-18. Beim ersten internen Fehler einer `EventEmitter`-Instanz wird genau
-    einmal `logger.warning` geloggt; danach ist **diese Instanz** dauerhaft
-    deaktiviert: weitere Emit- und Span-Aufrufe sind stille No-Ops ohne
-    Dateizugriff und ohne weitere Warnungen. Die Garantie „einmal pro Run"
-    aus §4.3 ergibt sich aus der vorgesehenen Nutzung — der Orchestrator
-    hält je Run und Prozess genau eine Emitter-Instanz; eine
-    instanzübergreifende oder prozessweite Koordination wird bewusst nicht
-    gebaut. Andere Instanzen (insbesondere anderer Runs) bleiben
-    unbeeinflusst.
-19. `NoOpEmitter` hat exakt dieselben Signaturen wie der aktive Emitter: er
-    schreibt nichts, legt keine Datei an, und kein intern von ihm
-    verursachter Fehler erreicht den Aufrufer. Exceptions aus dem Body eines
-    No-Op-Spans werden dagegen — wie beim aktiven Emitter (Kriterium 16) —
-    unverändert weiterpropagiert, niemals verschluckt. Aufrufer können damit
-    später bedingungslos emittieren.
+10. **Keine neuen Persistenzzustände.** Der Lauf legt außer `events.jsonl`
+    keinen neuen persistenten Zustand an; `RunState` wird nicht erweitert,
+    keine neuen Laufzeit-Dependencies, kein Konfigurationsschalter — der
+    Emitter ist aktiv, sobald ein Run-Verzeichnis existiert.
 
-## Definition of Done
+11. **`adw/events.py` bleibt unverändert.** Die Emitter-Datei wird nur
+    importiert und aufgerufen, nicht editiert.
 
-1. `adw/events.py` existiert und erfüllt alle Acceptance Criteria; kein
-   anderes Produktionsmodul (`phases.py`, `agents.py`, `gates.py`,
-   `codex.py`, `state.py`, `cli.py`, `config.py`) wurde verändert.
-2. `tests/test_events.py` deckt die Kriterien ab (Richtwert 12–18 Tests),
-   insbesondere: Feldschema und `ts`-Format; `seq` monoton/lückenlos ab 1;
-   Weiterzählen auf bestehender Datei; Thread-Nebenläufigkeit ohne
-   Lücken/kaputte Zeilen; Span-Verschachtelung über `parent`; end-Event auch
-   bei Exception im Body samt unveränderter Propagation; `0600`-Rechte;
-   `ensure_runs_gitignored` vor erstem Write; flush ohne fsync; fail-open
-   bei erzwungenem internen Fehler → genau eine `logger.warning`, danach
-   Instanz dauerhaft still; No-Op-Emitter schreibt nichts, legt nichts an
-   und propagiert Body-Exceptions seiner Spans unverändert.
-3. Außer `events.jsonl` (und der von `ensure_runs_gitignored` verantworteten
-   `.adw/runs/.gitignore`) entstehen keine neuen persistenten Zustände.
-4. `flake8` + `isort` + `pytest` grün; keine neue Laufzeit-Dependency in den
-   Projekt-Metadaten.
+12. **Bestehende Tests bleiben grün.** Die 519 bestehenden Tests bleiben grün,
+    ohne inhaltlich angepasst zu werden.
 
 ## Deferred (bewusst nicht gebaut)
 
-Weitergehende Härtung/Erweiterung — ausdrücklich **kein** Akzeptanzkriterium,
-spätere Läufe oder verworfen:
+Diese Ideen sind defensibel, aber in diesem Lauf außerhalb des Scope. Ein
+Review-Finding, das einen dieser Punkte als Akzeptanzkriterium einführen will,
+wird mit Verweis auf diesen Abschnitt abgewiesen und dokumentiert — nicht
+umgesetzt. (In Lauf 1 sind auf genau diesem Weg zwei zurückgestellte
+Mechanismen doch eingebaut worden; das wiederholt sich nicht.)
 
-- Log-Rotation, Kompression (`--gzip`), Retention/Pruning (GUI-SPEC §4.5).
-- Schema-Versionierung des Record-Formats und Migration alter Logs.
-- Integritätsprüfung, Prüfsummen, Erkennung/Reparatur korrupter oder
-  angeschnittener Logs — Sache des späteren Readers/der GUI (§4.2).
-- Sequenz- oder Offset-Indizes zur Beschleunigung des Resume-Scans.
-- `fsync`-basierte Crash-Sicherheit (bewusst verworfen, §4.3;
-  `state.json` bleibt die Resume-Autorität).
-- Performance-Optimierung (Batch-Writes, Writer-Thread) über das
-  <1 ms/Event-Ziel aus §9 hinaus.
-- Nebenläufigkeitskoordination über den `fcntl.flock` aus §4.3 hinaus.
-- Snapshots und git-Refs (§5), Reader, Span-Baum-Modell, GUI, FastAPI,
-  Registry, `trace:`-Config, Aufrufer-Instrumentierung
-  (Umsetzungsschritte 2–13 aus §11).
+- **`snapshot`-Event, Snapshots, git-Refs, Schritt-Diff** (GUI-SPEC §5,
+  Schritt 5).
+- **Cross-Thread-Parent-API** für parallele Lane-Spans (E2): dass Lane-Spans
+  unter `--parallel` `parent: null` tragen, ist akzeptiert; die fehlende API
+  ist Befund für den Bericht, keine Emitter-Erweiterung.
+- **Fix des `_safe_span_id`-Race** (P2-Follow-up aus Lauf 1) — eigener
+  Bugfix-Lauf.
+- **`trace:`-Config-Sektion**, An-/Abschalten per Config, Retention,
+  `adw runs list` / `adw runs prune`, gzip.
+- **Redaction / Kappung** von Prompts, Ausgaben, Tool-Payloads und sonstigen
+  Event-Inhalten.
+- **Reader, Span-Baum-Modell, GUI, FastAPI, Registry, `adw gui`, i18n, SSE,
+  Timeline, Diff-Endpoint** (GUI-SPEC §7 ff.).
+- **Jede Erweiterung der öffentlichen Emitter-API**: reicht sie nicht, ist das
+  ein Befund, keine stille Ergänzung.
+- **Weitergehende Härtungsmechanismen**, die nicht einen durch diese
+  Instrumentierung konkret verursachten Schaden beheben.
+
+## Definition of Done
+
+- Alle Acceptance Criteria erfüllt und durch Tests belegt; darunter
+  verpflichtend der `_collect()`-Regressionstest (AC 4), der Fail-open-Test
+  mit realem `EventEmitter` und induziertem Schreibfehler (AC 5) und der
+  Dry-Run-Span-Baum-Test (AC 1).
+- Richtwert Testzahl rund 20–28 neue Tests; deutlich mehr ist ein
+  Scope-Drift-Signal.
+- Der Diff von `phases.py` beschränkt sich auf ergänzte emit-Aufrufe und das
+  Durchreichen des Emitters — keine aufgeteilten, umbenannten oder
+  umsortierten Funktionen.
+- Gates grün (Toolchain dieses Projekts, E3):
+  - `uv run ruff check .`
+  - `uv run pytest -x -q`

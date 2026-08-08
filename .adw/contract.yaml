@@ -1,207 +1,270 @@
-# Interface contract — adw/events.py
+# Interface-Kontrakt — Orchestrator-Instrumentierung (GUI-SPEC §11, Schritte 2–4)
 #
-# Single workstream (backend). No HTTP/events surface exists, so this contract
-# pins the only externally observable surfaces of this run:
-#   1. the public API of the module `adw/events.py`
-#   2. the on-disk line format of `.adw/runs/<run_id>/events.jsonl`
-# Internal helper signatures are deliberately NOT part of the contract.
-# On any conflict, docs/GUI-SPEC.md §4.1–§4.4 wins over this file.
+# Single-Lane-Projekt: es existiert nur die Lane 'backend'. Der Kontrakt pinnt
+# ausschliesslich die EXTERN BEOBACHTBARE Flaeche dieses Laufs:
+#   1. das Dateiformat und die Event-Typen/Payloads von events.jsonl (§4.2/§4.4),
+#      je Typ mit der beobachtbaren Bedingung (`when`), WANN er erscheint,
+#   2. die additiv-kompatiblen Signaturen der bestehenden oeffentlichen Funktionen,
+#   3. das Status-Mapping des run-End-Events und die run-Span-Grenze (E1),
+#   4. den Dry-Run als Abnahmepfad.
+# NICHT gepinnt: interne Helper-Signaturen, Datei-/Funktionsplatzierung der
+# emit-Aufrufe (steht im Plan), Aufrufreihenfolge INNERHALB einer Funktion,
+# Feld-Reihenfolge im JSON. `adw/events.py` ist eingefroren (nur Import).
+#
+# Massgeblich bei Widerspruch: docs/GUI-SPEC.md §4.3, §4.4, §6.
 
-contract_version: 1
-name: adw-events
-kind: python-module-and-jsonl
-module: adw.events
+version: 1
+scope:
+  lanes: [backend]
+  frozen_files:
+    - adw/events.py            # nur importiert/aufgerufen, nicht editiert (AC 11)
+  no_new_runtime_dependencies: true
+  new_persistent_state:
+    - ".adw/runs/<run_id>/events.jsonl"   # der EINZIGE neue Zustand (AC 10)
 
-public_api:
-  EventEmitter:
-    doc: >
-      Active emitter bound to a target repo and a run. Appends events to
-      .adw/runs/<run_id>/events.jsonl. Fail-open: no internal error ever
-      reaches the caller.
-    constructor:
-      signature: "EventEmitter(repo: Path, run_id: str)"
-      behavior:
-        - Binds the emitter to the target repository root and run identifier.
-        - Construction is fail-open and does not expose emitter-internal errors.
-    methods:
-      emit:
-        signature: "emit(type: str, payload: dict | None = None, *, phase: str | None = None, lane: str | None = None, round: int | None = None, span: str | None = None, parent: str | None = None) -> None"
-        behavior:
-          kind: point
-          return: "None (always)"
-          context: >
-            Explicitly passed values are written unchanged; omitted context
-            values are written as JSON null. Unknown `type` values are
-            accepted unchanged (forward compatibility). Payload is serialized
-            raw and uncapped.
-      span:
-        signature: "span(type: str, payload: dict | None = None, *, phase: str | None = None, lane: str | None = None, round: int | None = None)"
-        returns: "context manager yielding a SpanHandle"
-  NoOpEmitter:
-    doc: >
-      No-op emitter with EXACTLY the same method signatures as EventEmitter,
-      so callers can emit unconditionally. Writes nothing, creates no file,
-      and no internally caused error reaches the caller.
-    constructor:
-      signature: "NoOpEmitter()"
-    methods:
-      emit:
-        signature: "same as EventEmitter.emit"
-        behavior:
-          return: "None (always)"
-          writes_events: false
-          creates_files: false
-      span:
-        signature: "same as EventEmitter.span"
-        returns: "context manager yielding a SpanHandle (with id)"
-        behavior:
-          writes_events: false
-          creates_files: false
-  SpanHandle:
-    doc: >
-      The value yielded by the span(...) context manager, for the active,
-      the disabled and the no-op emitter alike.
-    attributes:
-      id:
-        type: string
-        access: read
-        description: A generated span identifier unique within the run.
-      end_payload:
-        type: object
-        access: read-write
-        initial_value: {}
-        description: >
-          Its contents at context-manager exit become the end-event payload
-          (separate start/end payloads, GUI-SPEC §4.4).
-
-span_semantics:
-  active:
-    enter:
-      - Generates a per-run-unique span identifier and exposes it as SpanHandle.id.
-      - Writes one event with kind start, the requested type, the generated span identifier, and the payload passed to span().
-    exit:
-      - Writes one event with kind end, the SAME type and the SAME span identifier, and SpanHandle.end_payload as payload.
-    nesting:
-      outer_parent: null
-      inner_parent: The enclosing span identifier.
-      tracking: Thread-isolated; concurrent threads (lanes run as threads, §4.3) do not share enclosing-span context.
-    body_exception:
-      - The end event is still written.
-      - The original body exception is propagated unchanged.
-      - An emitter error while writing the end event stays fail-open and does not replace the body exception.
-  disabled_or_noop:
-    - Yields a functional SpanHandle with an identifier.
-    - Writes no events and creates no event file.
-    - Propagates body exceptions unchanged — never swallowed.
-
+# ---------------------------------------------------------------------------
+# 1. Event-Log — Datei und Record-Huelle (GUI-SPEC §4.1, §4.2)
+# ---------------------------------------------------------------------------
 event_log:
-  path: ".adw/runs/<run_id>/events.jsonl"
-  encoding: UTF-8
-  format: JSON Lines
-  line_termination: "\n"
-  append_only: true  # bytes already written are never modified or replaced
-  new_file_mode: "0600"
-  preparation: >
-    Before the first record is written, .adw/runs/ in the target repo is
-    git-ignored (the behavior owned by adw.worktrees.ensure_runs_gitignored,
-    observable as .adw/runs/.gitignore). Preparation failures stay fail-open.
-  durability: >
-    Each record is a complete line and visible to concurrent readers after
-    the emit call returns (flushed); fsync is deliberately NOT issued —
-    crash durability is traded away per GUI-SPEC §4.3, state.json remains
-    the resume authority.
-  additional_persistent_state: forbidden  # no index/offset/sidecar files, no RunState change
+  path: ".adw/runs/<run_id>/events.jsonl"   # im Ziel-Repo, neben state.json
+  format: jsonl                              # eine JSON-Zeile je Event, \n-terminiert, append-only
+  record_envelope:                           # von adw/events.py erzeugt, hier nur referenziert
+    seq: int          # monoton je Run, lueckenlos
+    ts: string        # UTC, Millisekunden, YYYY-MM-DDTHH:MM:SS.mmmZ
+    type: string      # siehe event_types
+    kind: string      # start | end | point
+    span: string      # start/end: eigene Span-ID; point: ID des UMGEBENDEN
+                      # Spans (§4.2 "ID of the span this event belongs to").
+                      # NIE null — Points erhalten die ID explizit via
+                      # emit(..., span=...), da emit() den aktiven Span nicht
+                      # selbst ableitet.
+    parent: string?   # Eltern-Span des Spans; null beim run-Span und bei
+                      # parallelen Lane-Spans (E2); fuer point-Records nicht gepinnt
+    phase: string?    # RunState.Phase zum Emit-Zeitpunkt oder null
+    lane: string?     # Lane-Name oder null
+    round: int?       # Loop-Runde oder null
+    payload: object   # typ-spezifisch, siehe event_types
 
-record:
-  top_level_fields:
-    exact: true  # exactly these fields, no additions, no schema version
-    fields:
-      seq:
-        type: integer
-        minimum: 1
-        description: >
-          Strictly increasing, gap-free sequence number per run — also under
-          concurrent emitters.
-      ts:
-        type: string
-        pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'
-        description: >
-          Write time in UTC with millisecond precision
-          (e.g. 2026-08-05T14:02:20.117Z).
-      type:
-        type: string
-        description: Caller-provided event type; unknown values are accepted unchanged.
-      kind:
-        type: string
-        enum: [start, end, point]
-        description: Point events carry kind "point".
-      span:
-        type: [string, "null"]
-        description: Span id for start/end events; for point events the value passed by the caller, else null.
-      parent:
-        type: [string, "null"]
-        description: Enclosing span id for nested spans; outermost span has null.
-      phase:
-        type: [string, "null"]
-        description: Explicitly passed by caller, else null.
-      lane:
-        type: [string, "null"]
-        description: Explicitly passed by caller, else null.
-      round:
-        type: [integer, "null"]
-        description: Explicitly passed by caller, else null.
-      payload:
-        type: [object, "null"]
-        description: >
-          Serialized raw and uncapped; never redacted, filtered, truncated
-          or validated per type.
-  point_event:
+# ---------------------------------------------------------------------------
+# 2. Event-Typen, Payloads und Auftretensbedingungen (GUI-SPEC §4.4/§6,
+#    OHNE `snapshot`). `when` beschreibt die extern beobachtbare Bedingung —
+#    WO im Code emittiert wird, steht im Plan und ist NICHT Kontraktflaeche.
+#    Jeder Typ MUSS mindestens einmal emittiert werden (AC 2); `snapshot`
+#    wird nirgends emittiert.
+#    Span-End-Records tragen ihre Pflichtfelder bei JEDEM Ausgang: bei
+#    Exception-Unwinding gelten die deterministischen Werte aus
+#    `payload_end_on_exception` (Mechanik: End-Payload wird direkt nach
+#    Span-Start initialisiert und bei Fortschritt ueberschrieben). Fuer `run`
+#    und `agent.run` regeln `status_mapping` bzw. `is_error`/AgentRunError-
+#    Semantik den Fehlerausgang.
+# ---------------------------------------------------------------------------
+event_types:
+
+  # -- Span-bildend (start/end) ---------------------------------------------
+  run:
+    kind: span
+    when: "genau einmal je CLI-Kommando (run/resume/approve): ab Run-Identitaet + Emitter-Erzeugung bis Kommando-Ende, bei JEDEM Ausgang (E1)"
+    payload_start: [issue, parallel, dry_run, repo, base_branch, adw_version, lanes]
+    payload_end:   [status, totals]           # totals: {duration, cost, tokens}
+    status_enum:   [done, escalated, awaiting_approval]
+
+  phase:
+    kind: span
+    when: "je tatsaechlich ausgefuehrter Orchestrator-Phase ein Span (Eintritt..Austritt)"
+    payload_start: [name, from_phase]
+    payload_end:   [name, to_phase]
+    payload_end_on_exception: {name: "<Startwert>", to_phase: null}   # kein Uebergang eingetreten
+
+  lane:
+    kind: span
+    when: "je tatsaechlich gestarteter Lane-Ausfuehrung in der Build-Phase ein Span; unter --parallel mit parent: null (E2)"
+    payload_start: [name, branch, worktree, base_sha, ports]
+    payload_end:   [completed, gate_iterations, fix_cycles]
+    payload_end_on_exception: {completed: false, gate_iterations: "<Zaehlerstand>", fix_cycles: "<Zaehlerstand>"}
+
+  round:
+    kind: span
+    when: "je tatsaechlich betretener Loop-Runde ein Span (Authoring-, Gate-, Integrations-, Review-Loops)"
+    payload_start: [loop, n, cap]             # loop: authoring|gates|integration|codex_review|final_review
+    payload_end:   [outcome]
+    payload_end_on_exception: {outcome: aborted}
+
+  agent.run:
+    kind: span
+    when: "je tatsaechlich gestartetem Agent-Lauf ein Span: Start beim Aufruf, Ende mit Ergebnis oder Fehler"
+    payload_start: [agent, model, tools, allowed_tools, cwd, resume_session, prompt, system_append]
+    payload_end:   [session_id, result_text, usage, cost_usd, is_error]
+    # usage: {input, output, cache_read, cache_creation}
+
+  gate:
+    kind: span
+    when: "je tatsaechlich gestartetem Gate-Kommando ein Span (auch bei Timeout/Fehlschlag)"
+    payload_start: [name, cmd, timeout, cwd]
+    payload_end:   [passed, exit_code, timed_out, output]
+    # regulaerer Timeout-Pfad ist KEIN Exception-Ausgang: timed_out: true wird gesetzt
+    payload_end_on_exception: {passed: false, exit_code: null, timed_out: false, output: ""}
+
+  codex.review:
+    kind: span
+    when: "je tatsaechlich gestartetem Review-Subprozess ein Span (auch bei Parse-Fehlschlag: parse_ok=false)"
+    payload_start: [kind, argv, cwd, custom_prompt]
+    payload_end:   [findings, raw_stdout, parse_ok]   # findings: volle Finding-Objekte
+    payload_end_on_exception: {findings: [], raw_stdout: "<soweit erfasst, sonst leer>", parse_ok: false}
+
+  ci.wait:
+    kind: span
+    when: "je tatsaechlich betretener CI-Warteschleife ein Span (Beginn Warten..Endstatus/Timeout)"
+    payload_start: [provider, pipeline_ref]
+    payload_end:   [status, polls, duration]
+    # polls/duration werden je Poll-Iteration fortgeschrieben (Init 0/0)
+    payload_end_on_exception: {status: "timeout bei CiTimeoutError, sonst aborted", polls: "<Zaehlerstand>", duration: "<verstrichene Zeit>"}
+
+  # -- Point-Events (span = ID des umgebenden Spans, siehe Envelope) ---------
+  agent.message:
     kind: point
-  span_events:
-    start_and_end_share: [type, span]
-    start_payload: Payload passed to span().
-    end_payload: SpanHandle.end_payload at exit.
+    when: "je vom SDK-Stream empfangenem Assistant-Textblock; umgebender Span: agent.run"
+    payload: [role, text]
 
-sequence:
-  first: 1  # empty/new file starts at 1
-  scope: run
-  monotonic: strictly
-  gap_free: true
-  resume: >
-    An emitter opened on an existing non-empty file continues at one greater
-    than the highest seq found in complete existing records; no additional
-    persistent sequence state.
-  concurrency_outcome: >
-    Concurrent emits from multiple threads and/or processes on the same run
-    produce neither duplicate nor missing seq values, and every line in the
-    file is one complete, valid JSON record (no interleaved or partial
-    lines).
-  sidecar_state: forbidden
+  agent.tool.call:
+    kind: point
+    when: "je vom SDK-Stream empfangenem ToolUseBlock; umgebender Span: agent.run"
+    payload: [tool, tool_use_id, input]
 
-fail_open:
-  invariant: >
-    No emitter-internal error ever reaches the caller or aborts a run:
-    construction, emit() and span() never raise because of the emitter
-    itself, regardless of the failure cause (e.g. disk full, permissions,
-    unserializable payload).
-  warning:
-    channel: logger.warning
-    count: 1
-    scope: per run per process  # keyed by (repo, run_id)
-    note: >
-      Implements the "once per run" guarantee of GUI-SPEC §4.3 to the extent
-      observable without forbidden persistent state: the once-guarantee
-      holds across ALL EventEmitter instances for the same repo/run within
-      one process. A fresh process starts with a clean slate and may warn
-      once again; persisting the disabled state would require sidecar state,
-      which is forbidden.
-  after_first_internal_error:  # observable outcomes, per run per process
-    - No further records are appended to that run's events.jsonl by this process.
-    - No further warnings are logged for that run by this process.
-    - emit() keeps returning None; span() keeps yielding a functional SpanHandle with an id.
-    - Body exceptions inside spans still propagate unchanged.
-  isolation: Emitters for other runs (different repo/run_id) are unaffected.
-  caller_body_exceptions:
-    swallowed: false
-    replaced: false
-    propagated_unchanged: true
+  agent.tool.result:
+    kind: point
+    when: "je vom SDK-Stream empfangenem ToolResultBlock; umgebender Span: agent.run"
+    payload: [tool_use_id, is_error, content]
+
+  red.check:
+    kind: point
+    when: "je tatsaechlich durchgefuehrter RED-Pruefung, mit deren realem Ergebnis"
+    payload: [confirmed, test_paths, gates]
+
+  commit:
+    kind: point
+    when: "nach jedem tatsaechlich erzeugten Commit (nie davor; loest keinen aus)"
+    payload: [lane, sha, subject]
+
+  merge:
+    kind: point
+    when: "nach jedem tatsaechlich durchgefuehrten Lane-Merge, inkl. realer Konfliktliste"
+    payload: [lane, target, conflicts]
+
+  ci.poll:
+    kind: point
+    when: "je tatsaechlich ausgefuehrter Poll-Abfrage; umgebender Span: ci.wait"
+    payload: [provider, status, job]
+
+  ci.reentry:
+    kind: point
+    when: "je tatsaechlichem Wiedereintritt in den Build-/Fix-Ablauf nach CI-Ergebnis"
+    payload: [n, reason]
+
+  triage.decision:
+    kind: point
+    when: "je tatsaechlich getroffener Triage-Entscheidung (nie spekulativ)"
+    payload: [finding_key, severity, action, reason]
+
+  limit.hit:
+    kind: point
+    when: "nur wenn ein Limit tatsaechlich reisst"
+    payload: [limit, value, cap]
+
+  circuit_breaker:
+    kind: point
+    when: "nur wenn der Circuit-Breaker tatsaechlich ausloest"
+    payload: [keys, scope]
+
+  escalation:
+    kind: point
+    when: "je tatsaechlich ausgeloester Eskalation"
+    payload: [reason, phase]
+
+  approval:
+    kind: point
+    when: "nur bei tatsaechlich eingetretenem Warten (awaited) bzw. tatsaechlich erteilter Freigabe (granted)"
+    payload: [gate, event]                    # gate: spec|plan; event: awaited|granted
+
+  artifact:
+    kind: point
+    when: "nach jedem erfolgreichen Artefakt-Write (Drafts, Synthese, Spec/Plan/Kontrakt)"
+    payload: [name, path, bytes, sha256]
+
+  followup:
+    kind: point
+    when: "nach jedem tatsaechlich festgehaltenen Follow-up"
+    payload: [finding_key, text]
+
+  state.saved:
+    kind: point
+    when: "nach jeder ERFOLGREICHEN Persistenz von state.json, nie davor (AC 9)"
+    payload: [seq, phase]                     # RunState.seq und RunState.phase
+
+  log:
+    kind: point
+    when: "je gespiegeltem logger.warning des Orchestrators (Logging-Verhalten unveraendert)"
+    payload: [level, message]
+
+  # snapshot: BEWUSST NICHT emittiert (Schritt 5, eigener Lauf) — siehe Deferred.
+
+# ---------------------------------------------------------------------------
+# 3. run-Span-Grenze und Status-Mapping (E1, AC 7)
+# ---------------------------------------------------------------------------
+run_span:
+  boundary: "ab feststehender Run-Identitaet + erzeugtem Emitter bis Kommando-Ende, bei JEDEM Ausgang"
+  adw_run: "nach RunState.new(...), VOR dem ersten state.save(repo) — erstes state.saved liegt IM Span"
+  adw_resume_approve: "nach State-Laden + Emitter-Erzeugung, vor erster Persistenz bzw. vor approval-Event"
+  not_only: "_execute(ctx)"                   # der Span umschliesst NICHT nur _execute
+  excludes: [_load_config, _fetch_gitlab_issue, _fetch_github_issue]  # davor: kein Run, kein Log (E1)
+  status_mapping:
+    regular_completion: done
+    AwaitingApproval: awaiting_approval
+    EscalationError: escalated
+    AgentRunError: escalated
+    unexpected_exception: escalated       # End-Event VOR Weiterreichen; Exception propagiert unveraendert
+  invariant: "Status klassifiziert nur den Log-Ausgang; RunState.phase/Resume bleiben unberuehrt"
+
+# ---------------------------------------------------------------------------
+# 4. Additiv-kompatible Signaturen (AC 8)
+#    Der Emitter ist NEUER, OPTIONALER Parameter mit Default NoOpEmitter().
+#    state.py und triage.py (Point-only, halten kein SpanHandle) erhalten
+#    zusaetzlich die umgebende Span-ID als additiven optionalen Parameter
+#    (Default None). Gepinnt ist additive Kompatibilitaet, NICHT woertliche
+#    Signatur-Identitaet: alle bestehenden Parameter behalten Name,
+#    Reihenfolge, Default; jede vorher gueltige Aufrufform (ohne Emitter/
+#    Span-ID) bleibt gueltig und verhaltensgleich. RunContext (phases.py)
+#    traegt die eine Emitter-Instanz des Runs.
+# ---------------------------------------------------------------------------
+additive_emitter_param:
+  default: "NoOpEmitter()"
+  contract: "bestehende Aufrufform ohne Emitter -> unveraenderte Ergebnisse, Seiteneffekte, Exceptions"
+  functions:
+    - "adw/agents.py: SdkAgentRunner.run(agent, task, ...)"
+    - "adw/gates.py: run_gates(gates, cwd, extra_env=None, ...)"
+    - "adw/codex.py: CodexRunner.review(kind, content_refs, cwd, context=None, ...)"
+    - "adw/ci.py: poll_pipeline(repo, branch, cfg, ...)"
+    - "adw/github.py: poll_ci(...)"
+    - "adw/triage.py: triage_final_review(result, active_lanes=None, ...)   # + optionale umgebende Span-ID"
+    - "adw/state.py: RunState.save(repo, ...) / RunState.update(repo, run_id, mutate, ...)   # + optionale umgebende Span-ID"
+
+# ---------------------------------------------------------------------------
+# 5. Verhaltensvertrag (AC 4, AC 5, AC 6, AC 9)
+# ---------------------------------------------------------------------------
+behavior_contract:
+  collect_bit_identical: "SdkAgentRunner._collect() liefert mit Emitter und mit NoOpEmitter bit-identisches AgentResult + gleiche AgentRunError-Semantik"
+  emit_side_effect_free: "kein emit veraendert Rueckgabewert/Kontrollfluss, loest keine Exception aus/verschluckt keine; keine eigene try/except-Haertung an Aufrufstellen"
+  single_emitter_per_run: "genau eine Emitter-Konstruktion je Run und Prozess -> Fail-open-Garantie max. eine Warnung/Run"
+  point_span_attribution: "jedes Point-Event traegt die span-ID seines tatsaechlich umgebenden Spans (nie null); die ID wird via emit(..., span=...) uebergeben"
+  span_end_payload_complete: "jeder Span-End-Record traegt alle Pflichtfelder auch bei Exception-Ausgang (payload_end_on_exception); End-Payload wird direkt nach Span-Start deterministisch initialisiert, ohne try/except und ohne Kontrollfluss-Aenderung"
+  product_state_points: "approval, artifact, commit, merge, followup, escalation, triage.decision werden erst NACH tatsaechlichem Eintritt des Produktzustands emittiert; die Instrumentierung loest keinen davon aus (AC 9)"
+  no_redaction_no_truncation: "Payloads werden weder redigiert noch gekappt (Spec Non-Goals)"
+  existing_tests: "die 519 bestehenden Tests bleiben gruen, inhaltlich unveraendert"
+
+# ---------------------------------------------------------------------------
+# 6. Dry-Run als Abnahmepfad (AC 1, AC 2)
+# ---------------------------------------------------------------------------
+dry_run:
+  event_log_required: true          # vollstaendiges events.jsonl trotz gemockter Agent-/Codex-/Forge-Pfade
+  phases_required: 7                # alle sieben Phasen im Span-Baum rekonstruierbar
+  tokens: 0                         # kein Tokenverbrauch, Kosten null
+  snapshot_emission: forbidden
