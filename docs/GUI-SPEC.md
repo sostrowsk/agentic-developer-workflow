@@ -158,8 +158,11 @@ Rules:
   partial line is ignored and re-read on the next poll.
 - **Fail-open is mandatory.** Every emitter call is wrapped so that no
   exception (disk full, permissions, encoding) can reach the orchestrator.
-  On error: `logger.warning` once per run, then the emitter disables itself
-  for the rest of the run. **A broken event log must never abort a run.**
+  On error: `logger.warning` **once per run and process**, then every emitter
+  for that run goes silent for the rest of the process. The scope is
+  per-process on purpose — enforcing it across processes would need
+  persistent sidecar state, which §4.1 forbids, so a `resume` in a fresh
+  process may warn once again. **A broken event log must never abort a run.**
   This is the single most important invariant of the whole feature.
 
 ### 4.4 Event types
@@ -254,15 +257,15 @@ Explicit `emit()` calls (decision), fail-open, no magic:
 
 | File | Where | Events |
 | --- | --- | --- |
-| `cli.py` | `run`/`resume`/`approve` entry, exit | `run` start/end, `approval` |
+| `cli.py` | `run`/`resume`/`approve`: as soon as the run identity and the emitter exist, until every command exit | `run` start/end, `approval` |
 | `phases.py` | every phase function entry/exit | `phase` start/end |
 | `phases.py` | `_reviewed_authoring_loop` | `round`, `codex.review`, `artifact` |
-| `phases.py` | `_draft_stage`, `_claude_draft`, `_codex_draft` | `agent.run`, `artifact` (dual authoring: both drafts + synthesis are visible individually) |
+| `phases.py` | every `ctx.agents.run(...)` / `ctx.codex.review(...)` call site, incl. `_draft_stage`, `_claude_draft`, `_codex_draft` | `agent.run`, `codex.review` (the **spans** live here, not in the runners — only then do mock runners produce them too and a dry run stays a usable acceptance path), `artifact` (dual authoring: both drafts + synthesis are visible individually) |
 | `phases.py` | `_run_lane`, `_run_lane_gates` | `lane`, `round`, `snapshot`, `commit` |
 | `phases.py` | `_confirm_red`, `_run_test_only_pass`, `_require_red_tests` | `red.check`, `snapshot` |
 | `phases.py` | `escalate()`, limit and circuit-breaker checks | `escalation`, `limit.hit`, `circuit_breaker` |
 | `phases.py` | integration/merge, `_record_followup` | `merge`, `followup` |
-| `agents.py` | `SdkAgentRunner.run` / `_collect` | `agent.run` start/end, `agent.message`, `agent.tool.call`, `agent.tool.result` |
+| `agents.py` | `SdkAgentRunner.run` / `_collect` | the **contents** of the `agent.run` span opened by the call site: `agent.message`, `agent.tool.call`, `agent.tool.result`, plus usage/cost into its end payload. Mock runners contribute nothing here — correctly so, they have no tool calls |
 | `gates.py` | `run_gates` per gate | `gate` start/end |
 | `codex.py` | review subprocess | `codex.review` start/end |
 | `triage.py` | decision function | `triage.decision` |
