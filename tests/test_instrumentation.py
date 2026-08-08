@@ -40,6 +40,7 @@ from adw.config import Gate
 from adw.events import EventEmitter, NoOpEmitter
 from adw.findings import Finding, ReviewResult
 from adw.gates import GateReport, run_gates
+from adw.phases import EscalationError, run_ci_phase, run_final_review_phase
 from adw.state import RunState
 from adw.triage import triage_final_review
 from tests.conftest import git, write_config
@@ -484,6 +485,10 @@ def test_run_span_status_escalated_and_escalation_point(target_repo):
     escalations = of_type(records, "escalation")
     assert escalations, "an actually triggered escalation must emit an escalation point"
     assert set(escalations[0]["payload"]) == {"reason", "phase"}
+    # The hopeless gate repeats the SAME output → the circuit breaker trips first.
+    breakers = of_type(records, "circuit_breaker")
+    assert breakers, "no-progress must emit a circuit_breaker point"
+    assert set(breakers[0]["payload"]) == {"keys", "scope"}
 
 
 def test_run_span_opens_before_first_state_saved(target_repo):
@@ -539,36 +544,79 @@ def test_dry_run_span_tree_covers_seven_phases_in_order(target_repo):
         assert set(start["payload"]) == {"name", "from_phase"}
 
 
-def test_dry_run_has_round_spans_for_loops(target_repo):
-    """AC 1: loop rounds are spans with the §4.4 round payload."""
-    result = cli_run(target_repo, "--no-approval")
+ALL_LOOP_KINDS = {"authoring", "gates", "integration", "codex_review", "final_review"}
+
+
+def test_dry_run_has_round_spans_for_every_loop_kind(target_repo):
+    """AC 1 / plan B4: EVERY loop kind emits round spans with the §4.4 payload —
+    authoring, gates, integration, codex_review, final_review — reconstructable
+    from a parallel dry run."""
+    make_parallel_repo(target_repo)
+    result = cli_run(target_repo, "--no-approval", "--parallel")
     assert result.exit_code == 0, result.output
     _state, records = read_run_events(target_repo)
     rounds = of_type(records, "round", "start")
-    assert rounds, "authoring/gate loops must emit round spans"
-    enum = {"authoring", "gates", "integration", "codex_review", "final_review"}
+    assert rounds, "loops must emit round spans"
     for start in rounds:
         assert set(start["payload"]) == {"loop", "n", "cap"}
-        assert start["payload"]["loop"] in enum
+        assert start["payload"]["loop"] in ALL_LOOP_KINDS
+    seen_loops = {r["payload"]["loop"] for r in rounds}
+    assert ALL_LOOP_KINDS <= seen_loops, ALL_LOOP_KINDS - seen_loops
+    # Every round span is closed too (start/end paired per span id).
+    starts = {r["span"] for r in rounds}
+    ends = {r["span"] for r in of_type(records, "round", "end")}
+    assert starts <= ends
 
 
-def test_dry_run_type_coverage_and_no_snapshot(target_repo):
-    """AC 2: the dry run emits the structurally reachable event types, and a
-    `snapshot` event is emitted nowhere (deferred to step 5).
+# Every §4.4 type except snapshot, split by the path that provably emits it.
+DRY_RUN_TYPES = {
+    "run", "phase", "lane", "round", "gate", "ci.wait", "ci.poll",
+    "state.saved", "triage.decision", "artifact", "commit", "merge",
+}
+UNIT_OR_FOCUSED_TYPES = {
+    "agent.run", "agent.message", "agent.tool.call", "agent.tool.result",  # agent unit
+    "codex.review",          # codex unit
+    "red.check",             # tdd dry-run test
+    "approval",              # approval test
+    "escalation", "circuit_breaker",  # hopeless-gate test
+    "limit.hit",             # fix-cycle-limit test
+    "followup",              # _write_followups test
+    "log",                   # _log_warning test
+    "ci.reentry",            # ci-reentry test
+}
+CONTRACT_TYPES_EXCEPT_SNAPSHOT = DRY_RUN_TYPES | UNIT_OR_FOCUSED_TYPES
 
-    agent.* and codex.review use the real SDK/Codex runners (mocked away in the
-    dry run) and are covered by the unit tests above instead."""
+
+def test_contract_type_partition_is_complete_and_excludes_snapshot():
+    """Guard against forgetting a type: the union of the dry-run-reachable and
+    the unit/focused-covered types is exactly the §4.4 set minus snapshot."""
+    assert len(CONTRACT_TYPES_EXCEPT_SNAPSHOT) == 25  # §4.4 has 26 incl. snapshot
+    assert "snapshot" not in CONTRACT_TYPES_EXCEPT_SNAPSHOT
+
+
+def test_dry_run_emits_all_structural_types_and_never_snapshot(target_repo):
+    """AC 2: a parallel dry run emits every structurally reachable type; snapshot
+    is emitted nowhere (deferred to step 5)."""
     make_parallel_repo(target_repo)
     result = cli_run(target_repo, "--no-approval", "--parallel")
     assert result.exit_code == 0, result.output
     _state, records = read_run_events(target_repo)
     seen = {r["type"] for r in records}
-    expected = {
-        "run", "phase", "lane", "round", "gate", "ci.wait", "ci.poll",
-        "state.saved", "triage.decision", "artifact", "commit", "merge",
-    }
-    assert expected <= seen, expected - seen
+    assert DRY_RUN_TYPES <= seen, DRY_RUN_TYPES - seen
     assert "snapshot" not in seen
+
+
+def test_dry_run_points_all_carry_a_non_null_span(target_repo):
+    """Point-span attribution: every point event carries the id of its innermost
+    enclosing span (never null) — GUI-SPEC §4.2."""
+    make_parallel_repo(target_repo)
+    result = cli_run(target_repo, "--no-approval", "--parallel")
+    assert result.exit_code == 0, result.output
+    _state, records = read_run_events(target_repo)
+    points = [r for r in records if r["kind"] == "point"]
+    assert points
+    offenders = [(r["type"], r["seq"]) for r in points if r["span"] is None]
+    assert not offenders, offenders
 
 
 def test_dry_run_only_new_state_is_events_jsonl(target_repo):
@@ -597,6 +645,186 @@ def test_approval_points_emitted_on_pause_and_grant(target_repo):
     assert ("plan", "granted") in events
     for approval in approvals:
         assert set(approval["payload"]) == {"gate", "event"}
+
+
+TDD_CONFIG = """\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - {name: pytest, cmd: "test -f .adw-dry-run-fixed", timeout: 10, tdd: true}
+ci:
+  provider: gitlab
+  staging_job: deploy-staging
+"""
+
+
+def test_dry_run_tdd_gate_emits_red_check(target_repo):
+    """red.check: a tdd-marked gate makes the dry run walk the RED path and emit
+    a red.check point with the real result."""
+    write_config(target_repo, TDD_CONFIG)
+    git(target_repo, "add", ".adw/config.yaml")
+    git(target_repo, "commit", "-m", "tdd gate")
+    result = cli_run(target_repo, "--no-approval")
+    assert result.exit_code == 0, result.output
+    _state, records = read_run_events(target_repo)
+    checks = of_type(records, "red.check")
+    assert checks, "the tdd RED path must emit red.check"
+    payload = checks[0]["payload"]
+    assert set(payload) == {"confirmed", "test_paths", "gates"}
+    assert payload["confirmed"] is True
+    assert payload["gates"] == ["pytest"]
+
+
+def test_write_followups_emits_followup_point(target_repo):
+    """followup: recorded only after the follow-up was actually written (AC 9)."""
+    from adw.config import AdwConfig
+    from adw.phases import RunContext, _write_followups
+
+    ctx = RunContext(
+        repo=target_repo,
+        config=AdwConfig.load(target_repo),
+        state=RunState.new(issue="F", parallel=False),
+        agents=object(),
+        codex=object(),
+        emitter=EventEmitter(target_repo, RUN_ID),
+    )
+    ctx.state.save(target_repo)  # so run_dir exists
+    _write_followups(ctx, [_finding("Export fehlt", "scope_gap")])
+    (point,) = of_type(read_events(target_repo, RUN_ID), "followup")
+    assert set(point["payload"]) == {"finding_key", "text"}
+    assert point["span"] is None or isinstance(point["span"], str)
+    assert (ctx.run_dir / "followups.md").is_file()
+
+
+def test_log_warning_mirrors_to_a_log_point(target_repo):
+    """log: an orchestrator warning is mirrored as a log point (logging behaviour
+    unchanged)."""
+    from adw.config import AdwConfig
+    from adw.phases import RunContext, _log_warning
+
+    ctx = RunContext(
+        repo=target_repo,
+        config=AdwConfig.load(target_repo),
+        state=RunState.new(issue="L", parallel=False),
+        agents=object(),
+        codex=object(),
+        emitter=EventEmitter(target_repo, RUN_ID),
+    )
+    _log_warning(ctx, "etwas ist schiefgelaufen")
+    (point,) = of_type(read_events(target_repo, RUN_ID), "log")
+    assert set(point["payload"]) == {"level", "message"}
+    assert point["payload"]["level"] == "warning"
+    assert point["payload"]["message"] == "etwas ist schiefgelaufen"
+
+
+def test_fix_cycle_limit_emits_limit_hit(target_repo):
+    """limit.hit: three fix cycles exhaust the per-lane limit and emit a
+    limit.hit point before escalating."""
+    from tests.test_e2e_dry_run import finding, prepare_final_review, review_json
+
+    ctx = prepare_final_review(target_repo)
+    ctx.emitter = EventEmitter(ctx.repo, ctx.state.run_id)
+
+    def writes(cwd):
+        return {f"fix{len(ctx.agents.calls)}.py": "pass\n"}
+
+    ctx.agents.file_writes["build_agent"] = writes
+    ctx.agents.script(
+        "final_reviewer",
+        *[review_json([finding(f"Problem {i}", "implementation")]) for i in range(4)],
+    )
+    with pytest.raises(EscalationError):
+        run_final_review_phase(ctx)
+    hits = of_type(read_events(ctx.repo, ctx.state.run_id), "limit.hit")
+    assert hits, "the fix-cycle limit must emit limit.hit"
+    assert set(hits[0]["payload"]) == {"limit", "value", "cap"}
+    assert hits[0]["payload"]["limit"] == "fix_cycles"
+
+
+def test_ci_reentry_emits_reentry_point(target_repo):
+    """ci.reentry: a red pipeline routed back through the lanes emits a
+    ci.reentry point on the actual re-entry."""
+    import json as _json
+
+    from tests.test_e2e_dry_run import prepare_final_review, review_json
+
+    ctx = prepare_final_review(target_repo)
+    ctx.agents.script("final_reviewer", review_json([]))  # ok → advance to "ci"
+    run_final_review_phase(ctx)  # reach phase "ci" (green path, NoOp emitter)
+    assert ctx.state.phase == "ci"
+    ctx.emitter = EventEmitter(ctx.repo, ctx.state.run_id)
+    ctx.dry_run = True  # skip the real push
+
+    sha_seen: dict = {"red_done": False}
+
+    def glab(argv, cwd):
+        if argv[0] == "api" and "/pipelines?" in argv[1]:
+            import re as _re
+
+            m = _re.search(r"sha=([0-9a-f]+)", argv[1])
+            sha = m.group(1) if m else ""
+            status = "failed" if not sha_seen["red_done"] else "success"
+            return _json.dumps([{"id": 1, "status": status, "sha": sha}])
+        if argv[0] == "api":  # jobs
+            if not sha_seen["red_done"]:
+                return _json.dumps([{"id": 2, "name": "build", "status": "failed"}])
+            return _json.dumps([{"id": 2, "name": "deploy-staging", "status": "success"}])
+        if argv[:2] == ["ci", "trace"]:
+            sha_seen["red_done"] = True  # after logs are fetched, next poll is green
+            return "boom: test failed"
+        return ""
+
+    ctx.run_glab = glab
+    # The log analyst assigns the CI failure to the backend lane; the fix run
+    # then makes the lane green again.
+    ctx.agents.script(
+        "log_analyst",
+        _json.dumps(
+            {
+                "verdict": "needs_fixes",
+                "findings": [
+                    {
+                        "severity": "P2",
+                        "lane": "backend",
+                        "file": "src.py",
+                        "issue": "CI-Fehler",
+                        "remediation_plan": ["fix"],
+                    }
+                ],
+            }
+        ),
+    )
+    ctx.agents.script("build_agent", "fix")
+    ctx.agents.file_writes["build_agent"] = {"src.py": "ok = True\n"}
+    run_ci_phase(ctx)
+    reentries = of_type(read_events(ctx.repo, ctx.state.run_id), "ci.reentry")
+    assert reentries, "a CI re-entry must emit ci.reentry"
+    assert set(reentries[0]["payload"]) == {"n", "reason"}
+
+
+# --- plan phase span to_phase (P2) ------------------------------------------
+
+
+def test_plan_phase_end_reflects_the_actual_resulting_phase(target_repo):
+    """The plan phase end payload carries the phase the run actually transitions
+    to — 'build' with --no-approval — not a stale 'plan'."""
+    result = cli_run(target_repo, "--no-approval")
+    assert result.exit_code == 0, result.output
+    _state, records = read_run_events(target_repo)
+    plan_ends = [r for r in of_type(records, "phase", "end") if r["payload"]["name"] == "plan"]
+    assert plan_ends
+    assert plan_ends[0]["payload"]["to_phase"] == "build"
+
+
+def test_plan_phase_end_to_phase_is_awaiting_approval_when_gated(target_repo):
+    """With the approval gate active the plan phase resolves to awaiting_approval."""
+    result = cli_run(target_repo)  # no --no-approval → pause
+    assert result.exit_code == 2, result.output
+    _state, records = read_run_events(target_repo)
+    plan_ends = [r for r in of_type(records, "phase", "end") if r["payload"]["name"] == "plan"]
+    assert plan_ends
+    assert plan_ends[0]["payload"]["to_phase"] == "awaiting_approval"
 
 
 # --- additive-compatible signatures (AC 8) ----------------------------------
