@@ -555,6 +555,26 @@ def test_resume_base_branch_repin_saves_inside_the_run_span(target_repo):
     assert saved_in_resume, "the re-pin save must emit state.saved inside the resume run span"
 
 
+def test_run_span_status_escalated_on_unexpected_exception(target_repo, monkeypatch):
+    """AC 7: an UNEXPECTED exception (not Awaiting/Escalation/AgentRunError) still
+    closes the run span with status 'escalated' BEFORE propagating, and the
+    exception reaches the caller unchanged."""
+    boom = RuntimeError("unerwartet in der Phase")
+
+    def raising(_ctx):
+        raise boom
+
+    monkeypatch.setattr("adw.cli.run_spec_and_plan", raising)
+    result = cli_run(target_repo, "--no-approval")
+    assert result.exit_code != 0
+    assert result.exception is boom  # propagates unchanged to the caller
+    state = RunState.find_latest(target_repo)
+    records = read_events(target_repo, state.run_id)
+    assert len(of_type(records, "run", "start")) == 1
+    (end,) = of_type(records, "run", "end")
+    assert end["payload"]["status"] == "escalated"
+
+
 def test_run_span_opens_before_first_state_saved(target_repo):
     """E1: the run span opens right after RunState.new and BEFORE the first
     state.save, so the first state.saved event lies inside the run span."""
