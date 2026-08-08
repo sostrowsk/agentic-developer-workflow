@@ -118,13 +118,16 @@ def _emit_artifact(ctx, path: Path) -> None:
     )
 
 
-def _log_warning(ctx, message: str) -> None:
+def _log_warning(ctx, message: str, span_id: str | None = None) -> None:
     """Emit the orchestrator's own warning to the log AND mirror it as a ``log``
-    event — the logging behaviour itself is unchanged."""
+    event — the logging behaviour itself is unchanged.
+
+    ``span_id`` lets a caller running off the main thread (e.g. a draft-pool
+    worker, whose thread-local span stack is empty) pass the enclosing span
+    explicitly so the point is never attributed to null."""
     logger.warning("%s", message)
-    ctx.emitter.emit(
-        "log", {"level": "warning", "message": message}, span=_current_span_id(ctx.emitter)
-    )
+    span = span_id if span_id is not None else _current_span_id(ctx.emitter)
+    ctx.emitter.emit("log", {"level": "warning", "message": message}, span=span)
 
 
 class EscalationError(Exception):
@@ -177,8 +180,11 @@ class RunContext:
         )
 
 
-def escalate(ctx: RunContext, reason: str) -> EscalationError:
-    """Write the escalation report, mark the state, return the error to be raised."""
+def escalate(ctx: RunContext, reason: str, span_id: str | None = None) -> EscalationError:
+    """Write the escalation report, mark the state, return the error to be raised.
+
+    ``span_id`` lets an off-main-thread caller (draft-pool worker) pass its
+    enclosing span so the escalation point is never attributed to null."""
     with ctx.state_lock:  # RLock: auch unter bereits gehaltenem Lock aufrufbar
         origin_phase = ctx.state.phase  # capture BEFORE marking escalated
         ctx.run_dir.mkdir(parents=True, exist_ok=True)
@@ -195,10 +201,9 @@ def escalate(ctx: RunContext, reason: str) -> EscalationError:
         ctx.save()
         # AFTER the escalation actually happened (AC 9); the point carries the
         # phase the run escalated FROM.
+        span = span_id if span_id is not None else _current_span_id(ctx.emitter)
         ctx.emitter.emit(
-            "escalation",
-            {"reason": reason, "phase": origin_phase},
-            span=_current_span_id(ctx.emitter),
+            "escalation", {"reason": reason, "phase": origin_phase}, span=span
         )
     return EscalationError(reason)
 
@@ -420,29 +425,38 @@ def run_spec_and_plan(ctx: RunContext) -> None:
                     review_refs=(ISSUE_FILE, "spec.md", "plan.md", "contract.yaml"),
                     protected=protected,
                 )
-                # The plan→next transition happens in the tail (after archival),
-                # outside this span; reflect the phase it deterministically
-                # resolves to. Stays null if the plan work raised above.
-                _plan_phase.end_payload["to_phase"] = (
-                    "build" if (skip or ctx.state.approval_granted) else "awaiting_approval"
-                )
+                # Archival + the plan→next transition happen INSIDE the plan
+                # span, so its to_phase records the phase that was ACTUALLY
+                # reached and stays null if archival/persistence/approval raises.
+                # _restore_all is idempotent (also runs in the finally below).
+                _restore_all(protected)
+                _archive_artifacts(ctx)
+                # Archival already removed the ADW artifacts from the checkout;
+                # drop them from the restore set so the finally's safety-net
+                # restore does not recreate them (it keeps handling config.yaml).
+                for _name in (*ARTIFACTS, ISSUE_FILE, *SUMMARIES):
+                    protected.pop(ctx.repo / ".adw" / _name, None)
+                ctx.state.phase = "awaiting_approval"
+                ctx.save()  # Phase + geleerter Authoring-Checkpoint in EINEM Save
+                if skip or ctx.state.approval_granted:
+                    ctx.state.phase = "build"
+                    ctx.save()
+                # Only NOW, after the transition succeeded, is the resulting
+                # phase known.
+                _plan_phase.end_payload["to_phase"] = ctx.state.phase
+                if not (skip or ctx.state.approval_granted):
+                    raise AwaitingApproval(ctx.state.run_id)
     finally:
         _restore_all(protected)
-    # Archivieren + Haupt-Checkout säubern — auch beim Spec-Gate-Stopp, damit
-    # die generierten Artefakte (issue.md, spec.md) nicht während der
-    # Approval-Pause dirty im Checkout liegen (wie beim Plan-Gate).
-    _archive_artifacts(ctx)
-
+    # Spec-gate pause path: the plan span never opened. Archive the generated
+    # artifacts (issue.md, spec.md) so they do not sit dirty in the checkout
+    # during the approval pause, then signal the pause.
     if paused_for_spec_approval:
+        _archive_artifacts(ctx)
         raise AwaitingApproval(ctx.state.run_id)
-
-    ctx.state.phase = "awaiting_approval"
-    ctx.save()  # Phase + geleerter Authoring-Checkpoint in EINEM Save
-    if skip or ctx.state.approval_granted:
-        ctx.state.phase = "build"
-        ctx.save()
-        return
-    raise AwaitingApproval(ctx.state.run_id)
+    # Non-paused path: archival + transition already happened inside the plan
+    # span (build path falls through here; awaiting_approval raised above).
+    return
 
 
 def _restore_snapshot(path: Path, snapshot: bytes | None) -> None:
@@ -556,15 +570,21 @@ def _draft_stage(
     # geschrieben, contract.yaml nicht) lässt den Autor erneut laufen.
     need_claude = not all(_draft_present(path) for path in claude_paths)
     need_codex = not all(_draft_present(path) for path in codex_paths) and not marker.is_file()
+    # Captured on the MAIN thread (inside the phase span): the draft authors run
+    # in pool workers whose span stack is empty, so any point they emit (log on
+    # Codex degradation, escalation on a missing Claude draft) must be given
+    # this enclosing span explicitly to stay non-null (GUI-SPEC §4.2).
+    span_id = _current_span_id(ctx.emitter)
     with ThreadPoolExecutor(max_workers=2) as pool:
         codex_future = (
-            pool.submit(_codex_draft, ctx, kind, task, artifacts, codex_paths, marker)
+            pool.submit(_codex_draft, ctx, kind, task, artifacts, codex_paths, marker, span_id)
             if need_codex
             else None
         )
         claude_future = (
             pool.submit(
-                _claude_draft, ctx, agent_name, task, artifacts, claude_paths, prior, protected
+                _claude_draft,
+                ctx, agent_name, task, artifacts, claude_paths, prior, protected, span_id,
             )
             if need_claude
             else None
@@ -599,6 +619,7 @@ def _claude_draft(
     targets: list[Path],
     prior: dict[str, bytes | None],
     protected: dict[Path, bytes | None] | None,
+    span_id: str | None = None,
 ) -> None:
     """Claude draft: the agent writes into the checkout, the orchestrator copies
     the result into the run folder and cleans the checkout again.
@@ -616,6 +637,7 @@ def _claude_draft(
             ctx,
             f"{agent_name} hat {', '.join(f'.adw/{m}' for m in missing)} nicht "
             "erzeugt (oder leer gelassen) — ohne Entwurf gibt es nichts zu synthetisieren",
+            span_id=span_id,
         )
     # Getrackter Altbestand (gemergter Vorlauf) überlebt das Aufräumen — er darf
     # einen untätigen Agent-Lauf nicht als Entwurf adeln.
@@ -630,6 +652,7 @@ def _claude_draft(
             f"{agent_name} hat {', '.join(f'.adw/{u}' for u in unchanged)} nicht "
             "verändert — Altbestand eines früheren Runs würde sonst als Entwurf "
             "durchgehen",
+            span_id=span_id,
         )
     for name, target in zip(artifacts, targets, strict=True):
         _write_draft(target, (ctx.repo / ".adw" / name).read_bytes())
@@ -646,6 +669,7 @@ def _codex_draft(
     artifacts: tuple[str, ...],
     targets: list[Path],
     marker: Path,
+    span_id: str | None = None,
 ) -> None:
     """Codex draft — degrades instead of escalating.
 
@@ -666,6 +690,7 @@ def _codex_draft(
             ctx,
             f"Codex-Entwurf ({kind}) fehlgeschlagen — die Synthese arbeitet "
             f"einquellig: {exc}",
+            span_id=span_id,
         )
         return
     for name, target in zip(artifacts, targets, strict=True):
@@ -784,145 +809,151 @@ def _reviewed_authoring_loop(
         ) as _round:
             _round.end_payload = {"outcome": "aborted"}
             result = ctx.agents.run(spec, task, cwd=ctx.repo, resume=session)
-            _round.end_payload = {"outcome": "ran"}
-        session = result.session_id or session
-        with ctx.state_lock:
-            ctx.state.authoring_session = session
-            ctx.save()
-        if protected:
-            _restore_all(protected)
-        # Leer zählt wie fehlend: Die Summary reviewt niemand, eine weiße
-        # Summary fiele sonst erst dem Menschen am Freigabe-Gate auf.
-        missing = [
-            name for name in loop_artifacts if not (_artifact_bytes(ctx, name) or b"").strip()
-        ]
-        if missing:
-            raise escalate(
-                ctx,
-                f"{agent_name} hat {', '.join(f'.adw/{m}' for m in missing)} "
-                "nicht erzeugt (oder leer gelassen) — Lauf abgebrochen statt mit "
-                "leerem Artefakt weiterzumachen",
-            )
-        if first_iteration:
-            # Auch die Summary muss frisch sein: Reste eines fremden oder
-            # gecrashten Laufs hat die Draft-Stage vorher entfernt, ein
-            # unveränderter Altbestand wäre also eine untergeschobene
-            # Zusammenfassung — und die reviewt niemand.
-            unchanged = [
-                name
-                for name in loop_artifacts
-                if prior[name] is not None
-                and (ctx.repo / ".adw" / name).read_bytes() == prior[name]
+            session = result.session_id or session
+            with ctx.state_lock:
+                ctx.state.authoring_session = session
+                ctx.save()
+            if protected:
+                _restore_all(protected)
+            # Leer zählt wie fehlend: Die Summary reviewt niemand, eine weiße
+            # Summary fiele sonst erst dem Menschen am Freigabe-Gate auf.
+            missing = [
+                name for name in loop_artifacts if not (_artifact_bytes(ctx, name) or b"").strip()
             ]
-            if unchanged:
+            if missing:
                 raise escalate(
                     ctx,
-                    f"{agent_name} hat {', '.join(f'.adw/{u}' for u in unchanged)} "
-                    "nicht verändert — Altbestand eines früheren Runs würde sonst "
-                    "als neues Artefakt durchgehen",
+                    f"{agent_name} hat {', '.join(f'.adw/{m}' for m in missing)} "
+                    "nicht erzeugt (oder leer gelassen) — Lauf abgebrochen statt mit "
+                    "leerem Artefakt weiterzumachen",
                 )
-            first_iteration = False
-        round_no = rounds + 1
-        try:
-            review = ctx.codex.review(
-                review_kind,
-                [f".adw/{name}" for name in review_targets],
-                cwd=ctx.repo,
-                context=_severity_context(round_no, AUTHORING_MAX_ROUNDS, prior_context),
-            )
-        except (FindingsParseError, ValidationError) as exc:
-            raise escalate(ctx, f"Codex-{review_kind}-Review unlesbar: {exc}") from exc
-        if review.verdict == "ok":
-            known_findings_path.unlink(missing_ok=True)  # kein stale Report
-            # Bewusst KEIN Save hier: Das Leeren des Authoring-Checkpoints
-            # passiert atomar mit dem Phasenübergang beim Aufrufer — sonst
-            # gäbe es ein Crash-Fenster "Phase alt, Checkpoint weg".
-            _clear_authoring_checkpoint(ctx)
-            return
-        # Eine Runde (Agent-Lauf + Review) endete mit Verdict ≠ ok.
-        rounds += 1
-        if rounds >= AUTHORING_MAX_ROUNDS:
-            if any(f.severity == "P1" for f in review.findings):
+            if first_iteration:
+                # Auch die Summary muss frisch sein: Reste eines fremden oder
+                # gecrashten Laufs hat die Draft-Stage vorher entfernt, ein
+                # unveränderter Altbestand wäre also eine untergeschobene
+                # Zusammenfassung — und die reviewt niemand.
+                unchanged = [
+                    name
+                    for name in loop_artifacts
+                    if prior[name] is not None
+                    and (ctx.repo / ".adw" / name).read_bytes() == prior[name]
+                ]
+                if unchanged:
+                    raise escalate(
+                        ctx,
+                        f"{agent_name} hat {', '.join(f'.adw/{u}' for u in unchanged)} "
+                        "nicht verändert — Altbestand eines früheren Runs würde sonst "
+                        "als neues Artefakt durchgehen",
+                    )
+                first_iteration = False
+            round_no = rounds + 1
+            try:
+                review = ctx.codex.review(
+                    review_kind,
+                    [f".adw/{name}" for name in review_targets],
+                    cwd=ctx.repo,
+                    context=_severity_context(round_no, AUTHORING_MAX_ROUNDS, prior_context),
+                )
+            except (FindingsParseError, ValidationError) as exc:
+                raise escalate(ctx, f"Codex-{review_kind}-Review unlesbar: {exc}") from exc
+            _round.end_payload["outcome"] = review.verdict
+            if review.verdict == "ok":
                 known_findings_path.unlink(missing_ok=True)  # kein stale Report
+                # Bewusst KEIN Save hier: Das Leeren des Authoring-Checkpoints
+                # passiert atomar mit dem Phasenübergang beim Aufrufer — sonst
+                # gäbe es ein Crash-Fenster "Phase alt, Checkpoint weg".
+                _clear_authoring_checkpoint(ctx)
+                return
+            # Eine Runde (Agent-Lauf + Review) endete mit Verdict ≠ ok.
+            rounds += 1
+            if rounds >= AUTHORING_MAX_ROUNDS:
+                if any(f.severity == "P1" for f in review.findings):
+                    known_findings_path.unlink(missing_ok=True)  # kein stale Report
+                    raise escalate(
+                        ctx,
+                        f"Authoring-{review_kind}: Runden-Cap ({AUTHORING_MAX_ROUNDS}) "
+                        f"erreicht, P1-Findings weiterhin offen — Eskalation an den "
+                        f"Menschen.\n\n{_findings_text(review)}",
+                    )
+                # Nur P2/P3 offen: Artefakt akzeptieren, verbleibende Findings als
+                # Known Limitations dokumentieren und wie ein ok-Verdict beenden.
+                known_path = _write_known_findings(
+                    ctx,
+                    review_kind,
+                    review,
+                    f"Runden-Cap ({AUTHORING_MAX_ROUNDS}) erreicht, nur P2/P3 offen — "
+                    "Artefakt akzeptiert.",
+                )
+                _log_warning(
+                    ctx,
+                    f"Authoring-{review_kind}: Runden-Cap ({AUTHORING_MAX_ROUNDS}) erreicht, "
+                    f"nur P2/P3 offen — Artefakt akzeptiert, Known Limitations unter {known_path}",
+                )
+                _clear_authoring_checkpoint(ctx)
+                return
+            actionable, dropped = _split_by_severity(review.findings, round_no)
+            if not actionable:
+                # Alle Findings liegen unter der Schwelle dieser Runde: wie am Cap
+                # das Artefakt akzeptieren und die Findings dokumentieren.
+                severities = "/".join(sorted(_actionable_severities(round_no)))
+                known_path = _write_known_findings(
+                    ctx,
+                    review_kind,
+                    review,
+                    f"Runde {round_no}: alle Findings unter der Severity-Schwelle "
+                    f"({severities}) — Artefakt akzeptiert.",
+                )
+                _log_warning(
+                    ctx,
+                    f"Authoring-{review_kind}: Runde {round_no}, alle Findings unter der "
+                    f"Severity-Schwelle ({severities}) — Artefakt akzeptiert, Known "
+                    f"Limitations unter {known_path}",
+                )
+                _clear_authoring_checkpoint(ctx)
+                return
+            if dropped:
+                _write_followups(ctx, dropped)
+            review = ReviewResult(verdict="needs_fixes", findings=actionable)
+            failures = _finding_keys(review)
+            try:
+                check_progress(previous_failures, failures)
+            except NoProgressError as exc:
                 raise escalate(
                     ctx,
-                    f"Authoring-{review_kind}: Runden-Cap ({AUTHORING_MAX_ROUNDS}) "
-                    f"erreicht, P1-Findings weiterhin offen — Eskalation an den "
-                    f"Menschen.\n\n{_findings_text(review)}",
+                    f"Codex-{review_kind}-Review meldet unverändert dieselben Findings — "
+                    f"Circuit-Breaker.\n\n{_findings_text(review)}",
+                ) from exc
+            previous_failures = failures
+            prior_context = _extend_context(
+                prior_context,
+                [
+                    _disposition_line(item, _below_threshold_disposition(round_no))
+                    for item in dropped
+                ]
+                + [
+                    _disposition_line(item, _dispatched_disposition(round_no))
+                    for item in actionable
+                ],
+            )
+            task = (
+                f"The Codex review of {', '.join(f'.adw/{a}' for a in artifacts)} has "
+                f"Findings. Incorporate them and update the artifacts:\n\n"
+                f"{_findings_text(review)}"
+            )
+            if summary:
+                task += (
+                    f"\n\nKeep .adw/{summary} current: when the fixes change the "
+                    f"picture, update the summary accordingly."
                 )
-            # Nur P2/P3 offen: Artefakt akzeptieren, verbleibende Findings als
-            # Known Limitations dokumentieren und wie ein ok-Verdict beenden.
-            known_path = _write_known_findings(
-                ctx,
-                review_kind,
-                review,
-                f"Runden-Cap ({AUTHORING_MAX_ROUNDS}) erreicht, nur P2/P3 offen — "
-                "Artefakt akzeptiert.",
-            )
-            _log_warning(
-                ctx,
-                f"Authoring-{review_kind}: Runden-Cap ({AUTHORING_MAX_ROUNDS}) erreicht, "
-                f"nur P2/P3 offen — Artefakt akzeptiert, Known Limitations unter {known_path}",
-            )
-            _clear_authoring_checkpoint(ctx)
-            return
-        actionable, dropped = _split_by_severity(review.findings, round_no)
-        if not actionable:
-            # Alle Findings liegen unter der Schwelle dieser Runde: wie am Cap
-            # das Artefakt akzeptieren und die Findings dokumentieren.
-            severities = "/".join(sorted(_actionable_severities(round_no)))
-            known_path = _write_known_findings(
-                ctx,
-                review_kind,
-                review,
-                f"Runde {round_no}: alle Findings unter der Severity-Schwelle "
-                f"({severities}) — Artefakt akzeptiert.",
-            )
-            _log_warning(
-                ctx,
-                f"Authoring-{review_kind}: Runde {round_no}, alle Findings unter der "
-                f"Severity-Schwelle ({severities}) — Artefakt akzeptiert, Known "
-                f"Limitations unter {known_path}",
-            )
-            _clear_authoring_checkpoint(ctx)
-            return
-        if dropped:
-            _write_followups(ctx, dropped)
-        review = ReviewResult(verdict="needs_fixes", findings=actionable)
-        failures = _finding_keys(review)
-        try:
-            check_progress(previous_failures, failures)
-        except NoProgressError as exc:
-            raise escalate(
-                ctx,
-                f"Codex-{review_kind}-Review meldet unverändert dieselben Findings — "
-                f"Circuit-Breaker.\n\n{_findings_text(review)}",
-            ) from exc
-        previous_failures = failures
-        prior_context = _extend_context(
-            prior_context,
-            [_disposition_line(item, _below_threshold_disposition(round_no)) for item in dropped]
-            + [_disposition_line(item, _dispatched_disposition(round_no)) for item in actionable],
-        )
-        task = (
-            f"The Codex review of {', '.join(f'.adw/{a}' for a in artifacts)} has "
-            f"Findings. Incorporate them and update the artifacts:\n\n"
-            f"{_findings_text(review)}"
-        )
-        if summary:
-            task += (
-                f"\n\nKeep .adw/{summary} current: when the fixes change the "
-                f"picture, update the summary accordingly."
-            )
-        with ctx.state_lock:
-            # Checkpoint des Fix-Zyklus — überlebt einen Crash vor dem Fix-Lauf.
-            # authoring_rounds und der Findings-Verlauf gehen im SELBEN Save wie
-            # der Fix-Task raus.
-            ctx.state.authoring_pending_task = task
-            ctx.state.authoring_last_findings = failures
-            ctx.state.authoring_rounds = rounds
-            ctx.state.authoring_prior_context = prior_context
-            ctx.save()
+            with ctx.state_lock:
+                # Checkpoint des Fix-Zyklus — überlebt einen Crash vor dem Fix-Lauf.
+                # authoring_rounds und der Findings-Verlauf gehen im SELBEN Save wie
+                # der Fix-Task raus.
+                ctx.state.authoring_pending_task = task
+                ctx.state.authoring_last_findings = failures
+                ctx.state.authoring_rounds = rounds
+                ctx.state.authoring_prior_context = prior_context
+                ctx.save()
 
 
 def _write_issue(ctx: RunContext) -> bytes:
@@ -1237,56 +1268,58 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             lane_state.expected_head = current_head
             resume = lane_state.session_id
             ctx.save()  # Checkpoint VOR dem Agent-Lauf
-        result = ctx.agents.run(spec, task, cwd=worktree, resume=resume, deny_read_paths=deny)
-        _require_no_agent_commit(ctx, lane, worktree, current_head)
-        _require_lane_branch(ctx, worktree, lane_state)
-        with ctx.state_lock:
-            lane_state.session_id = result.session_id or lane_state.session_id
-            ctx.save()  # Checkpoint VOR den (potenziell langen) Gates
-        # VOR den Gates: approvte Artefakte restaurieren — Gates und Commit
-        # müssen exakt denselben, approvten Stand sehen.
-        _restore_approved_artifacts(ctx, worktree, lane_state.base_sha or ctx.config.base_branch)
-        if lane_state.gate_iterations == 1 and not _worktree_dirty(ctx, worktree):
-            _handle_idle_agent_run(ctx, lane, dispatch_findings)
-        # Kein Save zwischen Gates und Feedback-Persistenz — jeder Checkpoint
-        # nach einem Gate-Fail muss pending_task/last_failures bereits tragen.
         with ctx.emitter.span(
             "round",
             {"loop": "gates", "n": lane_state.gate_iterations, "cap": MAX_GATE_ITERATIONS},
-        ) as _gate_round:
-            _gate_round.end_payload = {"outcome": "aborted"}
-            report = _run_lane_gates(ctx, lane, worktree, lane_state)
-            _gate_round.end_payload = {"outcome": "passed" if report.passed else "failed"}
-        if report.passed:
-            _require_red_tests(ctx, lane, worktree, lane_state)
-            break
-        failures = [f"{f.gate}|{f.exit_code}|{f.output}" for f in report.failures]
-        try:
-            check_progress(previous_failures, failures)
-        except NoProgressError as exc:
-            ctx.emitter.emit(
-                "circuit_breaker",
-                {"keys": failures, "scope": f"lane:{lane}"},
-                span=_current_span_id(ctx.emitter),
+        ) as _round:
+            _round.end_payload = {"outcome": "aborted"}
+            result = ctx.agents.run(spec, task, cwd=worktree, resume=resume, deny_read_paths=deny)
+            _require_no_agent_commit(ctx, lane, worktree, current_head)
+            _require_lane_branch(ctx, worktree, lane_state)
+            with ctx.state_lock:
+                lane_state.session_id = result.session_id or lane_state.session_id
+                ctx.save()  # Checkpoint VOR den (potenziell langen) Gates
+            # VOR den Gates: approvte Artefakte restaurieren — Gates und Commit
+            # müssen exakt denselben, approvten Stand sehen.
+            _restore_approved_artifacts(
+                ctx, worktree, lane_state.base_sha or ctx.config.base_branch
             )
-            raise escalate(
-                ctx,
-                f"Lane {lane}: Gate-Fix-Iteration hat nichts verändert — "
-                f"Circuit-Breaker.\n\n{_gate_failure_text(report)}",
-            ) from exc
-        previous_failures = failures
-        task = (
-            f"The Gates have failed. Analyze the output and fix the root cause "
-            f"(no workaround bypassing the Gates):\n\n"
-            f"{_gate_failure_text(report)}"
-        )
-        with ctx.state_lock:
-            lane_state.pending_task = task
-            lane_state.last_failures = failures
-            # Ab hier treibt Gate-Feedback den Lauf, nicht mehr die Findings.
-            lane_state.pending_findings = []
-            ctx.save()
-        dispatch_findings = []
+            if lane_state.gate_iterations == 1 and not _worktree_dirty(ctx, worktree):
+                _handle_idle_agent_run(ctx, lane, dispatch_findings)
+            # Kein Save zwischen Gates und Feedback-Persistenz — jeder Checkpoint
+            # nach einem Gate-Fail muss pending_task/last_failures bereits tragen.
+            report = _run_lane_gates(ctx, lane, worktree, lane_state)
+            _round.end_payload["outcome"] = "passed" if report.passed else "failed"
+            if report.passed:
+                _require_red_tests(ctx, lane, worktree, lane_state)
+                break
+            failures = [f"{f.gate}|{f.exit_code}|{f.output}" for f in report.failures]
+            try:
+                check_progress(previous_failures, failures)
+            except NoProgressError as exc:
+                ctx.emitter.emit(
+                    "circuit_breaker",
+                    {"keys": failures, "scope": f"lane:{lane}"},
+                    span=_current_span_id(ctx.emitter),
+                )
+                raise escalate(
+                    ctx,
+                    f"Lane {lane}: Gate-Fix-Iteration hat nichts verändert — "
+                    f"Circuit-Breaker.\n\n{_gate_failure_text(report)}",
+                ) from exc
+            previous_failures = failures
+            task = (
+                f"The Gates have failed. Analyze the output and fix the root cause "
+                f"(no workaround bypassing the Gates):\n\n"
+                f"{_gate_failure_text(report)}"
+            )
+            with ctx.state_lock:
+                lane_state.pending_task = task
+                lane_state.last_failures = failures
+                # Ab hier treibt Gate-Feedback den Lauf, nicht mehr die Findings.
+                lane_state.pending_findings = []
+                ctx.save()
+            dispatch_findings = []
     with ctx.state_lock:
         lane_state.pending_task = None
         lane_state.last_failures = []
@@ -1792,46 +1825,45 @@ def _integration_loop(ctx: RunContext, lanes: list[str]) -> Path:
         with ctx.emitter.span(
             "round",
             {"loop": "integration", "n": ctx.state.integration_rounds + 1, "cap": MAX_E2E_ROUNDS},
-        ) as _int_round:
-            _int_round.end_payload = {"outcome": "aborted"}
+        ) as _round:
+            _round.end_payload = {"outcome": "aborted"}
             worktree = _fresh_integration_worktree(ctx, lanes)
             report = _run_e2e_gate(ctx, worktree, lanes)
-            _int_round.end_payload = {
-                "outcome": "passed" if (report is None or report.passed) else "failed"
-            }
-        if report is None or report.passed:
-            break
-        with ctx.state_lock:
-            ctx.state.integration_rounds += 1
-            ctx.save()  # Runden-Limit überlebt jeden Crash ab hier
-        if ctx.state.integration_rounds >= MAX_E2E_ROUNDS:
-            raise escalate(
-                ctx,
-                f"Integration/E2E: {ctx.state.integration_rounds} Runden erreicht "
-                f"(Limit {MAX_E2E_ROUNDS}) — Eskalation.\n\n{_gate_failure_text(report)}",
-            )
-        failures = [f"{f.gate}|{f.exit_code}|{f.output}" for f in report.failures]
-        try:
-            check_progress(previous, failures)
-        except NoProgressError as exc:
-            ctx.emitter.emit(
-                "circuit_breaker",
-                {"keys": failures, "scope": "integration"},
-                span=_current_span_id(ctx.emitter),
-            )
-            raise escalate(
-                ctx,
-                f"E2E-Fix-Runde hat nichts verändert — Circuit-Breaker.\n\n"
-                f"{_gate_failure_text(report)}",
-            ) from exc
-        review = _triage_e2e(ctx, worktree, report)
-        _dispatch_lane_fixes(ctx, review.findings, lanes, source="E2E")
-        with ctx.state_lock:
-            # Erst NACH dem Fix-Dispatch fortschreiben: ein Crash davor darf
-            # beim Resume nicht als "identische Runde" fehl-eskalieren.
-            ctx.state.integration_last_failures = failures
-            ctx.save()
-        previous = failures
+            if report is None or report.passed:
+                _round.end_payload["outcome"] = "passed"
+                break
+            _round.end_payload["outcome"] = "failed"
+            with ctx.state_lock:
+                ctx.state.integration_rounds += 1
+                ctx.save()  # Runden-Limit überlebt jeden Crash ab hier
+            if ctx.state.integration_rounds >= MAX_E2E_ROUNDS:
+                raise escalate(
+                    ctx,
+                    f"Integration/E2E: {ctx.state.integration_rounds} Runden erreicht "
+                    f"(Limit {MAX_E2E_ROUNDS}) — Eskalation.\n\n{_gate_failure_text(report)}",
+                )
+            failures = [f"{f.gate}|{f.exit_code}|{f.output}" for f in report.failures]
+            try:
+                check_progress(previous, failures)
+            except NoProgressError as exc:
+                ctx.emitter.emit(
+                    "circuit_breaker",
+                    {"keys": failures, "scope": "integration"},
+                    span=_current_span_id(ctx.emitter),
+                )
+                raise escalate(
+                    ctx,
+                    f"E2E-Fix-Runde hat nichts verändert — Circuit-Breaker.\n\n"
+                    f"{_gate_failure_text(report)}",
+                ) from exc
+            review = _triage_e2e(ctx, worktree, report)
+            _dispatch_lane_fixes(ctx, review.findings, lanes, source="E2E")
+            with ctx.state_lock:
+                # Erst NACH dem Fix-Dispatch fortschreiben: ein Crash davor darf
+                # beim Resume nicht als "identische Runde" fehl-eskalieren.
+                ctx.state.integration_last_failures = failures
+                ctx.save()
+            previous = failures
     if ctx.state.integration_last_failures:
         with ctx.state_lock:
             ctx.state.integration_last_failures = []
@@ -2055,11 +2087,11 @@ def run_codex_review_phase(ctx: RunContext) -> None:
                 f"(Limit {MAX_REVIEW_ROUNDS}) — Eskalation",
             )
         round_no = ctx.state.review_rounds + 1
-        worktree = _review_worktree(ctx, lanes)
         with ctx.emitter.span(
             "round", {"loop": "codex_review", "n": round_no, "cap": MAX_REVIEW_ROUNDS}
-        ) as _rev_round:
-            _rev_round.end_payload = {"outcome": "aborted"}
+        ) as _round:
+            _round.end_payload = {"outcome": "aborted"}
+            worktree = _review_worktree(ctx, lanes)
             try:
                 review = ctx.codex.review(
                     "code",
@@ -2069,63 +2101,69 @@ def run_codex_review_phase(ctx: RunContext) -> None:
                 )
             except (FindingsParseError, ValidationError) as exc:
                 raise escalate(ctx, f"Codex-Code-Review unlesbar: {exc}") from exc
-            _rev_round.end_payload = {"outcome": review.verdict}
-        if review.verdict == "ok":
-            break
-        findings = _without_deferred(ctx, review.findings)
-        if not findings:
-            break  # nur bereits vertagte Findings — sie stehen im Follow-up-Report
-        already_deferred = [item for item in review.findings if item not in findings]
-        actionable, dropped = _split_by_severity(findings, round_no)
-        if dropped:
-            _write_followups(ctx, dropped)
-        if not actionable:
-            break  # nur Findings unter der Schwelle — dokumentiert statt gefixt
-        review = ReviewResult(verdict="needs_fixes", findings=actionable)
-        prior_context = _extend_context(
-            prior_context,
-            [_disposition_line(item, _DEFERRED_DISPOSITION) for item in already_deferred]
-            + [_disposition_line(item, _below_threshold_disposition(round_no)) for item in dropped]
-            + [_disposition_line(item, _dispatched_disposition(round_no)) for item in actionable],
-        )
-        if round_no >= MAX_REVIEW_ROUNDS:
-            # VOR dem Dispatch eskalieren: ein Fix, den nie wieder ein Review
-            # prüfen kann, ist verschwendete (teure) Arbeit.
-            raise escalate(
-                ctx,
-                f"Codex-Code-Review: {round_no} Runden erreicht "
-                f"(Limit {MAX_REVIEW_ROUNDS}) — Eskalation.\n\n{_findings_text(review)}",
+            _round.end_payload["outcome"] = review.verdict
+            if review.verdict == "ok":
+                break
+            findings = _without_deferred(ctx, review.findings)
+            if not findings:
+                break  # nur bereits vertagte Findings — sie stehen im Follow-up-Report
+            already_deferred = [item for item in review.findings if item not in findings]
+            actionable, dropped = _split_by_severity(findings, round_no)
+            if dropped:
+                _write_followups(ctx, dropped)
+            if not actionable:
+                break  # nur Findings unter der Schwelle — dokumentiert statt gefixt
+            review = ReviewResult(verdict="needs_fixes", findings=actionable)
+            prior_context = _extend_context(
+                prior_context,
+                [_disposition_line(item, _DEFERRED_DISPOSITION) for item in already_deferred]
+                + [
+                    _disposition_line(item, _below_threshold_disposition(round_no))
+                    for item in dropped
+                ]
+                + [
+                    _disposition_line(item, _dispatched_disposition(round_no))
+                    for item in actionable
+                ],
             )
-        failures = _finding_keys(review)
-        try:
-            check_progress(previous, failures)
-        except NoProgressError as exc:
-            ctx.emitter.emit(
-                "circuit_breaker",
-                {"keys": failures, "scope": "codex_review"},
-                span=_current_span_id(ctx.emitter),
-            )
-            raise escalate(
+            if round_no >= MAX_REVIEW_ROUNDS:
+                # VOR dem Dispatch eskalieren: ein Fix, den nie wieder ein Review
+                # prüfen kann, ist verschwendete (teure) Arbeit.
+                raise escalate(
+                    ctx,
+                    f"Codex-Code-Review: {round_no} Runden erreicht "
+                    f"(Limit {MAX_REVIEW_ROUNDS}) — Eskalation.\n\n{_findings_text(review)}",
+                )
+            failures = _finding_keys(review)
+            try:
+                check_progress(previous, failures)
+            except NoProgressError as exc:
+                ctx.emitter.emit(
+                    "circuit_breaker",
+                    {"keys": failures, "scope": "codex_review"},
+                    span=_current_span_id(ctx.emitter),
+                )
+                raise escalate(
+                    ctx,
+                    f"Codex-Code-Review meldet unverändert dieselben Findings — "
+                    f"Circuit-Breaker.\n\n{_findings_text(review)}",
+                ) from exc
+            _dispatch_lane_fixes(
                 ctx,
-                f"Codex-Code-Review meldet unverändert dieselben Findings — "
-                f"Circuit-Breaker.\n\n{_findings_text(review)}",
-            ) from exc
-        _dispatch_lane_fixes(
-            ctx,
-            review.findings,
-            lanes,
-            source="Codex-Code-Review",
-            mutate_staged=_advance_review_round(ctx, round_no, prior_context, failures),
-        )
-        with ctx.state_lock:
-            # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4. Der
-            # Dispatch kann Findings vertagt haben; die fallen aus der Basis.
-            # Basis sind NUR die actionable Findings: ein neues, dauerhaft
-            # gedropptes P3 würde sonst ein stehengebliebenes P1 kaschieren.
-            failures = _circuit_breaker_keys(ctx, review.findings)
-            ctx.state.review_last_failures = failures
-            ctx.save()
-        previous = failures
+                review.findings,
+                lanes,
+                source="Codex-Code-Review",
+                mutate_staged=_advance_review_round(ctx, round_no, prior_context, failures),
+            )
+            with ctx.state_lock:
+                # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4. Der
+                # Dispatch kann Findings vertagt haben; die fallen aus der Basis.
+                # Basis sind NUR die actionable Findings: ein neues, dauerhaft
+                # gedropptes P3 würde sonst ein stehengebliebenes P1 kaschieren.
+                failures = _circuit_breaker_keys(ctx, review.findings)
+                ctx.state.review_last_failures = failures
+                ctx.save()
+            previous = failures
     with ctx.state_lock:
         ctx.state.review_last_failures = []
         ctx.state.review_prior_context = []  # Verlauf gehört zu dieser Phase
@@ -2145,102 +2183,102 @@ def run_final_review_phase(ctx: RunContext) -> None:
     fr_round = 0
     while True:
         fr_round += 1
-        worktree = _review_worktree(ctx, lanes)
-        spec = REGISTRY["final_reviewer"]
-        task = (
-            "Check the implementation in this Worktree read-only against "
-            ".adw/spec.md (acceptance criteria, Definition of Done) and "
-            ".adw/contract.yaml.\n\n"
-            f"{SCHEMA_INSTRUCTION}\n\n"
-            'Additionally MANDATORY on every Finding: the field "category" with '
-            "one of the values scope_gap | implementation | trivial "
-            "(triage basis)."
-        )
         with ctx.emitter.span(
             "round", {"loop": "final_review", "n": fr_round, "cap": MAX_FIX_CYCLES}
-        ) as _fr_round:
-            _fr_round.end_payload = {"outcome": "aborted"}
+        ) as _round:
+            _round.end_payload = {"outcome": "aborted"}
+            worktree = _review_worktree(ctx, lanes)
+            spec = REGISTRY["final_reviewer"]
+            task = (
+                "Check the implementation in this Worktree read-only against "
+                ".adw/spec.md (acceptance criteria, Definition of Done) and "
+                ".adw/contract.yaml.\n\n"
+                f"{SCHEMA_INSTRUCTION}\n\n"
+                'Additionally MANDATORY on every Finding: the field "category" with '
+                "one of the values scope_gap | implementation | trivial "
+                "(triage basis)."
+            )
             result = ctx.agents.run(spec, task, cwd=worktree, resume=None)
-            _fr_round.end_payload = {"outcome": "ran"}
-        try:
-            review = extract_review_result(result.text)
-        except (FindingsParseError, ValidationError) as exc:
-            raise escalate(ctx, f"Finaler Review unlesbar: {exc}") from exc
-        if review.verdict == "ok":
-            break
-        uncategorized = [f.file for f in review.findings if f.category is None]
-        if uncategorized:
-            # Ohne category ist keine Triage möglich — ein scope_gap würde
-            # sonst still als Implementierungs-Fix durchgehen.
-            raise escalate(
-                ctx,
-                f"Finaler Review ohne category-Feld bei: {', '.join(uncategorized)} — "
-                f"Findings sind nicht triagierbar",
+            try:
+                review = extract_review_result(result.text)
+            except (FindingsParseError, ValidationError) as exc:
+                raise escalate(ctx, f"Finaler Review unlesbar: {exc}") from exc
+            _round.end_payload["outcome"] = review.verdict
+            if review.verdict == "ok":
+                break
+            uncategorized = [f.file for f in review.findings if f.category is None]
+            if uncategorized:
+                # Ohne category ist keine Triage möglich — ein scope_gap würde
+                # sonst still als Implementierungs-Fix durchgehen.
+                raise escalate(
+                    ctx,
+                    f"Finaler Review ohne category-Feld bei: {', '.join(uncategorized)} — "
+                    f"Findings sind nicht triagierbar",
+                )
+            findings = _without_deferred(ctx, review.findings)
+            if not findings:
+                break  # nur bereits vertagte Findings — sie stehen im Follow-up-Report
+            review = ReviewResult(verdict="needs_fixes", findings=findings)
+            decision = triage_final_review(
+                review,
+                active_lanes=lanes,
+                emitter=ctx.emitter,
+                span_id=_current_span_id(ctx.emitter),
             )
-        findings = _without_deferred(ctx, review.findings)
-        if not findings:
-            break  # nur bereits vertagte Findings — sie stehen im Follow-up-Report
-        review = ReviewResult(verdict="needs_fixes", findings=findings)
-        decision = triage_final_review(
-            review,
-            active_lanes=lanes,
-            emitter=ctx.emitter,
-            span_id=_current_span_id(ctx.emitter),
-        )
-        if decision.followups:
-            _write_followups(ctx, decision.followups)
-        if not decision.fix_tasks:
-            break  # nur scope_gaps: Report statt Auto-Restart (SPEC §4 Phase 6)
-        fixable = [f for f in review.findings if f.category != "scope_gap"]
-        failures = _finding_keys(ReviewResult(verdict="needs_fixes", findings=fixable))
-        try:
-            check_progress(previous, failures)
-        except NoProgressError as exc:
-            ctx.emitter.emit(
-                "circuit_breaker",
-                {"keys": failures, "scope": "final_review"},
-                span=_current_span_id(ctx.emitter),
-            )
-            raise escalate(
+            if decision.followups:
+                _write_followups(ctx, decision.followups)
+            if not decision.fix_tasks:
+                break  # nur scope_gaps: Report statt Auto-Restart (SPEC §4 Phase 6)
+            fixable = [f for f in review.findings if f.category != "scope_gap"]
+            failures = _finding_keys(ReviewResult(verdict="needs_fixes", findings=fixable))
+            try:
+                check_progress(previous, failures)
+            except NoProgressError as exc:
+                ctx.emitter.emit(
+                    "circuit_breaker",
+                    {"keys": failures, "scope": "final_review"},
+                    span=_current_span_id(ctx.emitter),
+                )
+                raise escalate(
+                    ctx,
+                    f"Finaler Review meldet unverändert dieselben Findings — "
+                    f"Circuit-Breaker.\n\n{_findings_text(review)}",
+                ) from exc
+
+            def _bump_fix_cycles(fix_lanes: list[str]) -> None:
+                # Läuft im Dispatch unter dem State-Lock und wird mit dem Staging
+                # in EINEM Save persistiert — Zähler und Fix-Task sind atomar.
+                for lane in fix_lanes:
+                    try:
+                        check_fix_cycles(ctx.state.lanes[lane])
+                    except LimitExceededError as exc:
+                        ctx.emitter.emit(
+                            "limit.hit",
+                            {
+                                "limit": "fix_cycles",
+                                "value": ctx.state.lanes[lane].fix_cycles,
+                                "cap": MAX_FIX_CYCLES,
+                            },
+                            span=_current_span_id(ctx.emitter),
+                        )
+                        raise escalate(ctx, f"Lane {lane}: {exc}") from exc
+                for lane in fix_lanes:
+                    ctx.state.lanes[lane].fix_cycles += 1
+
+            _dispatch_lane_fixes(
                 ctx,
-                f"Finaler Review meldet unverändert dieselben Findings — "
-                f"Circuit-Breaker.\n\n{_findings_text(review)}",
-            ) from exc
-
-        def _bump_fix_cycles(fix_lanes: list[str]) -> None:
-            # Läuft im Dispatch unter dem State-Lock und wird mit dem Staging
-            # in EINEM Save persistiert — Zähler und Fix-Task sind atomar.
-            for lane in fix_lanes:
-                try:
-                    check_fix_cycles(ctx.state.lanes[lane])
-                except LimitExceededError as exc:
-                    ctx.emitter.emit(
-                        "limit.hit",
-                        {
-                            "limit": "fix_cycles",
-                            "value": ctx.state.lanes[lane].fix_cycles,
-                            "cap": MAX_FIX_CYCLES,
-                        },
-                        span=_current_span_id(ctx.emitter),
-                    )
-                    raise escalate(ctx, f"Lane {lane}: {exc}") from exc
-            for lane in fix_lanes:
-                ctx.state.lanes[lane].fix_cycles += 1
-
-        _dispatch_lane_fixes(
-            ctx,
-            review.findings,
-            lanes,
-            source="Final-Review",
-            mutate_staged=_bump_fix_cycles,
-        )
-        with ctx.state_lock:
-            # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4/5. Der
-            # Dispatch kann Findings vertagt haben; die fallen aus der Basis.
-            failures = _circuit_breaker_keys(ctx, fixable)
-            ctx.state.final_review_last_failures = failures
-            ctx.save()
-        previous = failures
+                review.findings,
+                lanes,
+                source="Final-Review",
+                mutate_staged=_bump_fix_cycles,
+            )
+            with ctx.state_lock:
+                # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4/5. Der
+                # Dispatch kann Findings vertagt haben; die fallen aus der Basis.
+                failures = _circuit_breaker_keys(ctx, fixable)
+                ctx.state.final_review_last_failures = failures
+                ctx.save()
+            previous = failures
     with ctx.state_lock:
         ctx.state.final_review_last_failures = []
         ctx.state.phase = "ci"

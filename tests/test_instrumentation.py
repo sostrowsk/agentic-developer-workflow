@@ -40,6 +40,7 @@ from adw.config import Gate
 from adw.events import EventEmitter, NoOpEmitter
 from adw.findings import Finding, ReviewResult
 from adw.gates import GateReport, run_gates
+from adw.mock import MockAgentRunner, MockCodexRunner
 from adw.phases import EscalationError, run_ci_phase, run_final_review_phase
 from adw.state import RunState
 from adw.triage import triage_final_review
@@ -568,6 +569,34 @@ def test_dry_run_has_round_spans_for_every_loop_kind(target_repo):
     assert starts <= ends
 
 
+def test_round_spans_contain_their_child_spans_and_points(target_repo):
+    """P2: a round span encompasses the full iteration — child spans nest under
+    it and the round-driven points carry it as their enclosing span."""
+    make_parallel_repo(target_repo)
+    result = cli_run(target_repo, "--no-approval", "--parallel")
+    assert result.exit_code == 0, result.output
+    _state, records = read_run_events(target_repo)
+    round_loop_by_id = {r["span"]: r["payload"]["loop"] for r in of_type(records, "round", "start")}
+
+    # Every gate span opened inside a loop nests under a round (gates for the
+    # lane gate loop, integration for the E2E gate).
+    gate_starts = of_type(records, "gate", "start")
+    assert gate_starts
+    for gate in gate_starts:
+        assert gate["parent"] in round_loop_by_id, ("gate not nested under a round", gate)
+
+    # The E2E triage decisions are dispatched inside the integration round.
+    triages = of_type(records, "triage.decision")
+    assert triages
+    assert any(round_loop_by_id.get(t["span"]) == "integration" for t in triages), (
+        "triage.decision must be attributed to the integration round it ran in"
+    )
+
+    # Every round span is closed with a concrete (non-aborted on success) outcome.
+    for end in of_type(records, "round", "end"):
+        assert set(end["payload"]) == {"outcome"}
+
+
 # Every §4.4 type except snapshot, split by the path that provably emits it.
 DRY_RUN_TYPES = {
     "run", "phase", "lane", "round", "gate", "ci.wait", "ci.poll",
@@ -718,6 +747,39 @@ def test_log_warning_mirrors_to_a_log_point(target_repo):
     assert point["payload"]["message"] == "etwas ist schiefgelaufen"
 
 
+def test_codex_draft_degradation_log_has_non_null_span(target_repo):
+    """P2: the Codex draft runs in a pool worker; its degradation `log` point
+    must still carry the enclosing phase span, never null."""
+    from adw.codex import CodexError
+    from adw.config import AdwConfig
+    from adw.phases import SPEC_SUMMARY, RunContext, _draft_stage
+
+    agents = MockAgentRunner()
+    agents.script_files("spec_agent", {".adw/spec.md": "# Draft Claude\n"})
+    agents.script("spec_agent", "ok")
+    codex = MockCodexRunner()
+    codex.script_author_error("spec", CodexError("codex kaputt"))
+    emitter = EventEmitter(target_repo, RUN_ID)
+    ctx = RunContext(
+        repo=target_repo,
+        config=AdwConfig.load(target_repo),
+        state=RunState.new(issue="D", parallel=False),
+        agents=agents,
+        codex=codex,
+        emitter=emitter,
+    )
+    ctx.run_dir.mkdir(parents=True, exist_ok=True)
+    with emitter.span("phase", {"name": "spec", "from_phase": "spec"}) as phase:
+        _draft_stage(
+            ctx, kind="spec", agent_name="spec_agent", task="t",
+            artifacts=("spec.md",), summary=SPEC_SUMMARY,
+        )
+    logs = of_type(read_events(target_repo, RUN_ID), "log")
+    assert logs, "the Codex degradation must emit a log point"
+    assert logs[0]["span"] == phase.id
+    assert logs[0]["span"] is not None
+
+
 def test_fix_cycle_limit_emits_limit_hit(target_repo):
     """limit.hit: three fix cycles exhaust the per-lane limit and emit a
     limit.hit point before escalating."""
@@ -825,6 +887,43 @@ def test_plan_phase_end_to_phase_is_awaiting_approval_when_gated(target_repo):
     plan_ends = [r for r in of_type(records, "phase", "end") if r["payload"]["name"] == "plan"]
     assert plan_ends
     assert plan_ends[0]["payload"]["to_phase"] == "awaiting_approval"
+
+
+def test_plan_phase_to_phase_stays_null_when_archival_fails(target_repo, monkeypatch):
+    """P2: the plan span stays open through archival, so a failure there leaves
+    to_phase null (the transition was never reached) and the error propagates."""
+    from adw.config import AdwConfig
+    from adw.phases import RunContext, run_spec_and_plan
+    from tests.test_e2e_dry_run import OK, script_authoring, script_draft_artifacts
+
+    agents = MockAgentRunner()
+    script_authoring(agents)
+    codex = MockCodexRunner()
+    script_draft_artifacts(codex)
+    codex.script(OK, OK)  # spec + plan reviews both green
+    state = RunState.new(issue="Boom", parallel=False)
+    ctx = RunContext(
+        repo=target_repo,
+        config=AdwConfig.load(target_repo),
+        state=state,
+        agents=agents,
+        codex=codex,
+        emitter=EventEmitter(target_repo, state.run_id),
+        skip_approval=True,
+    )
+    boom = RuntimeError("archival kaputt")
+
+    def raising(_ctx, overwrite_existing_archive=True):
+        raise boom
+
+    monkeypatch.setattr("adw.phases._archive_artifacts", raising)
+    with pytest.raises(RuntimeError) as excinfo:
+        run_spec_and_plan(ctx)
+    assert excinfo.value is boom  # propagates unchanged
+    records = read_events(target_repo, state.run_id)
+    plan_ends = [r for r in of_type(records, "phase", "end") if r["payload"]["name"] == "plan"]
+    assert plan_ends
+    assert plan_ends[0]["payload"]["to_phase"] is None
 
 
 # --- additive-compatible signatures (AC 8) ----------------------------------
