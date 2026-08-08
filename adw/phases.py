@@ -176,15 +176,18 @@ class RunContext:
     def run_dir(self) -> Path:
         return self.state.run_dir(self.repo)
 
-    def save(self) -> None:
+    def save(self, span_id: str | None = None) -> None:
         # Persist exactly as before (existing tests spy on the old save
         # signature), then mirror state.saved via THIS run's emitter with the
-        # innermost enclosing span — only after the write succeeded (AC 9).
+        # enclosing span — only after the write succeeded (AC 9). ``span_id`` lets
+        # an off-main-thread caller (draft-pool worker) pass the enclosing span
+        # explicitly so state.saved never carries null.
         self.state.save(self.repo)
+        span = span_id if span_id is not None else _current_span_id(self.emitter)
         self.emitter.emit(
             "state.saved",
             {"seq": self.state.seq, "phase": self.state.phase},
-            span=_current_span_id(self.emitter),
+            span=span,
         )
 
 
@@ -205,11 +208,14 @@ def escalate(ctx: RunContext, reason: str, span_id: str | None = None) -> Escala
             f"## Grund\n\n{reason}\n",
             encoding="utf-8",
         )
+        # Resolve the enclosing span ONCE so both state.saved (inside ctx.save)
+        # and the escalation point carry the same non-null span — critical for a
+        # draft-pool worker whose thread-local stack is empty.
+        span = span_id if span_id is not None else _current_span_id(ctx.emitter)
         ctx.state.phase = "escalated"
-        ctx.save()
+        ctx.save(span_id=span)
         # AFTER the escalation actually happened (AC 9); the point carries the
         # phase the run escalated FROM.
-        span = span_id if span_id is not None else _current_span_id(ctx.emitter)
         ctx.emitter.emit(
             "escalation", {"reason": reason, "phase": origin_phase}, span=span
         )
@@ -255,15 +261,20 @@ def _lane_span(fn):
         }
         with ctx.emitter.span("lane", start_payload, phase=ctx.state.phase, lane=lane) as handle:
             handle.end_payload = {"completed": False, "gate_iterations": 0, "fix_cycles": 0}
-            result = fn(ctx, lane, all_lanes)
-            ls = ctx.state.lanes.get(lane)
-            if ls is not None:
-                handle.end_payload = {
-                    "completed": ls.completed,
-                    "gate_iterations": ls.gate_iterations,
-                    "fix_cycles": ls.fix_cycles,
-                }
-            return result
+            try:
+                return fn(ctx, lane, all_lanes)
+            finally:
+                # Advance the end payload from the PERSISTED counters on EVERY
+                # exit (contract payload_end_on_exception): an escalation after N
+                # gate iterations / fix cycles must not report 0/0. No except —
+                # the exception propagates unchanged (fail-open untouched).
+                ls = ctx.state.lanes.get(lane)
+                if ls is not None:
+                    handle.end_payload = {
+                        "completed": ls.completed,
+                        "gate_iterations": ls.gate_iterations,
+                        "fix_cycles": ls.fix_cycles,
+                    }
 
     return wrapper
 

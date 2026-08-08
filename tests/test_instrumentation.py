@@ -698,6 +698,49 @@ def test_dry_run_emits_all_structural_types_and_never_snapshot(target_repo):
     assert "snapshot" not in seen
 
 
+def test_dry_run_span_and_point_payloads_match_contract(target_repo):
+    """AC 3: lane/commit/merge/artifact carry exactly their §4.4 payload fields
+    (not just present in the log)."""
+    make_parallel_repo(target_repo)
+    result = cli_run(target_repo, "--no-approval", "--parallel")
+    assert result.exit_code == 0, result.output
+    _state, records = read_run_events(target_repo)
+
+    lane_starts = of_type(records, "lane", "start")
+    lane_ends = of_type(records, "lane", "end")
+    assert lane_starts and lane_ends
+    for start in lane_starts:
+        assert set(start["payload"]) == {"name", "branch", "worktree", "base_sha", "ports"}
+    for end in lane_ends:
+        assert set(end["payload"]) == {"completed", "gate_iterations", "fix_cycles"}
+
+    for commit in of_type(records, "commit"):
+        assert set(commit["payload"]) == {"lane", "sha", "subject"}
+    merges = of_type(records, "merge")
+    assert merges
+    for merge in merges:
+        assert set(merge["payload"]) == {"lane", "target", "conflicts"}
+    artifacts = of_type(records, "artifact")
+    assert artifacts
+    for artifact in artifacts:
+        assert set(artifact["payload"]) == {"name", "path", "bytes", "sha256"}
+
+
+def test_lane_end_reports_real_counters_on_escalation(target_repo):
+    """P2/contract payload_end_on_exception: a lane that escalates reports the
+    ACTUAL gate_iterations counter in its lane-end event, not a stale 0."""
+    write_config(target_repo, HOPELESS_GATE_CONFIG)
+    git(target_repo, "add", ".adw/config.yaml")
+    git(target_repo, "commit", "-m", "hopeless gate")
+    result = cli_run(target_repo, "--no-approval")
+    assert result.exit_code == 1
+    _state, records = read_run_events(target_repo)
+    lane_ends = of_type(records, "lane", "end")
+    assert lane_ends, "the escalated lane must still close its lane span"
+    assert lane_ends[0]["payload"]["gate_iterations"] > 0, lane_ends[0]["payload"]
+    assert lane_ends[0]["payload"]["completed"] is False
+
+
 def test_dry_run_points_all_carry_a_non_null_span(target_repo):
     """Point-span attribution: every point event carries the id of its innermost
     enclosing span (never null) — GUI-SPEC §4.2."""
@@ -808,6 +851,46 @@ def test_log_warning_mirrors_to_a_log_point(target_repo):
     assert set(point["payload"]) == {"level", "message"}
     assert point["payload"]["level"] == "warning"
     assert point["payload"]["message"] == "etwas ist schiefgelaufen"
+
+
+def test_escalate_with_span_id_keeps_state_saved_and_escalation_non_null(target_repo):
+    """P3: escalate() from a thread with no open spans (a draft-pool worker)
+    must attribute BOTH its state.saved and escalation events to the explicitly
+    passed span, never null."""
+    from adw.config import AdwConfig
+    from adw.phases import RunContext, escalate
+
+    emitter = EventEmitter(target_repo, RUN_ID)
+    state = RunState.new(issue="E", parallel=False)
+    ctx = RunContext(
+        repo=target_repo,
+        config=AdwConfig.load(target_repo),
+        state=state,
+        agents=object(),
+        codex=object(),
+        emitter=emitter,
+    )
+    ctx.state.save(target_repo)  # ensure run dir exists
+
+    captured: dict = {}
+
+    def worker():
+        # No `with emitter.span(...)` here → the thread-local span stack is empty.
+        captured["err"] = escalate(ctx, "worker boom", span_id="PHASE-SPAN")
+
+    import threading
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+    assert isinstance(captured["err"], EscalationError)
+
+    records = read_events(target_repo, RUN_ID)
+    (escalation,) = of_type(records, "escalation")
+    assert escalation["span"] == "PHASE-SPAN"
+    saved = of_type(records, "state.saved")
+    assert saved
+    assert saved[-1]["span"] == "PHASE-SPAN"  # the escalate() save, non-null
 
 
 def test_codex_draft_degradation_log_has_non_null_span(target_repo):
