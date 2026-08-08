@@ -30,6 +30,7 @@ from typing import Literal, Protocol
 
 from adw.agents import _PLAN_CONTENT_RULES, _SPEC_CONTENT_RULES
 from adw.env import safe_env
+from adw.events import NoOpEmitter
 from adw.findings import SCHEMA_INSTRUCTION, ReviewResult, extract_review_result
 
 CODEX_TIMEOUT = 900
@@ -121,6 +122,7 @@ class CodexClient(Protocol):
         content_refs: list[str],
         cwd: Path,
         context: str | None = None,
+        emitter=None,
     ) -> ReviewResult: ...
 
     def author(self, kind: AuthorKind, task: str, cwd: Path) -> dict[str, str]: ...
@@ -251,15 +253,35 @@ def _extract_blocks(stdout: str, names: tuple[str, ...], marker_id: str) -> dict
 class CodexRunner:
     """Invokes the Codex CLI as a read-only subprocess and parses strictly."""
 
+    def __init__(self, emitter=None):
+        # Optional run emitter injected by the orchestrator; the explicit
+        # review(emitter=...) arg still wins (used by unit tests).
+        self._emitter = emitter
+
     def review(
         self,
         kind: ReviewKind,
         content_refs: list[str],
         cwd: Path,
         context: str | None = None,
+        emitter=None,
     ) -> ReviewResult:
+        emitter = emitter or self._emitter or NoOpEmitter()
         prompt = self._build_prompt(kind, content_refs, context)
-        return extract_review_result(self._run(prompt, cwd))
+        argv = self._argv(cwd, prompt)
+        with emitter.span(
+            "codex.review",
+            {"kind": kind, "argv": argv, "cwd": str(cwd), "custom_prompt": context},
+        ) as handle:
+            # Deterministic defaults BEFORE the subprocess: a parse failure or an
+            # unexpected exception still writes a complete end record.
+            handle.end_payload = {"findings": [], "raw_stdout": "", "parse_ok": False}
+            stdout = self._run(prompt, cwd)
+            handle.end_payload["raw_stdout"] = stdout
+            result = extract_review_result(stdout)
+            handle.end_payload["findings"] = [f.model_dump() for f in result.findings]
+            handle.end_payload["parse_ok"] = True
+            return result
 
     def author(self, kind: AuthorKind, task: str, cwd: Path) -> dict[str, str]:
         """Have Codex author the artifacts of `kind`; returns file name -> content.
@@ -270,8 +292,9 @@ class CodexRunner:
         stdout = self._run(self._build_author_prompt(kind, task, marker_id), cwd)
         return _extract_blocks(stdout, _AUTHOR_BLOCKS[kind], marker_id)
 
-    def _run(self, prompt: str, cwd: Path) -> str:
-        argv = [
+    @staticmethod
+    def _argv(cwd: Path, prompt: str) -> list[str]:
+        return [
             "codex",
             "exec",
             "--sandbox",
@@ -284,6 +307,9 @@ class CodexRunner:
             str(cwd),
             prompt,
         ]
+
+    def _run(self, prompt: str, cwd: Path) -> str:
+        argv = self._argv(cwd, prompt)
         env = safe_env()
         # Isoliertes CODEX_HOME: nur auth.json, KEINE config.toml — sonst
         # starten user-konfigurierte MCP-Server außerhalb der read-only-

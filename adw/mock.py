@@ -47,7 +47,10 @@ class MockAgentRunner:
         cwd: Path,
         resume: str | None = None,
         deny_read_paths: list[str] | None = None,
+        emitter=None,
     ) -> AgentResult:
+        # ``emitter`` is accepted for protocol parity (the orchestrator passes
+        # the run's emitter through); the mock writes no event log itself.
         self.calls.append(
             AgentCall(
                 agent=agent.name,
@@ -127,7 +130,12 @@ class MockCodexRunner:
         return scripted
 
     def review(
-        self, kind: str, content_refs: list[str], cwd: Path, context: str | None = None
+        self,
+        kind: str,
+        content_refs: list[str],
+        cwd: Path,
+        context: str | None = None,
+        emitter=None,
     ) -> ReviewResult:
         self.calls.append(
             CodexCall(kind=kind, content_refs=tuple(content_refs), cwd=Path(cwd), context=context)

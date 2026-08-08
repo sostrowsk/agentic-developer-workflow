@@ -18,6 +18,7 @@ from urllib.parse import quote
 from adw.ci import CiError, CiResult, CiTimeoutError
 from adw.config import CiConfig
 from adw.env import safe_env
+from adw.events import NoOpEmitter
 
 _LOG_EXCERPT_LINES = 200
 _RUNS_PER_PAGE = 100
@@ -59,27 +60,52 @@ def poll_ci(
     run_gh: RunGh = run_gh,
     sleep: Callable[[float], None] = time.sleep,
     sha: str | None = None,
+    emitter=None,
 ) -> CiResult:
     """Polls all workflow runs of the push until they reach a final status.
 
     ``sha`` binds the poll to a specific push (head_sha filter of the
     Actions API) — the runs of an earlier push or foreign commits
     can neither judge nor obscure the result.
+
+    ``emitter`` is additive and optional (default: no-op): the wait is a
+    ``ci.wait`` span, each executed poll a ``ci.poll`` point.
     """
-    remaining = float(cfg.timeout)
-    while True:
-        runs = _workflow_runs(repo, branch, run_gh, sha)
-        if runs and all(run.get("status") == "completed" for run in runs):
-            return _evaluate(repo, runs, cfg, run_gh)
-        if remaining <= 0:
-            pending = [run.get("status") for run in runs] or ["keine Workflow-Runs gefunden"]
-            raise CiTimeoutError(
-                f"GitHub-Actions für {branch} nach {cfg.timeout}s nicht abgeschlossen "
-                f"(Status: {', '.join(str(s) for s in pending)})"
+    emitter = emitter or NoOpEmitter()
+    with emitter.span("ci.wait", {"provider": "github", "pipeline_ref": branch}) as handle:
+        handle.end_payload = {"status": "aborted", "polls": 0, "duration": 0}
+        remaining = float(cfg.timeout)
+        polls = 0
+        elapsed = 0.0
+        while True:
+            runs = _workflow_runs(repo, branch, run_gh, sha)
+            polls += 1
+            emitter.emit(
+                "ci.poll",
+                {
+                    "provider": "github",
+                    "status": ", ".join(str(run.get("status")) for run in runs) or "keine Runs",
+                    "job": None,
+                },
+                span=handle.id,
             )
-        nap = min(float(cfg.poll_interval), remaining)
-        sleep(nap)
-        remaining -= nap
+            handle.end_payload["polls"] = polls
+            handle.end_payload["duration"] = elapsed
+            if runs and all(run.get("status") == "completed" for run in runs):
+                result = _evaluate(repo, runs, cfg, run_gh)
+                handle.end_payload["status"] = "success" if result.passed else "failed"
+                return result
+            if remaining <= 0:
+                pending = [run.get("status") for run in runs] or ["keine Workflow-Runs gefunden"]
+                handle.end_payload["status"] = "timeout"
+                raise CiTimeoutError(
+                    f"GitHub-Actions für {branch} nach {cfg.timeout}s nicht abgeschlossen "
+                    f"(Status: {', '.join(str(s) for s in pending)})"
+                )
+            nap = min(float(cfg.poll_interval), remaining)
+            sleep(nap)
+            remaining -= nap
+            elapsed += nap
 
 
 def _workflow_runs(repo: Path, branch: str, run_gh: RunGh, sha: str | None) -> list[dict]:

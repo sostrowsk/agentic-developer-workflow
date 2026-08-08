@@ -12,6 +12,8 @@ manual git invocation by the user.
 """
 
 import contextlib
+import functools
+import hashlib
 import logging
 import os
 import shutil
@@ -31,6 +33,7 @@ from adw.agents import REGISTRY, AgentRunner, AgentSpec
 from adw.codex import CodexAuthorError, CodexClient, CodexError
 from adw.config import AdwConfig, Gate
 from adw.env import safe_env
+from adw.events import EventEmitter, NoOpEmitter
 from adw.findings import (
     SCHEMA_INSTRUCTION,
     Finding,
@@ -81,6 +84,23 @@ AUTHORING_MAX_ROUNDS = 5
 logger = logging.getLogger(__name__)
 
 
+def _current_span_id(emitter) -> str | None:
+    """Innermost open span on the current thread, or None.
+
+    Point events must carry the id of their enclosing span (GUI-SPEC §4.2), but
+    emit() does not read the thread-local stack itself. This reads the top of
+    that stack so point-emitters (state.saved, escalation, …) attribute to the
+    innermost run/phase/lane/round span active where they fire."""
+    stack = getattr(emitter, "_stack", None)
+    if stack is None:  # NoOpEmitter has no stack
+        return None
+    try:
+        current = stack()
+        return current[-1] if current else None
+    except Exception:
+        return None
+
+
 class EscalationError(Exception):
     """The run cannot continue autonomously — a human takes over (exit ≠ 0)."""
 
@@ -99,6 +119,9 @@ class RunContext:
     run_glab: ci.RunGlab = ci.run_glab
     run_gh: github.RunGh = github.run_gh
     sleep: Callable[[float], None] = time.sleep
+    # The ONE emitter of this run/process (GUI-SPEC §4.3). Defaults to the
+    # no-op so existing RunContext(...) constructions stay behaviour-identical.
+    emitter: "EventEmitter | NoOpEmitter" = field(default_factory=NoOpEmitter)
     skip_approval: bool = False
     # --spec-approval (Stopp nach Spec, vor Plan). Wie skip_approval als
     # State-Feld gepinnt, damit Resume/Approve das Gate kennen.
@@ -117,12 +140,21 @@ class RunContext:
         return self.state.run_dir(self.repo)
 
     def save(self) -> None:
+        # Persist exactly as before (existing tests spy on the old save
+        # signature), then mirror state.saved via THIS run's emitter with the
+        # innermost enclosing span — only after the write succeeded (AC 9).
         self.state.save(self.repo)
+        self.emitter.emit(
+            "state.saved",
+            {"seq": self.state.seq, "phase": self.state.phase},
+            span=_current_span_id(self.emitter),
+        )
 
 
 def escalate(ctx: RunContext, reason: str) -> EscalationError:
     """Write the escalation report, mark the state, return the error to be raised."""
     with ctx.state_lock:  # RLock: auch unter bereits gehaltenem Lock aufrufbar
+        origin_phase = ctx.state.phase  # capture BEFORE marking escalated
         ctx.run_dir.mkdir(parents=True, exist_ok=True)
         report = ctx.run_dir / "escalation.md"
         report.write_text(
@@ -135,7 +167,66 @@ def escalate(ctx: RunContext, reason: str) -> EscalationError:
         )
         ctx.state.phase = "escalated"
         ctx.save()
+        # AFTER the escalation actually happened (AC 9); the point carries the
+        # phase the run escalated FROM.
+        ctx.emitter.emit(
+            "escalation",
+            {"reason": reason, "phase": origin_phase},
+            span=_current_span_id(ctx.emitter),
+        )
     return EscalationError(reason)
+
+
+def _phase_span(name: str):
+    """Wrap a single-phase orchestrator function in a ``phase`` span — only when
+    the function actually runs its phase (its own guard returns immediately for
+    a skipped phase, so no span opens then). Adds no indentation to the body."""
+
+    def deco(fn):
+        @functools.wraps(fn)
+        def wrapper(ctx: "RunContext") -> None:
+            if ctx.state.phase != name:
+                return fn(ctx)
+            with ctx.emitter.span("phase", {"name": name, "from_phase": name}) as handle:
+                handle.end_payload = {"name": name, "to_phase": None}
+                result = fn(ctx)
+                handle.end_payload["to_phase"] = ctx.state.phase
+                return result
+
+        return wrapper
+
+    return deco
+
+
+def _lane_span(fn):
+    """Wrap ``_run_lane`` in a ``lane`` span. Under --parallel this runs in a
+    ThreadPool worker whose thread-local span stack is empty, so the span
+    carries parent: null (E2); the phase/lane fields keep the attribution. Adds
+    no indentation to the body."""
+
+    @functools.wraps(fn)
+    def wrapper(ctx: "RunContext", lane: str, all_lanes: list[str]) -> None:
+        existing = ctx.state.lanes.get(lane)
+        start_payload = {
+            "name": lane,
+            "branch": lane_branch(ctx.state.run_id, lane),
+            "worktree": str(lane_worktree_path(ctx.repo, ctx.state.run_id, lane)),
+            "base_sha": existing.base_sha if existing is not None else None,
+            "ports": ports_for(ctx.state.run_id, lane),
+        }
+        with ctx.emitter.span("lane", start_payload, phase=ctx.state.phase, lane=lane) as handle:
+            handle.end_payload = {"completed": False, "gate_iterations": 0, "fix_cycles": 0}
+            result = fn(ctx, lane, all_lanes)
+            ls = ctx.state.lanes.get(lane)
+            if ls is not None:
+                handle.end_payload = {
+                    "completed": ls.completed,
+                    "gate_iterations": ls.gate_iterations,
+                    "fix_cycles": ls.fix_cycles,
+                }
+            return result
+
+    return wrapper
 
 
 def run_spec_and_plan(ctx: RunContext) -> None:
@@ -210,94 +301,100 @@ def run_spec_and_plan(ctx: RunContext) -> None:
         # damit ein Agent es nicht effektiv verändern kann (wie config.yaml).
         protected[ctx.repo / ".adw" / ISSUE_FILE] = _write_issue(ctx)
         if ctx.state.phase == "spec":
-            draft_task = _spec_draft_task(ctx)
-            drafts = _draft_stage(
-                ctx,
-                kind="spec",
-                agent_name="spec_agent",
-                task=draft_task,
-                artifacts=("spec.md",),
-                protected=protected,
-                summary=SPEC_SUMMARY,
-            )
-            _reviewed_authoring_loop(
-                ctx,
-                agent_name="spec_synthesis",
-                initial_task=_synthesis_task(
-                    drafts, artifacts=("spec.md",), summary=SPEC_SUMMARY, goal=draft_task
-                ),
-                review_kind="spec",
-                artifacts=("spec.md",),
-                summary=SPEC_SUMMARY,
-                # Issue mitgeben: Codex prüft die Spec auf Proportionalität
-                # gegen die tatsächliche Anforderung.
-                review_refs=(ISSUE_FILE, "spec.md"),
-                protected=protected,
-            )
-            with ctx.state_lock:
-                # Reviewte Spec SOFORT ins Run-Verzeichnis sichern: markiert sie
-                # als eigenen Output (Guard-Ausnahme beim Resume) und schützt
-                # sie vor dem Crash-Fenster bis zur Archivierung. Die Summary
-                # gehört zum Gate-Ergebnis und wird genauso gesichert.
-                ctx.run_dir.mkdir(parents=True, exist_ok=True)
-                for name in ("spec.md", SPEC_SUMMARY):
-                    shutil.copy2(ctx.repo / ".adw" / name, ctx.run_dir / name)
-                # Spec-Gate: Phase + geleerter Checkpoint atomar. Ein Crash im
-                # Fenster darf nie phase="plan" hinterlassen, sonst würde der
-                # Stopp übersprungen (Runden-Zähler startet für den Plan bei 0).
-                if spec_approval and not ctx.state.spec_approval_granted:
-                    ctx.state.phase = "awaiting_spec_approval"
-                    paused_for_spec_approval = True
-                else:
-                    ctx.state.phase = "plan"
-                ctx.save()  # Phase + geleerter Authoring-Checkpoint in EINEM Save
+            with ctx.emitter.span("phase", {"name": "spec", "from_phase": "spec"}) as _spec_phase:
+                _spec_phase.end_payload = {"name": "spec", "to_phase": None}
+                draft_task = _spec_draft_task(ctx)
+                drafts = _draft_stage(
+                    ctx,
+                    kind="spec",
+                    agent_name="spec_agent",
+                    task=draft_task,
+                    artifacts=("spec.md",),
+                    protected=protected,
+                    summary=SPEC_SUMMARY,
+                )
+                _reviewed_authoring_loop(
+                    ctx,
+                    agent_name="spec_synthesis",
+                    initial_task=_synthesis_task(
+                        drafts, artifacts=("spec.md",), summary=SPEC_SUMMARY, goal=draft_task
+                    ),
+                    review_kind="spec",
+                    artifacts=("spec.md",),
+                    summary=SPEC_SUMMARY,
+                    # Issue mitgeben: Codex prüft die Spec auf Proportionalität
+                    # gegen die tatsächliche Anforderung.
+                    review_refs=(ISSUE_FILE, "spec.md"),
+                    protected=protected,
+                )
+                with ctx.state_lock:
+                    # Reviewte Spec SOFORT ins Run-Verzeichnis sichern: markiert sie
+                    # als eigenen Output (Guard-Ausnahme beim Resume) und schützt
+                    # sie vor dem Crash-Fenster bis zur Archivierung. Die Summary
+                    # gehört zum Gate-Ergebnis und wird genauso gesichert.
+                    ctx.run_dir.mkdir(parents=True, exist_ok=True)
+                    for name in ("spec.md", SPEC_SUMMARY):
+                        shutil.copy2(ctx.repo / ".adw" / name, ctx.run_dir / name)
+                    # Spec-Gate: Phase + geleerter Checkpoint atomar. Ein Crash im
+                    # Fenster darf nie phase="plan" hinterlassen, sonst würde der
+                    # Stopp übersprungen (Runden-Zähler startet für den Plan bei 0).
+                    if spec_approval and not ctx.state.spec_approval_granted:
+                        ctx.state.phase = "awaiting_spec_approval"
+                        paused_for_spec_approval = True
+                    else:
+                        ctx.state.phase = "plan"
+                    ctx.save()  # Phase + geleerter Authoring-Checkpoint in EINEM Save
+                _spec_phase.end_payload["to_phase"] = ctx.state.phase
 
         if not paused_for_spec_approval:
-            # Phase "plan" — frisch erreicht ODER Resume nach Crash in der Plan-Phase.
-            # Spec UND Spec-Summary sind das Ergebnis der Vorphase: sie werden
-            # wiederhergestellt und sind ab hier fix — die Plan-Phase darf sie
-            # lesen, aber nicht umschreiben (Write(.adw/**) würde es erlauben).
-            for name in ("spec.md", SPEC_SUMMARY):
-                path = ctx.repo / ".adw" / name
-                archived = ctx.run_dir / name
-                if archived.is_file():
-                    # Die ARCHIVIERTE (reviewte) Fassung hat immer Vorrang: Ein
-                    # Crash mitten in der Archivierung kann die Checkout-Datei
-                    # bereits auf eine alte getrackte Version zurückgesetzt haben.
-                    shutil.copy2(archived, path)
-                elif not path.is_file():
-                    raise escalate(
-                        ctx,
-                        f"Resume in Phase 'plan', aber .adw/{name} fehlt — "
-                        "Spec-Ergebnis verloren, bitte Run neu starten",
-                    )
-                protected[path] = path.read_bytes()
+            with ctx.emitter.span("phase", {"name": "plan", "from_phase": "plan"}) as _plan_phase:
+                _plan_phase.end_payload = {"name": "plan", "to_phase": None}
+                # Phase "plan" — frisch erreicht ODER Resume nach Crash in der Plan-Phase.
+                # Spec UND Spec-Summary sind das Ergebnis der Vorphase: sie werden
+                # wiederhergestellt und sind ab hier fix — die Plan-Phase darf sie
+                # lesen, aber nicht umschreiben (Write(.adw/**) würde es erlauben).
+                for name in ("spec.md", SPEC_SUMMARY):
+                    path = ctx.repo / ".adw" / name
+                    archived = ctx.run_dir / name
+                    if archived.is_file():
+                        # Die ARCHIVIERTE (reviewte) Fassung hat immer Vorrang: Ein
+                        # Crash mitten in der Archivierung kann die Checkout-Datei
+                        # bereits auf eine alte getrackte Version zurückgesetzt haben.
+                        shutil.copy2(archived, path)
+                    elif not path.is_file():
+                        raise escalate(
+                            ctx,
+                            f"Resume in Phase 'plan', aber .adw/{name} fehlt — "
+                            "Spec-Ergebnis verloren, bitte Run neu starten",
+                        )
+                    protected[path] = path.read_bytes()
 
-            draft_task = _plan_draft_task(ctx)
-            plan_artifacts = ("plan.md", "contract.yaml")
-            drafts = _draft_stage(
-                ctx,
-                kind="plan",
-                agent_name="plan_agent",
-                task=draft_task,
-                artifacts=plan_artifacts,
-                protected=protected,
-                summary=PLAN_SUMMARY,
-            )
-            _reviewed_authoring_loop(
-                ctx,
-                agent_name="plan_synthesis",
-                initial_task=_synthesis_task(
-                    drafts, artifacts=plan_artifacts, summary=PLAN_SUMMARY, goal=draft_task
-                ),
-                review_kind="plan",
-                artifacts=plan_artifacts,
-                summary=PLAN_SUMMARY,
-                # Issue + Spec mitgeben: Codex prüft Plan/Kontrakt GEGEN die
-                # Akzeptanzkriterien und die tatsächliche Anforderung.
-                review_refs=(ISSUE_FILE, "spec.md", "plan.md", "contract.yaml"),
-                protected=protected,
-            )
+                draft_task = _plan_draft_task(ctx)
+                plan_artifacts = ("plan.md", "contract.yaml")
+                drafts = _draft_stage(
+                    ctx,
+                    kind="plan",
+                    agent_name="plan_agent",
+                    task=draft_task,
+                    artifacts=plan_artifacts,
+                    protected=protected,
+                    summary=PLAN_SUMMARY,
+                )
+                _reviewed_authoring_loop(
+                    ctx,
+                    agent_name="plan_synthesis",
+                    initial_task=_synthesis_task(
+                        drafts, artifacts=plan_artifacts, summary=PLAN_SUMMARY, goal=draft_task
+                    ),
+                    review_kind="plan",
+                    artifacts=plan_artifacts,
+                    summary=PLAN_SUMMARY,
+                    # Issue + Spec mitgeben: Codex prüft Plan/Kontrakt GEGEN die
+                    # Akzeptanzkriterien und die tatsächliche Anforderung.
+                    review_refs=(ISSUE_FILE, "spec.md", "plan.md", "contract.yaml"),
+                    protected=protected,
+                )
+                _plan_phase.end_payload["to_phase"] = ctx.state.phase
     finally:
         _restore_all(protected)
     # Archivieren + Haupt-Checkout säubern — auch beim Spec-Gate-Stopp, damit
@@ -645,7 +742,12 @@ def _reviewed_authoring_loop(
     # letzte Runde fährt und "ok" bzw. andere Findings erhält.
     known_findings_path = ctx.run_dir / f"authoring-{review_kind}-known-findings.md"
     while True:
-        result = ctx.agents.run(spec, task, cwd=ctx.repo, resume=session)
+        with ctx.emitter.span(
+            "round", {"loop": "authoring", "n": rounds + 1, "cap": AUTHORING_MAX_ROUNDS}
+        ) as _round:
+            _round.end_payload = {"outcome": "aborted"}
+            result = ctx.agents.run(spec, task, cwd=ctx.repo, resume=session)
+            _round.end_payload = {"outcome": "ran"}
         session = result.session_id or session
         with ctx.state_lock:
             ctx.state.authoring_session = session
@@ -981,12 +1083,26 @@ def _archive_artifacts(ctx: RunContext, overwrite_existing_archive: bool = True)
             continue
         if overwrite_existing_archive or not (ctx.run_dir / name).is_file():
             shutil.copy2(source, ctx.run_dir / name)
+            # AFTER the artifact was successfully written into the run folder.
+            archived = ctx.run_dir / name
+            data = archived.read_bytes()
+            ctx.emitter.emit(
+                "artifact",
+                {
+                    "name": name,
+                    "path": str(archived),
+                    "bytes": len(data),
+                    "sha256": hashlib.sha256(data).hexdigest(),
+                },
+                span=_current_span_id(ctx.emitter),
+            )
         _reset_checkout_artifact(ctx, name)
 
 
 # --- Phase 3: Build-Lanes ---------------------------------------------------
 
 
+@_phase_span("build")
 def run_build_phase(ctx: RunContext) -> None:
     """Phase 3: build agent(s) per Lane in isolated Worktrees, Gate loop until
     green (max. 10 iterations, Circuit-Breaker), commit by the orchestrator."""
@@ -1005,6 +1121,7 @@ def run_build_phase(ctx: RunContext) -> None:
     ctx.save()
 
 
+@_lane_span
 def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
     existing = ctx.state.lanes.get(lane)
     worktree = create_lane_worktree(ctx.repo, ctx.state.run_id, lane, ctx.config.base_branch)
@@ -1451,20 +1568,22 @@ def _run_lane_gates(
     """All Gates of the Lane — or the passed subset (RED check: tdd Gates only)."""
     gates = ctx.config.lanes[lane].gates if gates is None else gates
     extra_env = {f"{name.upper()}_PORT": str(port) for name, port in lane_state.ports.items()}
-    return run_gates(gates, cwd=worktree, extra_env=extra_env)
+    return run_gates(gates, cwd=worktree, extra_env=extra_env, emitter=ctx.emitter)
 
 
 def _commit_lane(ctx: RunContext, worktree: Path, lane: str, base_ref: str) -> None:
     _restore_approved_artifacts(ctx, worktree, base_ref)
     if not _worktree_dirty(ctx, worktree):
         return
+    subject = f"adw({ctx.state.run_id}/{lane}): Build-Ergebnis nach grünen Gates"
     _git(ctx, worktree, "add", "-A")
-    _git(
-        ctx,
-        worktree,
+    _git(ctx, worktree, "commit", "-m", subject)
+    # AFTER the commit actually happened (AC 9).
+    sha = _git(ctx, worktree, "rev-parse", "HEAD").strip()
+    ctx.emitter.emit(
         "commit",
-        "-m",
-        f"adw({ctx.state.run_id}/{lane}): Build-Ergebnis nach grünen Gates",
+        {"lane": lane, "sha": sha, "subject": subject},
+        span=_current_span_id(ctx.emitter),
     )
 
 
@@ -1587,6 +1706,7 @@ MAX_E2E_ROUNDS = 10
 INTEGRATION_LANE = "integration"
 
 
+@_phase_span("integration")
 def run_integration_phase(ctx: RunContext) -> None:
     """Phase 4: merge Lane branches onto an integration branch, run the E2E
     Gate; on red the E2E agent triages the failures back into the Lanes.
@@ -1694,6 +1814,12 @@ def _fresh_integration_worktree(ctx: RunContext, lanes: list[str]) -> Path:
                 f"Konflikt braucht menschliche Auflösung:\n"
                 f"{result.stdout.strip()}\n{result.stderr.strip()}",
             )
+        # AFTER the lane was actually merged without conflicts (AC 9).
+        ctx.emitter.emit(
+            "merge",
+            {"lane": lane, "target": INTEGRATION_LANE, "conflicts": []},
+            span=_current_span_id(ctx.emitter),
+        )
     return worktree
 
 
@@ -1718,7 +1844,7 @@ def _run_e2e_gate(ctx: RunContext, worktree: Path, lanes: list[str]) -> GateRepo
     for lane in lanes:
         for name, port in ctx.state.lanes[lane].ports.items():
             extra_env[f"{name.upper()}_PORT"] = str(port)
-    return run_gates([gate], cwd=worktree, extra_env=extra_env)
+    return run_gates([gate], cwd=worktree, extra_env=extra_env, emitter=ctx.emitter)
 
 
 def _triage_e2e(ctx: RunContext, worktree: Path, report: GateReport) -> ReviewResult:
@@ -1754,6 +1880,8 @@ def _dispatch_lane_fixes(
         if findings
         else ReviewResult(verdict="ok", findings=[]),
         active_lanes=lanes,
+        emitter=ctx.emitter,
+        span_id=_current_span_id(ctx.emitter),
     )
     with ctx.state_lock:
         # Erst ALLE Lanes validieren, dann mutieren — escalate() persistiert
@@ -1841,6 +1969,7 @@ def _advance_review_round(
     return advance
 
 
+@_phase_span("codex_review")
 def run_codex_review_phase(ctx: RunContext) -> None:
     """Phase 5: Codex reviews the integrated diff; Findings are routed via the
     lane field into the build Lanes, until the verdict is ok."""
@@ -1928,6 +2057,7 @@ def run_codex_review_phase(ctx: RunContext) -> None:
         ctx.save()
 
 
+@_phase_span("final_review")
 def run_final_review_phase(ctx: RunContext) -> None:
     """Phase 6: final reviewer (read-only) checks against the spec; Triage in
     code: scope_gap → follow-up report, rest → fix cycle (max. 3 per Lane)."""
@@ -1968,7 +2098,12 @@ def run_final_review_phase(ctx: RunContext) -> None:
         if not findings:
             break  # nur bereits vertagte Findings — sie stehen im Follow-up-Report
         review = ReviewResult(verdict="needs_fixes", findings=findings)
-        decision = triage_final_review(review, active_lanes=lanes)
+        decision = triage_final_review(
+            review,
+            active_lanes=lanes,
+            emitter=ctx.emitter,
+            span_id=_current_span_id(ctx.emitter),
+        )
         if decision.followups:
             _write_followups(ctx, decision.followups)
         if not decision.fix_tasks:
@@ -2020,6 +2155,7 @@ def run_final_review_phase(ctx: RunContext) -> None:
 MAX_CI_REENTRIES = 1
 
 
+@_phase_span("ci")
 def run_ci_phase(ctx: RunContext) -> None:
     """Phase 7: push the feature branch, poll the pipeline via glab. On red the
     log analyst reads the logs, ONE re-entry via the Lane loops — then a human."""
@@ -2051,6 +2187,7 @@ def run_ci_phase(ctx: RunContext) -> None:
                     run_gh=ctx.run_gh,
                     sleep=ctx.sleep,
                     sha=pushed_sha,
+                    emitter=ctx.emitter,
                 )
             else:
                 result = ci.poll_pipeline(
@@ -2060,6 +2197,7 @@ def run_ci_phase(ctx: RunContext) -> None:
                     run_glab=ctx.run_glab,
                     sleep=ctx.sleep,
                     sha=pushed_sha,
+                    emitter=ctx.emitter,
                 )
         except ci.CiTimeoutError as exc:
             raise escalate(ctx, f"CI-Timeout: {exc}") from exc

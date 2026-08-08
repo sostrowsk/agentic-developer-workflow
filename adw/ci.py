@@ -10,6 +10,7 @@ from urllib.parse import quote
 
 from adw.config import CiConfig
 from adw.env import safe_env
+from adw.events import NoOpEmitter
 
 _GLAB_TIMEOUT = 120
 _TERMINAL_STATUSES = {"success", "failed", "canceled", "skipped"}
@@ -60,6 +61,7 @@ def poll_pipeline(
     run_glab: RunGlab = run_glab,
     sleep: Callable[[float], None] = time.sleep,
     sha: str | None = None,
+    emitter=None,
 ) -> CiResult:
     """Polls the branch's latest pipeline until it reaches a final status.
 
@@ -70,24 +72,49 @@ def poll_pipeline(
     ``sha`` binds the poll to a specific push: right after a
     re-entry push, GitLab may still deliver the terminal pipeline of the
     PREVIOUS push — which must not judge the fresh result.
+
+    ``emitter`` is additive and optional (default: no-op): the wait is a
+    ``ci.wait`` span, each executed poll a ``ci.poll`` point. The end payload is
+    seeded with deterministic defaults and advanced per iteration.
     """
-    # Budget als Restzeit führen und den Sleep darauf kappen — sonst schläft
-    # ein 61s-Budget bei 60s-Intervall bis 120s.
-    remaining = float(cfg.timeout)
-    while True:
-        pipeline = _latest_pipeline(repo, branch, run_glab, sha=sha)
-        if pipeline is not None and sha is not None and pipeline.get("sha") != sha:
-            pipeline = None  # Defense in depth — der Server filtert bereits
-        if pipeline is not None and pipeline["status"] in _TERMINAL_STATUSES:
-            return _evaluate(repo, pipeline, cfg, run_glab)
-        if remaining <= 0:
-            raise CiTimeoutError(
-                f"Pipeline für {branch} nach {cfg.timeout}s nicht abgeschlossen "
-                f"(Status: {pipeline['status'] if pipeline else 'keine Pipeline gefunden'})"
+    emitter = emitter or NoOpEmitter()
+    with emitter.span("ci.wait", {"provider": "gitlab", "pipeline_ref": branch}) as handle:
+        handle.end_payload = {"status": "aborted", "polls": 0, "duration": 0}
+        # Budget als Restzeit führen und den Sleep darauf kappen — sonst schläft
+        # ein 61s-Budget bei 60s-Intervall bis 120s.
+        remaining = float(cfg.timeout)
+        polls = 0
+        elapsed = 0.0
+        while True:
+            pipeline = _latest_pipeline(repo, branch, run_glab, sha=sha)
+            if pipeline is not None and sha is not None and pipeline.get("sha") != sha:
+                pipeline = None  # Defense in depth — der Server filtert bereits
+            polls += 1
+            emitter.emit(
+                "ci.poll",
+                {
+                    "provider": "gitlab",
+                    "status": pipeline["status"] if pipeline else "keine Pipeline",
+                    "job": None,
+                },
+                span=handle.id,
             )
-        nap = min(float(cfg.poll_interval), remaining)
-        sleep(nap)
-        remaining -= nap
+            handle.end_payload["polls"] = polls
+            handle.end_payload["duration"] = elapsed
+            if pipeline is not None and pipeline["status"] in _TERMINAL_STATUSES:
+                result = _evaluate(repo, pipeline, cfg, run_glab)
+                handle.end_payload["status"] = pipeline["status"]
+                return result
+            if remaining <= 0:
+                handle.end_payload["status"] = "timeout"
+                raise CiTimeoutError(
+                    f"Pipeline für {branch} nach {cfg.timeout}s nicht abgeschlossen "
+                    f"(Status: {pipeline['status'] if pipeline else 'keine Pipeline gefunden'})"
+                )
+            nap = min(float(cfg.poll_interval), remaining)
+            sleep(nap)
+            remaining -= nap
+            elapsed += nap
 
 
 def _latest_pipeline(

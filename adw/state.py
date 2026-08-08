@@ -149,19 +149,28 @@ class RunState(BaseModel):
     def run_dir(self, repo: Path) -> Path:
         return repo / RUNS_RELPATH / self.run_id
 
-    def save(self, repo: Path) -> None:
+    def save(self, repo: Path, emitter=None, span_id: str | None = None) -> None:
         """Save a full snapshot atomically (tmp + rename, repo-wide flock).
 
         For concurrent mutations of the same run (parallel Lanes) use
         :meth:`update` instead — save() overwrites the whole
         snapshot and would lose foreign intermediate states.
+
+        ``emitter``/``span_id`` are additive and optional: the ``state.saved``
+        event is emitted ONLY after a successful persistence (AC 9), carrying the
+        enclosing span id the caller passes in. Absent an emitter (default) the
+        behaviour is byte-identical to before.
         """
         with _repo_lock(repo) as seq_fh:
             self.seq = _next_seq_locked(seq_fh, repo / RUNS_RELPATH)
             self._write_snapshot(repo)
+        if emitter is not None:
+            emitter.emit("state.saved", {"seq": self.seq, "phase": self.phase}, span=span_id)
 
     @classmethod
-    def update(cls, repo: Path, run_id: str, mutate) -> "RunState":
+    def update(
+        cls, repo: Path, run_id: str, mutate, emitter=None, span_id: str | None = None
+    ) -> "RunState":
         """Load → mutate → write as ONE transaction under the repo lock.
 
         The only loss-free way to modify a run from multiple threads/processes
@@ -172,7 +181,9 @@ class RunState(BaseModel):
             mutate(state)
             state.seq = _next_seq_locked(seq_fh, repo / RUNS_RELPATH)
             state._write_snapshot(repo)
-            return state
+        if emitter is not None:
+            emitter.emit("state.saved", {"seq": state.seq, "phase": state.phase}, span=span_id)
+        return state
 
     def _write_snapshot(self, repo: Path) -> None:
         run_dir = self.run_dir(repo)

@@ -4,8 +4,11 @@ Exit codes: 0 = done, 2 = awaiting_approval (plan-approval pause),
 1 = escalation or error.
 """
 
+import contextlib
 import json
 import re
+import time
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated
 
@@ -16,12 +19,14 @@ from adw import ci, github
 from adw.agents import AgentRunError, SdkAgentRunner
 from adw.codex import CodexRunner
 from adw.config import AdwConfig, ConfigError
+from adw.events import EventEmitter
 from adw.findings import Finding, ReviewResult
 from adw.mock import MockAgentRunner, MockCodexRunner
 from adw.phases import (
     AwaitingApproval,
     EscalationError,
     RunContext,
+    _current_span_id,
     run_build_phase,
     run_ci_phase,
     run_codex_review_phase,
@@ -44,6 +49,57 @@ _run_gh = github.run_gh
 def _fail(message: str) -> typer.Exit:
     typer.echo(f"Fehler: {message}", err=True)
     return typer.Exit(1)
+
+
+def _adw_version() -> str:
+    try:
+        return version("adw")
+    except PackageNotFoundError:
+        return "unknown"
+
+
+def _run_start_payload(state: RunState, config: AdwConfig, repo: Path) -> dict:
+    return {
+        "issue": state.issue,
+        "parallel": state.parallel,
+        "dry_run": state.dry_run,
+        "repo": str(repo),
+        "base_branch": config.base_branch,
+        "adw_version": _adw_version(),
+        "lanes": list(config.lanes),
+    }
+
+
+# typer.Exit codes → run-span status (E1 status_mapping): 0=done, 2=awaiting,
+# everything else (1: EscalationError/AgentRunError, or an unexpected raise) = escalated.
+_EXIT_STATUS = {0: "done", 1: "escalated", EXIT_AWAITING_APPROVAL: "awaiting_approval"}
+
+
+@contextlib.contextmanager
+def _run_span(emitter: EventEmitter, state: RunState, config: AdwConfig, repo: Path):
+    """The `run` span around the whole CLI lifecycle (E1), at EVERY exit. The end
+    event is written before any exception propagates (span() writes end in its
+    finally); the exception itself propagates unchanged."""
+    start = time.monotonic()
+
+    def totals() -> dict:
+        return {"duration": time.monotonic() - start, "cost": 0.0, "tokens": 0}
+
+    with emitter.span("run", _run_start_payload(state, config, repo)) as handle:
+        handle.end_payload = {"status": "escalated", "totals": totals()}
+        try:
+            yield handle
+        except typer.Exit as exc:
+            handle.end_payload = {
+                "status": _EXIT_STATUS.get(exc.exit_code, "escalated"),
+                "totals": totals(),
+            }
+            raise
+        except BaseException:
+            handle.end_payload = {"status": "escalated", "totals": totals()}
+            raise
+        else:
+            handle.end_payload = {"status": "done", "totals": totals()}
 
 
 @app.command()
@@ -97,12 +153,17 @@ def run(
     # SOFORT persistieren: crasht der allererste Agent-Lauf, muss die
     # angezeigte run_id per `adw resume` auffindbar sein.
     ensure_runs_gitignored(repo)
-    state.save(repo)
-    ctx = _build_context(
-        repo, config, state, skip_approval=no_approval, spec_approval=spec_approval
-    )
-    typer.echo(f"Run {state.run_id} gestartet (Phase: {state.phase})")
-    _execute(ctx)
+    # E1: der eine Emitter dieses Runs wird NACH RunState.new und VOR dem ersten
+    # state.save erzeugt — das erste state.saved-Event liegt damit im run-Span.
+    emitter = EventEmitter(repo, state.run_id)
+    with _run_span(emitter, state, config, repo) as run_handle:
+        state.save(repo, emitter=emitter, span_id=run_handle.id)
+        ctx = _build_context(
+            repo, config, state, skip_approval=no_approval, spec_approval=spec_approval,
+            emitter=emitter,
+        )
+        typer.echo(f"Run {state.run_id} gestartet (Phase: {state.phase})")
+        _execute(ctx)
 
 
 @app.command()
@@ -120,9 +181,11 @@ def resume(
             f"lesen und einen neuen Run starten"
         )
     config = _config_for_continuation(repo, state, base_branch)
-    ctx = _build_context(repo, config, state)
-    typer.echo(f"Run {state.run_id} wird fortgesetzt (Phase: {state.phase})")
-    _execute(ctx)
+    emitter = EventEmitter(repo, state.run_id)
+    with _run_span(emitter, state, config, repo):
+        ctx = _build_context(repo, config, state, emitter=emitter)
+        typer.echo(f"Run {state.run_id} wird fortgesetzt (Phase: {state.phase})")
+        _execute(ctx)
 
 
 @app.command()
@@ -140,17 +203,22 @@ def approve(
             f"für Crash-Fortsetzung `adw resume` benutzen"
         )
     config = _config_for_continuation(repo, state, base_branch)
-    if state.phase == "awaiting_spec_approval":
-        # Spec approven: in die Plan-Phase übergehen. Der Lauf pausiert danach
-        # regulär beim Plan-Approval, sofern der Run nicht mit --no-approval lief.
-        state.spec_approval_granted = True
-        state.phase = "plan"
-    else:
-        state.approval_granted = True
-    state.save(repo)
-    ctx = _build_context(repo, config, state)
-    typer.echo(f"Approval erteilt — Run {state.run_id} läuft weiter")
-    _execute(ctx)
+    gate = "spec" if state.phase == "awaiting_spec_approval" else "plan"
+    emitter = EventEmitter(repo, state.run_id)
+    with _run_span(emitter, state, config, repo) as run_handle:
+        if state.phase == "awaiting_spec_approval":
+            # Spec approven: in die Plan-Phase übergehen. Der Lauf pausiert danach
+            # regulär beim Plan-Approval, sofern der Run nicht mit --no-approval lief.
+            state.spec_approval_granted = True
+            state.phase = "plan"
+        else:
+            state.approval_granted = True
+        state.save(repo, emitter=emitter, span_id=run_handle.id)
+        # granted: ein tatsächlich eingetretener Produktzustand (AC 9).
+        emitter.emit("approval", {"gate": gate, "event": "granted"}, span=run_handle.id)
+        ctx = _build_context(repo, config, state, emitter=emitter)
+        typer.echo(f"Approval erteilt — Run {state.run_id} läuft weiter")
+        _execute(ctx)
 
 
 @app.command()
@@ -193,6 +261,11 @@ def _execute(ctx: RunContext) -> None:
         run_final_review_phase(ctx)
         run_ci_phase(ctx)
     except AwaitingApproval:
+        # awaited: ein tatsächlich eingetretenes Warten am Gate (AC 9).
+        gate = "spec" if ctx.state.phase == "awaiting_spec_approval" else "plan"
+        ctx.emitter.emit(
+            "approval", {"gate": gate, "event": "awaited"}, span=_current_span_id(ctx.emitter)
+        )
         # Die Zusammenfassung der Synthese ist die Entscheidungsgrundlage am
         # Gate — sie liegt im ignorierten Run-Ordner und wäre sonst unsichtbar.
         if ctx.state.phase == "awaiting_spec_approval":
@@ -300,7 +373,12 @@ def _build_context(
     state: RunState,
     skip_approval: bool = False,
     spec_approval: bool = False,
+    emitter=None,
 ) -> RunContext:
+    if emitter is None:
+        from adw.events import NoOpEmitter
+
+        emitter = NoOpEmitter()
     if state.dry_run:
         config = _dry_run_config(config)
         agents, codex = _dry_run_runners()
@@ -313,6 +391,7 @@ def _build_context(
             run_glab=_dry_run_glab(config),
             run_gh=_dry_run_gh(config),
             sleep=lambda seconds: None,
+            emitter=emitter,
             skip_approval=skip_approval,
             spec_approval=spec_approval,
             dry_run=True,
@@ -321,8 +400,9 @@ def _build_context(
         repo=repo,
         config=config,
         state=state,
-        agents=SdkAgentRunner(),
-        codex=CodexRunner(),
+        agents=SdkAgentRunner(emitter=emitter),
+        codex=CodexRunner(emitter=emitter),
+        emitter=emitter,
         skip_approval=skip_approval,
         spec_approval=spec_approval,
     )

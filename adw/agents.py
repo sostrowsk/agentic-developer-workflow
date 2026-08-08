@@ -7,9 +7,16 @@ from pathlib import Path
 from typing import Protocol
 
 import anyio
-from claude_agent_sdk import ClaudeAgentOptions, query
+from claude_agent_sdk import (
+    ClaudeAgentOptions,
+    TextBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    query,
+)
 
 from adw.env import safe_env
+from adw.events import NoOpEmitter
 
 FABLE = "claude-fable-5"
 OPUS = "claude-opus-4-8"
@@ -163,6 +170,7 @@ class AgentRunner(Protocol):
         cwd: Path,
         resume: str | None = None,
         deny_read_paths: list[str] | None = None,
+        emitter=None,
     ) -> AgentResult: ...
 
 
@@ -366,8 +374,48 @@ def _require_stored_login() -> None:
     )
 
 
+def _mirror_block(emitter, span_id: str, block) -> None:
+    """Mirror ONE SDK content block into the event log — read-only, never
+    changes the collected result (AC 4). Unknown block types are ignored."""
+    if isinstance(block, TextBlock):
+        emitter.emit("agent.message", {"role": "assistant", "text": block.text}, span=span_id)
+    elif isinstance(block, ToolUseBlock):
+        emitter.emit(
+            "agent.tool.call",
+            {"tool": block.name, "tool_use_id": block.id, "input": block.input},
+            span=span_id,
+        )
+    elif isinstance(block, ToolResultBlock):
+        emitter.emit(
+            "agent.tool.result",
+            {
+                "tool_use_id": block.tool_use_id,
+                "is_error": block.is_error,
+                "content": block.content,
+            },
+            span=span_id,
+        )
+
+
+def _map_usage(raw: dict | None) -> dict:
+    """SDK token usage → the §4.4 usage shape (missing counters default to 0)."""
+    raw = raw or {}
+    return {
+        "input": raw.get("input_tokens", 0),
+        "output": raw.get("output_tokens", 0),
+        "cache_read": raw.get("cache_read_input_tokens", 0),
+        "cache_creation": raw.get("cache_creation_input_tokens", 0),
+    }
+
+
 class SdkAgentRunner:
     """Executes an agent node via the Claude Agent SDK (headless)."""
+
+    def __init__(self, emitter=None):
+        # Optional run emitter injected by the orchestrator, so ctx.agents.run()
+        # call sites need no per-call wiring; the explicit run(emitter=...) arg
+        # still wins (used by unit tests).
+        self._emitter = emitter
 
     def run(
         self,
@@ -376,8 +424,10 @@ class SdkAgentRunner:
         cwd: Path,
         resume: str | None = None,
         deny_read_paths: list[str] | None = None,
+        emitter=None,
     ) -> AgentResult:
         _require_stored_login()
+        emitter = emitter or self._emitter or NoOpEmitter()
         options = ClaudeAgentOptions(
             model=agent.model,
             cwd=str(cwd),
@@ -415,33 +465,72 @@ class SdkAgentRunner:
                 "append": agent.system_append,
             },
         )
-        return anyio.run(self._collect, task, options)
+        start_payload = {
+            "agent": agent.name,
+            "model": agent.model,
+            "tools": list(agent.tools),
+            "allowed_tools": list(agent.allowed_tools),
+            "cwd": str(cwd),
+            "resume_session": resume,
+            "prompt": task,
+            "system_append": agent.system_append,
+        }
+        with emitter.span("agent.run", start_payload) as handle:
+            # Deterministic end-payload BEFORE the run: an unexpected exception
+            # unwinding the span still writes a complete end record.
+            handle.end_payload = {
+                "session_id": None,
+                "result_text": "",
+                "usage": _map_usage(None),
+                "cost_usd": 0.0,
+                "is_error": True,
+            }
+            return anyio.run(self._collect, task, options, emitter, handle)
 
     @staticmethod
-    async def _collect(task: str, options: ClaudeAgentOptions) -> AgentResult:
+    async def _collect(task: str, options: ClaudeAgentOptions, emitter, handle) -> AgentResult:
+        span_id = handle.id
         session_id: str | None = None
         assistant_texts: list[str] = []
         final_text: str | None = None
         is_error = False
+        usage_raw: dict | None = None
+        cost_usd: float = 0.0
         async for message in query(prompt=task, options=options):
             found = getattr(message, "session_id", None)
             if found is None and isinstance(getattr(message, "data", None), dict):
                 found = message.data.get("session_id")
             if found:
                 session_id = found
+            msg_usage = getattr(message, "usage", None)
+            if isinstance(msg_usage, dict):
+                usage_raw = msg_usage
             for block in getattr(message, "content", []) or []:
                 text = getattr(block, "text", None)
                 if text:
                     assistant_texts.append(text)
+                # Mirroring is read-only — the two lines above still compute the
+                # result exactly as before (AC 4 bit-identity).
+                _mirror_block(emitter, span_id, block)
             if hasattr(message, "result"):
                 final_text = message.result
                 is_error = bool(getattr(message, "is_error", False))
+                cost = getattr(message, "total_cost_usd", None)
+                if cost is not None:
+                    cost_usd = cost
                 if is_error and not final_text:
                     # SDK liefert die eigentliche Ursache ggf. strukturiert.
                     errors = getattr(message, "errors", None)
                     if errors:
                         final_text = "; ".join(str(item) for item in errors)
+        text = final_text if final_text else "\n".join(assistant_texts)
+        handle.end_payload = {
+            "session_id": session_id,
+            "result_text": text,
+            "usage": _map_usage(usage_raw),
+            "cost_usd": cost_usd,
+            "is_error": is_error,
+        }
         if is_error:
             raise AgentRunError(f"Agent-Lauf fehlgeschlagen: {final_text or '(kein Result)'}")
-        text = final_text if final_text else "\n".join(assistant_texts)
         return AgentResult(text=text, session_id=session_id)
