@@ -2,6 +2,7 @@
 
 import os
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -158,6 +159,23 @@ class AgentSpec:
 class AgentResult:
     text: str
     session_id: str | None
+
+
+class RunTotals:
+    """Process-wide accumulator of agent cost/tokens for the run-end ``totals``.
+
+    Thread-safe: parallel Lane build agents update it concurrently. A dry run
+    uses the mock runner, which never calls ``add``, so its totals stay 0/0."""
+
+    def __init__(self) -> None:
+        self.cost_usd: float = 0.0
+        self.tokens: int = 0
+        self._lock = threading.Lock()
+
+    def add(self, cost_usd: float | None, tokens: int | None) -> None:
+        with self._lock:
+            self.cost_usd += cost_usd or 0.0
+            self.tokens += tokens or 0
 
 
 class AgentRunner(Protocol):
@@ -411,11 +429,13 @@ def _map_usage(raw: dict | None) -> dict:
 class SdkAgentRunner:
     """Executes an agent node via the Claude Agent SDK (headless)."""
 
-    def __init__(self, emitter=None):
+    def __init__(self, emitter=None, totals=None):
         # Optional run emitter injected by the orchestrator, so ctx.agents.run()
         # call sites need no per-call wiring; the explicit run(emitter=...) arg
-        # still wins (used by unit tests).
+        # still wins (used by unit tests). ``totals`` (a RunTotals) accumulates
+        # this run's agent cost/tokens for the run-end totals.
         self._emitter = emitter
+        self._totals = totals
 
     def run(
         self,
@@ -485,7 +505,18 @@ class SdkAgentRunner:
                 "cost_usd": 0.0,
                 "is_error": True,
             }
-            return anyio.run(self._collect, task, options, emitter, handle)
+            try:
+                return anyio.run(self._collect, task, options, emitter, handle)
+            finally:
+                # Accumulate the run's cost/tokens even on AgentRunError — the
+                # cost was incurred; handle.end_payload is set by _collect before
+                # it raises (or holds the defaults).
+                if self._totals is not None:
+                    usage = handle.end_payload.get("usage") or {}
+                    self._totals.add(
+                        handle.end_payload.get("cost_usd"),
+                        sum(v for v in usage.values() if isinstance(v, int)),
+                    )
 
     @staticmethod
     async def _collect(task: str, options: ClaudeAgentOptions, emitter, handle) -> AgentResult:

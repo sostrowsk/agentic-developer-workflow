@@ -257,6 +257,45 @@ def test_collect_result_bit_identical_across_emitters(target_repo, patched_query
     assert with_active.session_id == with_noop.session_id == without.session_id == "sess-final"
 
 
+def test_agent_run_accumulates_cost_and_tokens_into_run_totals(target_repo, patched_query):
+    """P3: SdkAgentRunner feeds each run's cost/tokens into the shared RunTotals
+    accumulator that the run-end totals are computed from."""
+    from adw.agents import RunTotals
+
+    totals = RunTotals()
+    patched_query(make_stream_factory())
+    SdkAgentRunner(emitter=NoOpEmitter(), totals=totals).run(
+        REGISTRY["spec_agent"], "task", cwd=target_repo
+    )
+    assert totals.cost_usd == 0.0123
+    assert totals.tokens == sum(USAGE.values())  # input+output+cache_read+cache_creation
+    # A second run adds up.
+    patched_query(make_stream_factory())
+    SdkAgentRunner(emitter=NoOpEmitter(), totals=totals).run(
+        REGISTRY["spec_agent"], "task", cwd=target_repo
+    )
+    assert totals.cost_usd == pytest.approx(0.0246)
+    assert totals.tokens == 2 * sum(USAGE.values())
+
+
+def test_run_end_totals_reflect_the_accumulator(target_repo):
+    """P3: the run-end totals report the aggregated cost/tokens, not hardcoded 0."""
+    from adw.agents import RunTotals
+    from adw.cli import _run_span
+    from adw.config import AdwConfig
+
+    totals = RunTotals()
+    totals.add(0.5, 4321)
+    emitter = EventEmitter(target_repo, RUN_ID)
+    state = RunState.new(issue="T", parallel=False)
+    with _run_span(emitter, state, AdwConfig.load(target_repo), target_repo, totals):
+        pass
+    (end,) = of_type(read_events(target_repo, RUN_ID), "run", "end")
+    assert set(end["payload"]["totals"]) == {"duration", "cost", "tokens"}
+    assert end["payload"]["totals"]["cost"] == 0.5
+    assert end["payload"]["totals"]["tokens"] == 4321
+
+
 def test_agent_run_error_semantics_preserved_and_end_marks_is_error(target_repo, patched_query):
     """AC 4/AC-exception: an error result still raises AgentRunError with the
     emitter active, and the agent.run end event is written with is_error=True."""
@@ -490,6 +529,30 @@ def test_run_span_status_escalated_and_escalation_point(target_repo):
     breakers = of_type(records, "circuit_breaker")
     assert breakers, "no-progress must emit a circuit_breaker point"
     assert set(breakers[0]["payload"]) == {"keys", "scope"}
+
+
+def test_resume_base_branch_repin_saves_inside_the_run_span(target_repo):
+    """E1/AC 7: a `resume --base-branch other` (no lanes yet) persists the
+    re-pinned base branch INSIDE the run span — its state.saved lies within the
+    resume command's run span, not before it."""
+    paused = cli_run(target_repo)  # awaiting_approval, lanes still empty
+    assert paused.exit_code == 2, paused.output
+    state = RunState.find_latest(target_repo)
+    resumed = runner.invoke(
+        app, ["resume", state.run_id, "--repo", str(target_repo), "--base-branch", "develop"]
+    )
+    # Still awaiting approval → exits 2 again; the point is the persistence order.
+    assert resumed.exit_code == 2, resumed.output
+    records = read_events(target_repo, state.run_id)
+    run_starts = of_type(records, "run", "start")
+    run_ends = of_type(records, "run", "end")
+    assert len(run_starts) == 2 and len(run_ends) == 2  # run + resume commands
+    resume_start = run_starts[-1]["seq"]
+    resume_end = run_ends[-1]["seq"]
+    saved_in_resume = [
+        r for r in of_type(records, "state.saved") if resume_start < r["seq"] < resume_end
+    ]
+    assert saved_in_resume, "the re-pin save must emit state.saved inside the resume run span"
 
 
 def test_run_span_opens_before_first_state_saved(target_repo):

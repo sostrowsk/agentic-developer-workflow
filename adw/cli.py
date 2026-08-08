@@ -16,7 +16,7 @@ import typer
 from pydantic import ValidationError
 
 from adw import ci, github
-from adw.agents import AgentRunError, SdkAgentRunner
+from adw.agents import AgentRunError, RunTotals, SdkAgentRunner
 from adw.codex import CodexRunner
 from adw.config import AdwConfig, ConfigError
 from adw.events import EventEmitter
@@ -76,14 +76,25 @@ _EXIT_STATUS = {0: "done", 1: "escalated", EXIT_AWAITING_APPROVAL: "awaiting_app
 
 
 @contextlib.contextmanager
-def _run_span(emitter: EventEmitter, state: RunState, config: AdwConfig, repo: Path):
+def _run_span(
+    emitter: EventEmitter,
+    state: RunState,
+    config: AdwConfig,
+    repo: Path,
+    run_totals: RunTotals,
+):
     """The `run` span around the whole CLI lifecycle (E1), at EVERY exit. The end
     event is written before any exception propagates (span() writes end in its
-    finally); the exception itself propagates unchanged."""
+    finally); the exception itself propagates unchanged. ``run_totals`` is the
+    live accumulator the agent runner feeds; a dry run leaves it 0/0."""
     start = time.monotonic()
 
     def totals() -> dict:
-        return {"duration": time.monotonic() - start, "cost": 0.0, "tokens": 0}
+        return {
+            "duration": time.monotonic() - start,
+            "cost": run_totals.cost_usd,
+            "tokens": run_totals.tokens,
+        }
 
     with emitter.span("run", _run_start_payload(state, config, repo)) as handle:
         handle.end_payload = {"status": "escalated", "totals": totals()}
@@ -156,11 +167,12 @@ def run(
     # E1: der eine Emitter dieses Runs wird NACH RunState.new und VOR dem ersten
     # state.save erzeugt — das erste state.saved-Event liegt damit im run-Span.
     emitter = EventEmitter(repo, state.run_id)
-    with _run_span(emitter, state, config, repo) as run_handle:
+    run_totals = RunTotals()
+    with _run_span(emitter, state, config, repo, run_totals) as run_handle:
         state.save(repo, emitter=emitter, span_id=run_handle.id)
         ctx = _build_context(
             repo, config, state, skip_approval=no_approval, spec_approval=spec_approval,
-            emitter=emitter,
+            emitter=emitter, run_totals=run_totals,
         )
         typer.echo(f"Run {state.run_id} gestartet (Phase: {state.phase})")
         _execute(ctx)
@@ -180,10 +192,15 @@ def resume(
             f"Run {run_id} ist eskaliert — Report unter .adw/runs/{run_id}/escalation.md "
             f"lesen und einen neuen Run starten"
         )
-    config = _config_for_continuation(repo, state, base_branch)
+    config, rebased = _config_for_continuation(repo, state, base_branch)
     emitter = EventEmitter(repo, state.run_id)
-    with _run_span(emitter, state, config, repo):
-        ctx = _build_context(repo, config, state, emitter=emitter)
+    run_totals = RunTotals()
+    with _run_span(emitter, state, config, repo, run_totals) as run_handle:
+        if rebased:
+            # First persistence of this command — inside the run span (E1), so
+            # its state.saved event is emitted within the span.
+            state.save(repo, emitter=emitter, span_id=run_handle.id)
+        ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
         typer.echo(f"Run {state.run_id} wird fortgesetzt (Phase: {state.phase})")
         _execute(ctx)
 
@@ -202,10 +219,13 @@ def approve(
             f"Run {run_id} wartet nicht auf Approval (Phase: {state.phase}) — "
             f"für Crash-Fortsetzung `adw resume` benutzen"
         )
-    config = _config_for_continuation(repo, state, base_branch)
+    # A re-pinned base branch is only mutated in memory here; approve's own save
+    # below (inside the run span) persists it together with the approval grant.
+    config, _rebased = _config_for_continuation(repo, state, base_branch)
     gate = "spec" if state.phase == "awaiting_spec_approval" else "plan"
     emitter = EventEmitter(repo, state.run_id)
-    with _run_span(emitter, state, config, repo) as run_handle:
+    run_totals = RunTotals()
+    with _run_span(emitter, state, config, repo, run_totals) as run_handle:
         if state.phase == "awaiting_spec_approval":
             # Spec approven: in die Plan-Phase übergehen. Der Lauf pausiert danach
             # regulär beim Plan-Approval, sofern der Run nicht mit --no-approval lief.
@@ -216,7 +236,7 @@ def approve(
         state.save(repo, emitter=emitter, span_id=run_handle.id)
         # granted: ein tatsächlich eingetretener Produktzustand (AC 9).
         emitter.emit("approval", {"gate": gate, "event": "granted"}, span=run_handle.id)
-        ctx = _build_context(repo, config, state, emitter=emitter)
+        ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
         typer.echo(f"Approval erteilt — Run {state.run_id} läuft weiter")
         _execute(ctx)
 
@@ -318,13 +338,19 @@ def _load_config(repo: Path, base_branch: str | None) -> AdwConfig:
     return config
 
 
-def _config_for_continuation(repo: Path, state: RunState, cli_override: str | None) -> AdwConfig:
+def _config_for_continuation(
+    repo: Path, state: RunState, cli_override: str | None
+) -> tuple[AdwConfig, bool]:
     """Config for resume/approve: the CLI flag wins, otherwise the run's override.
 
-    Validate first, THEN persist — a rejected override must not poison the
-    state. Once the Lanes have been created the base branch is
-    fixed: the Lanes are forked from the old base, a switch would yield
-    inconsistent diffs and merges."""
+    Validate first (config loading stays OUTSIDE the run span, contract excludes),
+    then mutate the pinned base branch IN MEMORY only — the persistence is the
+    run's first save and belongs INSIDE the run span (E1), so the caller does it
+    with the emitter/span. Returns ``(config, rebased)`` where ``rebased`` is
+    True iff the pinned base branch changed and must be persisted.
+
+    Once the Lanes have been created the base branch is fixed: the Lanes are
+    forked from the old base, a switch would yield inconsistent diffs and merges."""
     candidate = cli_override if cli_override is not None else state.pinned_base_branch
     config = _load_config(repo, candidate)
     if cli_override is not None and cli_override != state.pinned_base_branch:
@@ -334,8 +360,8 @@ def _config_for_continuation(repo: Path, state: RunState, cli_override: str | No
                 "werden — die Lanes sind vom bisherigen Base-Branch geforkt"
             )
         state.pinned_base_branch = cli_override
-        state.save(repo)
-    return config
+        return config, True
+    return config, False
 
 
 def _load_state(repo: Path, run_id: str) -> RunState:
@@ -374,6 +400,7 @@ def _build_context(
     skip_approval: bool = False,
     spec_approval: bool = False,
     emitter=None,
+    run_totals: RunTotals | None = None,
 ) -> RunContext:
     if emitter is None:
         from adw.events import NoOpEmitter
@@ -400,7 +427,7 @@ def _build_context(
         repo=repo,
         config=config,
         state=state,
-        agents=SdkAgentRunner(emitter=emitter),
+        agents=SdkAgentRunner(emitter=emitter, totals=run_totals),
         codex=CodexRunner(emitter=emitter),
         emitter=emitter,
         skip_approval=skip_approval,

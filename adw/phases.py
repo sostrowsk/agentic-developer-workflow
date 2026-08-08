@@ -92,7 +92,15 @@ def _current_span_id(emitter) -> str | None:
     Point events must carry the id of their enclosing span (GUI-SPEC §4.2), but
     emit() does not read the thread-local stack itself. This reads the top of
     that stack so point-emitters (state.saved, escalation, …) attribute to the
-    innermost run/phase/lane/round span active where they fire."""
+    innermost run/phase/lane/round span active where they fire.
+
+    KNOWN LIMITATION / FOLLOW-UP (reported, deliberately not fixed here): the
+    frozen ``adw/events.py`` (AC 11) exposes no public accessor for the active
+    span, so this reads the private ``emitter._stack()``. If a later run changes
+    those internals, point attribution degrades to null. The proper fix is a
+    separate run that adds a public ``current_span_id()`` to the emitter API and
+    switches this over; until then ``test_dry_run_points_all_carry_a_non_null_span``
+    is the regression guard."""
     stack = getattr(emitter, "_stack", None)
     if stack is None:  # NoOpEmitter has no stack
         return None
