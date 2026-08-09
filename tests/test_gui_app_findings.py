@@ -14,12 +14,14 @@ from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+    CODEX_STDOUT,
+    FINAL_ANSWER,
+    GATE_OUTPUT,
     XSS_BREAKOUT,
     comprehensive_lines,
     escalated_lines,
     home,
     parse_sse,
-    simple_run_lines,
     write_run,
     xss_lines,
 )
@@ -154,21 +156,31 @@ def test_detail_phase_bar_marks_escalated_phase_failed(home, tmp_path):  # noqa:
 # --- P2: the live client actually incorporates streamed records -----------------
 
 
-def test_client_js_incorporates_stream_records_into_the_view(home, tmp_path):  # noqa: F811
-    """P2: the served client must consume stream records into the visible view
-    (phase bar, trace tree and panes), not merely dedupe and dispatch a no-op
-    event. Guards the regression where nothing listened to the stream."""
-    client, slug, _ = _client_with(tmp_path, "abcdef12", simple_run_lines("x"), phase="done")
+def test_client_renders_live_through_the_shared_server_snapshot_path(home, tmp_path):  # noqa: F811
+    """P2/AC 14/17/20: a live-observed run must reach the completed-snapshot
+    representation. The client must use ONE shared rendering path — re-fetch the
+    server-rendered detail snapshot and swap it in without a page reload, driven
+    by the SSE stream — rather than a divergent JS re-implementation of the tree/
+    panes. (A headless-browser comparison is out of scope: E5 forbids a JS/node
+    toolchain; the guarantee is structural — live and snapshot share one
+    endpoint and thus one rendering path.)"""
+    client, slug, _ = _client_with(tmp_path, "abcdef12", comprehensive_lines(), phase="done")
     js = client.get("/static/app.js").text
 
-    # It listens to the stream and mutates the DOM from the incoming record.
-    assert "onmessage" in js
-    assert "createElement" in js or "insertAdjacentHTML" in js
-    # It updates the three contract surfaces incrementally.
-    assert "phase" in js  # phase bar
-    assert "trace" in js  # trace tree container
-    assert "pane" in js  # detail panes
-    # The detail page exposes the hooks the client needs to target nodes/phases.
-    detail_html = client.get(f"/runs/{slug}/abcdef12").text
-    assert "data-name" in detail_html  # phase cells addressable by name
-    assert "data-span" in detail_html  # tree nodes/panes addressable by span id
+    # Driven by the stream ...
+    assert "EventSource" in js and "onmessage" in js
+    # ... but rendered by re-fetching the server snapshot and swapping it in place
+    # (no page reload) — the SAME path that produced the initial page.
+    assert "fetch(" in js
+    assert "replaceWith" in js
+    assert "run-header" in js and "detail" in js  # phase bar + tree/panes/problems
+    # It must NOT re-implement node/detail rendering in JS (the divergent path the
+    # previous defect used): building tree nodes/panes client-side is forbidden.
+    assert "createElement" not in js
+
+    # The snapshot the client re-fetches is COMPLETE, so once refreshed the live
+    # view matches a freshly opened completed run: final answer, gate output,
+    # review findings and raw stdout are all present in that one server page.
+    html = client.get(f"/runs/{slug}/abcdef12").text
+    for expected in (FINAL_ANSWER, GATE_OUTPUT, "Missing null check", CODEX_STDOUT):
+        assert expected in html
