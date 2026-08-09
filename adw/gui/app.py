@@ -238,6 +238,37 @@ def _node_status(node):
     return "done"
 
 
+def _subtree_cost(node):
+    """Sum of ``cost_usd`` over every ``agent.run`` in the subtree, or None when no
+    descendant carries usage (AC 11: an absent cost is null, not zero)."""
+    total = None
+    if _is_span(node):
+        if node.type == "agent.run":
+            cost = (node.end_payload or {}).get("cost_usd")
+            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+                total = float(cost)
+        for child in node.children:
+            child_cost = _subtree_cost(child)
+            if child_cost is not None:
+                total = (total or 0.0) + child_cost
+    return total
+
+
+def _aggregate_outcome(node):
+    """A per-node-type outcome for phase/lane/round aggregates: the frozen end
+    payloads use different keys (round: ``outcome``, lane: ``completed``, phase:
+    ``to_phase``), so none of them is a literal ``outcome`` field."""
+    ep = node.end_payload or {}
+    if node.type == "round":
+        return ep.get("outcome")
+    if node.type == "lane":
+        completed = ep.get("completed")
+        return "completed" if completed is True else ("failed" if completed is False else None)
+    if node.type == "phase":
+        return ep.get("to_phase")
+    return None
+
+
 def _serialize(node) -> dict:
     if _is_span(node):
         payload = node.start_payload if node.start_payload is not None else node.end_payload
@@ -259,6 +290,12 @@ def _serialize(node) -> dict:
         if node.type == "round" and isinstance(node.start_payload, dict):
             d["n"] = node.start_payload.get("n")
             d["cap"] = node.start_payload.get("cap")
+        if node.type in ("phase", "lane", "round"):
+            # Aggregate the children (contract detail_pane.aggregates): duration is
+            # the span's own; cost is summed from descendant agent.run usage;
+            # outcome is derived per node type.
+            d["cost"] = _subtree_cost(node)
+            d["outcome"] = _aggregate_outcome(node)
         return d
     return {
         "type": node.type,
@@ -286,15 +323,19 @@ def _run_detail(ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path) -> di
 def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
     entries: list[dict] = []
     for ref in refs.values():
-        runs_dir = Path(ref.path) / RUNS_RELPATH if ref.path else None
-        if not ref.exists or runs_dir is None or not runs_dir.is_dir():
+        if not ref.exists or not ref.path:
+            # The placeholder is reserved for an UNREACHABLE repo (its registered
+            # path is gone) — not for a reachable repo that simply has no runs yet.
             entries.append(
                 {"repo": ref.slug, "repo_exists": False, "hint": ref.path or "(unknown path)"}
             )
             continue
+        runs_dir = Path(ref.path) / RUNS_RELPATH
         runs_root = _runs_root(ref.path)
-        if runs_root is None:
-            continue  # the runs root escapes the repo — expose nothing for it
+        if runs_root is None or not runs_dir.is_dir():
+            # Reachable repo, but no readable/valid runs directory (none yet, or an
+            # escaping runs root): contribute nothing — never a false 'unavailable'.
+            continue
         for child in sorted(runs_dir.iterdir()):
             if not RUN_ID_RE.fullmatch(child.name):
                 continue

@@ -41,6 +41,23 @@ main.detail { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .node .dur { color: var(--muted); margin-left: 0.4rem; font-size: 0.8rem; }
 .node .round { color: var(--accent); margin-left: 0.3rem; }
 
+/* Expand/collapse: native <details>/<summary>, no JS needed to toggle. */
+.trace summary { cursor: pointer; }
+.node .label { cursor: pointer; }
+.node.selected > .label,
+.node.selected > details > summary > .label { font-weight: 600; text-decoration: underline; }
+
+/* Per-status icon glyph coloured by the node's serialized status. */
+.node .icon { display: inline-block; width: 1.2em; text-align: center; color: var(--muted); }
+.node-running > .icon, .node-running > details > summary > .icon { color: #c90; }
+.node-failed > .icon, .node-failed > details > summary > .icon { color: #c33; }
+.node-done > .icon, .node-done > details > summary > .icon,
+.node-passed > .icon, .node-passed > details > summary > .icon { color: var(--accent); }
+
+/* Node-dependent detail pane: only the selected node's pane is shown. */
+.panes .pane { display: none; border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; margin-bottom: 0.6rem; }
+.panes .pane.selected { display: block; }
+
 .pane { border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; margin-bottom: 0.6rem; }
 .pane h3 { margin: 0 0 0.4rem; font-size: 1rem; }
 .pane .type { color: var(--muted); font-weight: normal; }

@@ -22,6 +22,7 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     XSS_BREAKOUT,
     comprehensive_lines,
     escalated_lines,
+    find_node,
     home,
     parse_sse,
     write_run,
@@ -218,3 +219,85 @@ def test_client_renders_live_through_the_shared_server_snapshot_path(home, tmp_p
     html = client.get(f"/runs/{slug}/abcdef12").text
     for expected in (FINAL_ANSWER, GATE_OUTPUT, "Missing null check", CODEX_STDOUT):
         assert expected in html
+
+
+# --- P2: trace tree is expandable and shows per-node status icons ---------------
+
+
+def test_trace_tree_is_expandable_with_status_icons(home, tmp_path):  # noqa: F811
+    """AC 13: nodes with children collapse/expand (native <details>/<summary>) and
+    every node shows a status icon driven by its serialized status."""
+    client, slug, _ = _client_with(tmp_path, "abcdef12", comprehensive_lines(), phase="done")
+    html = client.get(f"/runs/{slug}/abcdef12").text
+
+    assert "<details" in html and "<summary" in html  # expandable structure
+    assert 'class="icon"' in html
+    # Comprehensive has a failed gate (✗) and completed spans (✓).
+    assert "✓" in html and "✗" in html
+    assert "node-failed" in html and "node-done" in html  # status classes for CSS
+
+
+# --- P2: the detail pane is node-dependent (click to select) --------------------
+
+
+def test_detail_pane_is_selectable_per_node(home, tmp_path):  # noqa: F811
+    """AC 14: the pane depends on the selected node. Node <li> and its pane share a
+    data-seq (addressable pairing), and the client wires click-to-select
+    (preserved across the live swap)."""
+    client, slug, _ = _client_with(tmp_path, "abcdef12", comprehensive_lines(), phase="done")
+    html = client.get(f"/runs/{slug}/abcdef12").text
+    # The agent.run node (seq 5) and its pane both carry data-seq="5".
+    assert html.count('data-seq="5"') >= 2
+
+    js = client.get("/static/app.js").text
+    assert 'addEventListener("click"' in js
+    assert "closest" in js and "data-seq" in js
+    assert "selected" in js  # toggles the selected pane/node
+
+
+# --- P2: phase/lane/round aggregate cost and outcome ----------------------------
+
+
+def test_aggregate_panes_expose_cost_and_derived_outcome(home, tmp_path):  # noqa: F811
+    """AC 14/aggregates: phase/lane/round panes aggregate the children — the
+    summed agent.run cost and a per-type outcome (round: outcome, lane: completed,
+    phase: to_phase), not the raw (absent) ``outcome`` key."""
+    client, slug, _ = _client_with(tmp_path, "abcdef12", comprehensive_lines(), phase="done")
+    tree = client.get(f"/api/runs/{slug}/abcdef12").json()["tree"]
+
+    phase = find_node(tree, "phase")
+    lane = find_node(tree, "lane")
+    rnd = find_node(tree, "round")
+    assert phase["cost"] == 0.4 and phase["outcome"] == "done"
+    assert lane["cost"] == 0.4 and lane["outcome"] == "completed"
+    assert rnd["cost"] == 0.4 and rnd["outcome"] == "ok"
+
+    html = client.get(f"/runs/{slug}/abcdef12").text
+    assert "cost: 0.4" in html  # aggregated cost is rendered
+    assert "outcome: done" in html and "outcome: completed" in html  # non-empty
+
+
+# --- P3: codex.review findings table has a Key column ---------------------------
+
+
+def test_codex_findings_table_has_key_column(home, tmp_path):  # noqa: F811
+    """AC 14/§7: the findings table carries the pinned Key column (file|issue, the
+    same key phases.py uses)."""
+    client, slug, _ = _client_with(tmp_path, "abcdef12", comprehensive_lines(), phase="done")
+    html = client.get(f"/runs/{slug}/abcdef12").text
+    assert "<th>key</th>" in html
+    assert "parser.py|Missing null check before parse" in html
+
+
+# --- P3: reachable repo without runs is not falsely 'unavailable' ---------------
+
+
+def test_reachable_repo_without_runs_is_not_reported_unavailable(home, tmp_path):  # noqa: F811
+    """P3: a reachable repo that simply has no runs yet must not appear as an
+    ``repo_exists: false`` placeholder — that is reserved for unreachable repos."""
+    repo = tmp_path / "fresh_repo"
+    repo.mkdir()  # exists, but no .adw/runs directory yet
+    client = TestClient(create_app(repos=[str(repo)]))
+    data = client.get("/api/runs").json()
+    slug = _slug_for(repo)
+    assert not any(e.get("repo") == slug and e.get("repo_exists") is False for e in data)

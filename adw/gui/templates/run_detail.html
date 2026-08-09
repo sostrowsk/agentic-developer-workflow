@@ -5,13 +5,22 @@
   <title>Run {{ detail.run.run_id }}</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
-{% macro tree_item(node) %}
-  <li class="node node-{{ node.status }}" data-seq="{{ node.seq }}">
+{% macro status_icon(status) %}{% if status == "failed" %}✗{% elif status in ["done", "passed", "completed"] %}✓{% elif status == "running" %}◐{% else %}•{% endif %}{% endmacro %}
+{% macro tree_row(node) %}
+    <span class="icon" aria-hidden="true">{{ status_icon(node.status) }}</span>
     <span class="label">{{ node.label }}</span>
     {% if node.duration is not none %}<span class="dur">{{ "%.1f"|format(node.duration) }}s</span>{% endif %}
     {% if node.type == "round" and node.n is defined %}<span class="round">{{ node.n }}/{{ node.cap }}</span>{% endif %}
+{% endmacro %}
+{% macro tree_item(node) %}
+  <li class="node node-{{ node.status }}" data-seq="{{ node.seq }}">
     {% if node.children %}
-    <ul>{% for child in node.children %}{{ tree_item(child) }}{% endfor %}</ul>
+    <details open>
+      <summary>{{ tree_row(node) }}</summary>
+      <ul>{% for child in node.children %}{{ tree_item(child) }}{% endfor %}</ul>
+    </details>
+    {% else %}
+    {{ tree_row(node) }}
     {% endif %}
   </li>
 {% endmacro %}
@@ -49,10 +58,10 @@
       </div>
     {% elif node.type == "codex.review" %}
       <table class="findings">
-        <thead><tr><th>severity</th><th>file</th><th>message</th></tr></thead>
+        <thead><tr><th>severity</th><th>key</th><th>file</th><th>message</th></tr></thead>
         <tbody>
         {% for f in (node.end_payload.findings if node.end_payload else []) %}
-          <tr><td>{{ f.severity }}</td><td>{{ f.file }}</td><td>{{ f.issue }}</td></tr>
+          <tr><td>{{ f.severity }}</td><td class="key">{{ f.file }}|{{ f.issue }}</td><td>{{ f.file }}</td><td>{{ f.issue }}</td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -60,8 +69,9 @@
     {% elif node.type in ["phase", "lane", "round"] %}
       <div class="aggregate">
         <div class="agg-duration">duration: {{ node.duration if node.duration is not none else "" }}</div>
+        <div class="agg-cost">cost: {{ node.cost if node.cost is not none else "" }}</div>
         {% if node.type == "round" %}<div class="agg-round">round: {{ node.n }}/{{ node.cap }}</div>{% endif %}
-        <div class="agg-outcome">outcome: {{ node.end_payload.outcome if node.end_payload else "" }}</div>
+        <div class="agg-outcome">outcome: {{ node.outcome if node.outcome is not none else "" }}</div>
       </div>
     {% else %}
       <pre class="raw">{{ node.payload | tojson }}</pre>

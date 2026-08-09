@@ -28,6 +28,34 @@
   var inFlight = false;
   var repeat = false;
 
+  // --- node-dependent detail pane (AC 14): clicking a tree node shows only that
+  // node's pane. The node <li> and its pane share a data-seq, so selection is a
+  // pure data-seq match. The choice is preserved across the live region swap.
+  var selectedSeq = null;
+
+  function applySelection() {
+    var haveSelected =
+      selectedSeq && document.querySelector('.pane[data-seq="' + selectedSeq + '"]');
+    if (!haveSelected) {
+      var first = document.querySelector(".node[data-seq]");
+      selectedSeq = first ? first.getAttribute("data-seq") : null;
+    }
+    document.querySelectorAll(".panes .pane").forEach(function (pane) {
+      pane.classList.toggle("selected", pane.getAttribute("data-seq") === selectedSeq);
+    });
+    document.querySelectorAll(".node[data-seq]").forEach(function (node) {
+      node.classList.toggle("selected", node.getAttribute("data-seq") === selectedSeq);
+    });
+  }
+
+  // Delegated on document so it keeps working after main.detail is swapped.
+  document.addEventListener("click", function (event) {
+    var node = event.target.closest ? event.target.closest(".node[data-seq]") : null;
+    if (!node) return;
+    selectedSeq = node.getAttribute("data-seq");
+    applySelection();
+  });
+
   function swapRegions(html) {
     var doc = new DOMParser().parseFromString(html, "text/html");
     REGIONS.forEach(function (selector) {
@@ -35,7 +63,10 @@
       var current = document.querySelector(selector);
       if (next && current) current.replaceWith(next);
     });
+    applySelection(); // re-apply the current selection to the fresh markup
   }
+
+  applySelection(); // initial: select the root node's pane
 
   function refresh() {
     if (inFlight) { repeat = true; return; }
