@@ -9,9 +9,9 @@ Tested against fixture logs with FastAPI's TestClient. RED until
 
 import json
 
-from adw.gui.app import create_app
 from fastapi.testclient import TestClient
 
+from adw.gui.app import create_app
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     CODEX_STDOUT,
     FINAL_ANSWER,

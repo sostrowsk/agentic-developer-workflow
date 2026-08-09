@@ -7,9 +7,9 @@ with FastAPI's TestClient. RED until ``adw.gui.app.create_app`` exists.
 
 import shutil
 
-from adw.gui.app import create_app
 from fastapi.testclient import TestClient
 
+from adw.gui.app import create_app
 from adw.gui.registry import register_repo
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     home,

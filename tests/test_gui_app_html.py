@@ -7,9 +7,9 @@ visible reader problems, generic unknown nodes, no external asset references) vi
 substring, never exact markup. RED until ``adw.gui.app.create_app`` exists.
 """
 
-from adw.gui.app import create_app
 from fastapi.testclient import TestClient
 
+from adw.gui.app import create_app
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     CODEX_STDOUT,
     FINAL_ANSWER,
