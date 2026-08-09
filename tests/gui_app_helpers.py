@@ -165,6 +165,114 @@ def comprehensive_lines(issue=PROMPT, *, cost=0.5, duration=17.0):
     ]
 
 
+# --- Lauf-5 polish fixtures (Aufgaben A, B, C, G) -------------------------------
+
+
+def multi_run_span_lines(*, last_ended=True, last_status="done", issue="Gated run"):
+    """A single run file holding SEVERAL ``run`` spans, as a real gated run does
+    (adw run + adw approve + adw approve). The two earlier spans end
+    ``awaiting_approval``; the LAST span carries ``last_status`` (or has no ``end``
+    at all when ``last_ended`` is False). Drives Aufgabe A: the reported status is
+    the last span's, not the first's."""
+    lines = [
+        rec(1, "run", "start", "R1", None, sec=0, payload=run_start_payload(issue)),
+        rec(2, "run", "end", "R1", None, sec=10,
+            payload=run_end_payload("awaiting_approval")),
+        rec(3, "run", "start", "R2", None, sec=11, payload=run_start_payload(issue)),
+        rec(4, "run", "end", "R2", None, sec=20,
+            payload=run_end_payload("awaiting_approval")),
+        rec(5, "run", "start", "R3", None, sec=21, payload=run_start_payload(issue)),
+    ]
+    if last_ended:
+        lines.append(
+            rec(6, "run", "end", "R3", None, sec=30, payload=run_end_payload(last_status))
+        )
+    return lines
+
+
+def tool_label_lines():
+    """One ``agent.run`` span whose tool-call/-result points exercise every branch
+    of Aufgabe C: Read/Bash/Grep with their main argument, another tool (Write),
+    an error result carrying an exit code, and the three no-invention fallbacks
+    (missing tool name, present tool but missing argument, result without outcome
+    fields). Points are addressed in the tests by their ``tool_use_id``."""
+    return [
+        rec(1, "run", "start", "R", None, sec=1, payload=run_start_payload("Tool labels")),
+        rec(2, "agent.run", "start", "A", "R", sec=2,
+            payload={"agent": "build_agent", "prompt": "p", "system_append": ""}),
+        rec(3, "agent.tool.call", "point", "A", sec=3, payload={
+            "tool": "Read", "tool_use_id": "read1", "input": {"file_path": "models.py"}}),
+        rec(4, "agent.tool.result", "point", "A", sec=4, payload={
+            "tool_use_id": "read1", "is_error": False, "content": "ok"}),
+        rec(5, "agent.tool.call", "point", "A", sec=5, payload={
+            "tool": "Bash", "tool_use_id": "bash1", "input": {"command": "pytest -x -q"}}),
+        rec(6, "agent.tool.result", "point", "A", sec=6, payload={
+            "tool_use_id": "bash1", "is_error": True, "exit_code": 1, "content": "boom"}),
+        rec(7, "agent.tool.call", "point", "A", sec=7, payload={
+            "tool": "Grep", "tool_use_id": "grep1", "input": {"pattern": "RUN_ID_RE"}}),
+        rec(8, "agent.tool.result", "point", "A", sec=8, payload={
+            "tool_use_id": "grep1", "is_error": False, "content": "3 matches"}),
+        rec(9, "agent.tool.call", "point", "A", sec=9, payload={
+            "tool": "Write", "tool_use_id": "write1",
+            "input": {"file_path": "new.py", "content": "x = 1"}}),
+        # no tool name → keep the type name
+        rec(10, "agent.tool.call", "point", "A", sec=10, payload={
+            "tool_use_id": "noname1", "input": {"file_path": "x.py"}}),
+        # tool present but no identifiable argument → tool name alone
+        rec(11, "agent.tool.call", "point", "A", sec=11, payload={
+            "tool": "Read", "tool_use_id": "noarg1", "input": {}}),
+        # result without any outcome field → keep the type name
+        rec(12, "agent.tool.result", "point", "A", sec=12, payload={"tool_use_id": "bare1"}),
+        rec(13, "agent.run", "end", "A", "R", sec=13,
+            payload={"result_text": "done", "is_error": False}),
+        rec(14, "run", "end", "R", None, sec=14, payload=run_end_payload("done")),
+    ]
+
+
+# Sentinels bracketing the single >= 1 MB tool result of the big fixture, so a test
+# can prove the FULL content is reachable (head + body + tail) via the events route.
+BIG_RESULT_HEAD = "BIGRESULTHEADSENTINEL"
+BIG_RESULT_TAIL = "BIGRESULTTAILSENTINEL"
+
+
+def big_agent_run_lines(pairs=45):
+    """A deterministic ``agent.run`` span with ``pairs`` (>= 40) tool-call/-result
+    pairs carrying full inputs/outputs. Total result payload is >= 5 MB, with the
+    first result >= 1 MB (bracketed by the sentinels) — the Aufgabe-B reference
+    case (well below the 200 MB guard of GUI-SPEC §9). Generated in-memory so no
+    multi-megabyte binary artefact is checked in."""
+    lines = [
+        rec(1, "run", "start", "R", None, sec=1, payload=run_start_payload("Big agent run")),
+        rec(2, "agent.run", "start", "A", "R", sec=2,
+            payload={"agent": "build_agent", "prompt": "Big run prompt", "system_append": ""}),
+    ]
+    seq = 3
+    for i in range(pairs):
+        lines.append(rec(seq, "agent.tool.call", "point", "A", sec=seq % 60, payload={
+            "tool": "Bash", "tool_use_id": f"t{i}", "input": {"command": f"step {i}"}}))
+        seq += 1
+        if i == 0:
+            content = BIG_RESULT_HEAD + ("x" * (1200 * 1024)) + BIG_RESULT_TAIL
+        else:
+            content = (f"result-{i:03d} " * ((120 * 1024) // 12))  # ~120 KB each
+        lines.append(rec(seq, "agent.tool.result", "point", "A", sec=seq % 60, payload={
+            "tool_use_id": f"t{i}", "is_error": False, "content": content}))
+        seq += 1
+    lines.append(rec(seq, "agent.run", "end", "A", "R", sec=seq % 60,
+                     payload={"result_text": "big done", "is_error": False}))
+    seq += 1
+    lines.append(rec(seq, "run", "end", "R", None, sec=seq % 60,
+                     payload=run_end_payload("done")))
+    return lines
+
+
+def write_state_only_run(repo: Path, run_id: str, *, phase="done", issue="Legacy run"):
+    """Write a run that predates instrumentation: a ``state.json`` and NO
+    ``events.jsonl`` (e.g. 8f8dc4ff, e680e005). Drives Aufgabe G."""
+    RunState(run_id=run_id, issue=issue, phase=phase, parallel=False).save(repo)
+    return repo / ".adw" / "runs" / run_id
+
+
 # A payload that tries to break out of a <script> element (P1 XSS regression).
 XSS_BREAKOUT = "</script><script>alert(document.cookie)</script>"
 

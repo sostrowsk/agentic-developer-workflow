@@ -56,6 +56,60 @@
     applySelection();
   });
 
+  // --- switchable agent.run tabs (Aufgabe D): exactly one panel active at a time.
+  // Delegated so it survives the live region swap; toggles classes only (no DOM
+  // construction — the panels are already server-rendered).
+  document.addEventListener("click", function (event) {
+    var btn = event.target.closest ? event.target.closest(".tab-btn") : null;
+    if (!btn) return;
+    var tabs = btn.closest("[data-tabs]");
+    if (!tabs) return;
+    var name = btn.getAttribute("data-tab");
+    tabs.querySelectorAll(".tab-btn").forEach(function (b) {
+      b.classList.toggle("active", b === btn);
+    });
+    tabs.querySelectorAll("[data-tab-panel]").forEach(function (panel) {
+      panel.classList.toggle("active", panel.getAttribute("data-tab-panel") === name);
+    });
+  });
+
+  // --- lazy tool payloads (Aufgabe B): full tool inputs/results are NOT inlined
+  // in the initial page (that caused the ~35 s freeze). Each collapsed entry
+  // carries only its data-load-seq; the full payload is fetched from the read-only
+  // events route on first expand, so selecting an agent.run node never blocks on
+  // rendering megabytes at once, yet every full payload stays reachable.
+  function loadToolBody(pre) {
+    if (pre.getAttribute("data-loaded")) return;
+    var seq = pre.getAttribute("data-load-seq");
+    if (!seq) return;
+    pre.setAttribute("data-loaded", "1");
+    pre.textContent = "Loading…";
+    fetch(base + "/events?from_seq=" + encodeURIComponent(seq))
+      .then(function (response) { return response.json(); })
+      .then(function (records) {
+        var found = null;
+        for (var i = 0; i < records.length; i++) {
+          if (String(records[i].seq) === String(seq)) { found = records[i]; break; }
+        }
+        pre.textContent = found
+          ? JSON.stringify(found.payload, null, 2)
+          : "(payload not found)";
+      })
+      .catch(function () {
+        pre.removeAttribute("data-loaded"); // allow a retry on the next expand
+        pre.textContent = "(failed to load — expand again to retry)";
+      });
+  }
+
+  // The native <details> toggle event does not bubble, so listen in the capture
+  // phase; load the body only when a details element is being opened.
+  document.addEventListener("toggle", function (event) {
+    var details = event.target;
+    if (!details || details.tagName !== "DETAILS" || !details.open) return;
+    var pre = details.querySelector ? details.querySelector("pre[data-load-seq]") : null;
+    if (pre) loadToolBody(pre);
+  }, true);
+
   // Record every node's <details> open/closed state, keyed by data-seq, so the
   // wholesale region swap does not reset the user's expand/collapse choices
   // (the server always renders <details open>). Nodes unseen before keep the

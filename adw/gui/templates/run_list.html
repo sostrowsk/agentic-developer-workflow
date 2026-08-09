@@ -17,16 +17,16 @@
     <tbody>
     {% for e in entries %}
       {% if e.repo_exists %}
-      <tr class="run-row">
-        <td><a href="/runs/{{ e.repo }}/{{ e.run_id }}">{{ e.run_id }}</a></td>
+      <tr class="run-row{% if not e.has_trace %} no-trace{% endif %}">
+        <td class="run-id"><a href="/runs/{{ e.repo }}/{{ e.run_id }}">{{ e.run_id }}</a></td>
         <td>{{ e.repo }}</td>
         <td class="issue">{{ e.issue if e.issue is not none else "" }}</td>
         <td>{{ e.phase if e.phase is not none else "" }}</td>
         <td>{{ e.status if e.status is not none else "" }}</td>
-        <td>{{ e.start if e.start is not none else "" }}</td>
-        <td>{{ "%.1f"|format(e.duration) if e.duration is not none else "" }}</td>
-        <td>{{ e.cost if e.cost is not none else "" }}</td>
-        <td>{{ e.event_count }}</td>
+        <td class="ts">{{ e.start | fmt_ts }}</td>
+        <td class="dur">{{ e.duration | fmt_duration }}</td>
+        <td class="cost">{{ e.cost | fmt_cost }}</td>
+        <td class="events">{% if e.has_trace %}{{ e.event_count }}{% else %}<span class="no-trace-hint" title="no event log for this run">no trace</span>{% endif %}</td>
       </tr>
       {% else %}
       <tr class="run-row missing-repo">

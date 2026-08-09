@@ -6,6 +6,10 @@
   --accent: #2a6;
 }
 
+/* Aufgabe F: the page itself never scrolls horizontally — wide children scroll
+   inside their own box or wrap, they never widen the viewport. */
+html, body { max-width: 100%; overflow-x: hidden; }
+
 body {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color: var(--fg);
@@ -15,13 +19,18 @@ body {
 
 h1 { font-size: 1.4rem; }
 
-table.run-list { border-collapse: collapse; width: 100%; }
+table.run-list { border-collapse: collapse; width: 100%; max-width: 100%; table-layout: fixed; }
 table.run-list th, table.run-list td {
   border: 1px solid var(--border);
   padding: 0.3rem 0.5rem;
   text-align: left;
   font-size: 0.9rem;
+  overflow-wrap: anywhere;  /* wide cell content wraps, never widens the table */
 }
+/* Aufgabe E4: a timestamp stays on one line and does not break across two rows. */
+table.run-list .ts { white-space: nowrap; }
+table.run-list .no-trace-hint { color: var(--muted); font-style: italic; }
+tr.no-trace td { color: var(--muted); }
 tr.missing-repo { color: var(--muted); opacity: 0.55; font-style: italic; }
 
 .phase-bar { display: flex; gap: 0.25rem; flex-wrap: wrap; margin: 0.5rem 0; }
@@ -37,6 +46,11 @@ tr.missing-repo { color: var(--muted); opacity: 0.55; font-style: italic; }
 .phase-failed { background: #fde5e5; }
 
 main.detail { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+/* Aufgabe F: grid/flex children need a shrink limit (min-width: 0), otherwise a
+   wide descendant (a long prompt line, tool output, a table) forces the whole
+   column — and the page — to grow horizontally. */
+main.detail > section { min-width: 0; }
+.tabs, .tabs .tab, .pane, .panes { min-width: 0; }
 .trace ul { list-style: none; padding-left: 1rem; }
 .node .dur { color: var(--muted); margin-left: 0.4rem; font-size: 0.8rem; }
 .node .round { color: var(--accent); margin-left: 0.3rem; }
@@ -61,8 +75,22 @@ main.detail { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .pane { border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; margin-bottom: 0.6rem; }
 .pane h3 { margin: 0 0 0.4rem; font-size: 1rem; }
 .pane .type { color: var(--muted); font-weight: normal; }
-.tabs { display: flex; flex-direction: column; gap: 0.4rem; }
-pre { background: #f6f6f6; padding: 0.4rem; overflow-x: auto; white-space: pre-wrap; }
+/* Aufgabe D: switchable tabs — exactly one panel visible at a time (JS toggles
+   the `active` class; with JS the default-active panel still shows). */
+.tabs { display: block; }
+.tab-buttons { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+.tab-btn {
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: #f0f0f0;
+  padding: 0.2rem 0.7rem;
+  border-radius: 3px 3px 0 0;
+  font: inherit;
+}
+.tab-btn.active { background: #fff; font-weight: 600; }
+.tabs .tab { display: none; }
+.tabs .tab.active { display: block; }
+pre { background: #f6f6f6; padding: 0.4rem; overflow-x: auto; white-space: pre-wrap; max-width: 100%; overflow-wrap: anywhere; }
 table.findings { border-collapse: collapse; }
 table.findings th, table.findings td { border: 1px solid var(--border); padding: 0.2rem 0.4rem; }
 

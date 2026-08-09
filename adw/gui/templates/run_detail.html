@@ -24,31 +24,48 @@
     {% endif %}
   </li>
 {% endmacro %}
+{# A tool call/result entry: its readable label (Aufgabe C) and, collapsed, the
+   full payload — loaded on demand from the events route so the initial page never
+   inlines megabytes of tool output (Aufgabe B). #}
+{% macro tool_entry(c) %}
+  <li class="tool-{{ c.type | replace('.', '-') }}">
+    <details>
+      <summary>{{ c.label }}</summary>
+      <pre class="tool-body" data-load-seq="{{ c.seq }}"></pre>
+    </details>
+  </li>
+{% endmacro %}
 {% macro pane(node) %}
   <div class="pane pane-{{ node.type | replace('.', '-') }}" data-seq="{{ node.seq }}">
     <h3>{{ node.label }} <small class="type">{{ node.type }}</small></h3>
     {% if node.type == "agent.run" %}
-      <div class="tabs">
-        <section class="tab tab-prompt">
-          <h4>Prompt</h4>
+      <div class="tabs" data-tabs>
+        <div class="tab-buttons" role="tablist">
+          <button type="button" class="tab-btn active" data-tab="prompt">Prompt</button>
+          <button type="button" class="tab-btn" data-tab="antwort">Antwort</button>
+          <button type="button" class="tab-btn" data-tab="tools">Tools</button>
+        </div>
+        <section class="tab tab-prompt active" data-tab-panel="prompt">
           <pre>{{ node.payload.prompt if node.payload else "" }}
 {{ node.payload.system_append if node.payload else "" }}</pre>
         </section>
-        <section class="tab tab-answer">
-          <h4>Answer</h4>
+        <section class="tab tab-antwort" data-tab-panel="antwort">
           <pre class="final">{{ node.end_payload.result_text if node.end_payload else "" }}</pre>
           {% for c in node.children if c.type == "agent.message" %}
           <pre class="assistant">{{ c.payload.text if c.payload else "" }}</pre>
           {% endfor %}
         </section>
-        <section class="tab tab-tools">
-          <h4>Tools</h4>
-          <ul>
+        <section class="tab tab-tools" data-tab-panel="tools">
+          <ul class="tool-list">
           {% for c in node.children if c.type in ["agent.tool.call", "agent.tool.result"] %}
-            <li class="tool-{{ c.type | replace('.', '-') }}">{{ c.type }}<pre>{{ c.payload | tojson }}</pre></li>
+            {{ tool_entry(c) }}
           {% endfor %}
           </ul>
         </section>
+      </div>
+    {% elif node.type in ["agent.tool.call", "agent.tool.result"] %}
+      <div class="tool-detail">
+        <pre class="tool-body" data-load-seq="{{ node.seq }}"></pre>
       </div>
     {% elif node.type == "gate" %}
       <div class="gate">
@@ -115,7 +132,6 @@
     </section>
   </main>
 
-  <script id="run-data" type="application/json">{{ detail | tojson }}</script>
   <script src="/static/app.js"></script>
 </body>
 </html>

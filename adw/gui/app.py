@@ -13,7 +13,7 @@ import json
 import os
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -28,6 +28,49 @@ from adw.state import RUN_ID_RE, RUNS_RELPATH, RunState, StateNotFoundError
 
 _HERE = Path(__file__).resolve().parent
 _TEMPLATES = Jinja2Templates(directory=str(_HERE / "templates"))
+
+
+# --- presentation formatting (Aufgabe E): applied in the HTML templates only; the
+# JSON API keeps its raw numeric values. Missing values render empty, never 0/null.
+
+
+def _fmt_duration(seconds) -> str:
+    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+        return ""
+    total = int(round(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours}h")
+    if hours or minutes:
+        parts.append(f"{minutes}m")
+    parts.append(f"{secs}s")
+    return " ".join(parts)
+
+
+def _fmt_cost(cost) -> str:
+    if not isinstance(cost, (int, float)) or isinstance(cost, bool):
+        return ""
+    return f"${cost:.2f}"
+
+
+def _fmt_ts(ts) -> str:
+    """ISO-UTC → ``YYYY-MM-DD HH:MM:SS`` in UTC (no ``Z``, no fractional seconds)."""
+    if not isinstance(ts, str) or not ts:
+        return ""
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(UTC)
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+_TEMPLATES.env.filters["fmt_duration"] = _fmt_duration
+_TEMPLATES.env.filters["fmt_cost"] = _fmt_cost
+_TEMPLATES.env.filters["fmt_ts"] = _fmt_ts
 
 # The seven workflow phases in order (contract PhaseStatus enum / GUI-SPEC §7.2).
 PHASES = ["spec", "plan", "build", "integration", "codex_review", "final_review", "ci"]
@@ -128,8 +171,22 @@ def _load_state(run_dir: Path, runs_root: Path, repo_path, run_id):
 
 
 def _run_span(events):
-    start = next((e for e in events if e.get("type") == "run" and e.get("kind") == "start"), None)
-    end = next((e for e in events if e.get("type") == "run" and e.get("kind") == "end"), None)
+    """The run's first ``run`` start (its beginning) and the end of the LAST
+    ``run`` span (Aufgabe A). A gated run is several CLI commands and thus several
+    ``run`` spans in one log; the reported status is the last span's, not the
+    first's. ``end`` is None when the last span has no ``end`` yet (→ running),
+    even if earlier spans finished."""
+    start = None
+    end = None
+    for e in events:
+        if e.get("type") != "run":
+            continue
+        if e.get("kind") == "start":
+            if start is None:
+                start = e
+            end = None  # a new span opened; its end (if any) comes later in the log
+        elif e.get("kind") == "end":
+            end = e
     return start, end
 
 
@@ -139,6 +196,9 @@ def _summary(slug, run_id, events, state) -> dict:
     end_payload = (end_rec or {}).get("payload") or {}
     totals = end_payload.get("totals") or {}
     issue = start_payload.get("issue")
+    if issue is None and state is not None:
+        # A run without an event log (Aufgabe G) still names its issue in state.
+        issue = state.issue
     if isinstance(issue, str) and len(issue) > _ISSUE_MAX:
         issue = issue[:_ISSUE_MAX] + "…"
     return {
@@ -152,6 +212,8 @@ def _summary(slug, run_id, events, state) -> dict:
         "duration": totals.get("duration"),
         "cost": totals.get("cost"),
         "event_count": len(events),
+        # Aufgabe G: a clear indication whether a trace exists for this run.
+        "has_trace": bool(events),
     }
 
 
@@ -213,6 +275,55 @@ def _is_span(node) -> bool:
     return hasattr(node, "children")
 
 
+# Per-tool priority for the main argument shown next to a tool call (Aufgabe C).
+# The named cases are pinned by the spec (Read → file path, Bash → command, Grep
+# → pattern); the ordered fallback keys cover other tools with an unambiguous main
+# argument. Absent any of these, the tool name is shown alone (nothing invented).
+_TOOL_ARG_PRIORITY = {
+    "Read": ("file_path",),
+    "Bash": ("command",),
+    "Grep": ("pattern",),
+    "Write": ("file_path",),
+    "Edit": ("file_path",),
+    "Glob": ("pattern",),
+}
+_TOOL_ARG_FALLBACK = ("file_path", "command", "pattern", "path", "file", "query", "url")
+_TOOL_ARG_MAX = 80
+
+
+def _tool_main_arg(tool, inp) -> str | None:
+    if not isinstance(inp, dict):
+        return None
+    keys = _TOOL_ARG_PRIORITY.get(tool, ()) + _TOOL_ARG_FALLBACK
+    for key in keys:
+        value = inp.get(key)
+        if isinstance(value, str) and value:
+            return value if len(value) <= _TOOL_ARG_MAX else value[:_TOOL_ARG_MAX] + "…"
+    return None
+
+
+def _tool_call_label(p) -> str:
+    if not isinstance(p, dict) or not p.get("tool"):
+        return "agent.tool.call"  # no tool name → keep the type name (invent nothing)
+    tool = str(p["tool"])
+    arg = _tool_main_arg(tool, p.get("input"))
+    return f"{tool} {arg}" if arg else tool
+
+
+def _tool_result_label(p) -> str:
+    if not isinstance(p, dict):
+        return "agent.tool.result"
+    is_error = p.get("is_error")
+    exit_code = p.get("exit_code")
+    has_outcome = is_error is not None or exit_code is not None or "content" in p
+    if not has_outcome:
+        return "agent.tool.result"  # no outcome fields → keep the type name
+    outcome = "error" if is_error else "ok"
+    if exit_code is not None:
+        return f"{outcome} (exit {exit_code})"
+    return outcome
+
+
 def _node_label(node) -> str:
     if _is_span(node):
         p = node.start_payload or node.end_payload or {}
@@ -225,6 +336,11 @@ def _node_label(node) -> str:
                 return str(p["name"])
             if node.type == "round":
                 return f"round {p.get('n')}/{p.get('cap')}"
+        return node.type or "?"
+    if node.type == "agent.tool.call":
+        return _tool_call_label(node.payload)
+    if node.type == "agent.tool.result":
+        return _tool_result_label(node.payload)
     return node.type or "?"
 
 
@@ -351,10 +467,13 @@ def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
                 if run_dir is None or not run_dir.is_dir():
                     continue
                 events_file = _contained(run_dir / "events.jsonl", runs_root)
-                if events_file is None or not events_file.is_file():
-                    continue
-                events = EventReader(events_file).read().events
+                if events_file is not None and events_file.is_file():
+                    events = EventReader(events_file).read().events
+                else:
+                    events = []  # Aufgabe G: a run may predate instrumentation
                 state = _load_state(run_dir, runs_root, ref.path, child.name)
+                if not events and state is None:
+                    continue  # neither a trace nor state → not a listable run
             except OSError:
                 continue  # one unreadable run must not drop the rest of the repo
             entries.append(_summary(ref.slug, child.name, events, state))
