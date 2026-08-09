@@ -6,7 +6,7 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 {% macro tree_item(node) %}
-  <li class="node node-{{ node.status }}" data-seq="{{ node.seq }}">
+  <li class="node node-{{ node.status }}" data-seq="{{ node.seq }}" data-span="{{ node.span_id }}">
     <span class="label">{{ node.label }}</span>
     {% if node.duration is not none %}<span class="dur">{{ "%.1f"|format(node.duration) }}s</span>{% endif %}
     {% if node.type == "round" and node.n is defined %}<span class="round">{{ node.n }}/{{ node.cap }}</span>{% endif %}
@@ -16,7 +16,7 @@
   </li>
 {% endmacro %}
 {% macro pane(node) %}
-  <div class="pane pane-{{ node.type | replace('.', '-') }}" data-seq="{{ node.seq }}">
+  <div class="pane pane-{{ node.type | replace('.', '-') }}" data-seq="{{ node.seq }}" data-span="{{ node.span_id }}">
     <h3>{{ node.label }} <small class="type">{{ node.type }}</small></h3>
     {% if node.type == "agent.run" %}
       <div class="tabs">
@@ -77,7 +77,7 @@
     <h1>Run {{ detail.run.run_id }} &mdash; {{ detail.run.status }}</h1>
     <div class="phase-bar">
       {% for ph in detail.phases %}
-      <span class="phase phase-{{ ph.status }}">{{ ph.name }}{% if ph.duration is not none %} <em>{{ "%.1f"|format(ph.duration) }}s</em>{% endif %}</span>
+      <span class="phase phase-{{ ph.status }}" data-name="{{ ph.name }}">{{ ph.name }}{% if ph.duration is not none %} <em>{{ "%.1f"|format(ph.duration) }}s</em>{% endif %}</span>
       {% endfor %}
     </div>
   </header>
@@ -105,7 +105,7 @@
     </section>
   </main>
 
-  <script id="run-data" type="application/json">{{ detail_json | safe }}</script>
+  <script id="run-data" type="application/json">{{ detail | tojson }}</script>
   <script src="/static/app.js"></script>
 </body>
 </html>

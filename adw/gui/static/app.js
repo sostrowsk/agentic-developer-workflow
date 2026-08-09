@@ -1,8 +1,10 @@
-// Vanilla client (GUI-SPEC §7.3, E5): fetch is unused here — the snapshot is
-// server-rendered — and the live tail uses the native EventSource only. New
-// records are merged by integer seq so an event already covered by the initial
-// snapshot (or delivered twice) is never rendered twice; problem messages are
-// appended to the visible problem list without reloading the page.
+// Vanilla client (GUI-SPEC §7.3, E5): native EventSource only, no framework, no
+// external asset. New stream records are merged by integer seq (never rendered
+// twice — not even an event appended between the snapshot and the stream start)
+// and incorporated INTO the existing view: the phase bar, the trace tree and the
+// per-node detail panes update live, without reloading, using the same data the
+// server-rendered snapshot was built from. Problem messages append to the
+// visible problem list. A later full snapshot renders identically.
 (function () {
   "use strict";
   var body = document.body;
@@ -26,6 +28,119 @@
     }
   }
 
+  function esc(value) {
+    return String(value == null ? "" : value);
+  }
+
+  function phaseCell(name) {
+    return document.querySelector('.phase[data-name="' + name + '"]');
+  }
+
+  function setPhase(name, status) {
+    var cell = phaseCell(name);
+    if (cell) cell.className = "phase phase-" + status;
+  }
+
+  function nodeLabel(record) {
+    var p = record.payload || {};
+    if ((record.type === "phase" || record.type === "lane") && p.name) return p.name;
+    if (record.type === "agent.run" && p.agent) return p.agent;
+    if (record.type === "gate" && p.name) return p.name;
+    if (record.type === "round") return "round " + p.n + "/" + p.cap;
+    return record.type || "?";
+  }
+
+  function traceRoot() {
+    var trace = document.querySelector(".trace");
+    if (!trace) return null;
+    var ul = trace.querySelector("ul");
+    if (!ul) {
+      ul = document.createElement("ul");
+      trace.appendChild(ul);
+    }
+    return ul;
+  }
+
+  function childList(li) {
+    var ul = li.querySelector(":scope > ul");
+    if (!ul) {
+      ul = document.createElement("ul");
+      li.appendChild(ul);
+    }
+    return ul;
+  }
+
+  function ensureNode(record) {
+    var span = record.span;
+    if (!span) return null;
+    var existing = document.querySelector('.node[data-span="' + span + '"]');
+    if (existing) return existing;
+    var li = document.createElement("li");
+    li.className = "node node-running";
+    li.setAttribute("data-span", span);
+    li.setAttribute("data-seq", esc(record.seq));
+    var label = document.createElement("span");
+    label.className = "label";
+    label.textContent = nodeLabel(record);
+    li.appendChild(label);
+    var parentLi = record.parent
+      ? document.querySelector('.node[data-span="' + record.parent + '"]')
+      : null;
+    var target = parentLi ? childList(parentLi) : traceRoot();
+    if (target) target.appendChild(li);
+    ensurePane(record);
+    return li;
+  }
+
+  function ensurePane(record) {
+    var span = record.span;
+    var panes = document.querySelector(".panes");
+    if (!panes || !span) return null;
+    var existing = panes.querySelector('.pane[data-span="' + span + '"]');
+    if (existing) return existing;
+    var pane = document.createElement("div");
+    pane.className = "pane pane-" + String(record.type || "").replace(/\./g, "-");
+    pane.setAttribute("data-span", span);
+    var title = document.createElement("h3");
+    title.textContent = nodeLabel(record);
+    pane.appendChild(title);
+    panes.appendChild(pane);
+    return pane;
+  }
+
+  function appendToPane(record) {
+    var pane = document.querySelector('.pane[data-span="' + record.span + '"]');
+    if (!pane) return;
+    var line = document.createElement("pre");
+    line.className = "live-" + String(record.type || "").replace(/\./g, "-");
+    line.textContent = JSON.stringify(record.payload);
+    pane.appendChild(line);
+  }
+
+  function markEnded(record) {
+    var li = document.querySelector('.node[data-span="' + record.span + '"]');
+    if (li) li.className = "node node-done";
+  }
+
+  // Incorporate one accepted record into the live view (the same surfaces the
+  // snapshot renders: phase bar, trace tree, detail panes).
+  function applyEvent(record) {
+    if (record.type === "phase") {
+      var name = (record.payload || {}).name;
+      if (name) setPhase(name, record.kind === "end" ? "completed" : "active");
+    } else if (record.type === "escalation") {
+      var failedPhase = (record.payload || {}).phase;
+      if (failedPhase) setPhase(failedPhase, "failed");
+    }
+    if (record.kind === "start") {
+      ensureNode(record);
+    } else if (record.kind === "end") {
+      markEnded(record);
+    } else {
+      appendToPane(record);
+    }
+  }
+
   var url = "/api/runs/" + encodeURIComponent(repo) + "/" + encodeURIComponent(runId) + "/stream";
   var source = new EventSource(url);
 
@@ -40,8 +155,7 @@
       if (seen.has(record.seq)) return; // no duplication, no gap
       seen.add(record.seq);
     }
-    // Hand the new record to whatever incremental view is listening.
-    document.dispatchEvent(new CustomEvent("adw:event", { detail: record }));
+    applyEvent(record);
     if (record.type === "run" && record.kind === "end") {
       source.close();
     }

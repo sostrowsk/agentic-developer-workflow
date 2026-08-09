@@ -83,12 +83,34 @@ def _ts_epoch(ts):
         return None
 
 
-def _read_events(run_dir: Path):
-    result = EventReader(run_dir / "events.jsonl").read()
+def _runs_root(repo_path) -> Path:
+    return (Path(repo_path) / RUNS_RELPATH).resolve()
+
+
+def _contained(path: Path, root: Path) -> Path | None:
+    """The real path if it stays within ``root`` after resolving EVERY symlink,
+    else None. The read-only scope (GUI-SPEC §8) must never follow a symlinked run
+    directory or events/state file out of the resolved runs tree — resolving both
+    sides consistently neutralises legitimate symlinks in the root itself."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    return resolved if resolved.is_relative_to(root) else None
+
+
+def _read_events(run_dir: Path, runs_root: Path):
+    events_file = _contained(run_dir / "events.jsonl", runs_root)
+    if events_file is None or not events_file.is_file():
+        return [], []
+    result = EventReader(events_file).read()
     return result.events, result.problems
 
 
-def _load_state(repo_path, run_id):
+def _load_state(run_dir: Path, runs_root: Path, repo_path, run_id):
+    state_file = _contained(run_dir / "state.json", runs_root)
+    if state_file is None or not state_file.is_file():
+        return None
     try:
         return RunState.load(Path(repo_path), run_id)
     except StateNotFoundError:
@@ -126,17 +148,28 @@ def _summary(slug, run_id, events, state) -> dict:
 def _phase_bar(events, state_phase) -> list[dict]:
     spans: dict[str, dict] = {}
     starts: dict[str, tuple] = {}
+    failed: set[str] = set()  # phases the run failed/escalated from
     for e in events:
-        if e.get("type") != "phase":
+        etype = e.get("type")
+        if etype == "escalation":
+            # The escalation point names the phase it escalated FROM (phases.py).
+            phase = (e.get("payload") or {}).get("phase")
+            if phase:
+                failed.add(phase)
+            continue
+        if etype != "phase":
             continue
         sid = e.get("span")
-        name = (e.get("payload") or {}).get("name")
+        payload = e.get("payload") or {}
+        name = payload.get("name")
         if e.get("kind") == "start":
             starts[sid] = (name, e.get("ts"))
             if name:
                 spans.setdefault(name, {}).setdefault("start", e.get("ts"))
         elif e.get("kind") == "end":
             sname = name or starts.get(sid, (None,))[0]
+            if sname and payload.get("to_phase") == "escalated":
+                failed.add(sname)  # ended straight into the terminal escalated state
             if sname:
                 info = spans.setdefault(sname, {})
                 info["end"] = e.get("ts")
@@ -151,6 +184,10 @@ def _phase_bar(events, state_phase) -> list[dict]:
         if info and info.get("start") and info.get("end"):
             a, b = _ts_epoch(info["start"]), _ts_epoch(info["end"])
             duration = (b - a) if (a is not None and b is not None) else None
+        ended = bool(info and info.get("start") and info.get("end"))
+        if name in failed:  # failure wins over a merely-present end record
+            status = "failed"
+        elif ended:
             status = "completed"
         elif name == state_phase:
             status = "active"
@@ -225,10 +262,9 @@ def _serialize(node) -> dict:
     }
 
 
-def _run_detail(ref: RepoRef, run_id: str) -> dict:
-    run_dir = Path(ref.path) / RUNS_RELPATH / run_id
-    events, problems = _read_events(run_dir)
-    state = _load_state(ref.path, run_id)
+def _run_detail(ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path) -> dict:
+    events, problems = _read_events(run_dir, runs_root)
+    state = _load_state(run_dir, runs_root, ref.path, run_id)
     return {
         "run": _summary(ref.slug, run_id, events, state),
         "phases": _phase_bar(events, state.phase if state is not None else None),
@@ -246,14 +282,19 @@ def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
                 {"repo": ref.slug, "repo_exists": False, "hint": ref.path or "(unknown path)"}
             )
             continue
-        for run_dir in sorted(runs_dir.iterdir()):
-            if not run_dir.is_dir() or not RUN_ID_RE.fullmatch(run_dir.name):
+        runs_root = _runs_root(ref.path)
+        for child in sorted(runs_dir.iterdir()):
+            if not RUN_ID_RE.fullmatch(child.name):
                 continue
-            if not (run_dir / "events.jsonl").is_file():
+            run_dir = _contained(child, runs_root)  # skip symlinks escaping the tree
+            if run_dir is None or not run_dir.is_dir():
                 continue
-            events, _ = _read_events(run_dir)
-            state = _load_state(ref.path, run_dir.name)
-            entries.append(_summary(ref.slug, run_dir.name, events, state))
+            events_file = _contained(run_dir / "events.jsonl", runs_root)
+            if events_file is None or not events_file.is_file():
+                continue
+            events = EventReader(events_file).read().events
+            state = _load_state(run_dir, runs_root, ref.path, child.name)
+            entries.append(_summary(ref.slug, child.name, events, state))
     # Stable ordering: newest start first, then running runs pulled to the front.
     entries.sort(key=lambda e: e.get("start") or "", reverse=True)
     entries.sort(key=lambda e: 0 if e.get("status") == "running" else 1)
@@ -278,11 +319,13 @@ def _parse_last_event_id(raw):
         return None
 
 
-def _stream(events_path: Path, last_id):
+def _stream(events_path, last_id):
     """Tail ``events.jsonl`` by byte offset (a single reader carries the offset in
     memory — no cursor on disk). Emit each new accepted event with a valid integer
     seq as ``id:``/``data:``; surface reader problems (and records without a valid
     seq) as ``event: problem`` without an id; close after the run end event."""
+    if events_path is None:
+        return  # nothing safe to tail (missing or escaping events log)
     reader = EventReader(events_path)
     while True:
         result = reader.read()
@@ -290,6 +333,7 @@ def _stream(events_path: Path, last_id):
             yield _sse_problem(asdict(problem))
         for record in result.events:
             seq = record.get("seq")
+            is_end = record.get("type") == "run" and record.get("kind") == "end"
             if not isinstance(seq, int):
                 yield _sse_problem(
                     {"kind": "bad_seq", "line_no": None, "byte_offset": None,
@@ -297,9 +341,13 @@ def _stream(events_path: Path, last_id):
                 )
                 continue
             if last_id is not None and seq <= last_id:
+                # Already replayed — but the run end still closes the stream, so a
+                # reconnect at/after the final seq does not poll the file forever.
+                if is_end:
+                    return
                 continue
             yield _sse_event(record)
-            if record.get("type") == "run" and record.get("kind") == "end":
+            if is_end:
                 return
         time.sleep(_POLL_SECONDS)
 
@@ -320,16 +368,23 @@ def create_app(repos=None) -> FastAPI:
             raise HTTPException(status_code=404, detail=f"Unknown repository slug: {slug}")
         return ref
 
-    def require_run(slug: str, run_id: str) -> tuple[RepoRef, Path]:
+    def require_run(slug: str, run_id: str) -> tuple[RepoRef, Path, Path]:
         ref = resolve_repo(slug)
         if not RUN_ID_RE.fullmatch(run_id):
             raise HTTPException(status_code=400, detail=f"Invalid run_id: {run_id!r}")
         if not ref.exists or not ref.path:
             raise HTTPException(status_code=404, detail=f"Repository {slug} unreachable")
-        run_dir = Path(ref.path) / RUNS_RELPATH / run_id
-        if not (run_dir / "events.jsonl").is_file() and not (run_dir / "state.json").is_file():
+        runs_root = _runs_root(ref.path)
+        run_dir = _contained(runs_root / run_id, runs_root)
+        if run_dir is None:  # the run directory is a symlink escaping the tree
             raise HTTPException(status_code=404, detail=f"No run {run_id}")
-        return ref, run_dir
+        events_file = _contained(run_dir / "events.jsonl", runs_root)
+        state_file = _contained(run_dir / "state.json", runs_root)
+        has_events = events_file is not None and events_file.is_file()
+        has_state = state_file is not None and state_file.is_file()
+        if not has_events and not has_state:  # absent, or only escaping symlinks
+            raise HTTPException(status_code=404, detail=f"No run {run_id}")
+        return ref, run_dir, runs_root
 
     @app.get("/api/runs")
     def api_runs():
@@ -337,23 +392,24 @@ def create_app(repos=None) -> FastAPI:
 
     @app.get("/api/runs/{repo}/{run_id}")
     def api_run_detail(repo: str, run_id: str):
-        ref, _ = require_run(repo, run_id)
-        return _run_detail(ref, run_id)
+        ref, run_dir, runs_root = require_run(repo, run_id)
+        return _run_detail(ref, run_id, run_dir, runs_root)
 
     @app.get("/api/runs/{repo}/{run_id}/events")
     def api_run_events(repo: str, run_id: str, from_seq: int | None = None):
-        _, run_dir = require_run(repo, run_id)
-        events, _problems = _read_events(run_dir)
+        _, run_dir, runs_root = require_run(repo, run_id)
+        events, _problems = _read_events(run_dir, runs_root)
         if from_seq is not None:
             events = [e for e in events if isinstance(e.get("seq"), int) and e["seq"] >= from_seq]
         return events
 
     @app.get("/api/runs/{repo}/{run_id}/stream")
     def api_run_stream(repo: str, run_id: str, request: Request):
-        _, run_dir = require_run(repo, run_id)
+        _, run_dir, runs_root = require_run(repo, run_id)
+        events_file = _contained(run_dir / "events.jsonl", runs_root)
         last_id = _parse_last_event_id(request.headers.get("last-event-id"))
         return StreamingResponse(
-            _stream(run_dir / "events.jsonl", last_id), media_type="text/event-stream"
+            _stream(events_file, last_id), media_type="text/event-stream"
         )
 
     @app.get("/", response_class=HTMLResponse)
@@ -363,11 +419,9 @@ def create_app(repos=None) -> FastAPI:
 
     @app.get("/runs/{repo}/{run_id}", response_class=HTMLResponse)
     def run_detail_page(repo: str, run_id: str):
-        ref, _ = require_run(repo, run_id)
-        detail = _run_detail(ref, run_id)
-        html = _TEMPLATES.get_template("run_detail.html").render(
-            {"detail": detail, "detail_json": json.dumps(detail)}
-        )
+        ref, run_dir, runs_root = require_run(repo, run_id)
+        detail = _run_detail(ref, run_id, run_dir, runs_root)
+        html = _TEMPLATES.get_template("run_detail.html").render({"detail": detail})
         return HTMLResponse(html)
 
     return app

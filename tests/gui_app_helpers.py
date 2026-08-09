@@ -165,6 +165,38 @@ def comprehensive_lines(issue=PROMPT, *, cost=0.5, duration=17.0):
     ]
 
 
+# A payload that tries to break out of a <script> element (P1 XSS regression).
+XSS_BREAKOUT = "</script><script>alert(document.cookie)</script>"
+
+
+def xss_lines():
+    """A finished run whose event payloads carry a script-breakout string, so the
+    detail page's embedded JSON and rendered panes must neutralise it."""
+    return [
+        rec(1, "run", "start", "R", None, sec=1, payload=run_start_payload("XSS run")),
+        rec(2, "agent.run", "start", "A", "R", sec=2, payload={
+            "agent": "build_agent", "prompt": XSS_BREAKOUT, "system_append": ""}),
+        rec(3, "agent.message", "point", "A", sec=3,
+            payload={"role": "assistant", "text": XSS_BREAKOUT}),
+        rec(4, "agent.run", "end", "A", "R", sec=4,
+            payload={"result_text": XSS_BREAKOUT, "is_error": False}),
+        rec(5, "run", "end", "R", None, sec=5, payload=run_end_payload("done")),
+    ]
+
+
+def escalated_lines():
+    """A run whose ``build`` phase escalates (fails): an ``escalation`` point names
+    the failed phase, the run ends ``escalated``."""
+    return [
+        rec(1, "run", "start", "R", None, sec=1, payload=run_start_payload("Escalated run")),
+        rec(2, "phase", "start", "B", "R", sec=2, payload={"name": "build", "from_phase": "build"}),
+        rec(3, "escalation", "point", "B", sec=3,
+            payload={"reason": "gate hopeless", "phase": "build"}),
+        rec(4, "phase", "end", "B", "R", sec=4, payload={"name": "build", "to_phase": None}),
+        rec(5, "run", "end", "R", None, sec=5, payload=run_end_payload("escalated")),
+    ]
+
+
 def problems_lines():
     """A run whose log has a broken line (bad_line) and a missing seq 2 (seq_gap),
     yet still ends so a stream over it closes."""
