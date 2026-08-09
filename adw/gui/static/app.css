@@ -1,0 +1,52 @@
+/* Hand-written CSS, system fonts only — no external asset, no CDN (GUI-SPEC E5). */
+:root {
+  --fg: #1c1c1c;
+  --muted: #777;
+  --border: #ddd;
+  --accent: #2a6;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--fg);
+  margin: 1.5rem;
+  line-height: 1.4;
+}
+
+h1 { font-size: 1.4rem; }
+
+table.run-list { border-collapse: collapse; width: 100%; }
+table.run-list th, table.run-list td {
+  border: 1px solid var(--border);
+  padding: 0.3rem 0.5rem;
+  text-align: left;
+  font-size: 0.9rem;
+}
+tr.missing-repo { color: var(--muted); opacity: 0.55; font-style: italic; }
+
+.phase-bar { display: flex; gap: 0.25rem; flex-wrap: wrap; margin: 0.5rem 0; }
+.phase {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.85rem;
+}
+.phase-completed { background: #e6f5ec; }
+.phase-active { background: #fff4d6; font-weight: 600; }
+.phase-pending { color: var(--muted); }
+.phase-failed { background: #fde5e5; }
+
+main.detail { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+.trace ul { list-style: none; padding-left: 1rem; }
+.node .dur { color: var(--muted); margin-left: 0.4rem; font-size: 0.8rem; }
+.node .round { color: var(--accent); margin-left: 0.3rem; }
+
+.pane { border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; margin-bottom: 0.6rem; }
+.pane h3 { margin: 0 0 0.4rem; font-size: 1rem; }
+.pane .type { color: var(--muted); font-weight: normal; }
+.tabs { display: flex; flex-direction: column; gap: 0.4rem; }
+pre { background: #f6f6f6; padding: 0.4rem; overflow-x: auto; white-space: pre-wrap; }
+table.findings { border-collapse: collapse; }
+table.findings th, table.findings td { border: 1px solid var(--border); padding: 0.2rem 0.4rem; }
+
+.problems .problem { color: #a33; }

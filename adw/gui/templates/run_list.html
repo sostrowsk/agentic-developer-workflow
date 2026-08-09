@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>ADW Runs</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <h1>ADW Runs</h1>
+  <table class="run-list">
+    <thead>
+      <tr>
+        <th>Run</th><th>Repo</th><th>Issue</th><th>Phase</th><th>Status</th>
+        <th>Start</th><th>Duration</th><th>Cost</th><th>Events</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for e in entries %}
+      {% if e.repo_exists %}
+      <tr class="run-row">
+        <td><a href="/runs/{{ e.repo }}/{{ e.run_id }}">{{ e.run_id }}</a></td>
+        <td>{{ e.repo }}</td>
+        <td class="issue">{{ e.issue if e.issue is not none else "" }}</td>
+        <td>{{ e.phase if e.phase is not none else "" }}</td>
+        <td>{{ e.status if e.status is not none else "" }}</td>
+        <td>{{ e.start if e.start is not none else "" }}</td>
+        <td>{{ "%.1f"|format(e.duration) if e.duration is not none else "" }}</td>
+        <td>{{ e.cost if e.cost is not none else "" }}</td>
+        <td>{{ e.event_count }}</td>
+      </tr>
+      {% else %}
+      <tr class="run-row missing-repo">
+        <td>&mdash;</td>
+        <td>{{ e.repo }}</td>
+        <td colspan="7">Repository unavailable: {{ e.hint }}</td>
+      </tr>
+      {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

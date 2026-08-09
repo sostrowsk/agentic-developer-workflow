@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Run {{ detail.run.run_id }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+{% macro tree_item(node) %}
+  <li class="node node-{{ node.status }}" data-seq="{{ node.seq }}">
+    <span class="label">{{ node.label }}</span>
+    {% if node.duration is not none %}<span class="dur">{{ "%.1f"|format(node.duration) }}s</span>{% endif %}
+    {% if node.type == "round" and node.n is defined %}<span class="round">{{ node.n }}/{{ node.cap }}</span>{% endif %}
+    {% if node.children %}
+    <ul>{% for child in node.children %}{{ tree_item(child) }}{% endfor %}</ul>
+    {% endif %}
+  </li>
+{% endmacro %}
+{% macro pane(node) %}
+  <div class="pane pane-{{ node.type | replace('.', '-') }}" data-seq="{{ node.seq }}">
+    <h3>{{ node.label }} <small class="type">{{ node.type }}</small></h3>
+    {% if node.type == "agent.run" %}
+      <div class="tabs">
+        <section class="tab tab-prompt">
+          <h4>Prompt</h4>
+          <pre>{{ node.payload.prompt if node.payload else "" }}
+{{ node.payload.system_append if node.payload else "" }}</pre>
+        </section>
+        <section class="tab tab-answer">
+          <h4>Answer</h4>
+          <pre class="final">{{ node.end_payload.result_text if node.end_payload else "" }}</pre>
+          {% for c in node.children if c.type == "agent.message" %}
+          <pre class="assistant">{{ c.payload.text if c.payload else "" }}</pre>
+          {% endfor %}
+        </section>
+        <section class="tab tab-tools">
+          <h4>Tools</h4>
+          <ul>
+          {% for c in node.children if c.type in ["agent.tool.call", "agent.tool.result"] %}
+            <li class="tool-{{ c.type | replace('.', '-') }}">{{ c.type }}<pre>{{ c.payload | tojson }}</pre></li>
+          {% endfor %}
+          </ul>
+        </section>
+      </div>
+    {% elif node.type == "gate" %}
+      <div class="gate">
+        <div class="command">command: <code>{{ node.payload.cmd if node.payload else "" }}</code></div>
+        <div class="exit">exit_code: {{ node.end_payload.exit_code if node.end_payload else "" }}</div>
+        <pre class="output">{{ node.end_payload.output if node.end_payload else "" }}</pre>
+      </div>
+    {% elif node.type == "codex.review" %}
+      <table class="findings">
+        <thead><tr><th>severity</th><th>file</th><th>message</th></tr></thead>
+        <tbody>
+        {% for f in (node.end_payload.findings if node.end_payload else []) %}
+          <tr><td>{{ f.severity }}</td><td>{{ f.file }}</td><td>{{ f.issue }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <pre class="stdout">{{ node.end_payload.raw_stdout if node.end_payload else "" }}</pre>
+    {% elif node.type in ["phase", "lane", "round"] %}
+      <div class="aggregate">
+        <div class="agg-duration">duration: {{ node.duration if node.duration is not none else "" }}</div>
+        {% if node.type == "round" %}<div class="agg-round">round: {{ node.n }}/{{ node.cap }}</div>{% endif %}
+        <div class="agg-outcome">outcome: {{ node.end_payload.outcome if node.end_payload else "" }}</div>
+      </div>
+    {% else %}
+      <pre class="raw">{{ node.payload | tojson }}</pre>
+    {% endif %}
+  </div>
+{% endmacro %}
+{% macro all_panes(node) %}
+  {{ pane(node) }}
+  {% for child in node.children %}{{ all_panes(child) }}{% endfor %}
+{% endmacro %}
+<body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}">
+  <header class="run-header">
+    <h1>Run {{ detail.run.run_id }} &mdash; {{ detail.run.status }}</h1>
+    <div class="phase-bar">
+      {% for ph in detail.phases %}
+      <span class="phase phase-{{ ph.status }}">{{ ph.name }}{% if ph.duration is not none %} <em>{{ "%.1f"|format(ph.duration) }}s</em>{% endif %}</span>
+      {% endfor %}
+    </div>
+  </header>
+
+  <main class="detail">
+    <section class="trace">
+      <ul>{% for node in detail.tree %}{{ tree_item(node) }}{% endfor %}</ul>
+    </section>
+
+    <section class="panes">
+      {% for node in detail.tree %}{{ all_panes(node) }}{% endfor %}
+    </section>
+
+    <section class="problems">
+      <h2>Reader problems</h2>
+      {% if detail.problems %}
+      <ul class="problem-list">
+      {% for p in detail.problems %}
+        <li class="problem">{{ p.kind }}{% if p.line_no is not none %} &middot; line {{ p.line_no }}{% endif %}{% if p.byte_offset is not none %} &middot; byte {{ p.byte_offset }}{% endif %}{% if p.expected is not none %} &middot; expected {{ p.expected }} found {{ p.found }}{% endif %}</li>
+      {% endfor %}
+      </ul>
+      {% else %}
+      <p class="no-problems">No problems reported.</p>
+      {% endif %}
+    </section>
+  </main>
+
+  <script id="run-data" type="application/json">{{ detail_json | safe }}</script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

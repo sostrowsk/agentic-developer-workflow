@@ -35,6 +35,20 @@ def write_config(repo: Path, content: str = DEFAULT_CONFIG) -> Path:
     return cfg
 
 
+@pytest.fixture(autouse=True)
+def _isolate_registry(tmp_path_factory, monkeypatch):
+    """Aufgabe A: no test may pollute the real ~/.adw/repos.json.
+
+    Point the registry at a throwaway file for EVERY test (not just the
+    registry's own), so ``adw run`` / auto-registration writes there. Tests that
+    need to inspect the registry (their own ``home`` fixture) override this with
+    their chosen location. The override is a plain env var honoured by
+    ``adw.gui.registry._registry_path``; the production default is untouched.
+    """
+    registry = tmp_path_factory.mktemp("adw-registry") / "repos.json"
+    monkeypatch.setenv("ADW_REGISTRY_PATH", str(registry))
+
+
 @pytest.fixture
 def target_repo(tmp_path: Path) -> Path:
     """Real Git repo with a staging branch, one commit, and a valid .adw/config.yaml."""

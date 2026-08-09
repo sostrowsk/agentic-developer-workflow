@@ -12,6 +12,16 @@ dependencies = [
     "anyio>=4",
 ]
 
+[project.optional-dependencies]
+# The read-only web GUI (`adw gui`). Kept OUT of the core dependencies (E7): a
+# plain `adw run` install stays free of the web stack — no import error, no
+# missing dependency.
+gui = [
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "jinja2>=3",
+]
+
 [project.scripts]
 adw = "adw.cli:app"
 
@@ -20,6 +30,14 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "ruff>=0.6",
+    # The optional `gui` extra's stack, so `uv run pytest` can exercise the web
+    # app (FastAPI TestClient needs httpx). These are dev/test-only: the
+    # distributed core package still declares no web dependency (E7), and the
+    # core import path never imports them (test_gui_cli guards this).
+    "fastapi>=0.110",
+    "uvicorn>=0.27",
+    "jinja2>=3",
+    "httpx>=0.27",
 ]
 
 [build-system]

@@ -276,6 +276,64 @@ def status(
         typer.echo(f"{state.run_id}  {state.phase:<22} {mode:<8}{extra}  {issue_head}")
 
 
+def _is_loopback(host: str) -> bool:
+    """A loopback bind target: 127.0.0.0/8, ::1 or localhost."""
+    h = host.strip().lower()
+    if h in ("localhost", "::1", "0:0:0:0:0:0:0:1"):
+        return True
+    import ipaddress
+
+    try:
+        return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+@app.command()
+def gui(
+    repo: Annotated[
+        list[Path] | None,
+        typer.Option("--repo", help="Repo(s) zusätzlich zur Registry verfügbar machen"),
+    ] = None,
+    host: Annotated[str, typer.Option("--host", help="Bind-Adresse (nur Loopback)")] = "127.0.0.1",
+    port: Annotated[int, typer.Option("--port", help="Bind-Port")] = 8765,
+    open_browser: Annotated[
+        bool, typer.Option("--open", help="Browser auf der lokalen Adresse öffnen")
+    ] = False,
+    i_know: Annotated[
+        bool, typer.Option("--i-know", help="Nicht-Loopback-Host explizit zulassen")
+    ] = False,
+) -> None:
+    """Start the read-only web GUI (loopback only unless --i-know)."""
+    # §8: the event log carries raw, unredacted agent output — a non-loopback bind
+    # must be an explicit, informed choice. Checked BEFORE any bind/server start.
+    if not _is_loopback(host) and not i_know:
+        raise _fail(
+            f"--host {host} ist keine Loopback-Adresse. Das Event-Log enthält rohe, "
+            f"unredigierte Agent-Ausgaben — mit --i-know explizit zulassen."
+        )
+    # Lazy import: the web stack (adw.gui.app → FastAPI/Jinja2) is the optional
+    # `gui` extra; the core `adw run` path must never import it.
+    try:
+        import uvicorn
+
+        from adw.gui.app import create_app
+    except ImportError:
+        typer.echo(
+            "adw gui benötigt das optionale Extra 'gui' (FastAPI, uvicorn, Jinja2). "
+            "Installieren mit: pip install 'adw[gui]'  (oder: uv pip install 'adw[gui]').",
+            err=True,
+        )
+        raise typer.Exit(1) from None
+
+    application = create_app(repos=[str(p) for p in (repo or [])])
+    if open_browser:
+        import webbrowser
+
+        webbrowser.open(f"http://{host}:{port}/")
+    uvicorn.run(application, host=host, port=port)
+
+
 # --- interne Verdrahtung ------------------------------------------------------
 
 

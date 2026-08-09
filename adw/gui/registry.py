@@ -42,7 +42,19 @@ class Registry:
         return None
 
 
+# A single overridable path source (Aufgabe A): outside tests the resolved path
+# stays exactly ``~/.adw/repos.json`` in the pinned format; a test harness can
+# point the registry at a throwaway location via ``ADW_REGISTRY_PATH`` so a run's
+# auto-registration never writes into the developer's real home. This is a plain
+# environment override, not a test-only branch — the runtime behaviour of
+# ``adw run`` is unchanged when the variable is unset.
+_REGISTRY_PATH_ENV = "ADW_REGISTRY_PATH"
+
+
 def _registry_path() -> Path:
+    override = os.environ.get(_REGISTRY_PATH_ENV)
+    if override:
+        return Path(override)
     return Path.home() / ".adw" / "repos.json"
 
 

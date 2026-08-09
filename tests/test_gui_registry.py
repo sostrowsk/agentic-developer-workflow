@@ -22,11 +22,16 @@ cli = CliRunner()
 
 @pytest.fixture
 def home(tmp_path, monkeypatch):
-    """Hermetic HOME so the registry writes under a throwaway ~/.adw."""
+    """Hermetic HOME so the registry writes under a throwaway ~/.adw.
+
+    Also pins ADW_REGISTRY_PATH to that same ~/.adw/repos.json, overriding the
+    suite-wide isolation fixture, so these registry-own tests keep inspecting the
+    file at ``home/.adw/repos.json`` (Aufgabe A realignment)."""
     h = tmp_path / "home"
     h.mkdir()
     monkeypatch.setenv("HOME", str(h))
     monkeypatch.setenv("USERPROFILE", str(h))
+    monkeypatch.setenv("ADW_REGISTRY_PATH", str(h / ".adw" / "repos.json"))
     return h
 
 
