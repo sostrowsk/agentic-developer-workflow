@@ -1,254 +1,746 @@
-# Interface contract — codex.author-Span + Lese-Seite (Reader, Modell, Registry)
-#
-# Single-Lane-Projekt (nur Workstream "backend"): kein HTTP, keine zweite
-# Lane, keine Web-Schicht in DIESEM Lauf. Gepinnt wird AUSSCHLIESSLICH die
-# extern beobachtbare Flaeche:
-#   - die Payload-Felder des neuen codex.author-Spans (GUI-SPEC §4.4),
-#   - die oeffentliche API von adw.gui.reader / .model / .registry,
-#   - die Struktur des gelieferten Span-Baums,
-#   - das Format von ~/.adw/repos.json.
-# NICHT Bestandteil des Kontrakts: interne Helper-Signaturen und Mechanik —
-# Parser-Interna, Datenhaltung, wie das Span-Handle an den Codex-Runner
-# gereicht wird, Signatur des Author-argv-Builders, Slug-Bildungsverfahren,
-# git/os-Kommandoreihenfolge. Feldlisten sind Mindestangaben; Ergebnisobjekte
-# machen ihre Felder attributiv zugreifbar (dataclass oder pydantic, frei).
+openapi: 3.1.0
+info:
+  title: ADW Read-only GUI
+  version: 1.0.0
+  description: |
+    Minimal external contract for the single backend workstream. Pinned are
+    ONLY the externally observable surfaces: the `adw gui` CLI (including its
+    security and packaging behavior), the HTTP routes with their response
+    formats, the SSE format, the observable template behavior and the
+    guarantee that the core package works unchanged without the gui extra.
+    Field lists are minimum requirements; JSON objects may contain additional
+    fields. Internal helpers, Python signatures (including the app factory),
+    the span-tree serialization mechanics, template/CSS/JS file structure and
+    markup details are not contractual.
+servers:
+  - url: http://127.0.0.1:8765
 
-version: 1
-
-scope:
+x-adw-scope:
   workstreams:
     - backend
+  language: English
+  read_only: true
   externally_observable_surfaces:
-    - codex_author_span
-    - reader_api
-    - model_api
-    - span_tree_structure
-    - registry_api
-    - registry_file_format
-
-# --- Aufgabe A: codex.author-Span (GUI-SPEC §4.4) ---------------------------
-# Der Span liegt an der Aufrufstelle im Orchestrator, nicht im Runner, und
-# erscheint daher auch im Dry-Run (Mock-Runner). Die exakte Code-Stelle ist
-# Mechanik (siehe Plan), ebenso wie das Handle gereicht und wie das argv
-# (inkl. per-Call-marker_id) gebaut wird.
-codex_author_span:
-  type: codex.author
-  kind: span
-  start_payload:   # an der Aufrufstelle bekannt — auch im Dry-Run Pflicht
-    - kind         # "spec" | "plan"
-    - argv         # list — vollstaendig VOR dem Span; == vom Runner ausgefuehrtes argv
-    - cwd
-    - task
-  end_payload:     # tatsaechlich zurueckgegebene Ergebnisfelder — auch im Dry-Run Pflicht
-    - artifacts    # list — die zurueckgegebenen Dateinamen
-    - raw_stdout
-    - parse_ok     # bool
+    - cli
+    - http
+    - json
+    - sse
+    - template_behavior
+    - optional_dependency_boundary
   invariants:
-    - "Jede ausgefuehrte Author-Operation (ctx.codex.author(...)) ist von
-       genau einem codex.author-Span umschlossen — Mock- wie Echt-Runner."
-    - "Start- und End-Event tragen dieselbe Span-ID."
-    - "argv liegt vollstaendig im Start-Event (kein nachtraegliches Befuellen);
-       beim Echt-Lauf identisch mit dem ausgefuehrten argv."
-    - "Auch bei gescheitertem/leerem Entwurf wird der Span mit vollstaendigem
-       end-Record geschlossen: parse_ok=false, verfuegbarer raw_stdout; das
-       bestehende Degradations-Verhalten bleibt unveraendert, der Lauf bricht
-       nicht ab."
-    - "Ein Dry-Run erzeugt geschlossene codex.author-Spans mit allen o. g.
-       Start- und End-Feldern."
+    - "The GUI exposes no write or control route."
+    - "No code path of the GUI writes state.json, the repository or the event
+       log; the GUI executes no external program."
+    - "Run content is read only below the resolved .adw/runs/<run_id>/
+       directory. The only exceptions are: reading the registry file, pure
+       filesystem metadata checks (existence/readability) for registry
+       resolution and repo_exists, and the package's own installed resources
+       (templates, static CSS/JS)."
+    - "Repository slugs are resolved only through the runtime registry (plus
+       repositories added via --repo) and are never interpreted as filesystem
+       paths."
+    - "Run IDs must fully match RUN_ID_RE from adw/state.py."
+    - "The pinned error cases (unknown slug, invalid run_id, absent run_id)
+       never produce a server error (5xx) and never cause access outside
+       .adw/runs/<run_id>/."
+    - "No page or asset references an external frontend resource."
+
+x-adw-cli:
+  command: adw gui
+  usage: "adw gui [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--i-know]"
+  options:
+    repo:
+      spelling: --repo
+      type: path
+      repeatable: true
+      description: "Makes the named repositories available in addition to the
+                    registry repositories for this app instance. Without
+                    --repo the app shows the registry repositories."
+    host:
+      spelling: --host
+      type: string
+      default: "127.0.0.1"
+    port:
+      spelling: --port
+      type: integer
+      default: 8765
+    open:
+      spelling: --open
+      type: boolean
+      default: false
+      description: "Opens the local application address in a browser."
+    i_know:
+      spelling: --i-know
+      type: boolean
+      default: false
+      description: "Explicitly permits a non-loopback host (the log contains
+                    raw, unredacted agent output)."
+  behavior:
+    - "Starts the FastAPI app via uvicorn on --host/--port."
+    - "Without --i-know, a non-loopback --host is rejected with a
+       comprehensible error before binding or starting the server."
+    - "With --i-know, a non-loopback --host is permitted."
+    - "Without --open, no browser is opened."
+    - "A repository added via --repo is addressed by the same stable slug it
+       has (or would have) in the registry."
+    - "If the gui extra is unavailable, the command exits cleanly with an
+       instruction to install adw[gui], without a traceback."
   not_pinned:
-    - "Signatur des Author-argv-Builders und wie der marker_id geteilt wird."
-    - "Wie das Span-Handle an den Codex-Runner gereicht wird."
-    - "Die exakte Aufrufstelle (Datei/Funktion) im Orchestrator-Code."
+    - "App-factory signature and uvicorn wiring."
+    - "Exact wording of error and installation messages."
 
-# --- Aufgabe B1: adw.gui.reader ---------------------------------------------
-reader_api:
-  module: adw.gui.reader
-  EventReader:
-    constructor: "EventReader(path)  # Pfad einer events.jsonl"
-    attributes:
-      offset:
-        type: int
-        access: read
-        description: "Bestaetigter Byte-Offset; Startwert 0; lebt nur im
-                      Speicher (keine Offset-Datei)."
-    methods:
-      read:
-        signature: "read() -> ReadResult"
-        description: "Liefert nur das seit dem letzten bestaetigten Offset
-                      Hinzugekommene, in Dateireihenfolge."
-    invariants:
-      - "Nur vollstaendige, \\n-terminierte Zeilen werden geparst. Eine
-         angeschnittene letzte Zeile wird weder geparst noch als Problem
-         gemeldet, ihr Anfang nicht als Offset bestaetigt; nach
-         Vervollstaendigung wird sie genau einmal verarbeitet."
-      - "Ein erster Aufruf liefert alle vollstaendigen gueltigen Records; ein
-         Aufruf ohne Dateizuwachs liefert nichts erneut; nach Anhaengen liefert
-         der naechste Aufruf ausschliesslich das Neue."
-      - "Reader-Aufrufe veraendern das Log nicht und erzeugen keine Dateien."
-      - "snapshot-Events und Records unbekannten Typs werden unveraendert als
-         Events geliefert (Ref-Namen verfuegbar); der Reader berechnet keine
-         Diffs."
-  ReadResult:
-    fields:
-      events: "geparste Records in Dateireihenfolge, als Mappings mit ALLEN
-               Originalfeldern"
-      problems: "Liste von ReadProblem"
-    description: "Events und Probleme sind eindeutig getrennt."
-  ReadProblem:
-    fields:
-      kind: '"bad_line" | "seq_gap"'
-      line_no: "betroffene Zeilennummer (line_no und/oder byte_offset gesetzt)"
-      byte_offset: "betroffener Byte-Offset (line_no und/oder byte_offset gesetzt)"
-      expected: "nur bei seq_gap: erwartete seq"
-      found: "nur bei seq_gap: gefundene seq"
-    invariants:
-      - "Eine Luecke in der seq-Folge wird als seq_gap gemeldet (mit
-         expected/found), nicht still ueberlesen; Events vor und nach der
-         Luecke bleiben verfuegbar."
-      - "Eine vollstaendige, nicht parsbare Zeile wird als bad_line fuer diese
-         Zeile gemeldet; alle nachfolgenden vollstaendigen Zeilen werden
-         weiterhin geliefert."
-
-# --- Aufgabe B2: adw.gui.model ----------------------------------------------
-model_api:
-  module: adw.gui.model
-  build_tree:
-    signature: "build_tree(events) -> list[SpanNode]"
-    description: "Die Wurzeln in Log-Reihenfolge (die run-Spans; bei Resume
-                  mehrere, je Lauf-Segment eine)."
-  SpanNode:
-    fields:
-      - span_id
-      - type
-      - seq            # Start-seq (im end-only-Fall aus AC 19: die End-seq)
-      - start_ts       # None nur im end-only-Fall (AC 19)
-      - end_ts         # None solange laufend
-      - duration       # None solange laufend
-      - running        # bool
-      - start_payload  # None nur im end-only-Fall (AC 19)
-      - end_payload    # None solange laufend
-      - start_record   # vollstaendiger Original-Start-Record; None nur im end-only-Fall (AC 19)
-      - end_record     # vollstaendiger Original-End-Record; None solange laufend
-      - children       # geordnete Liste aus SpanNode und PointNode
-  PointNode:
-    fields:
-      - type
-      - seq
-      - ts
-      - payload
-      - record         # vollstaendiger Original-Record
-
-span_tree_structure:
-  span_formation:
-    - "start/end mit derselben Span-ID werden zu genau einem Knoten; duration
-       aus der ts-Differenz. Ein Span ohne end hat running=true und weder
-       end_ts noch duration."
-  roots_and_resume:
-    - "Verschachtelung folgt dem parent-Feld, soweit gesetzt."
-    - "Die Wurzeln sind die run-Spans in Log-Reihenfolge."
-    - "Ein Resume-Log (§12: zweiter run-Start in derselben Datei,
-       resumed_from_seq markiert die Naht, seq zaehlt durch) ergibt mehrere
-       Wurzeln, je Lauf-Segment eine."
-    - "Ein Log ohne run-Start (degeneriert/truncatiert) bricht nicht ab;
-       elternlose Spans werden dann selbst Wurzeln."
-  orphan_containment:   # GUI-SPEC §4.2, normativ (AC 14/15) — rein zeitbasiert
-    - "Eine Waise (Span mit parent:null, der nicht die run-Wurzel ist) gehoert
-       zum INNERSTEN Span, dessen Intervall das Intervall der Waise
-       [start ts, end ts] echt enthaelt — unter allen enthaltenden Kandidaten
-       der mit dem spaetesten Start; bei Gleichstand entscheidet die hoehere
-       seq."
-    - "Intervalle je Knotenart: gepaarter Span [start ts, end ts]; laufender
-       Span [start ts, unendlich) — er gilt als enthaltend fuer alles nach
-       seinem Start; End-only-Span [end ts, end ts]; Punkt-Event [ts, ts]."
-    - "run-Spans nehmen als Kandidaten regulaer teil; eine Waise eines
-       Resume-Segments faellt an dessen run-Span (spaeterer Start gewinnt gegen
-       einen noch offenen frueheren run)."
-    - "Eine Waise, die nichts enthaelt, bleibt Kind der run-Wurzel — bei
-       mehreren Wurzeln: der spaetesten Wurzel, deren Start nicht nach dem Start
-       der Waise liegt, sonst der ersten."
-    - "Die Regel ist ausschliesslich zeitbasiert (seq als Tiebreaker) und
-       haengt NICHT von phase/lane ab; sie funktioniert, wenn diese ueberall
-       null sind."
-  points:
-    - "Punkt-Events haengen an dem Span, dessen ID sie im Feld span tragen."
-  unknown_types:
-    - "Unbekannte type-Werte werden generisch als Knoten uebernommen — nie
-       verworfen, nie als Fehler. Der Original-Record inkl. Payload bleibt ueber
-       stabile Knotenfelder zugaenglich: SpanNode.start_record/end_record bzw.
-       PointNode.record — mit ALLEN Originalfeldern. Unbekannte Span-Typen
-       nehmen regulaer an Spanbildung/Verschachtelung teil, unbekannte
-       Punkt-Typen werden regulaer ihrem span zugeordnet."
-  dangling_references:  # AC 19 — deterministisch, nie abbrechend, kein Recordverlust
-    - "end ohne bekannten start: Span-Knoten allein aus dem End-Record —
-       start_ts/start_payload/start_record/duration=None, running=false,
-       end_ts/end_payload/end_record/seq aus dem End-Record; eingeordnet ueber
-       parent falls aufloesbar, sonst nach orphan_containment mit Intervall
-       [end ts, end ts]."
-    - "Span mit nicht-nullem, im Bestand unbekanntem parent: wie eine Waise
-       nach orphan_containment."
-    - "Punkt-Event mit fehlendem/null/unbekanntem span: wie eine Waise nach
-       orphan_containment mit Intervall [ts, ts]."
-  children_order:
-    - "Kinder jedes Knotens chronologisch nach ts, bei Gleichstand nach seq."
-    - "Das Modell liefert fuer einen vollstaendigen und fuer einen inkrementell
-       erweiterten Eventbestand denselben beobachtbaren Baum."
-
-# --- Aufgabe B3: adw.gui.registry -------------------------------------------
-registry_api:
-  module: adw.gui.registry
-  register_repo:
-    signature: "register_repo(path) -> RepoEntry"
-    description: "Legt den Eintrag an bzw. aktualisiert last_seen. Je
-                  kanonischem Repo-Pfad hoechstens ein Eintrag. Fail-open: ein
-                  Registry-Fehler verhindert den adw-run nie."
-  load_registry:
-    signature: "load_registry() -> Registry"
-  Registry:
-    attributes:
-      repos: "Liste von RepoEntry"
-    methods:
-      resolve: "resolve(slug) -> RepoEntry | None"
-  RepoEntry:
-    fields:
-      - path       # absoluter, kanonischer Pfad
-      - slug       # stabiler, URL-tauglicher Slug
-      - last_seen  # UTC-Zeitstempel, ISO-8601
-      - exists     # bool — ob der Pfad aktuell existiert
+x-adw-packaging:
+  optional_extra: gui
+  dependencies:
+    - FastAPI
+    - uvicorn
+    - Jinja2
   invariants:
-    - "adw run registriert sein aufgeloestes, kanonisches Ziel-Repo automatisch
-       bzw. aktualisiert dessen last_seen; ein Registry-Fehler verhindert den
-       Run nie."
-    - "Stabiler Slug: derselbe Pfad ergibt stets denselben Slug — ein
-       bestehender Eintrag behaelt beim Aktualisieren seinen Slug; verschiedene
-       kanonische Pfade verschiedene Slugs (auch bei gleichem
-       Verzeichnisnamen); ein Slug enthaelt nie einen rohen Dateisystempfad
-       (§7.4) und ist per resolve zu seinem Eintrag aufloesbar."
-    - "Nicht mehr existierende Pfade werden ueber exists=false gekennzeichnet;
-       sie bleiben auflistbar und per Slug aufloesbar und fuehren nie zu einem
-       Fehler."
-    - "Eine fehlende oder unlesbare Registry-Datei fuehrt zu einer leeren,
-       nutzbaren Registry, nicht zu einem ungefangenen Fehler; das naechste
-       erfolgreiche Registrieren schreibt wieder ein gueltiges Format."
-    - "Jeder Schreibvorgang schreibt die vollstaendige neue Registry in eine
-       Temp-Datei im selben Verzeichnis und ersetzt repos.json atomar
-       (os.replace); ein vor dem Ersetzen scheiternder/abgebrochener
-       Schreibvorgang laesst den vorherigen Inhalt unversehrt."
-  not_pinned:
-    - "Slug-Bildungsverfahren (Basename+Hash o. Ae.), solange die Invarianten
-       gelten."
-    - "Interne Datenhaltung und os/tempfile-Mechanik des atomaren Writes."
-    - "Ort des Registrierungs-Hooks im CLI-Code (siehe Plan)."
+    - "The listed web dependencies are available exclusively through adw[gui],
+       not as core dependencies."
+    - "Installing or importing the core package without adw[gui] leaves adw run
+       and all other core commands functional: no import error, no missing
+       dependency."
+    - "Core command import paths do not import FastAPI, uvicorn or Jinja2."
 
-registry_file_format:
-  path: "~/.adw/repos.json"
-  schema:
-    version: 1
-    repos:
-      - path: "/absoluter/kanonischer/pfad"
-        slug: "stabiler-url-tauglicher-slug"
-        last_seen: "UTC-Zeitstempel im ISO-8601-Format"
-  notes:
-    - "exists ist KEIN persistiertes Feld — es wird beim Laden/Auflisten aus dem
-       aktuellen Dateisystemzustand abgeleitet."
-    - "Die Datei ist die einzige erlaubte Persistenz dieses Laufs (keine Index-,
-       Cache- oder Offset-Dateien)."
+paths:
+  /:
+    get:
+      operationId: runListPage
+      summary: Server-rendered run list
+      responses:
+        "200":
+          description: |
+            English HTML listing runs from every known repository. Running runs
+            appear first. Missing repositories remain visible as clearly
+            greyed-out placeholders and never cause an error.
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /runs/{repo}/{run_id}:
+    parameters:
+      - $ref: "#/components/parameters/RepoSlug"
+      - $ref: "#/components/parameters/RunId"
+    get:
+      operationId: runDetailPage
+      summary: Server-rendered run detail
+      responses:
+        "200":
+          description: |
+            English HTML containing the seven-phase status bar, expandable
+            chronological trace tree, node-dependent detail pane and visible
+            reader problems. The page uses only package-local assets and
+            incrementally incorporates SSE records without a reload.
+          content:
+            text/html:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/InvalidRunId"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/runs:
+    get:
+      operationId: listRuns
+      summary: List runs across all known repositories
+      responses:
+        "200":
+          description: |
+            Running runs precede completed runs. Each unreachable repository
+            contributes exactly one placeholder (no run fields, no
+            reconstructed run metadata, no persistent caching) instead of run
+            entries. Failure of one repository does not prevent entries from
+            other repositories. Values absent from the log (e.g. cost in dry
+            runs without usage) are null, not an error.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  oneOf:
+                    - $ref: "#/components/schemas/RunSummary"
+                    - $ref: "#/components/schemas/MissingRepo"
+
+  /api/runs/{repo}/{run_id}:
+    parameters:
+      - $ref: "#/components/parameters/RepoSlug"
+      - $ref: "#/components/parameters/RunId"
+    get:
+      operationId: getRun
+      summary: Return run metadata, phases, model tree and reader problems
+      responses:
+        "200":
+          description: Run detail snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunDetail"
+        "400":
+          $ref: "#/components/responses/InvalidRunId"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/runs/{repo}/{run_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/RepoSlug"
+      - $ref: "#/components/parameters/RunId"
+    get:
+      operationId: getRunEvents
+      summary: Return accepted raw event records in file order
+      parameters:
+        - name: from_seq
+          in: query
+          required: false
+          description: "Return records whose integer seq is greater than or
+                        equal to this value. Omission means the beginning. An
+                        invalid value is answered with a controlled client
+                        error (never 5xx); the exact status code is not
+                        pinned. How records without a valid integer seq are
+                        treated by the filter is not pinned."
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: |
+            Reader-accepted original event records, including unknown event
+            types (never filtered) and records without a valid integer seq
+            (returned with their original value), with all original fields and
+            in file order.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EventRecord"
+        "400":
+          $ref: "#/components/responses/InvalidRunId"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/runs/{repo}/{run_id}/stream:
+    parameters:
+      - $ref: "#/components/parameters/RepoSlug"
+      - $ref: "#/components/parameters/RunId"
+    get:
+      operationId: streamRunEvents
+      summary: Read-only SSE live tail
+      parameters:
+        - name: Last-Event-ID
+          in: header
+          required: false
+          description: "When present, resume strictly after this integer event
+                        sequence."
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: |
+            text/event-stream of the run's events (see x-adw-sse). Without
+            Last-Event-ID, replay starts at the beginning of the log. With the
+            header, replay resumes strictly after that seq. The stream closes
+            after the run end event.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              examples:
+                event:
+                  summary: Accepted event record
+                  value: |
+                    id: 42
+                    data: {"seq":42,"type":"agent.run","kind":"point","payload":{}}
+
+                problem:
+                  summary: Reader problem that does not advance Last-Event-ID
+                  value: |
+                    event: problem
+                    data: {"kind":"bad_line","line_no":43,"byte_offset":9012}
+
+        "400":
+          $ref: "#/components/responses/InvalidRunId"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+components:
+  parameters:
+    RepoSlug:
+      name: repo
+      in: path
+      required: true
+      description: "Stable slug of a registry or ad-hoc repository; never a
+                    filesystem path. Unknown slug: 404."
+      schema:
+        type: string
+        minLength: 1
+    RunId:
+      name: run_id
+      in: path
+      required: true
+      description: "Run identifier that must fully match RUN_ID_RE from
+                    adw/state.py. Formally invalid: 400; valid but absent:
+                    404."
+      schema:
+        type: string
+        minLength: 1
+
+  responses:
+    InvalidRunId:
+      description: The run_id does not fully match RUN_ID_RE.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HttpError"
+    NotFound:
+      description: Unknown repository slug or valid but absent run ID.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/HttpError"
+
+  schemas:
+    HttpError:
+      type: object
+      required:
+        - detail
+      properties:
+        detail:
+          type: string
+      additionalProperties: true
+
+    RunSummary:
+      type: object
+      required:
+        - run_id
+        - repo
+        - repo_exists
+        - issue
+        - phase
+        - status
+        - start
+        - duration
+        - cost
+        - event_count
+      properties:
+        run_id:
+          type: string
+        repo:
+          type: string
+          description: Stable repository slug.
+        repo_exists:
+          type: boolean
+        issue:
+          type:
+            - string
+            - "null"
+          description: Truncated issue text.
+        phase:
+          type:
+            - string
+            - "null"
+        status:
+          type:
+            - string
+            - "null"
+        start:
+          type:
+            - string
+            - "null"
+          description: Run start timestamp when determinable.
+        duration:
+          type:
+            - number
+            - "null"
+        cost:
+          type:
+            - number
+            - "null"
+        event_count:
+          type: integer
+          minimum: 0
+      additionalProperties: true
+
+    MissingRepo:
+      type: object
+      required:
+        - repo
+        - repo_exists
+        - hint
+      properties:
+        repo:
+          type: string
+          description: Stable repository slug.
+        repo_exists:
+          const: false
+        hint:
+          type: string
+          description: Displayable explanation, such as the registered path.
+      not:
+        anyOf:
+          - required: [run_id]
+          - required: [issue]
+          - required: [phase]
+          - required: [status]
+          - required: [start]
+          - required: [duration]
+          - required: [cost]
+          - required: [event_count]
+      additionalProperties: true
+
+    RunMetadata:
+      type: object
+      required:
+        - run_id
+        - repo
+      properties:
+        run_id:
+          type: string
+        repo:
+          type: string
+        issue:
+          type:
+            - string
+            - "null"
+        phase:
+          type:
+            - string
+            - "null"
+        status:
+          type:
+            - string
+            - "null"
+        start:
+          type:
+            - string
+            - "null"
+        duration:
+          type:
+            - number
+            - "null"
+        cost:
+          type:
+            - number
+            - "null"
+        event_count:
+          type: integer
+          minimum: 0
+      additionalProperties: true
+
+    PhaseStatus:
+      type: object
+      required:
+        - name
+        - status
+        - duration
+      properties:
+        name:
+          type: string
+          enum:
+            - spec
+            - plan
+            - build
+            - integration
+            - codex_review
+            - final_review
+            - ci
+        status:
+          type: string
+          enum:
+            - completed
+            - active
+            - pending
+            - failed
+        duration:
+          type:
+            - number
+            - "null"
+      additionalProperties: true
+
+    ReadProblem:
+      type: object
+      required:
+        - kind
+      properties:
+        kind:
+          type: string
+          description: Reader problem category, including bad_line or seq_gap.
+        line_no:
+          type:
+            - integer
+            - "null"
+        byte_offset:
+          type:
+            - integer
+            - "null"
+        expected:
+          type:
+            - integer
+            - "null"
+          description: Expected sequence for a seq_gap.
+        found:
+          type:
+            - integer
+            - "null"
+          description: Observed sequence for a seq_gap.
+        message:
+          type:
+            - string
+            - "null"
+      additionalProperties: true
+
+    EventRecord:
+      type: object
+      description: |
+        A reader-accepted original event record with all original fields.
+        Records whose seq is missing or not an integer are still returned with
+        their original value; only the SSE accepted_event surface requires a
+        valid integer seq (such records emit a problem message there instead).
+      properties:
+        seq:
+          description: "Original seq value; an integer for well-formed records,
+                        otherwise retained as-is or absent."
+        ts:
+          type:
+            - string
+            - number
+            - "null"
+        type:
+          type:
+            - string
+            - "null"
+        kind:
+          type:
+            - string
+            - "null"
+        span:
+          type:
+            - string
+            - "null"
+        parent:
+          type:
+            - string
+            - "null"
+        phase:
+          type:
+            - string
+            - "null"
+        lane:
+          type:
+            - string
+            - "null"
+        round:
+          type:
+            - integer
+            - "null"
+        payload:
+          description: Original event payload.
+      additionalProperties: true
+
+    TraceNode:
+      type: object
+      description: |
+        Serialized trace-tree node. The tree reflects the run's span tree in
+        chronological order, including orphan containment per the abstention
+        rule. Unknown types are retained and carried generically (type label
+        plus raw payload), never dropped. How the tree is produced and how
+        node data for the detail pane is embedded beyond these minimum fields
+        is not contractual.
+      required:
+        - type
+        - label
+        - duration
+        - payload
+        - children
+      properties:
+        type:
+          type: string
+          description: Original event/span type; unknown types are retained.
+        label:
+          type: string
+        duration:
+          type:
+            - number
+            - "null"
+        payload:
+          description: Node payload, retaining raw payload for generic unknown
+            nodes.
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/TraceNode"
+        status:
+          type:
+            - string
+            - "null"
+        seq:
+          type:
+            - integer
+            - "null"
+        n:
+          type:
+            - integer
+            - "null"
+          description: Round number for round nodes.
+        cap:
+          type:
+            - integer
+            - "null"
+          description: Round cap for round nodes.
+      additionalProperties: true
+
+    RunDetail:
+      type: object
+      required:
+        - run
+        - phases
+        - tree
+        - problems
+      properties:
+        run:
+          $ref: "#/components/schemas/RunMetadata"
+        phases:
+          type: array
+          description: "Exactly the seven workflow phases in spec, plan,
+            build, integration, codex_review, final_review, ci order."
+          minItems: 7
+          maxItems: 7
+          items:
+            $ref: "#/components/schemas/PhaseStatus"
+        tree:
+          type: array
+          items:
+            $ref: "#/components/schemas/TraceNode"
+        problems:
+          type: array
+          description: Reader-reported problems (seq gaps, broken lines) with
+            the available position/sequence information — visible, never
+            suppressed.
+          items:
+            $ref: "#/components/schemas/ReadProblem"
+      additionalProperties: true
+
+x-adw-sse:
+  media_type: text/event-stream
+  framing:
+    accepted_event:
+      event_field: omitted
+      id: "Decimal integer seq from the accepted record."
+      data: "One-line JSON encoding of the complete original event record
+             (same fields as in the log)."
+    problem:
+      event_field: problem
+      id: "Deliberately omitted so Last-Event-ID remains unaffected."
+      data: "One-line JSON encoding of ReadProblem in the same form used by
+             RunDetail.problems."
+  behavior:
+    - "New complete events are delivered within a 500 ms poll cadence. How the
+       server detects new data is not contractual."
+    - "Every new complete log line accepted as an event record with a valid
+       integer seq emits exactly one accepted_event message. Records are only
+       ever delivered complete; a partially written final line is never
+       emitted and appears exactly once when complete."
+    - "A corrupt line or a record without a valid integer seq emits a problem
+       message, does not terminate the stream and does not change
+       Last-Event-ID; subsequent valid events continue to be delivered."
+    - "An initial connection without Last-Event-ID starts at the beginning of
+       the log and replays every accepted event."
+    - "A reconnect with Last-Event-ID resumes strictly after that seq, without
+       duplication or omission."
+    - "After the run end event has been delivered, the server closes the
+       stream; all events complete by then are delivered first. An already
+       finished run replays every complete record up to and including the end
+       event, then closes."
+  client_contract:
+    - "The client uses only vanilla JS (fetch, native EventSource)."
+    - "The page renders each event exactly once — no loss and no duplication,
+       even for an event appended between the snapshot fetch and the stream
+       start."
+    - "The client appends problem messages to the visible problem display
+       without reloading."
+
+x-adw-template-behavior:
+  run_list:
+    - "Shows runs from all known repositories with running runs first."
+    - "Shows unreachable repositories as clearly greyed-out placeholders; this
+       never causes an error and other repositories stay listed normally."
+    - "Displays absent values as empty/null-equivalent content rather than an
+       error."
+  run_detail:
+    phase_bar:
+      order:
+        - spec
+        - plan
+        - build
+        - integration
+        - codex_review
+        - final_review
+        - ci
+      states:
+        - completed
+        - active
+        - pending
+        - failed
+      duration: "Shown per phase where determinable."
+    trace_tree:
+      - "Expandable and chronological."
+      - "Each node displays a status icon, label and duration."
+      - "Round nodes additionally display n/cap."
+      - "Unknown types display their type label and raw payload; they are
+         never dropped."
+    detail_pane:
+      agent.run:
+        tabs:
+          - Prompt
+          - Answer
+          - Tools
+        notes:
+          - "Exactly these three tabs; no Diff tab in this run."
+          - "Prompt: the full task string including the system append."
+          - "Answer: the final text plus intermediate assistant messages."
+          - "Tools: chronological tool calls, each with full input and full
+             result."
+      gate:
+        fields:
+          - command
+          - exit_code
+          - output
+        notes:
+          - "Output is shown in full."
+      codex.review:
+        fields:
+          - findings
+          - stdout
+        notes:
+          - "Findings as a table with at least severity, key, file and
+             message; stdout raw."
+      aggregates:
+        node_types:
+          - phase
+          - lane
+          - round
+        fields:
+          - duration
+          - cost
+          - outcome
+        notes:
+          - "Cost where available; round nodes show n/cap."
+      unknown:
+        notes:
+          - "Type label plus raw payload."
+    problems:
+      - "Reader problems are visibly displayed with available position and
+         sequence information."
+    live_updates:
+      - "Uses fetch and native EventSource only."
+      - "Merges accepted stream records incrementally without reloading."
+      - "A completed run opened later and the same event set observed live
+         render identically."
+  not_pinned:
+    - "Template/CSS/JS file structure and markup details."
+    - "The exact JSON embedding of detail-pane data per node type beyond the
+       TraceNode minimum fields."
+    - "Internal mechanics: how the server detects new log data, how the tree
+       is built, and how the client achieves identical live/snapshot
+       rendering."
