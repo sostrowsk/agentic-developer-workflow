@@ -79,6 +79,18 @@ def test_state_only_run_detail_status_is_empty(home, tmp_path):  # noqa: F811
     assert detail["run"]["status"] != "running"
 
 
+def test_state_only_run_detail_html_shows_no_none_or_null(home, tmp_path):  # noqa: F811
+    """E5/G3: the detail page of a state-only run (empty status) never renders the
+    literal ``None``/``null`` — a missing status stays empty in the header."""
+    repo = _repo_with_state_only_run(tmp_path)
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = _slug_for(repo)
+
+    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+    assert "None" not in html
+    assert "null" not in html
+
+
 def test_state_only_run_html_list_shows_no_trace_hint(home, tmp_path):  # noqa: F811
     """G2: the list page shows the run and a clear indication that no trace exists
     (how the hint is embedded is not contractual — the word 'trace' surfaces it)."""

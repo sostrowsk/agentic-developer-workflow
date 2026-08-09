@@ -98,6 +98,19 @@ def test_result_without_outcome_fields_keeps_type_name(home, tmp_path):  # noqa:
     assert labels["result:bare1"] == "agent.tool.result"
 
 
+def test_exit_code_only_result_outcome_follows_the_code(home, tmp_path):  # noqa: F811
+    """C2 (regression): with no ``is_error``, the outcome follows the numeric exit
+    code — zero is success, nonzero is error. A nonzero code is never shown as
+    ``ok``."""
+    labels = _labels_by_use_id(tmp_path)
+
+    zero = labels["result:exit0"]
+    nonzero = labels["result:exitN"]
+    assert "error" not in zero.lower() and "0" in zero   # exit 0 → success
+    assert "error" in nonzero.lower() and "2" in nonzero  # exit 2 → error
+    assert zero != "agent.tool.result" and nonzero != "agent.tool.result"
+
+
 def test_content_only_result_keeps_type_name(home, tmp_path):  # noqa: F811
     """C3 (regression): a result with a resolvable tool but only a ``content`` body
     (no ``is_error``/exit code) keeps the type name — content is not an outcome, so

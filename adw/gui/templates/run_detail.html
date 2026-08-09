@@ -101,7 +101,7 @@
 {% endmacro %}
 <body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}">
   <header class="run-header">
-    <h1>Run {{ detail.run.run_id }} &mdash; {{ detail.run.status }}</h1>
+    <h1>Run {{ detail.run.run_id }}{% if detail.run.status is not none %} &mdash; {{ detail.run.status }}{% endif %}</h1>
     <div class="phase-bar">
       {% for ph in detail.phases %}
       <span class="phase phase-{{ ph.status }}">{{ ph.name }}{% if ph.duration is not none %} <em>{{ ph.duration | fmt_duration }}</em>{% endif %}</span>

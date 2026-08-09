@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from adw.gui.app import create_app
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     home,
+    interleaved_run_span_lines,
     multi_run_span_lines,
     write_run,
 )
@@ -69,3 +70,26 @@ def test_list_and_detail_status_are_identical(home, tmp_path):  # noqa: F811
 
     assert _list_status(client, slug, "cccc3333") == _detail_status(client, slug, "cccc3333")
     assert _detail_status(client, slug, "cccc3333") == "escalated"
+
+
+def test_interleaved_run_spans_report_the_last_started_span(home, tmp_path):  # noqa: F811
+    """A1 (regression): with interleaved spans (start A, start B, end B, end A) the
+    reported status is the last-STARTED span B's — not that of the plainly-last
+    run end record (A's ``awaiting_approval``)."""
+    client, slug = _client_with(
+        tmp_path, "dddd4444", interleaved_run_span_lines(last_ended=True, last_status="done")
+    )
+
+    assert _list_status(client, slug, "dddd4444") == "done"
+    assert _detail_status(client, slug, "dddd4444") == "done"
+
+
+def test_interleaved_run_spans_last_open_is_running(home, tmp_path):  # noqa: F811
+    """A2 (regression): if the last-STARTED span B stays open, the run is
+    ``running`` even though the earlier-started span A already ended."""
+    client, slug = _client_with(
+        tmp_path, "eeee5555", interleaved_run_span_lines(last_ended=False), phase="build"
+    )
+
+    assert _list_status(client, slug, "eeee5555") == "running"
+    assert _detail_status(client, slug, "eeee5555") == "running"

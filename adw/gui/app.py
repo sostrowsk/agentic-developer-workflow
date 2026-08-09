@@ -174,20 +174,29 @@ def _run_span(events):
     """The run's first ``run`` start (its beginning) and the end of the LAST
     ``run`` span (Aufgabe A). A gated run is several CLI commands and thus several
     ``run`` spans in one log; the reported status is the last span's, not the
-    first's. ``end`` is None when the last span has no ``end`` yet (→ running),
-    even if earlier spans finished."""
-    start = None
-    end = None
-    for e in events:
-        if e.get("type") != "run":
-            continue
-        if e.get("kind") == "start":
-            if start is None:
-                start = e
-            end = None  # a new span opened; its end (if any) comes later in the log
-        elif e.get("kind") == "end":
-            end = e
-    return start, end
+    first's.
+
+    The last span's end is matched to the last ``run`` start by **span id** and
+    must occur after that start — with interleaved spans (start A, start B, end B,
+    end A, e.g. from concurrent appenders) the plain last ``run`` end belongs to
+    an earlier-started span, so span-id matching is required. ``end`` is None when
+    the last span is still open (→ running), even if earlier spans finished."""
+    first_start = None
+    last_start_idx = None
+    for i, e in enumerate(events):
+        if e.get("type") == "run" and e.get("kind") == "start":
+            if first_start is None:
+                first_start = e
+            last_start_idx = i
+    if last_start_idx is None:
+        # No run start at all: defensively fall back to the last run end, if any.
+        ends = [e for e in events if e.get("type") == "run" and e.get("kind") == "end"]
+        return first_start, (ends[-1] if ends else None)
+    last_span = events[last_start_idx].get("span")
+    for e in events[last_start_idx + 1:]:
+        if e.get("type") == "run" and e.get("kind") == "end" and e.get("span") == last_span:
+            return first_start, e
+    return first_start, None  # the last run span remains open → running
 
 
 def _summary(slug, run_id, events, state) -> dict:
@@ -332,9 +341,15 @@ def _tool_result_label(p, tool_names) -> str:
     # name rather than being invented as success.
     is_error = p.get("is_error")
     exit_code = p.get("exit_code")
-    if is_error is None and exit_code is None:
-        return "agent.tool.result"
-    outcome = "error" if is_error else "ok"
+    if isinstance(is_error, bool):
+        failed = is_error
+    elif isinstance(exit_code, int) and not isinstance(exit_code, bool):
+        # No explicit is_error: a nonzero exit code is a failure, zero a success —
+        # never the opposite (a nonzero exit must not be presented as ``ok``).
+        failed = exit_code != 0
+    else:
+        return "agent.tool.result"  # no valid outcome signal → keep the type name
+    outcome = "error" if failed else "ok"
     if exit_code is not None:
         return f"{outcome} (exit {exit_code})"
     return outcome

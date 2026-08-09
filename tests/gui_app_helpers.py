@@ -190,6 +190,27 @@ def multi_run_span_lines(*, last_ended=True, last_status="done", issue="Gated ru
     return lines
 
 
+def interleaved_run_span_lines(*, last_ended=True, last_status="done", issue="Interleaved"):
+    """Two ``run`` spans whose completion order differs from their start order
+    (start A, start B, end B, end A — as concurrent appenders can produce). The
+    LAST-started span is B; its status must be reported, not that of the plainly
+    last ``run`` end record (A's). When ``last_ended`` is False, B stays open (end
+    A still present) so the run is ``running``."""
+    lines = [
+        rec(1, "run", "start", "A", None, sec=0, payload=run_start_payload(issue)),
+        rec(2, "run", "start", "B", None, sec=1, payload=run_start_payload(issue)),
+    ]
+    if last_ended:
+        lines.append(rec(3, "run", "end", "B", None, sec=2, payload=run_end_payload(last_status)))
+        lines.append(rec(4, "run", "end", "A", None, sec=3,
+                         payload=run_end_payload("awaiting_approval")))
+    else:
+        # B stays open; A's end is the plainly-last run end but must NOT be used.
+        lines.append(rec(3, "run", "end", "A", None, sec=3,
+                         payload=run_end_payload("awaiting_approval")))
+    return lines
+
+
 def tool_label_lines():
     """One ``agent.run`` span whose tool-call/-result points exercise every branch
     of Aufgabe C: Read/Bash/Grep with their main argument, another tool (Write),
@@ -232,9 +253,18 @@ def tool_label_lines():
         # result whose tool_use_id matches no call → unresolved tool → type name
         rec(15, "agent.tool.result", "point", "A", sec=15, payload={
             "tool_use_id": "orphan1", "is_error": True}),
-        rec(16, "agent.run", "end", "A", "R", sec=16,
+        # exit-code-only results (no is_error): zero → success, nonzero → error
+        rec(16, "agent.tool.call", "point", "A", sec=16, payload={
+            "tool": "Bash", "tool_use_id": "exit0", "input": {"command": "true"}}),
+        rec(17, "agent.tool.result", "point", "A", sec=17, payload={
+            "tool_use_id": "exit0", "exit_code": 0, "content": "done"}),
+        rec(18, "agent.tool.call", "point", "A", sec=18, payload={
+            "tool": "Bash", "tool_use_id": "exitN", "input": {"command": "false"}}),
+        rec(19, "agent.tool.result", "point", "A", sec=19, payload={
+            "tool_use_id": "exitN", "exit_code": 2, "content": "boom"}),
+        rec(20, "agent.run", "end", "A", "R", sec=20,
             payload={"result_text": "done", "is_error": False}),
-        rec(17, "run", "end", "R", None, sec=17, payload=run_end_payload("done")),
+        rec(21, "run", "end", "R", None, sec=21, payload=run_end_payload("done")),
     ]
 
 
