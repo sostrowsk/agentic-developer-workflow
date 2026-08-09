@@ -194,6 +194,83 @@ def test_wrong_version_registry_is_treated_as_empty(home, tmp_path):
     assert data["version"] == 1 and len(data["repos"]) == 1
 
 
+def _write_registry(home, repos):
+    registry_file(home).parent.mkdir(parents=True, exist_ok=True)
+    registry_file(home).write_text(
+        json.dumps({"version": 1, "repos": repos}), encoding="utf-8"
+    )
+
+
+def test_load_registry_deduplicates_duplicate_paths(home):
+    """AC 21: at most one entry per canonical path. Duplicate paths collapse
+    deterministically to the first occurrence on load; the shadowed slug no longer
+    resolves."""
+    _write_registry(
+        home,
+        [
+            {"path": "/dup/repo", "slug": "alpha", "last_seen": "2026-01-01T00:00:00Z"},
+            {"path": "/dup/repo", "slug": "beta", "last_seen": "2026-02-02T00:00:00Z"},
+        ],
+    )
+    reg = load_registry()
+    assert [e.path for e in reg.repos] == ["/dup/repo"]  # exactly one entry
+    assert reg.resolve("alpha").path == "/dup/repo"  # first kept
+    assert reg.resolve("beta") is None  # shadowed duplicate dropped
+
+
+def test_load_registry_regenerates_unsafe_slug_from_path(home):
+    """AC 23/§7.4: a slug that contains a path separator or a raw filesystem path
+    is not URL-safe; it is regenerated deterministically from the path, and the
+    raw path no longer resolves."""
+    _write_registry(
+        home,
+        [{"path": "/a/repo", "slug": "/home/user/repo", "last_seen": "2026-01-01T00:00:00Z"}],
+    )
+    reg = load_registry()
+    (entry,) = reg.repos
+    assert "/" not in entry.slug and entry.slug  # URL-safe
+    assert reg.resolve(entry.slug).path == "/a/repo"  # resolvable via the safe slug
+    assert reg.resolve("/home/user/repo") is None  # raw path is not a usable slug
+
+
+def test_load_registry_makes_duplicate_slugs_unique(home):
+    """AC 23: different canonical paths must have different slugs. A file that
+    assigns the same slug to two paths is repaired so both stay uniquely
+    resolvable."""
+    _write_registry(
+        home,
+        [
+            {"path": "/a", "slug": "dup", "last_seen": "2026-01-01T00:00:00Z"},
+            {"path": "/b", "slug": "dup", "last_seen": "2026-01-01T00:00:00Z"},
+        ],
+    )
+    reg = load_registry()
+    slugs = [e.slug for e in reg.repos]
+    assert len(reg.repos) == 2
+    assert len(set(slugs)) == 2  # slugs made unique
+    for entry in reg.repos:
+        assert reg.resolve(entry.slug).path == entry.path  # each resolvable to its own path
+
+
+def test_register_repo_rewrites_registry_without_duplicate_paths(home, tmp_path):
+    """AC 21: registering against a file that already holds duplicate entries for
+    the target path persists a single, deduplicated entry."""
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    canonical = str(repo.resolve())
+    _write_registry(
+        home,
+        [
+            {"path": canonical, "slug": "alpha", "last_seen": "2026-01-01T00:00:00Z"},
+            {"path": canonical, "slug": "beta", "last_seen": "2026-02-02T00:00:00Z"},
+        ],
+    )
+    register_repo(repo)
+    data = json.loads(registry_file(home).read_text(encoding="utf-8"))
+    assert len(data["repos"]) == 1
+    assert data["repos"][0]["path"] == canonical
+
+
 def test_aborted_write_leaves_previous_registry_intact(home, tmp_path, monkeypatch):
     """AC 26: a write that fails before the atomic replace leaves the previous
     registry content untouched."""

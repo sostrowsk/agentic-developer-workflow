@@ -60,18 +60,41 @@ def _slug(canonical_path: str) -> str:
     return f"{readable}-{digest}"
 
 
+# A URL-safe slug: no path separators, spaces or other reserved characters — so a
+# raw filesystem path (which contains "/") can never masquerade as a slug (§7.4).
+_SLUG_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def _is_valid_slug(slug) -> bool:
+    return isinstance(slug, str) and _SLUG_RE.fullmatch(slug) is not None
+
+
+def _unique_slug(canonical_path: str, used: set) -> str:
+    """A deterministic slug for ``canonical_path`` that is not already in ``used``
+    (a numeric suffix disambiguates the astronomically rare hash collision)."""
+    base = _slug(canonical_path)
+    if base not in used:
+        return base
+    i = 2
+    while f"{base}-{i}" in used:
+        i += 1
+    return f"{base}-{i}"
+
+
 def _normalize_entry(entry) -> dict | None:
-    """A structurally valid repo entry with all required string fields, repairing
-    a missing/invalid slug from the path and coercing a missing/invalid
-    ``last_seen`` — or None if unrecoverable (not a mapping, or without a usable
-    path, from which nothing including the slug can be derived)."""
+    """A structurally valid repo entry with all required string fields: the path
+    is normalized (so duplicates collapse), the slug is repaired from the path if
+    missing or not URL-safe, and ``last_seen`` is coerced to a string — or None if
+    unrecoverable (not a mapping, or without a usable path from which nothing,
+    including the slug, can be derived)."""
     if not isinstance(entry, dict):
         return None
     path = entry.get("path")
     if not isinstance(path, str) or not path:
         return None
+    path = os.path.normpath(path)
     slug = entry.get("slug")
-    if not isinstance(slug, str) or not slug:
+    if not _is_valid_slug(slug):
         slug = _slug(path)
     last_seen = entry.get("last_seen")
     if not isinstance(last_seen, str):
@@ -82,8 +105,10 @@ def _normalize_entry(entry) -> dict | None:
 def _load_raw() -> dict:
     """The parsed registry as a normalized version-1 structure. A missing,
     unreadable, wrong-version or otherwise structurally corrupt file yields an
-    empty registry; recoverable entries are repaired (slug from path) and
-    unrecoverable ones discarded deterministically. Never raises."""
+    empty registry. Recoverable entries are repaired; unrecoverable ones are
+    discarded. The result is deduplicated by canonical path (first occurrence
+    wins) with a unique, URL-safe slug per path — the invariants of AC 21/23.
+    Never raises."""
     try:
         with open(_registry_path(), encoding="utf-8") as fh:
             data = json.load(fh)
@@ -94,7 +119,19 @@ def _load_raw() -> dict:
     raw_repos = data.get("repos")
     if not isinstance(raw_repos, list):
         return {"version": REGISTRY_VERSION, "repos": []}
-    repos = [norm for norm in (_normalize_entry(e) for e in raw_repos) if norm is not None]
+
+    repos: list[dict] = []
+    seen_paths: set[str] = set()
+    used_slugs: set[str] = set()
+    for raw in raw_repos:
+        entry = _normalize_entry(raw)
+        if entry is None or entry["path"] in seen_paths:
+            continue  # discard unrecoverable and duplicate-path entries
+        seen_paths.add(entry["path"])
+        if entry["slug"] in used_slugs:  # a slug must be unique across paths
+            entry["slug"] = _unique_slug(entry["path"], used_slugs)
+        used_slugs.add(entry["slug"])
+        repos.append(entry)
     return {"version": REGISTRY_VERSION, "repos": repos}
 
 
@@ -118,18 +155,18 @@ def _write_atomic(data: dict) -> None:
 def register_repo(path) -> RepoEntry:
     """Create or update the entry for ``path`` (refreshing ``last_seen``). At most
     one entry per canonical path; a pre-existing entry keeps its slug."""
-    canonical = str(Path(path).resolve())
+    canonical = os.path.normpath(str(Path(path).resolve()))
     now = _utc_now_iso()
-    data = _load_raw()
-    repos = data.get("repos", [])
+    # _load_raw already deduplicated by path and made slugs unique & URL-safe.
+    repos = _load_raw()["repos"]
 
-    slug = _slug(canonical)
     for entry in repos:
-        if entry.get("path") == canonical:
+        if entry["path"] == canonical:
             entry["last_seen"] = now
-            slug = entry.get("slug", slug)  # keep the existing slug
+            slug = entry["slug"]  # keep the existing (already valid, unique) slug
             break
     else:
+        slug = _unique_slug(canonical, {e["slug"] for e in repos})
         repos.append({"path": canonical, "slug": slug, "last_seen": now})
 
     _write_atomic({"version": REGISTRY_VERSION, "repos": repos})
