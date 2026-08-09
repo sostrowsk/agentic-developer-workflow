@@ -21,6 +21,7 @@ from adw.codex import CodexRunner
 from adw.config import AdwConfig, ConfigError
 from adw.events import EventEmitter
 from adw.findings import Finding, ReviewResult
+from adw.gui.registry import register_repo
 from adw.mock import MockAgentRunner, MockCodexRunner
 from adw.phases import (
     AwaitingApproval,
@@ -144,6 +145,13 @@ def run(
     if len(sources) != 1:
         raise _fail("genau EINE Issue-Quelle angeben: --issue, --gitlab-issue ODER --github-issue")
     repo = repo.resolve()
+    # Register the resolved target repo for the later GUI (GUI-SPEC §7.4).
+    # Fail-open: the registry only feeds a display, so a registry error (e.g. a
+    # write failure) must never block the actual run.
+    try:
+        register_repo(repo)
+    except Exception:  # noqa: BLE001 — fail-open by design
+        pass
     # Config ZUERST validieren (fail fast) — kein Forge-Netzaufruf für ein
     # Repo, das ohnehin keine gültige .adw/config.yaml hat.
     config = _load_config(repo, base_branch)

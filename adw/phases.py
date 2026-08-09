@@ -16,6 +16,7 @@ import functools
 import hashlib
 import logging
 import os
+import secrets
 import shutil
 import subprocess
 import tempfile
@@ -718,10 +719,27 @@ def _codex_draft(
     draft. A failure is therefore logged and marked; the marker keeps a resume
     from burning another Codex run on the same broken input."""
     try:
-        files = ctx.codex.author(kind, task, cwd=ctx.repo)
-        empty = [name for name in artifacts if not files.get(name, "").strip()]
-        if empty:
-            raise CodexAuthorError(f"Codex-Entwurf ohne Inhalt für {', '.join(empty)}")
+        # codex.author span at the call site (GUI-SPEC §4.4, E4): the argv is
+        # built (with the per-call marker_id) and complete BEFORE the span opens;
+        # the runner fills artifacts/raw_stdout/parse_ok into the handle. Opened
+        # in this pool worker, its span stack is empty, so parent stays null (the
+        # documented orphan case, repaired on read by the model).
+        marker_id = secrets.token_hex(8)
+        author_argv = ctx.codex.effective_author_argv(kind, task, ctx.repo, marker_id)
+        start_payload = {
+            "kind": kind, "argv": author_argv, "cwd": str(ctx.repo), "task": task,
+        }
+        with ctx.emitter.span("codex.author", start_payload) as handle:
+            # Deterministic defaults so a failed/empty draft still writes a
+            # complete end record (the runner overwrites them on success).
+            handle.end_payload = {"artifacts": [], "raw_stdout": "", "parse_ok": False}
+            files = ctx.codex.author(
+                kind, task, cwd=ctx.repo, marker_id=marker_id,
+                emitter=ctx.emitter, span=handle,
+            )
+            empty = [name for name in artifacts if not files.get(name, "").strip()]
+            if empty:
+                raise CodexAuthorError(f"Codex-Entwurf ohne Inhalt für {', '.join(empty)}")
     except CodexError as exc:
         marker.write_text(
             f"# Codex-Entwurf ({kind}) fehlgeschlagen — Run {ctx.state.run_id}\n\n{exc}\n",

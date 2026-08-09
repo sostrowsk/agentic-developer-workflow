@@ -126,10 +126,22 @@ class CodexClient(Protocol):
         span=None,
     ) -> ReviewResult: ...
 
-    def author(self, kind: AuthorKind, task: str, cwd: Path) -> dict[str, str]: ...
+    def author(
+        self,
+        kind: AuthorKind,
+        task: str,
+        cwd: Path,
+        marker_id: str | None = None,
+        emitter=None,
+        span=None,
+    ) -> dict[str, str]: ...
 
     def effective_argv(
         self, kind: ReviewKind, content_refs: list[str], cwd: Path, context: str | None = None
+    ) -> list[str]: ...
+
+    def effective_author_argv(
+        self, kind: AuthorKind, task: str, cwd: Path, marker_id: str
     ) -> list[str]: ...
 
 
@@ -300,14 +312,51 @@ class CodexRunner:
         handle.end_payload["parse_ok"] = True
         return result
 
-    def author(self, kind: AuthorKind, task: str, cwd: Path) -> dict[str, str]:
+    def effective_author_argv(
+        self, kind: AuthorKind, task: str, cwd: Path, marker_id: str
+    ) -> list[str]:
+        """The exact argv this runner will execute for such an authoring call — a
+        static, side-effect-free builder so the call site can write the full argv
+        into the codex.author span start event BEFORE the subprocess runs. The
+        per-call ``marker_id`` is passed in (and reused by ``author``) so the
+        start-event argv is byte-identical to the executed one (GUI-SPEC §4.4)."""
+        return self._argv(cwd, self._build_author_prompt(kind, task, marker_id))
+
+    def author(
+        self,
+        kind: AuthorKind,
+        task: str,
+        cwd: Path,
+        marker_id: str | None = None,
+        emitter=None,
+        span=None,
+    ) -> dict[str, str]:
         """Have Codex author the artifacts of `kind`; returns file name -> content.
 
         Nothing is written: the read-only sandbox forbids it, so Codex returns the
-        content in marker blocks and the caller persists it."""
-        marker_id = secrets.token_hex(8)
+        content in marker blocks and the caller persists it.
+
+        The codex.author SPAN is owned by the phases.py call site (GUI-SPEC §4.4,
+        E4): the runner never opens one, it only fills the end payload of the
+        handle it is handed. The call site also picks the per-call ``marker_id``
+        and hands it in so the executed argv equals the one in the start event; a
+        direct call without one (an uninstrumented caller) mints its own and
+        collects into a detached handle — no orphan span."""
+        if marker_id is None:
+            marker_id = secrets.token_hex(8)
+        handle = span if span is not None else SpanHandle("detached")
+        return self._author_into(kind, task, cwd, marker_id, handle)
+
+    def _author_into(self, kind, task, cwd, marker_id, handle) -> dict[str, str]:
+        # Deterministic defaults BEFORE the subprocess: a parse failure or an
+        # unexpected exception still writes a complete end record.
+        handle.end_payload = {"artifacts": [], "raw_stdout": "", "parse_ok": False}
         stdout = self._run(self._build_author_prompt(kind, task, marker_id), cwd)
-        return _extract_blocks(stdout, _AUTHOR_BLOCKS[kind], marker_id)
+        handle.end_payload["raw_stdout"] = stdout
+        files = _extract_blocks(stdout, _AUTHOR_BLOCKS[kind], marker_id)
+        handle.end_payload["artifacts"] = list(files)
+        handle.end_payload["parse_ok"] = True
+        return files
 
     @staticmethod
     def _argv(cwd: Path, prompt: str) -> list[str]:

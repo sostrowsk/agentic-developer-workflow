@@ -334,9 +334,9 @@ class BarrierCodex(MockCodexRunner):
         super().__init__()
         self.barrier = barrier
 
-    def author(self, kind, task, cwd):
+    def author(self, kind, task, cwd, marker_id=None, emitter=None, span=None):
         self.barrier.wait()
-        return super().author(kind, task, cwd)
+        return super().author(kind, task, cwd, marker_id=marker_id, emitter=emitter, span=span)
 
 
 def test_draft_stage_writes_both_drafts(ctx):

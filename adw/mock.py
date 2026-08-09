@@ -130,7 +130,30 @@ class MockCodexRunner:
     def script_author_error(self, kind: str, *errors: Exception) -> None:
         self.artifacts[kind].extend(errors)
 
-    def author(self, kind: str, task: str, cwd: Path) -> dict[str, str]:
+    def effective_author_argv(
+        self, kind: str, task: str, cwd: Path, marker_id: str
+    ) -> list[str]:
+        """A deterministic builder value mirroring the real runner's author argv
+        shape, so the call site can put an ``argv`` into the codex.author span
+        start event in a dry run too (its exact content is not contract-pinned)."""
+        return [
+            "codex", "exec", "--sandbox", "read-only", "-c", "mcp_servers={}",
+            "-C", str(cwd), f"[mock-author:{kind}:{marker_id}]",
+        ]
+
+    def author(
+        self,
+        kind: str,
+        task: str,
+        cwd: Path,
+        marker_id: str | None = None,
+        emitter=None,
+        span=None,
+    ) -> dict[str, str]:
+        # ``emitter`` is accepted for protocol parity; the mock writes no event
+        # log itself. When the call site opens the codex.author span it passes
+        # ``span`` (the handle); the mock fills the end fields on success (like
+        # mock.review) so a dry run shows closed codex.author spans (GUI-SPEC §4.4).
         self.author_calls.append(CodexAuthorCall(kind=kind, task=task, cwd=Path(cwd)))
         queue = self.artifacts[kind]
         if not queue:
@@ -138,6 +161,12 @@ class MockCodexRunner:
         scripted = queue.popleft()
         if isinstance(scripted, Exception):
             raise scripted
+        if span is not None:
+            span.end_payload = {
+                "artifacts": list(scripted),
+                "raw_stdout": "",
+                "parse_ok": True,
+            }
         return scripted
 
     def effective_argv(
