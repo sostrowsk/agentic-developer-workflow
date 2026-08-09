@@ -223,9 +223,39 @@ def tool_label_lines():
             "tool": "Read", "tool_use_id": "noarg1", "input": {}}),
         # result without any outcome field → keep the type name
         rec(12, "agent.tool.result", "point", "A", sec=12, payload={"tool_use_id": "bare1"}),
-        rec(13, "agent.run", "end", "A", "R", sec=13,
+        # resolvable tool (a Read call) but a content-only result (content is the
+        # payload body, NOT an outcome field) → keep the type name
+        rec(13, "agent.tool.call", "point", "A", sec=13, payload={
+            "tool": "Read", "tool_use_id": "content1", "input": {"file_path": "c.py"}}),
+        rec(14, "agent.tool.result", "point", "A", sec=14, payload={
+            "tool_use_id": "content1", "content": "file body only"}),
+        # result whose tool_use_id matches no call → unresolved tool → type name
+        rec(15, "agent.tool.result", "point", "A", sec=15, payload={
+            "tool_use_id": "orphan1", "is_error": True}),
+        rec(16, "agent.run", "end", "A", "R", sec=16,
             payload={"result_text": "done", "is_error": False}),
-        rec(14, "run", "end", "R", None, sec=14, payload=run_end_payload("done")),
+        rec(17, "run", "end", "R", None, sec=17, payload=run_end_payload("done")),
+    ]
+
+
+def long_duration_lines(issue="Long detail run"):
+    """A run whose phase and agent.run span ~2828.7 s and whose agent.run costs
+    ~$5.80, so the run DETAIL (tree rows, phase badge, aggregate pane) exercises
+    the readable duration/cost formatting — not only the run list (Aufgabe E)."""
+    a = "2026-08-05T14:00:00.000Z"
+    b = "2026-08-05T14:47:08.700Z"  # exactly 2828.7 s after ``a``
+    return [
+        rec(1, "run", "start", "R", None, ts=a, payload=run_start_payload(issue)),
+        rec(2, "phase", "start", "PB", "R", ts=a,
+            payload={"name": "build", "from_phase": "build"}),
+        rec(3, "agent.run", "start", "A", "PB", ts=a,
+            payload={"agent": "build_agent", "prompt": "p", "system_append": ""}),
+        rec(4, "agent.run", "end", "A", "PB", ts=b, payload={
+            "result_text": "done", "cost_usd": 5.795072500000001, "is_error": False,
+            "usage": {"input": 1, "output": 1, "cache_read": 0, "cache_creation": 0}}),
+        rec(5, "phase", "end", "PB", "R", ts=b, payload={"name": "build", "to_phase": "done"}),
+        rec(6, "run", "end", "R", None, ts=b,
+            payload=run_end_payload("done", 2828.7, 5.795072500000001)),
     ]
 
 

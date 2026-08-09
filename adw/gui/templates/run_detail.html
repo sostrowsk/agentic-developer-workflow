@@ -9,7 +9,7 @@
 {% macro tree_row(node) %}
     <span class="icon" aria-hidden="true">{{ status_icon(node.status) }}</span>
     <span class="label">{{ node.label }}</span>
-    {% if node.duration is not none %}<span class="dur">{{ "%.1f"|format(node.duration) }}s</span>{% endif %}
+    {% if node.duration is not none %}<span class="dur">{{ node.duration | fmt_duration }}</span>{% endif %}
     {% if node.type == "round" and node.n is defined %}<span class="round">{{ node.n }}/{{ node.cap }}</span>{% endif %}
 {% endmacro %}
 {% macro tree_item(node) %}
@@ -85,8 +85,8 @@
       <pre class="stdout">{{ node.end_payload.raw_stdout if node.end_payload else "" }}</pre>
     {% elif node.type in ["phase", "lane", "round"] %}
       <div class="aggregate">
-        <div class="agg-duration">duration: {{ node.duration if node.duration is not none else "" }}</div>
-        <div class="agg-cost">cost: {{ node.cost if node.cost is not none else "" }}</div>
+        <div class="agg-duration">duration: {{ node.duration | fmt_duration }}</div>
+        <div class="agg-cost">cost: {{ node.cost | fmt_cost }}</div>
         {% if node.type == "round" %}<div class="agg-round">round: {{ node.n }}/{{ node.cap }}</div>{% endif %}
         <div class="agg-outcome">outcome: {{ node.outcome if node.outcome is not none else "" }}</div>
       </div>
@@ -104,7 +104,7 @@
     <h1>Run {{ detail.run.run_id }} &mdash; {{ detail.run.status }}</h1>
     <div class="phase-bar">
       {% for ph in detail.phases %}
-      <span class="phase phase-{{ ph.status }}">{{ ph.name }}{% if ph.duration is not none %} <em>{{ "%.1f"|format(ph.duration) }}s</em>{% endif %}</span>
+      <span class="phase phase-{{ ph.status }}">{{ ph.name }}{% if ph.duration is not none %} <em>{{ ph.duration | fmt_duration }}</em>{% endif %}</span>
       {% endfor %}
     </div>
   </header>

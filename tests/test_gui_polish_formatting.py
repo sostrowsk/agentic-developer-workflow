@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from adw.gui.app import create_app
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     home,
+    long_duration_lines,
     simple_run_lines,
     write_run,
 )
@@ -28,6 +29,17 @@ def _list_html(tmp_path, run_id, lines, phase="done"):
     resp = client.get("/")
     assert resp.status_code == 200
     return resp.text, client
+
+
+def _detail_html(tmp_path, run_id, lines, phase="done"):
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    write_run(repo, run_id, lines, phase=phase)
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = client.get("/api/runs").json()[0]["repo"]
+    resp = client.get(f"/runs/{slug}/{run_id}")
+    assert resp.status_code == 200
+    return resp.text
 
 
 def test_duration_and_cost_are_formatted_readably(home, tmp_path):  # noqa: F811
@@ -63,6 +75,18 @@ def test_run_list_timestamp_does_not_wrap(home, tmp_path):  # noqa: F811
 
     css = client.get("/static/app.css").text
     assert "nowrap" in css.replace(" ", "").lower()
+
+
+def test_detail_html_formats_durations_and_aggregate_cost(home, tmp_path):  # noqa: F811
+    """E1/E2 (regression): the run DETAIL formats durations and the aggregate cost
+    too — tree rows, the phase badge and the aggregate pane show ``47m 9s`` /
+    ``$5.80``, never raw seconds or a raw float."""
+    html = _detail_html(tmp_path, "aaaa1111", long_duration_lines())
+
+    assert "47m 9s" in html                   # tree row + phase badge + aggregate
+    assert "$5.80" in html                    # aggregate cost, readably
+    assert "2828.7s" not in html              # no raw ``%.1fs`` seconds remain
+    assert "5.795072500000001" not in html    # no raw cost float remains
 
 
 def test_missing_duration_and_cost_render_empty_not_zero(home, tmp_path):  # noqa: F811

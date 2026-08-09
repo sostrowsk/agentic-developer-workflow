@@ -275,7 +275,7 @@ def test_aggregate_panes_expose_cost_and_derived_outcome(home, tmp_path):  # noq
     assert rnd["cost"] == 0.4 and rnd["outcome"] == "ok"
 
     html = client.get(f"/runs/{slug}/abcdef12").text
-    assert "cost: 0.4" in html  # aggregated cost is rendered
+    assert "cost: $0.40" in html  # aggregated cost is rendered, readably (Aufgabe E)
     assert "outcome: done" in html and "outcome: completed" in html  # non-empty
 
 

@@ -18,6 +18,8 @@ from adw.gui.app import create_app
 from adw.gui.registry import _slug
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     home,
+    simple_run_lines,
+    write_run,
     write_state_only_run,
 )
 
@@ -47,6 +49,34 @@ def test_state_only_run_is_listed_with_state_metadata(home, tmp_path):  # noqa: 
     assert entry["phase"] == "done"                      # from state.json
     assert entry["issue"] == "Legacy run without trace"  # from state.json
     assert entry["event_count"] == 0                     # no events log
+    # A run with no run span at all is NOT active: its status is not derivable from
+    # state, so it stays empty (never a false 'running' that promotes it to the top).
+    assert entry["status"] in (None, "")
+    assert entry["status"] != "running"
+
+
+def test_state_only_run_is_not_promoted_above_running_runs(home, tmp_path):  # noqa: F811
+    """G1/status: a state-only run must not be sorted to the front as if active —
+    a genuinely running run precedes it in the list."""
+    repo = _repo_with_state_only_run(tmp_path)
+    write_run(repo, "aaaa1111", simple_run_lines("Active", ended=False), phase="build")
+    client = TestClient(create_app(repos=[str(repo)]))
+
+    data = client.get("/api/runs").json()
+    order = [e.get("run_id") for e in data if e.get("run_id")]
+    assert order.index("aaaa1111") < order.index(RUN_ID)
+
+
+def test_state_only_run_detail_status_is_empty(home, tmp_path):  # noqa: F811
+    """G3/status: the run detail of a state-only run reports an empty status, not
+    'running'."""
+    repo = _repo_with_state_only_run(tmp_path)
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = _slug_for(repo)
+
+    detail = client.get(f"/api/runs/{slug}/{RUN_ID}").json()
+    assert detail["run"]["status"] in (None, "")
+    assert detail["run"]["status"] != "running"
 
 
 def test_state_only_run_html_list_shows_no_trace_hint(home, tmp_path):  # noqa: F811

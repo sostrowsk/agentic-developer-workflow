@@ -201,13 +201,21 @@ def _summary(slug, run_id, events, state) -> dict:
         issue = state.issue
     if isinstance(issue, str) and len(issue) > _ISSUE_MAX:
         issue = issue[:_ISSUE_MAX] + "…"
+    if end_rec is not None:
+        status = end_payload.get("status")
+    elif start_rec is not None:
+        status = "running"  # a run span started but has no matching end yet
+    else:
+        # No run span at all (a state-only run, Aufgabe G): the status is not
+        # derivable from state — leave it empty, never a false 'running'.
+        status = None
     return {
         "run_id": run_id,
         "repo": slug,
         "repo_exists": True,
         "issue": issue,
         "phase": state.phase if state is not None else None,
-        "status": end_payload.get("status") if end_rec is not None else "running",
+        "status": status,
         "start": (start_rec or {}).get("ts"),
         "duration": totals.get("duration"),
         "cost": totals.get("cost"),
@@ -310,21 +318,30 @@ def _tool_call_label(p) -> str:
     return f"{tool} {arg}" if arg else tool
 
 
-def _tool_result_label(p) -> str:
+def _tool_result_label(p, tool_names) -> str:
     if not isinstance(p, dict):
         return "agent.tool.result"
+    # A result payload rarely carries the tool name directly; it references the
+    # call via ``tool_use_id``. Without a resolvable tool identity, invent nothing
+    # and keep the type name (spec C3 / contract fallbacks).
+    tool = p.get("tool") or tool_names.get(p.get("tool_use_id"))
+    if not tool:
+        return "agent.tool.result"
+    # Only ``is_error`` / ``exit_code`` are actual outcome fields; ``content`` is
+    # the payload body, not an outcome, so a content-only result stays the type
+    # name rather than being invented as success.
     is_error = p.get("is_error")
     exit_code = p.get("exit_code")
-    has_outcome = is_error is not None or exit_code is not None or "content" in p
-    if not has_outcome:
-        return "agent.tool.result"  # no outcome fields → keep the type name
+    if is_error is None and exit_code is None:
+        return "agent.tool.result"
     outcome = "error" if is_error else "ok"
     if exit_code is not None:
         return f"{outcome} (exit {exit_code})"
     return outcome
 
 
-def _node_label(node) -> str:
+def _node_label(node, tool_names=None) -> str:
+    tool_names = tool_names or {}
     if _is_span(node):
         p = node.start_payload or node.end_payload or {}
         if isinstance(p, dict):
@@ -340,7 +357,7 @@ def _node_label(node) -> str:
     if node.type == "agent.tool.call":
         return _tool_call_label(node.payload)
     if node.type == "agent.tool.result":
-        return _tool_result_label(node.payload)
+        return _tool_result_label(node.payload, tool_names)
     return node.type or "?"
 
 
@@ -385,12 +402,27 @@ def _aggregate_outcome(node):
     return None
 
 
-def _serialize(node) -> dict:
+def _tool_names_by_use_id(events) -> dict:
+    """Map ``tool_use_id`` → tool name from the ``agent.tool.call`` records, so a
+    ``agent.tool.result`` (which carries only the id) can resolve its tool name
+    (Aufgabe C fallback semantics)."""
+    names: dict = {}
+    for e in events:
+        if e.get("type") == "agent.tool.call":
+            p = e.get("payload") or {}
+            uid, tool = p.get("tool_use_id"), p.get("tool")
+            if uid and tool:
+                names[uid] = str(tool)
+    return names
+
+
+def _serialize(node, tool_names=None) -> dict:
+    tool_names = tool_names or {}
     if _is_span(node):
         payload = node.start_payload if node.start_payload is not None else node.end_payload
         d = {
             "type": node.type,
-            "label": _node_label(node),
+            "label": _node_label(node, tool_names),
             "duration": node.duration,
             "status": _node_status(node),
             "seq": node.seq,
@@ -401,7 +433,7 @@ def _serialize(node) -> dict:
             "payload": payload,
             "start_payload": node.start_payload,
             "end_payload": node.end_payload,
-            "children": [_serialize(c) for c in node.children],
+            "children": [_serialize(c, tool_names) for c in node.children],
         }
         if node.type == "round" and isinstance(node.start_payload, dict):
             d["n"] = node.start_payload.get("n")
@@ -415,7 +447,7 @@ def _serialize(node) -> dict:
         return d
     return {
         "type": node.type,
-        "label": _node_label(node),
+        "label": _node_label(node, tool_names),
         "duration": None,
         "status": None,
         "seq": node.seq,
@@ -428,10 +460,11 @@ def _serialize(node) -> dict:
 def _run_detail(ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path) -> dict:
     events, problems = _read_events(run_dir, runs_root)
     state = _load_state(run_dir, runs_root, ref.path, run_id)
+    tool_names = _tool_names_by_use_id(events)
     return {
         "run": _summary(ref.slug, run_id, events, state),
         "phases": _phase_bar(events, state.phase if state is not None else None),
-        "tree": [_serialize(n) for n in build_tree(events)],
+        "tree": [_serialize(n, tool_names) for n in build_tree(events)],
         "problems": [asdict(p) for p in problems],
     }
 

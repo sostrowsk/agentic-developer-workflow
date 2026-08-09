@@ -42,13 +42,11 @@ def _labels_by_use_id(tmp_path):
             calls[use_id] = node["label"]
         elif node.get("type") == "agent.tool.result":
             results[use_id] = node["label"]
-    # Calls win the shared view; result-only ids (bash1/read1 results, bare1) are
-    # asserted through ``results`` in the outcome test.
-    merged = dict(results)
-    merged.update(calls)
-    merged["result:bash1"] = results.get("bash1")
-    merged["result:read1"] = results.get("read1")
-    merged["result:bare1"] = results.get("bare1")
+    # Calls win the shared view; every result is also exposed under a ``result:``
+    # prefix so a call and its result (same tool_use_id) can both be asserted.
+    merged = dict(calls)
+    for use_id, label in results.items():
+        merged[f"result:{use_id}"] = label
     return merged
 
 
@@ -98,3 +96,21 @@ def test_result_without_outcome_fields_keeps_type_name(home, tmp_path):  # noqa:
     labels = _labels_by_use_id(tmp_path)
 
     assert labels["result:bare1"] == "agent.tool.result"
+
+
+def test_content_only_result_keeps_type_name(home, tmp_path):  # noqa: F811
+    """C3 (regression): a result with a resolvable tool but only a ``content`` body
+    (no ``is_error``/exit code) keeps the type name — content is not an outcome, so
+    success is never invented."""
+    labels = _labels_by_use_id(tmp_path)
+
+    assert labels["result:content1"] == "agent.tool.result"
+
+
+def test_unresolved_tool_name_result_keeps_type_name(home, tmp_path):  # noqa: F811
+    """C3 (regression): a result whose ``tool_use_id`` matches no call has no
+    resolvable tool name and keeps the type name, even though it carries an
+    outcome field."""
+    labels = _labels_by_use_id(tmp_path)
+
+    assert labels["result:orphan1"] == "agent.tool.result"
