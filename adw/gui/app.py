@@ -628,11 +628,18 @@ def create_app(repos=None) -> FastAPI:
         return _run_detail(ref, run_id, run_dir, runs_root)
 
     @app.get("/api/runs/{repo}/{run_id}/events")
-    def api_run_events(repo: str, run_id: str, from_seq: int | None = None):
+    def api_run_events(
+        repo: str, run_id: str, from_seq: int | None = None, to_seq: int | None = None
+    ):
         _, run_dir, runs_root = require_run(repo, run_id)
         events, _problems = _read_events(run_dir, runs_root)
         if from_seq is not None:
             events = [e for e in events if isinstance(e.get("seq"), int) and e["seq"] >= from_seq]
+        if to_seq is not None:
+            # An optional upper bound (still the same read-only route) lets the
+            # client fetch a single record (from_seq==to_seq) instead of the whole
+            # tail from a seq to the log end.
+            events = [e for e in events if isinstance(e.get("seq"), int) and e["seq"] <= to_seq]
         return events
 
     @app.get("/api/runs/{repo}/{run_id}/stream")

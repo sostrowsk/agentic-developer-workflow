@@ -86,6 +86,34 @@ def test_full_tool_result_stays_reachable(home, tmp_path):  # noqa: F811
     assert len(content) >= 1024 * 1024
 
 
+def test_tool_node_pane_carries_load_anchor_and_loads_on_selection(home, tmp_path):  # noqa: F811
+    """B2 (regression): selecting a tool node directly must not show a permanently
+    empty box. Its own pane carries a standalone load anchor (data-load-seq, not
+    inside <details>), and the client loads that anchor on selection."""
+    client, slug = _big_client(tmp_path)
+
+    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+    assert 'class="tool-detail"' in html  # the tool node's own pane
+    assert "data-load-seq" in html        # with a load anchor
+
+    js = client.get("/static/app.js").text
+    assert "loadToolBody" in js
+    # The selection path targets the standalone tool pane (not only <details>).
+    assert "tool-detail" in js
+
+
+def test_single_record_events_query_returns_only_that_record(home, tmp_path):  # noqa: F811
+    """B (regression): the events route accepts an upper bound so the client can
+    fetch a single record (from_seq == to_seq) instead of the whole tail — a hint
+    query returns exactly the requested record, not megabytes of following log."""
+    client, slug = _big_client(tmp_path)
+
+    recs = client.get(
+        f"/api/runs/{slug}/{RUN_ID}/events", params={"from_seq": 3, "to_seq": 3}
+    ).json()
+    assert [r["seq"] for r in recs] == [3]
+
+
 def test_detail_endpoints_respond_without_server_error(home, tmp_path):  # noqa: F811
     """B3: opening the big run never yields a 5xx (HTML and JSON detail both 200),
     and the pinned error cases stay controlled client errors — whatever load

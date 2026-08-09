@@ -46,6 +46,14 @@
     document.querySelectorAll(".node[data-seq]").forEach(function (node) {
       node.classList.toggle("selected", node.getAttribute("data-seq") === selectedSeq);
     });
+    // A tool-node's own pane holds a standalone (not inside <details>) load anchor;
+    // the toggle-based lazy load never fires for it, so load it on selection —
+    // otherwise selecting a tool node directly would show a permanently empty box.
+    if (selectedSeq) {
+      var selectedPane = document.querySelector('.pane[data-seq="' + selectedSeq + '"]');
+      var pre = selectedPane && selectedPane.querySelector(".tool-detail pre[data-load-seq]");
+      if (pre) loadToolBody(pre);
+    }
   }
 
   // Delegated on document so it keeps working after main.detail is swapped.
@@ -84,7 +92,9 @@
     if (!seq) return;
     pre.setAttribute("data-loaded", "1");
     pre.textContent = "Loading…";
-    fetch(base + "/events?from_seq=" + encodeURIComponent(seq))
+    // Fetch ONLY this record (from_seq == to_seq), not the whole tail from seq to
+    // the log end — expanding an early entry must not transfer the entire log.
+    fetch(base + "/events?from_seq=" + encodeURIComponent(seq) + "&to_seq=" + encodeURIComponent(seq))
       .then(function (response) { return response.json(); })
       .then(function (records) {
         var found = null;
