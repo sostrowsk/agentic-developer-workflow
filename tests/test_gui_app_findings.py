@@ -9,10 +9,12 @@ DOM (a headless browser is out of scope — E5 forbids a node/JS toolchain).
 """
 
 import json
+import os
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
+from adw.gui.registry import _slug
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     CODEX_STDOUT,
     FINAL_ANSWER,
@@ -36,6 +38,13 @@ def _client_with(tmp_path, run_id, lines, phase=None):
     return client, slug, repo
 
 
+def _slug_for(repo):
+    """The stable slug the app assigns to an ad-hoc ``--repo`` path — computed the
+    same way as the resolver, so the detail routes can be addressed even when the
+    repo has no listable runs (and thus is absent from ``/api/runs``)."""
+    return _slug(os.path.normpath(str(repo.resolve())))
+
+
 # --- P1: symlink containment ----------------------------------------------------
 
 
@@ -55,11 +64,13 @@ def test_symlinked_run_directory_escaping_the_tree_is_rejected(home, tmp_path): 
     (repo / ".adw" / "runs" / "abcdef12").symlink_to(outside, target_is_directory=True)
 
     client = TestClient(create_app(repos=[str(repo)]))
-    slug = client.get("/api/runs").json()
+    listing = client.get("/api/runs").json()
     # The escaping run is not listed and does not crash the list.
-    assert all(e.get("run_id") != "abcdef12" for e in slug if "run_id" in e)
+    assert all(e.get("run_id") != "abcdef12" for e in listing if "run_id" in e)
 
-    repo_slug = _repo_slug(client)
+    # Addressed with the REAL slug so require_run's containment is exercised (a
+    # bogus slug would only prove the unknown-slug 404).
+    repo_slug = _slug_for(repo)
     for path in (
         "/api/runs/{}/abcdef12",
         "/runs/{}/abcdef12",
@@ -82,7 +93,7 @@ def test_symlinked_events_file_escaping_the_tree_is_not_read(home, tmp_path):  #
     (run_dir / "events.jsonl").symlink_to(secret)
 
     client = TestClient(create_app(repos=[str(repo)]))
-    repo_slug = _repo_slug(client)
+    repo_slug = _slug_for(repo)
 
     for path in (
         f"/api/runs/{repo_slug}/abcdef12",
@@ -94,13 +105,36 @@ def test_symlinked_events_file_escaping_the_tree_is_not_read(home, tmp_path):  #
         assert "TOP_SECRET_TOKEN" not in resp.text
 
 
-def _repo_slug(client):
-    data = client.get("/api/runs").json()
-    for entry in data:
-        if entry.get("repo"):
-            return entry["repo"]
-    # No runs listed yet — fall back to the placeholder/first entry's slug.
-    return data[0]["repo"] if data else "missing"
+def test_symlinked_runs_root_escaping_the_repo_is_rejected(home, tmp_path):  # noqa: F811
+    """P1: ``.adw/runs`` itself symlinked to an external directory must not turn
+    that external tree into the containment root — its runs are neither listed nor
+    readable, and no external content is served."""
+    repo = tmp_path / "repo"
+    (repo / ".adw").mkdir(parents=True)
+    external = tmp_path / "external_runs"
+    (external / "abcdef12").mkdir(parents=True)
+    (external / "abcdef12" / "events.jsonl").write_text(
+        json.dumps({"seq": 1, "type": "run", "kind": "start",
+                    "payload": {"issue": "EXTERNAL_SECRET"}}) + "\n",
+        encoding="utf-8",
+    )
+    (repo / ".adw" / "runs").symlink_to(external, target_is_directory=True)
+
+    client = TestClient(create_app(repos=[str(repo)]))
+    listing = client.get("/api/runs").json()
+    assert all(e.get("run_id") != "abcdef12" for e in listing if "run_id" in e)
+    assert "EXTERNAL_SECRET" not in json.dumps(listing)
+
+    repo_slug = _slug_for(repo)
+    for path in (
+        "/api/runs/{}/abcdef12",
+        "/runs/{}/abcdef12",
+        "/api/runs/{}/abcdef12/events",
+        "/api/runs/{}/abcdef12/stream",
+    ):
+        resp = client.get(path.format(repo_slug))
+        assert resp.status_code == 404, path
+        assert "EXTERNAL_SECRET" not in resp.text
 
 
 # --- P1: script-embed XSS -------------------------------------------------------

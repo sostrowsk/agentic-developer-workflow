@@ -83,8 +83,18 @@ def _ts_epoch(ts):
         return None
 
 
-def _runs_root(repo_path) -> Path:
-    return (Path(repo_path) / RUNS_RELPATH).resolve()
+def _runs_root(repo_path) -> Path | None:
+    """The resolved ``.adw/runs`` directory — but ONLY if it stays within the
+    resolved repository. A ``.adw/runs`` that is itself a symlink to somewhere
+    outside the registered repo would otherwise become the containment root and
+    expose arbitrary external runs (GUI-SPEC §8). Anchoring to the resolved repo
+    (not to the resolved runs dir) closes that escape; per-run/per-file symlinks
+    are still checked against this validated root by :func:`_contained`."""
+    repo_root = Path(repo_path).resolve()
+    runs_root = (repo_root / RUNS_RELPATH).resolve()
+    if runs_root == repo_root or not runs_root.is_relative_to(repo_root):
+        return None
+    return runs_root
 
 
 def _contained(path: Path, root: Path) -> Path | None:
@@ -283,6 +293,8 @@ def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
             )
             continue
         runs_root = _runs_root(ref.path)
+        if runs_root is None:
+            continue  # the runs root escapes the repo — expose nothing for it
         for child in sorted(runs_dir.iterdir()):
             if not RUN_ID_RE.fullmatch(child.name):
                 continue
@@ -375,6 +387,8 @@ def create_app(repos=None) -> FastAPI:
         if not ref.exists or not ref.path:
             raise HTTPException(status_code=404, detail=f"Repository {slug} unreachable")
         runs_root = _runs_root(ref.path)
+        if runs_root is None:  # .adw/runs symlinked outside the repository
+            raise HTTPException(status_code=404, detail=f"No run {run_id}")
         run_dir = _contained(runs_root / run_id, runs_root)
         if run_dir is None:  # the run directory is a symlink escaping the tree
             raise HTTPException(status_code=404, detail=f"No run {run_id}")
