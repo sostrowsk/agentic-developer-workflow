@@ -126,6 +126,74 @@ def test_missing_or_unreadable_registry_yields_empty_usable_registry(home, tmp_p
     assert len(data["repos"]) == 1
 
 
+def test_load_registry_survives_structurally_corrupt_entries(home):
+    """AC 23/25: a parseable but structurally corrupt registry does not raise;
+    non-mapping/unrecoverable entries are discarded, a recoverable entry missing
+    its slug gets a regenerated, resolvable one, and well-formed entries survive."""
+    registry_file(home).parent.mkdir(parents=True, exist_ok=True)
+    registry_file(home).write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "repos": [
+                    42,  # non-mapping → discarded
+                    {"path": "/some/repo", "last_seen": "2026-01-01T00:00:00Z"},  # no slug
+                    {"slug": "x", "last_seen": "t"},  # no path → unrecoverable → discarded
+                    {"path": "/other", "slug": "keep-me", "last_seen": "2026-01-01T00:00:00Z"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    reg = load_registry()  # must not raise
+    paths = sorted(e.path for e in reg.repos)
+    assert paths == ["/other", "/some/repo"]  # the two recoverable entries
+
+    recovered = next(e for e in reg.repos if e.path == "/some/repo")
+    assert isinstance(recovered.slug, str) and recovered.slug and "/" not in recovered.slug
+    assert reg.resolve(recovered.slug).path == "/some/repo"  # resolvable after recovery
+    assert reg.resolve("keep-me").path == "/other"  # well-formed entry kept
+
+
+def test_register_repo_repairs_persisted_entry_missing_slug(home, tmp_path):
+    """AC 23: updating a recoverable entry missing its slug persists the generated
+    fallback slug, so the entry becomes resolvable and stays unique per path."""
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    canonical = str(repo.resolve())
+    registry_file(home).parent.mkdir(parents=True, exist_ok=True)
+    registry_file(home).write_text(
+        json.dumps(
+            {"version": 1, "repos": [{"path": canonical, "last_seen": "2026-01-01T00:00:00Z"}]}
+        ),
+        encoding="utf-8",
+    )
+    entry = register_repo(repo)  # must not raise
+    assert isinstance(entry.slug, str) and entry.slug
+
+    data = json.loads(registry_file(home).read_text(encoding="utf-8"))
+    assert len(data["repos"]) == 1  # still exactly one entry for this path
+    assert data["repos"][0]["slug"] == entry.slug  # fallback slug PERSISTED
+    assert load_registry().resolve(entry.slug).path == canonical
+
+
+def test_wrong_version_registry_is_treated_as_empty(home, tmp_path):
+    """AC 25: an unrecognized version is an invalid structure → empty registry;
+    the next successful register writes a valid version-1 file again."""
+    registry_file(home).parent.mkdir(parents=True, exist_ok=True)
+    registry_file(home).write_text(
+        json.dumps({"version": 999, "repos": [{"path": "/a", "slug": "s", "last_seen": "t"}]}),
+        encoding="utf-8",
+    )
+    assert load_registry().repos == []
+
+    repo = tmp_path / "r"
+    repo.mkdir()
+    register_repo(repo)
+    data = json.loads(registry_file(home).read_text(encoding="utf-8"))
+    assert data["version"] == 1 and len(data["repos"]) == 1
+
+
 def test_aborted_write_leaves_previous_registry_intact(home, tmp_path, monkeypatch):
     """AC 26: a write that fails before the atomic replace leaves the previous
     registry content untouched."""

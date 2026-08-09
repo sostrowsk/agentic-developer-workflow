@@ -147,6 +147,44 @@ def test_reader_reports_bad_line_and_keeps_following_lines(tmp_path):
     assert [p for p in result.problems if p.kind == "seq_gap"] == []
 
 
+def test_reader_reports_missing_prefix_when_first_seq_exceeds_one(tmp_path):
+    """AC 9: a log truncated before its first readable record (first seq > 1) is
+    a gap too — the sequence is gap-free from 1 (§4.2), so the reader reports a
+    seq_gap with expected=1 and found=<first seq> instead of passing as complete."""
+    path = tmp_path / "events.jsonl"
+    _write(
+        path,
+        line(5, type="phase", kind="start", span="P", parent="R"),  # 1..4 truncated away
+        line(6, type="phase", kind="end", span="P", parent="R"),
+    )
+    result = EventReader(path).read()
+    assert [e["seq"] for e in result.events] == [5, 6]  # readable records still delivered
+
+    gaps = [p for p in result.problems if p.kind == "seq_gap"]
+    assert len(gaps) == 1
+    assert gaps[0].expected == 1
+    assert gaps[0].found == 5
+
+
+def test_reader_reports_non_mapping_json_line_as_bad_line(tmp_path):
+    """AC 10: a syntactically valid JSON line that is not a mapping (a scalar or
+    an array) is a bad_line, not a crash — later valid records are still delivered."""
+    path = tmp_path / "events.jsonl"
+    _write(
+        path,
+        line(1, type="run", kind="start", span="R"),
+        "null",   # valid JSON, but not an event mapping
+        "[1, 2, 3]",  # valid JSON array, also not a mapping
+        line(2, type="phase", kind="start", span="P", parent="R"),
+    )
+    result = EventReader(path).read()
+    assert [e["seq"] for e in result.events] == [1, 2]  # following record still delivered
+
+    bad = [p for p in result.problems if p.kind == "bad_line"]
+    assert len(bad) == 2  # both non-mapping lines reported
+    assert [p for p in result.problems if p.kind == "seq_gap"] == []  # they carry no seq
+
+
 def test_reader_passes_snapshot_and_unknown_types_through_unchanged(tmp_path):
     """AC 11: snapshot events and records of unknown type are delivered unchanged
     (ref names available); the reader computes no diffs."""

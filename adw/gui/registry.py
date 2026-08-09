@@ -60,17 +60,42 @@ def _slug(canonical_path: str) -> str:
     return f"{readable}-{digest}"
 
 
+def _normalize_entry(entry) -> dict | None:
+    """A structurally valid repo entry with all required string fields, repairing
+    a missing/invalid slug from the path and coercing a missing/invalid
+    ``last_seen`` — or None if unrecoverable (not a mapping, or without a usable
+    path, from which nothing including the slug can be derived)."""
+    if not isinstance(entry, dict):
+        return None
+    path = entry.get("path")
+    if not isinstance(path, str) or not path:
+        return None
+    slug = entry.get("slug")
+    if not isinstance(slug, str) or not slug:
+        slug = _slug(path)
+    last_seen = entry.get("last_seen")
+    if not isinstance(last_seen, str):
+        last_seen = ""
+    return {"path": path, "slug": slug, "last_seen": last_seen}
+
+
 def _load_raw() -> dict:
-    """The parsed registry file, or an empty version-1 structure if it is missing
-    or unreadable/corrupt (never raises)."""
+    """The parsed registry as a normalized version-1 structure. A missing,
+    unreadable, wrong-version or otherwise structurally corrupt file yields an
+    empty registry; recoverable entries are repaired (slug from path) and
+    unrecoverable ones discarded deterministically. Never raises."""
     try:
         with open(_registry_path(), encoding="utf-8") as fh:
             data = json.load(fh)
     except (OSError, ValueError):
         return {"version": REGISTRY_VERSION, "repos": []}
-    if not isinstance(data, dict) or not isinstance(data.get("repos"), list):
+    if not isinstance(data, dict) or data.get("version") != REGISTRY_VERSION:
         return {"version": REGISTRY_VERSION, "repos": []}
-    return data
+    raw_repos = data.get("repos")
+    if not isinstance(raw_repos, list):
+        return {"version": REGISTRY_VERSION, "repos": []}
+    repos = [norm for norm in (_normalize_entry(e) for e in raw_repos) if norm is not None]
+    return {"version": REGISTRY_VERSION, "repos": repos}
 
 
 def _write_atomic(data: dict) -> None:

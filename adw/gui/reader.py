@@ -89,15 +89,26 @@ class EventReader:
                 ReadProblem(kind="bad_line", line_no=line_no, byte_offset=byte_offset)
             )
             return
+        if not isinstance(record, dict):
+            # Syntactically valid JSON that is not an event mapping (a scalar or
+            # an array) is a bad_line too — never let it reach record.get().
+            result.problems.append(
+                ReadProblem(kind="bad_line", line_no=line_no, byte_offset=byte_offset)
+            )
+            return
         seq = record.get("seq")
         if isinstance(seq, int):
-            if self._last_seq is not None and seq > self._last_seq + 1:
+            # The sequence is gap-free from 1 (§4.2): before any record is seen the
+            # expected seq is 1, so a log truncated before its first readable record
+            # (first seq > 1) is reported as a gap, not passed off as complete.
+            expected = self._last_seq + 1 if self._last_seq is not None else 1
+            if seq > expected:
                 result.problems.append(
                     ReadProblem(
                         kind="seq_gap",
                         line_no=line_no,
                         byte_offset=byte_offset,
-                        expected=self._last_seq + 1,
+                        expected=expected,
                         found=seq,
                     )
                 )
