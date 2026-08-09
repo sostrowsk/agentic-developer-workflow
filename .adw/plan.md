@@ -1,254 +1,316 @@
-# Plan — Snapshots als Schritt-Diff-Basis + zwei Nachzügler der Instrumentierung
+# Plan — `codex.author`-Span + Lese-Seite des Event-Logs (Reader, Modell, Registry)
 
-Maßgeblich bleibt `docs/GUI-SPEC.md` (§4.4, §5, §6); bei Widerspruch gilt die
-GUI-SPEC. Dieser Plan setzt `.adw/spec.md` um und baut strikt gegen
+Maßgeblich bleibt `docs/GUI-SPEC.md` (§4.2, §4.4, §7.4, §12); bei Widerspruch
+gilt die GUI-SPEC. Dieser Plan setzt `.adw/spec.md` um und baut strikt gegen
 `.adw/contract.yaml`. Single-Lane: es gibt genau den Workstream **backend**.
+Dieser Lauf liefert ausschließlich importierbare Python-Bausteine — **keine
+Web-Schicht**.
 
-Leitplanken:
+## Leitplanken
 
-- `adw/events.py` und die Grenze/Implementierung des `run`-Spans bleiben
-  unverändert (E1, E2).
-- Kein Refactoring von `phases.py`: bestehende Aufrufstellen werden nur mit
-  Spans und Snapshot-Aufrufen umschlossen; keine Funktion wird aufgeteilt,
-  umbenannt oder umsortiert.
-- Stream-, Tool-, Usage- und Kosteninhalte bleiben runnerseitig; Mock-Runner
-  erfinden keine solchen Inhalte.
-- Snapshots sind fail-open und ändern Rückgabewerte, Exceptions und den
-  fachlichen Orchestrator-Ablauf nicht.
-- Keine neuen Laufzeit-Dependencies; keine neuen Persistenzzustände außer
-  `events.jsonl` und `refs/adw/*`.
+- `adw/events.py`, `adw/snapshots.py` und der fachliche Orchestrator-Ablauf
+  bleiben unverändert. KEINE Cross-Thread-Parent-API im Emitter (E2), kein
+  Nachrüsten von `phase`/`lane` an den Aufrufstellen (E6). Die
+  Waisen-Reparatur passiert ausschließlich beim Lesen im Modell.
+- Kein Refactoring von `phases.py`: Aufgabe A umschließt einzig die
+  `ctx.codex.author(...)`-Aufrufstelle mit einem Span, mehr nicht (E4).
+- Keine neuen Laufzeit-Dependencies des Kernpakets — Stdlib und das bereits
+  vorhandene pydantic genügen.
+- Keine Persistenz außer `~/.adw/repos.json`: keine Index-, Cache- oder
+  Offset-DATEIEN. Ein Byte-Offset im Speicher ist erlaubt und erwünscht.
+- Reale Gates (E3): `uv run ruff check .` und `uv run pytest -x -q`.
+  `flake8`, `isort`, `black` tauchen nirgends auf.
 
 ## Ausgangslage (verifiziert im Code)
 
-- `cli.py:_run_span` behandelt den Exception-Ausgang bereits:
-  `handle.end_payload = {"status": "escalated", "totals": totals()}` wird
-  gesetzt, `span()` schreibt das End-Event in seinem `finally`, die Exception
-  propagiert unverändert (`raise`). **Korrekt — bleibt unverändert (E1).**
-- Die `agent.run`- und `codex.review`-**Spans** liegen heute in den Runnern:
-  `agents.py:SdkAgentRunner.run` (`emitter.span("agent.run", …)`) und
-  `codex.py:CodexRunner.review` (`emitter.span("codex.review", …)`). Die Mocks
-  (`mock.py`) emittieren nichts — ein Dry-Run erzeugt daher heute keinen
-  einzigen dieser Spans.
-- `phases.py:_worktree_tree_hash()` zeigt exakt das temporäre-Index-Verfahren,
-  das Aufgabe C wiederverwendet: `GIT_INDEX_FILE` auf eine Temp-Datei,
-  `read-tree HEAD` → `add -A` → `write-tree`, realer Index unberührt.
-- `base_sha` ist der auf `LaneState` gepinnte Fork-Point der Lane
-  (`state.py: LaneState.base_sha`, gesetzt in `_run_lane`) — er, nicht der
-  weiterrückende Base-Branch, ist der Parent der Snapshot-Commits.
+- Record-Schema (`events.py:_append`): jeder Record trägt
+  `seq, ts, type, kind ("start"|"end"|"point"), span, parent, phase, lane,
+  round, payload`. `phase`/`lane` sind an den betroffenen Aufrufstellen
+  faktisch `null` — die Enthaltungsregel darf sich nicht auf sie stützen (AC 15).
+- Die `codex.review`-Instrumentierung (`phases.py:_codex_review`, Z. 126–133)
+  ist das Muster für Aufgabe A: die argv wird über einen seiteneffektfreien
+  Builder (`ctx.codex.effective_argv(...)`) VOR dem Öffnen des Spans gebaut und
+  steht vollständig im Start-Event; der Runner füllt nur das von der
+  Aufrufstelle gereichte Span-Handle (`end_payload`).
+- Die `codex.author`-Aufrufstelle ist `phases.py:_codex_draft` (Z. 706–738,
+  `files = ctx.codex.author(kind, task, cwd=ctx.repo)`). Sie läuft im
+  Pool-Worker (`_draft_stage`, `ThreadPoolExecutor`), dessen Span-Stack leer
+  ist — der `codex.author`-Span erhält daher `parent: null` (belegter
+  Waisen-Fall, E2/E6).
+- `CodexRunner.author` (`codex.py`, Z. 303–310) baut die argv heute intern über
+  `_build_author_prompt` (enthält einen per-Call-`marker_id`-Nonce) und
+  `_argv`; sie gibt `dict[name -> content]` zurück, ohne `raw_stdout`/`parse_ok`
+  zu exponieren. Für AC 2/3 muss die argv VOR dem Span vorliegen und mit der
+  ausgeführten identisch sein — der Nonce muss also einmal an der Aufrufstelle
+  festgelegt und in Builder wie Ausführung geteilt werden (Mechanik, s. u.).
+- `cli.py:run` löst das Ziel-Repo mit `repo = repo.resolve()` auf (Z. 146) —
+  der eine natürliche Punkt für die Registry-Eintragung (AC 22).
+- Der Reader liest `.adw/runs/<run_id>/events.jsonl` (`state.py:RUNS_RELPATH`).
+  Das Log ist append-only, `\n`-terminiert; eine crash-truncatierte
+  Schlusszeile ist möglich (`events.py:_append` heilt sie beim nächsten
+  Schreiben) — der Reader muss sie tolerieren (AC 8).
 
 ## Workstream: backend
 
-### Aufgabe A — Test für den Exception-Pfad des `run`-Spans
+### Aufgabe A — `codex.author` instrumentieren
 
-Reiner Testzuwachs, **keine** Implementierungsänderung.
+Reines Umschließen der Aufrufstelle nach dem `codex.review`-Muster (E4). KEIN
+Refactoring von `phases.py` darüber hinaus.
 
-A1. Test in der bestehenden `cli`/`_run_span`-Testsuite: einen Kontext bauen,
-    dessen `run`-Span-Körper eine unerwartete Exception (z. B. `RuntimeError`)
-    wirft, gegen einen echten `EventEmitter` (Temp-Repo). Belegen:
-    - das `run`-End-Event trägt `payload.status == "escalated"`;
-    - das End-Event wird VOR der Propagation geschrieben (es existiert in
-      `events.jsonl`, obwohl die Exception den `with`-Block verlässt);
-    - exakt dieselbe Exception-Instanz propagiert unverändert weiter
-      (per `pytest.raises`, Identität/Typ/Message).
-    Nutzt `_run_span` direkt (nicht den ganzen CLI-Lauf), damit der Test genau
-    den spezifizierten Pfad trifft.
+A1. In `phases.py:_codex_draft` den `ctx.codex.author(...)`-Aufruf mit einem
+    `ctx.emitter.span("codex.author", start)` umschließen. Der Span liegt an der
+    Aufrufstelle; der Inhalt (Ausführung, Roh-Output, Parse-Ergebnis) kommt aus
+    `codex.py`.
+A2. **Start-Payload (§4.4):** `kind`, `argv` (list), `cwd`, `task`. Die `argv`
+    liegt VOR dem Öffnen des Spans vollständig vor und steht unverändert im
+    Start-Record — identisch zu dem, was der Runner ausführt, nicht nachträglich
+    rekonstruiert (AC 2). Dazu wird — analog `effective_argv` für Review — eine
+    seiteneffektfreie Author-argv-Konstruktion auf dem Runner-Protokoll nutzbar
+    gemacht. Weil `_build_author_prompt` einen per-Call-`marker_id` enthält,
+    muss dieser Nonce einmal bestimmt und zwischen Builder und Ausführung
+    geteilt werden (z. B. ein an der Aufrufstelle erzeugter `marker_id`, der an
+    Builder und `author(...)` weitergereicht wird, ODER ein `author(...)`, das
+    ein vorab gebautes argv/Prompt entgegennimmt). Die genaue Signatur ist
+    Mechanik und NICHT im Kontrakt; verbindlich ist nur: Start-`argv` ==
+    ausgeführtes argv.
+A3. **End-Payload (§4.4):** `artifacts[]` (die zurückgegebenen Dateinamen),
+    `raw_stdout`, `parse_ok`. Das Befüllen erfolgt im Runner in das von der
+    Aufrufstelle gereichte Span-Handle — deterministische Defaults VOR der
+    Ausführung (`artifacts: []`, `raw_stdout: ""`, `parse_ok: false`), sodass
+    auch ein Fehlerpfad ein vollständiges End-Event schreibt (Muster
+    `codex.py:_review_into`). `codex.py` wird dafür span-fähig gemacht
+    (erlaubt: `codex.py` steht nicht auf der No-Change-Liste; verboten sind nur
+    `events.py`, `snapshots.py`, der Orchestrator-Ablauf und ein `phases.py`-
+    Refactoring).
+A4. **Degradation unverändert (AC 4):** Der Span wird auch bei gescheitertem
+    oder leerem Codex-Entwurf mit vollständigem `end`-Record geschlossen
+    (`parse_ok: false`, verfügbarer Roh-Output). Das bestehende
+    Degradations-/Marker-Verhalten von `_codex_draft` bleibt unangetastet; der
+    Lauf bricht nicht ab. Der Span umschließt den `ctx.codex.author(...)`-Aufruf
+    so, dass sein `end` auch im `except`-Pfad geschrieben wird (Span-`finally`).
+A5. **Dry-Run/Mock (AC 5):** Weil der Span an der Aufrufstelle liegt, erzeugt
+    auch der Mock-Runner (`mock.py`) den Span. Der Mock liefert dazu denselben
+    seiteneffektfreien Author-argv-Builder-Wert und befüllt das gereichte
+    Handle mit `artifacts`/`raw_stdout`/`parse_ok` (Muster wie
+    `mock.py:review`), damit ein Dry-Run geschlossene `codex.author`-Spans mit
+    den festgelegten Payload-Feldern erzeugt.
 
-### Aufgabe B — `agent.run`/`codex.review`-Span an die Aufrufstelle verschieben
+Tests A:
+- Dry-Run erzeugt für jeden `codex.author`-Aufruf genau ein geschlossenes
+  Start/End-Paar gleicher Span-ID; der Test prüft die Start-Felder (`kind`,
+  `argv`, `cwd`, `task`) UND die End-Felder (`artifacts`, `raw_stdout`,
+  `parse_ok`), nicht nur die Schließung (AC 1–3).
+- Start-`argv` ist vollständig und identisch mit dem, was der Runner ausführen
+  würde (Builder-Wert == ausgeführtes argv; AC 2).
+- Fehlerpfad: gescripteter Author-Fehler/leerer Entwurf → Span trotzdem
+  geschlossen, `parse_ok: false`, Roh-Output vorhanden, Lauf/Degradation
+  unverändert (AC 4).
 
-Die **Span-Klammer** wandert aus den Runnern in `adw/phases.py` an jede
-Aufrufstelle; der **Inhalt** (Stream-Spiegelung, Usage/Kosten) bleibt in den
-Runnern (E4). Bestehende Aufrufstellen werden ausschließlich umschlossen.
+### Aufgabe B1 — `adw/gui/reader.py`
 
-B1. `agents.py:SdkAgentRunner.run` / `_collect`: die eigene
-    `emitter.span("agent.run", …)`-Klammer entfernen, sodass der Runner keinen
-    Span mehr öffnet. `_collect` erhält weiter ein Span-Handle (mit `.id` und
-    `.end_payload`) von der Aufrufstelle, sodass die Stream-Spiegelung
-    (`agent.message`/`agent.tool.call`/`agent.tool.result`) und die
-    End-Payload-Felder (`session_id`, `result_text`, `usage`, `cost_usd`,
-    `is_error`) unverändert demselben Span zugeordnet werden. **Rückgabewerte
-    von `_collect` und `run` sowie die `AgentRunError`-/Exception-Semantik
-    bleiben unverändert (AC 12).** Wie das Handle an den Runner gereicht wird,
-    ist Mechanik und NICHT im Kontrakt.
-B2. `codex.py:CodexRunner.review`: analog die `emitter.span("codex.review",
-    …)`-Klammer entfernen; das Befüllen von `findings`/`raw_stdout`/`parse_ok`
-    erfolgt weiter im Runner in das von der Aufrufstelle gereichte Handle.
-B3. In `phases.py` an JEDER `ctx.agents.run(...)`-Aufrufstelle den
-    `agent.run`-Span öffnen — Start-Felder nach §4.4 aus den an der
-    Aufrufstelle bekannten Werten: `agent`, `model`, `tools`, `allowed_tools`,
-    `cwd`, `resume_session`, `prompt`, `system_append`. Aufrufstellen
-    (verifiziert): `_claude_draft` (Draft-Stage, läuft im Pool-Worker —
-    Span-Stack leer, `parent: null`, Zuordnung über `phase`/`lane`, E2),
-    `_reviewed_authoring_loop`, der Gate-Loop in `_run_lane`,
-    `_run_test_only_pass`, `_triage_e2e`, Final-Review, `_analyze_ci_logs`.
-B4. In `phases.py` an JEDER `ctx.codex.review(...)`-Aufrufstelle den
-    `codex.review`-Span öffnen — Start-Felder `kind`, `argv`, `cwd`,
-    `custom_prompt`. Aufrufstellen (verifiziert): `_reviewed_authoring_loop`
-    und die Codex-Code-Review-Phase. **`argv` muss VOR dem Öffnen des Spans
-    vollständig vorliegen** (das Start-Event wird beim Span-Öffnen
-    geschrieben; ein nachträgliches Befüllen über das Handle erreicht es
-    nicht). Dafür wird die bereits vorhandene, seiteneffektfreie
-    argv-Konstruktion des Runners (`CodexRunner._build_prompt` +
-    `CodexRunner._argv`, beides statisch) als geteilter Builder nutzbar
-    gemacht (z. B. eine öffentliche Methode `effective_argv(kind,
-    content_refs, cwd, context)` auf dem Runner-Protokoll); der echte Runner
-    führt exakt dieses argv aus, der Mock liefert denselben Builder-Wert.
-    Ein Test belegt, dass das serialisierte Start-Event das vollständige,
-    vom Runner tatsächlich ausgeführte argv enthält (AC 3). Die vom
-    (Mock-)Runner tatsächlich zurückgegebenen Ergebnisfelder werden immer
-    erfasst. `ctx.codex.author(...)` in `_codex_draft` erhält KEINEN Span —
-    §4.4 kennt keinen `author`-Event-Typ; AC 4 nennt ausschließlich
-    `agent.run` und `codex.review`.
-B5. Im Dry-Run fehlen weiterhin ausschließlich die runnerseitigen Inhalte:
-    keine `agent.message`-/`agent.tool.*`-Events, keine synthetischen Usage-/
-    Kostenwerte (Non-Goal). Die Start-Felder nach §4.4 und die vom Mock
-    zurückgegebenen Ergebnisfelder (`session_id`, `result_text`, `is_error`
-    bzw. `findings`, `raw_stdout`, `parse_ok`) werden dagegen immer erfasst.
+Neues Paket `adw/gui/` (mit `__init__.py`) und Modul `reader.py`.
 
-Tests B:
-- Dry-Run erzeugt ≥1 vollständig geschlossenen `agent.run`-Span (start+end,
-  gleiche Span-ID) und ≥1 `codex.review`-Span; der Test prüft AUCH die
-  Payload-Felder aus §4.4, nicht nur die Span-Schließung (AC 2/3).
-- Jede Aufrufstelle ist von genau einem Span umschlossen, Mock wie Echt
-  (AC 4) — z. B. Zählung der `agent.run`-Starts gegen die Zahl der
-  Agent-Läufe eines Dry-Runs.
-- Dry-Run enthält keine `agent.message`-/`agent.tool.*`-/Usage-/Kosten-
-  Simulation; Echt-Runner behalten Stream-Spiegelung und Usage/Kosten —
-  bestehende Runner-Tests bleiben grün, ggf. an das gereichte Handle
-  angepasst (kein Verhaltenswechsel).
-- Das `codex.review`-Start-Event enthält das vollständige argv, das der
-  Runner tatsächlich ausführt (Builder-Wert == ausgeführtes argv, AC 3).
+B1-1. `EventReader(path)` initialisiert auf einen `events.jsonl`-Pfad;
+    `EventReader.offset` (int) ist der öffentlich lesbare bestätigte
+    Byte-Offset, Startwert 0. Offset und Tail-Zustand leben ausschließlich im
+    Speicher (keine Offset-Datei). Reader-Aufrufe verändern das Log nicht und
+    erzeugen keine Dateien (AC 7).
+B1-2. `EventReader.read() -> ReadResult`: liest ab dem bestätigten Offset,
+    parst ausschließlich vollständige, `\n`-terminierte Zeilen in
+    Dateireihenfolge und rückt den Offset genau bis hinter die letzte
+    vollständig verarbeitete Zeile vor. Ein zweiter Aufruf ohne Dateizuwachs
+    liefert nichts erneut; nach Anhängen liefert der nächste Aufruf
+    ausschließlich das Neue (AC 6/7).
+B1-3. **Angeschnittene letzte Zeile (AC 8):** eine nicht `\n`-terminierte
+    Schlusszeile wird weder geparst noch als Problem gemeldet, ihr Anfang nicht
+    als Offset bestätigt; sobald sie durch angehängte Bytes vollständig ist,
+    wird sie genau einmal verarbeitet.
+B1-4. `ReadResult`: `events` (geparste Records in Dateireihenfolge, als
+    Mappings mit ALLEN Originalfeldern) und `problems` (Liste `ReadProblem`) —
+    Events und Probleme sind eindeutig getrennt (AC 6).
+B1-5. `ReadProblem`: `kind` (`"bad_line"` | `"seq_gap"`), betroffene Position
+    (`line_no` und/oder `byte_offset`); bei `seq_gap` zusätzlich `expected` und
+    `found`.
+    - **`seq_gap` (AC 9):** eine Lücke in der `seq`-Folge wird gemeldet, nicht
+      still überlesen; die lesbaren Events vor und nach der Lücke bleiben
+      verfügbar. Die `seq`-Kontinuität wird über Read-Aufrufe hinweg geführt
+      (in-memory), damit eine Lücke auch inkrementell erkannt wird.
+    - **`bad_line` (AC 10):** eine vollständige, nicht parsbare Zeile wird für
+      diese Zeile gemeldet; alle nachfolgenden vollständigen Zeilen werden
+      weiterhin geliefert.
+B1-6. `snapshot`-Events und Records unbekannten Typs werden unverändert als
+    Events geliefert (Ref-Namen verfügbar); der Reader berechnet KEINE Diffs
+    (AC 11, Non-Goal).
 
-### Aufgabe C — `adw/snapshots.py` (Snapshots und Schritt-Diff-Basis)
+### Aufgabe B2 — `adw/gui/model.py` (Span-Baum)
 
-C1. Neues Modul `adw/snapshots.py` mit öffentlicher Funktion
-    `capture(ctx, worktree, label)`:
-    1. **Tree** über temporären Index wie `phases.py:_worktree_tree_hash()`:
-       eigene `GIT_INDEX_FILE` (Temp-Datei, danach entfernt),
-       `read-tree HEAD` → `add -A` → `write-tree`; realer Index,
-       Worktree-Dateien, aktueller Branch und `HEAD` bleiben unberührt.
-    2. **Commit + Ref:** `git commit-tree <tree> -p <base_sha> -m "adw
-       snapshot <label>"`, dann `git update-ref refs/adw/<run_id>/<seq>
-       <commit>`. `base_sha` = der für die Lane gepinnte Fork-Point
-       (`lane_state.base_sha`); die Ref hält die Objekte gegen `git gc`.
-    3. **Event:** genau ein `snapshot`-Point-Event mit Payload `lane`, `tree`,
-       `ref`, `label`, erst NACH vollständig erfolgreichem Capture; `tree`/
-       `ref` entsprechen dem erzeugten Tree bzw. der gesetzten Ref.
-C2. **`<seq>`-Vergabe (prozessübergreifend eindeutig, keine Überschreibung):**
-    frische Sequenz aus den bereits existierenden `refs/adw/<run_id>/*`
-    ermitteln (höchste vorhandene `<seq>` + 1); `update-ref` so, dass eine
-    vorhandene Ref desselben Laufs nie überschrieben wird — auch nach `resume`
-    in einem neuen Prozess. Kein Sidecar, kein `RunState`-Feld: die Refs
-    selbst sind die Quelle (AC 7). Mechanik der git-Kommandos ist NICHT Teil
-    des Kontrakts.
-C3. **Fail-open** wie beim Emitter: jeder Fehlerpfad wird intern abgefangen —
-    EINE Warnung, `capture` wirft nie, bricht keinen Lauf ab, ändert kein
-    Verhalten und verdeckt/ersetzt keine bereits laufende fachliche Exception
-    (AC 11). Die "keine Ref, kein Event"-Garantie gilt für Fehler VOR oder
-    BEIM Setzen der Ref (scheiterndes git-Kommando: read-tree/add/write-tree,
-    commit-tree, update-ref). Schlägt danach nur noch der Event-Append fehl,
-    greift die ohnehin fail-open ausgelegte Emitter-Semantik: die bereits
-    gesetzte Ref bleibt als nutzbarer Snapshot bestehen, es gibt KEIN
-    Rollback und KEINE Recovery-Mechanik (siehe Deferred).
-C4. **Snapshot-Punkte** in `phases.py` (nur Build-Lane, §5/§6), ausschließlich
-    als eingefügte `snapshots.capture(...)`-Aufrufe — kein Umbau:
-    - `_run_lane` Gate-Loop: `before_agent` unmittelbar VOR
-      `ctx.agents.run(...)`, `after_agent` unmittelbar NACH normaler Rückkehr.
-    - `_run_test_only_pass`: `before_agent` vor und `after_agent` nach dem
-      Test-only-Agent-Lauf (auch dies ist ein Agent-Lauf der Build-Lane —
-      §5: "before and after every agent run").
-    - `red` NACH dem TDD-RED-Test-only-Lauf, an der Stelle im
-      `_confirm_red`/`_run_test_only_pass`/`_require_red_tests`-Umfeld, an der
-      der RED-Beweis feststeht.
-    - `after_gates` nach JEDER Gate-Iteration, unabhängig vom Gate-Ausgang
-      (grün wie rot).
-    Authoring-/Review-Agent-Läufe (`_claude_draft`, `_reviewed_authoring_loop`,
-    `_triage_e2e`, Final-Review, `_analyze_ci_logs`) erhalten Spans
-    (Aufgabe B), aber KEINE Snapshots — §6 sieht dort keine `snapshot`-Events
-    vor.
-C5. **Exception-Semantik `after_agent`:** gilt nur für normal zurückkehrende
-    Agent-Läufe. Der Aufruf liegt bewusst NICHT in einem `finally`- oder
-    Unwinding-Pfad: wirft `ctx.agents.run(...)`, entfällt der
-    `after_agent`-Snapshot samt Event, die Exception propagiert unverändert,
-    der `before_agent`-Snapshot bleibt als Diff-Basis erhalten (AC 10). Kein
-    Capture während des Stack-Unwindings (siehe Deferred).
+B2-1. `build_tree(events) -> list[SpanNode]`: überführt eine Folge gelesener
+    Event-Records in einen Span-Baum. `start`/`end` mit derselben Span-ID
+    werden zu genau einem Knoten; `duration` aus der `ts`-Differenz. Ein Span
+    ohne `end` hat `running: true`, `end_ts`/`end_payload`/`duration` = `None`
+    (AC 12).
+B2-2. `SpanNode`-Felder: `span_id`, `type`, `seq` (Start-`seq`), `start_ts`,
+    `end_ts`, `duration`, `running`, `start_payload`, `end_payload`,
+    `start_record` (vollständiger Original-Start-Record; `None` nur im
+    End-only-Fall aus AC 19), `end_record` (vollständiger Original-End-Record;
+    `None` solange laufend), `children` (geordnete Liste aus Span- und
+    Punkt-Knoten). `PointNode`-Felder: `type`, `seq`, `ts`, `payload`,
+    `record` (vollständiger Original-Record).
+B2-3. **Wurzeln & Resume (AC 13):** Verschachtelung folgt dem `parent`-Feld,
+    soweit gesetzt. Die Wurzeln des Ergebnisses sind die `run`-Spans in
+    Log-Reihenfolge. Ein Resume-Log (§12: zweiter `run`-Start in derselben
+    Datei, `resumed_from_seq` markiert die Naht, `seq` zählt durch) ergibt
+    mehrere Wurzeln, je Lauf-Segment eine. Ein Log ohne `run`-Start
+    (degeneriert/truncatiert) bricht nicht ab; elternlose Spans werden dann
+    selbst Wurzeln.
+B2-4. **Enthaltungsregel für Waisen-Spans (AC 14, GUI-SPEC §4.2, normativ):**
+    Eine Waise (Span mit `parent: null`, der nicht die `run`-Wurzel ist) gehört
+    zu dem INNERSTEN Span, dessen Intervall das Intervall der Waise
+    `[start ts, end ts]` echt enthält — unter allen enthaltenden Kandidaten der
+    mit dem spätesten Start; bei Gleichstand entscheidet die höhere `seq`. Ein
+    noch laufender Span gilt als enthaltend für alles nach seinem Start.
+    Intervalle je Knotenart: gepaarter Span `[start ts, end ts]`, laufender
+    Span `[start ts, ∞)`, End-only-Span `[end ts, end ts]`, Punkt-Event
+    `[ts, ts]`. `run`-Spans nehmen als Kandidaten regulär teil (eine Waise
+    eines Resume-Segments fällt an dessen `run`-Span: späterer Start gewinnt
+    gegen einen noch offenen früheren `run`). Eine Waise, die nichts enthält,
+    bleibt Kind der `run`-Wurzel — bei mehreren Wurzeln: der spätesten Wurzel,
+    deren Start nicht nach dem Start der Waise liegt, sonst der ersten.
+B2-5. **Rein zeitbasiert (AC 15):** die Regel nutzt `ts` (+ `seq` als
+    Tiebreaker) und hängt NICHT von `phase`/`lane` ab; sie funktioniert, wenn
+    diese überall `null` sind. Belegter Fall: der `agent.run`-Span der
+    Spec-Phase mit `parent: null` landet unter dem ihn zeitlich enthaltenden
+    offenen `phase`-Span, nicht unter der `run`-Wurzel.
+B2-6. **Punkt-Events (AC 17):** hängen an dem Span, dessen ID sie im Feld `span`
+    tragen.
+B2-7. **Unbekannte `type` (AC 18):** werden generisch als Knoten übernommen —
+    nie verworfen, nie als Fehler behandelt. Der Original-Record inkl. Payload
+    bleibt über stabile Knotenfelder zugänglich: `SpanNode.start_record`/
+    `end_record` bzw. `PointNode.record`, jeweils mit ALLEN Originalfeldern;
+    unbekannte Span-Typen nehmen regulär an Spanbildung/Verschachtelung teil,
+    unbekannte Punkt-Typen werden regulär ihrem `span` zugeordnet.
+B2-8. **Hängende Referenzen (AC 19), deterministisch, nie abbrechend, kein
+    Recordverlust:**
+    - `end` ohne bekannten `start`: Span-Knoten allein aus dem End-Record —
+      `start_ts`/`start_payload`/`start_record`/`duration` = `None`,
+      `running: false`, `end_ts`/`end_payload`/`end_record`/`seq` aus dem
+      End-Record. Einordnung über `parent`, falls auflösbar, sonst nach AC 14
+      mit Intervall `[end ts, end ts]`.
+    - Span mit nicht-nullem, im Bestand unbekanntem `parent`: wie eine Waise
+      nach AC 14.
+    - Punkt-Event mit fehlendem/`null`/unbekanntem `span`: wie eine Waise nach
+      AC 14 mit Intervall `[ts, ts]`.
+B2-9. **Kinder-Ordnung & Stabilität (AC 20):** Kinder jedes Knotens
+    chronologisch nach `ts`, bei Gleichstand nach `seq`. Das Modell liefert für
+    einen vollständigen und für einen inkrementell erweiterten Eventbestand
+    denselben beobachtbaren Baum.
 
-Tests C (Richtwert einhalten, siehe Guardrail):
-- Realer Temp-Repo: erfolgreicher `capture` erzeugt Tree+Commit; der Tree
-  bildet tracked, geänderte, gelöschte und untracked Dateien ab, ignorierte
-  nicht; realer Index, Worktree-Dateien, Branch und `HEAD` unverändert (AC 5).
-- Ref `refs/adw/<run_id>/<seq>` existiert, zeigt auf einen Commit mit
-  passendem Tree und `base_sha` als Parent (AC 6).
-- Resume in neuem Prozess für einen Lauf mit vorhandenen Refs: frische
-  Sequenzen, keine Überschreibung bestehender Refs (AC 7).
-- Erfolgreicher Snapshot → genau ein `snapshot`-Event mit `lane`/`tree`/
-  `ref`/`label`; `tree`/`ref` konsistent (AC 8).
-- Lauf-weit: `snapshot`-Events erscheinen an den vier Punkten mit korrektem
-  Label (`before_agent`, `after_agent`, `red`, `after_gates`); `after_gates`
-  unabhängig vom Gate-Ausgang (AC 9).
-- Agent-Lauf wirft → kein `after_agent`-Snapshot/-Event, Exception
-  unverändert, `before_agent`-Snapshot bleibt (AC 10).
-- Fehlgeschlagener Snapshot durch einen git-Fehler VOR oder BEIM Setzen der
-  Ref (z. B. gemocktes scheiterndes `write-tree`/`commit-tree`/`update-ref`)
-  → keine Ref, kein Event, eine Warnung, Lauf läuft unverändert weiter; eine
-  bereits laufende fachliche Exception bleibt unangetastet (AC 11). AC 11s
-  "keine Ref"-Garantie meint genau diesen Fall; ein Event-Append-Fehler nach
-  gesetzter Ref bleibt fail-open ohne Rollback (siehe C3) und wird nicht als
-  Rollback-Anforderung getestet.
+### Aufgabe B3 — `adw/gui/registry.py`
 
-### Regression
+B3-1. `register_repo(path) -> RepoEntry`: legt den Eintrag an bzw. aktualisiert
+    `last_seen`. Je kanonischem Repo-Pfad höchstens ein Eintrag mit `path`,
+    `slug`, `last_seen` (UTC, ISO-8601). Registry-Datei ausschließlich
+    `~/.adw/repos.json` im festgelegten Format (AC 21).
+B3-2. **`adw run`-Hook (AC 22):** In `cli.py:run` nach `repo = repo.resolve()`
+    das aufgelöste Ziel-Repo registrieren. Ein Registry-Fehler (z. B.
+    Schreibfehler) verhindert den Run nicht — fail-open, die Registry dient nur
+    der späteren Anzeige.
+B3-3. **Stabiler Slug (AC 23, §7.4):** derselbe Pfad ergibt stets denselben
+    Slug — ein vorhandener Eintrag behält beim Aktualisieren seinen Slug;
+    verschiedene kanonische Pfade verschiedene Slugs (auch bei gleichem
+    Verzeichnisnamen); ein Slug enthält nie einen rohen Dateisystempfad.
+    (Mechanik frei, z. B. lesbarer Basename + kurzer Hash-Suffix des
+    kanonischen Pfads.)
+B3-4. `load_registry() -> Registry`; `Registry.repos` (Liste `RepoEntry`),
+    `Registry.resolve(slug) -> RepoEntry | None`. `RepoEntry`: `path`, `slug`,
+    `last_seen`, `exists` (bool — ob der Pfad aktuell existiert). Nicht mehr
+    existierende Pfade werden über `RepoEntry.exists` als fehlend
+    gekennzeichnet, bleiben auflistbar und per Slug auflösbar, nie ein Fehler
+    (AC 24).
+B3-5. **Robustheit (AC 25):** eine fehlende oder unlesbare Registry-Datei führt
+    zu einer leeren, nutzbaren Registry, nicht zu einem ungefangenen Fehler; das
+    nächste erfolgreiche Registrieren schreibt wieder ein gültiges Format.
+B3-6. **Atomarer Schreibvorgang (AC 26):** jeder Schreibvorgang schreibt die
+    vollständige neue Registry in eine Temp-Datei im selben Verzeichnis und
+    ersetzt `repos.json` atomar (`os.replace`). Ein vor dem Ersetzen
+    scheiternder/abgebrochener Schreibvorgang lässt den vorherigen Inhalt
+    unversehrt. Cross-Prozess-Locking, Journaling, Backup-Recovery bleiben
+    deferred.
 
-- `agents.py:_collect`-Rückgabe und der fachliche Orchestrator-Ablauf
-  (Rückgabewerte, Fehlerbehandlung, Exception-Weitergabe, Limits,
-  Gate-Auswertung, Commit-/Merge-Semantik) bleiben unverändert; die
-  bestehenden Tests bleiben grün (AC 12).
+Tests B (Richtwert siehe Guardrail; Abdeckung ist maßgeblich):
+- Reader: erstes Lesen liefert alle vollständigen Records; erneutes Lesen ohne
+  Zuwachs liefert nichts; nach Anhängen nur das Neue; `offset` konsistent;
+  Reader-Aufrufe verändern das Log nicht und erzeugen keine Dateien.
+- Reader: angeschnittene Schlusszeile wird ignoriert und nach Vervollständigung
+  genau einmal geliefert; `seq_gap` (mit `expected`/`found`) und `bad_line`
+  gemeldet, Rest weiter lesbar; `snapshot`-Ref-Namen und unbekannte Records
+  kommen unverändert durch.
+- Modell: verschachtelte Spans über `parent`; laufender Span; Waisen-Einhängung
+  inkl. Gleichstand (`seq`-Tiebreaker) und laufendem Container; belegter
+  `agent.run`-unter-`phase`-Fall; Resume-Log ergibt zwei Wurzeln, Waise des
+  Resume-Segments unter der zweiten Wurzel; degeneriertes Log ohne `run`-Start;
+  Punkt-Event-Zuordnung; unbekannter Span- und Punkt-`type` mit Erhalt ALLER
+  Originalfelder über `start_record`/`end_record` bzw. `record`; hängende
+  Referenzen (`end` ohne `start`, Punkt mit unbekanntem `span`, Span mit
+  unauflösbarem `parent`); Kinder-Ordnung; voll == inkrementell.
+- Registry: Slug-Stabilität (auch über Aktualisierungen hinweg) und -Kollision
+  (gleicher Verzeichnisname, verschiedene Pfade → verschiedene Slugs);
+  `resolve`; exaktes persistiertes Version-1-Format; fehlendes Repo →
+  `exists: false`, auflistbar/auflösbar, kein Fehler; fehlende/unlesbare Datei →
+  leere Registry; abgebrochener Schreibvorgang lässt alte Registry intakt;
+  `adw run`-Registrierung im Dry-Run; Registry-Fehler blockiert Run nicht.
+- Realitätsnahes Fixture (DoD 4): verschachtelte Spans, Worker-Thread-Waisen,
+  Punkt-Events, unbekannte Typen, kaputte Zeile, `seq`-Lücke, zunächst
+  unvollständige Schlusszeile, Resume-Naht, hängende Referenzen — ohne Abbruch
+  lesbar, ergibt den festgelegten Baum, jeder gültige Record beobachtbar.
 
 ## Guardrail Testumfang
 
-Richtwert rund 15–22 neue Tests insgesamt für A, B und C. Deutlich mehr ist
+Richtwert rund 18–25 neue Tests für A und B zusammen. Maßgeblich ist die
+Abdeckung der Akzeptanzkriterien, nicht die exakte Anzahl. Deutlich mehr ist
 ein Signal für Scope-Drift.
 
 ## Definition of Done
 
-1. Alle Akzeptanzkriterien (Spec AC 1–12) sind durch Tests belegt.
-2. `uv run ruff check .` ist grün.
-3. `uv run pytest -x -q` ist grün (die bestehenden 562 Tests plus die neuen).
-4. Keine neuen Laufzeit-Dependencies; keine neuen Persistenzzustände außer
-   `events.jsonl` und `refs/adw/*`.
-5. `adw/events.py`, der `run`-Span und der fachliche Orchestrator-Ablauf sind
-   unverändert (außer dem in Aufgabe B erlaubten Umschließen der
-   Aufrufstellen); der Diff in `phases.py` beschränkt sich auf das Umschließen
-   vorhandener Runner-Aufrufe, die Handle-Übergabe und die vier
-   Snapshot-Punkte. Die Non-Goals und Deferred-Punkte sind nicht Bestandteil
-   des Produkts geworden.
+1. Aufgabe A und B sind gebaut; der `codex.author`-Span und die drei Module
+   `reader`, `model`, `registry` erfüllen die Akzeptanzkriterien und die im
+   Kontrakt festgelegte öffentliche Fläche.
+2. `adw.gui.reader`, `adw.gui.model`, `adw.gui.registry` importieren und
+   funktionieren ohne Web- oder neue Laufzeit-Abhängigkeiten; keine
+   unerlaubten persistenten Dateien.
+3. Ein Dry-Run erzeugt geschlossene `codex.author`-Spans mit den festgelegten
+   Payload-Feldern und trägt sein Ziel-Repo in `~/.adw/repos.json` ein, ohne
+   den fachlichen Ablauf der Dual-Authoring-Phase zu verändern.
+4. Das realitätsnahe Fixture ist ohne Abbruch lesbar und ergibt über das
+   Modell den festgelegten Baum mit korrekt eingehängten Waisen; jeder
+   ansonsten gültige Record bleibt beobachtbar.
+5. Gates grün: `uv run ruff check .` und `uv run pytest -x -q`.
+6. `adw/events.py`, `adw/snapshots.py` und der fachliche Orchestrator-Ablauf
+   sind unverändert; der Diff in `phases.py` beschränkt sich auf das
+   Umschließen der `codex.author`-Aufrufstelle. Non-Goals und Deferred-Punkte
+   sind nicht Bestandteil des Produkts geworden.
 
 ## Deferred (bewusst nicht gebaut)
 
-Folgende Ideen sind defensibel, aber für diesen Lauf disproportional oder
-vorentschieden ausgeschlossen. Sie gehören **nicht** in Akzeptanzkriterien.
-Ein Review-Finding, das einen dieser Punkte oder einen vorentschiedenen Punkt
-(E1–E4) einführen will, wird mit Begründung abgewiesen, nicht umgesetzt.
+Weitergehende Härtungs- oder Erweiterungsideen — auch Befunde aus den
+Codex-Review-Runden — gehören hierher, nicht in die Akzeptanzkriterien. Ein
+Finding, das einen dieser Punkte oder einen vorentschiedenen Punkt (E1–E6)
+einführen will, wird abgewiesen und mit Begründung dokumentiert.
 
-- Reader, Span-Baum-Modell, GUI, FastAPI, Registry, `adw gui`, Diff-Endpoint,
-  Diff-Berechnung und -Anzeige (Läufe 6+).
-- Prunen/Retention der Refs, `adw runs prune`, `adw runs list`,
-  `trace:`-Config (Lauf 5).
-- Redaction, Kappung oder Patch-Texte im Event-Log.
-- Cross-Thread-Parent-API in `adw/events.py` für parallele Lane-Spans (E2).
-- Tool-/Stream-Simulation oder synthetische Usage-/Kostenwerte in den
-  Mock-Runnern.
-- Zusätzliche Snapshot-Metadaten, Sidecar-Dateien oder Snapshot-Status in
-  `RunState`.
-- Retry-/Recovery-Mechanik für fehlgeschlagene Snapshots; Warnung, Events und
-  die vorhandenen Refs sind die vorgesehenen Backstops.
-- `after_agent`-Capture während des Stack-Unwindings (Review-Finding,
-  abgewiesen): Snapshot-Aufnahme im Exception-Pfad fügt am heikelsten Punkt
-  Fehlerfläche hinzu; der `before_agent`-Snapshot und der bei Eskalation
-  erhaltene Lane-Worktree sind die vorhandenen Backstops. Das Verhalten bei
-  Exception ist stattdessen explizit spezifiziert (AC 10).
-- Nebenläufigkeits-Garantien und Concurrent-Capture-Tests für parallele Lanes
-  (Review-Finding, teilweise abgewiesen): Single-Lane-Projekt laut Kontrakt;
-  die Eindeutigkeit über Prozessgrenzen (resume) ist dagegen übernommen
-  (AC 7).
-- Snapshots an weiteren Grenzen als den vier aus §5 (z. B. in Authoring-,
-  Integrations- oder Review-Phasen).
-- Codex-CLI-Volltranskript im Log (GUI-SPEC §12, v1.1).
+- Web-Schicht insgesamt (FastAPI, uvicorn, HTTP-API, Jinja2, Templates, CSS,
+  JS, SSE, `adw gui`, i18n) — nächster Lauf.
+- Diff-Berechnung oder Validierung der in Snapshot-Events genannten Git-Refs.
+- Prunen, Retention, gzip-Unterstützung, `trace:`-Config-Key (Lauf 5).
+- Cross-Thread-Parent-API im Emitter bzw. `parent` an der Quelle setzen (E2);
+  `phase`/`lane` an den Orchestrator-Aufrufstellen mitgeben (E6) — die
+  Waisen-Reparatur bleibt beim Lesen.
+- Persistente Offset-, Index- oder Cache-Dateien; Caching über Prozessläufe;
+  Dateisystem-Watcher (späteres Live-Tailing pollt den Reader).
+- Reparatur oder Umschreiben beschädigter bzw. lückenhafter Event-Logs.
+- Registry-Locking für konkurrierende Prozesse über den atomaren
+  Einzel-Schreibvorgang aus AC 26 hinaus; Journal-/Backup-Dateien und deren
+  Recovery.
+- Automatisches Entfernen oder Tombstones für verschwundene Repos;
+  Identitätserkennung nach Verschieben eines Repos (neuer kanonischer Pfad =
+  neuer Eintrag).
+- Redaction/Maskierung von Secrets im Log.

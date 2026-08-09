@@ -1,14 +1,17 @@
-# Interface contract — Snapshots + Instrumentierungs-Nachzügler
+# Interface contract — codex.author-Span + Lese-Seite (Reader, Modell, Registry)
 #
 # Single-Lane-Projekt (nur Workstream "backend"): kein HTTP, keine zweite
-# Lane. Gepinnt wird AUSSCHLIESSLICH die extern beobachtbare Flaeche:
-# die oeffentliche API von adw/snapshots.py, das Ref-Namensschema, die
-# snapshot-Events an den vier Punkten sowie — fuer Aufgabe B — die im
-# Dry-Run wie im Echt-Lauf beobachtbare agent.run/codex.review-Span-Flaeche
-# nach GUI-SPEC §4.4 (Spec-ACs 2–4). Interne Helper-Signaturen und
-# Mechanik-Details (Index-Handhabung, Reihenfolge der git-Kommandos, wie das
-# Span-Handle an die Runner gereicht wird, Signatur des argv-Builders) sind
-# NICHT Bestandteil des Kontrakts.
+# Lane, keine Web-Schicht in DIESEM Lauf. Gepinnt wird AUSSCHLIESSLICH die
+# extern beobachtbare Flaeche:
+#   - die Payload-Felder des neuen codex.author-Spans (GUI-SPEC §4.4),
+#   - die oeffentliche API von adw.gui.reader / .model / .registry,
+#   - die Struktur des gelieferten Span-Baums,
+#   - das Format von ~/.adw/repos.json.
+# NICHT Bestandteil des Kontrakts: interne Helper-Signaturen und Mechanik —
+# Parser-Interna, Datenhaltung, wie das Span-Handle an den Codex-Runner
+# gereicht wird, Signatur des Author-argv-Builders, Slug-Bildungsverfahren,
+# git/os-Kommandoreihenfolge. Feldlisten sind Mindestangaben; Ergebnisobjekte
+# machen ihre Felder attributiv zugreifbar (dataclass oder pydantic, frei).
 
 version: 1
 
@@ -16,151 +19,236 @@ scope:
   workstreams:
     - backend
   externally_observable_surfaces:
-    - public_snapshot_api
-    - snapshot_refs
-    - snapshot_events
-    - instrumentation_span_events
+    - codex_author_span
+    - reader_api
+    - model_api
+    - span_tree_structure
+    - registry_api
+    - registry_file_format
 
-public_snapshot_api:
-  module: adw.snapshots
-  callable: capture
-  signature: "capture(ctx, worktree, label)"
-  params:
-    ctx: "RunContext (traegt u. a. emitter, state.run_id, git-Umgebung)"
-    worktree: "Path — der zu snapshottende Lane-Worktree"
-    label: "str — einer von: before_agent | after_agent | after_gates | red"
-  returns: "None"
-  raises: "nie (fail-open) — jeder Fehler unterbleibt still mit einer Warnung"
-  behavior:
-    success:
-      - "Der Worktree-Stand wird ueber ein Tree-Objekt als Git-Commit
-         festgehalten; realer Index, Worktree-Dateien, aktueller Branch und
-         HEAD bleiben unveraendert."
-      - "Eine frische Ref refs/adw/<run_id>/<seq> wird gesetzt."
-      - "Genau ein snapshot-Event wird emittiert."
-    failure:
-      - "Fehler vor oder beim Setzen der Ref (scheiterndes git-Kommando):
-         keine Ref, kein snapshot-Event."
-      - "Fehler des Event-Appends NACH erfolgreich gesetzter Ref: fail-open
-         wie beim Emitter — die Ref bleibt als nutzbarer Snapshot bestehen,
-         kein Rollback, keine Recovery-Mechanik."
-      - "In jedem Fehlerfall eine Warnung; der Lauf und seine fachliche
-         Exception-Semantik bleiben unveraendert (keine verdeckte/ersetzte
-         Exception)."
-
-snapshot_refs:
-  pattern: "refs/adw/<run_id>/<seq>"
-  target: git_commit
-  commit:
-    tree: "vollstaendiger Worktree-Stand einschliesslich untracked, ohne
-           ignored Dateien"
-    parent: "<base_sha> — der fuer die Lane gepinnte Fork-Point"
-    message: "adw snapshot <label>"
+# --- Aufgabe A: codex.author-Span (GUI-SPEC §4.4) ---------------------------
+# Der Span liegt an der Aufrufstelle im Orchestrator, nicht im Runner, und
+# erscheint daher auch im Dry-Run (Mock-Runner). Die exakte Code-Stelle ist
+# Mechanik (siehe Plan), ebenso wie das Handle gereicht und wie das argv
+# (inkl. per-Call-marker_id) gebaut wird.
+codex_author_span:
+  type: codex.author
+  kind: span
+  start_payload:   # an der Aufrufstelle bekannt — auch im Dry-Run Pflicht
+    - kind         # "spec" | "plan"
+    - argv         # list — vollstaendig VOR dem Span; == vom Runner ausgefuehrtes argv
+    - cwd
+    - task
+  end_payload:     # tatsaechlich zurueckgegebene Ergebnisfelder — auch im Dry-Run Pflicht
+    - artifacts    # list — die zurueckgegebenen Dateinamen
+    - raw_stdout
+    - parse_ok     # bool
   invariants:
-    - "Nach jedem erfolgreichen Snapshot existiert die Ref und zeigt auf
-       dessen Commit; die Ref haelt die Objekte gegen git gc am Leben."
-    - "<seq> unterscheidet die Snapshots eines Laufs eindeutig."
-    - "Bereits vorhandene Refs desselben Laufs werden niemals ueberschrieben,
-       auch nicht nach resume in einem neuen Prozess (frische Sequenzen)."
+    - "Jede ausgefuehrte Author-Operation (ctx.codex.author(...)) ist von
+       genau einem codex.author-Span umschlossen — Mock- wie Echt-Runner."
+    - "Start- und End-Event tragen dieselbe Span-ID."
+    - "argv liegt vollstaendig im Start-Event (kein nachtraegliches Befuellen);
+       beim Echt-Lauf identisch mit dem ausgefuehrten argv."
+    - "Auch bei gescheitertem/leerem Entwurf wird der Span mit vollstaendigem
+       end-Record geschlossen: parse_ok=false, verfuegbarer raw_stdout; das
+       bestehende Degradations-Verhalten bleibt unveraendert, der Lauf bricht
+       nicht ab."
+    - "Ein Dry-Run erzeugt geschlossene codex.author-Spans mit allen o. g.
+       Start- und End-Feldern."
   not_pinned:
-    - "Interne Ermittlung von <seq> (Ableitung aus vorhandenen Refs)."
-    - "Reihenfolge/Wortlaut der git-Kommandos und die Index-Handhabung."
+    - "Signatur des Author-argv-Builders und wie der marker_id geteilt wird."
+    - "Wie das Span-Handle an den Codex-Runner gereicht wird."
+    - "Die exakte Aufrufstelle (Datei/Funktion) im Orchestrator-Code."
 
-snapshot_events:
-  snapshot:
-    kind: point
-    payload:
-      lane:
-        type: string
-        description: "Name der Build-Lane."
-      tree:
-        type: string
-        description: "SHA des erzeugten Tree-Objekts."
-      ref:
-        type: string
-        pattern: "^refs/adw/[^/]+/[^/]+$"
-        description: "Die fuer diesen Snapshot gesetzte Ref."
-      label:
-        type: string
-        enum:
-          - before_agent
-          - after_agent
-          - after_gates
-          - red
+# --- Aufgabe B1: adw.gui.reader ---------------------------------------------
+reader_api:
+  module: adw.gui.reader
+  EventReader:
+    constructor: "EventReader(path)  # Pfad einer events.jsonl"
+    attributes:
+      offset:
+        type: int
+        access: read
+        description: "Bestaetigter Byte-Offset; Startwert 0; lebt nur im
+                      Speicher (keine Offset-Datei)."
+    methods:
+      read:
+        signature: "read() -> ReadResult"
+        description: "Liefert nur das seit dem letzten bestaetigten Offset
+                      Hinzugekommene, in Dateireihenfolge."
     invariants:
-      - "Genau ein snapshot-Event pro erfolgreichem Snapshot (vorbehaltlich
-         der fail-open-Emitter-Semantik: ein fehlschlagender Event-Append
-         laesst die bereits gesetzte Ref bestehen, siehe
-         public_snapshot_api.behavior.failure)."
-      - "tree und ref entsprechen dem erzeugten Tree bzw. der gesetzten Ref."
-      - "Ein vor oder beim Setzen der Ref fehlgeschlagener Snapshot
-         emittiert kein Event."
-    occurrence:
-      before_agent: "Unmittelbar vor jedem Agent-Lauf der Build-Lane
-                     (Gate-Loop in _run_lane, _run_test_only_pass)."
-      after_agent: "Unmittelbar nach jedem NORMAL zurueckkehrenden Agent-Lauf
-                    der Build-Lane; entfaellt bei Agent-Exception, der
-                    before_agent-Snapshot bleibt erhalten (AC 10)."
-      red: "Nach dem TDD-RED-Test-only-Lauf."
-      after_gates: "Nach jeder Gate-Iteration, unabhaengig vom Gate-Ausgang."
-    exclusions:
-      - "Keine snapshot-Events fuer Agent-Laeufe der Authoring-/Review-Phasen."
-      - "Keine snapshot-Events an anderen Schrittgrenzen als den vier aus
-         GUI-SPEC §5."
+      - "Nur vollstaendige, \\n-terminierte Zeilen werden geparst. Eine
+         angeschnittene letzte Zeile wird weder geparst noch als Problem
+         gemeldet, ihr Anfang nicht als Offset bestaetigt; nach
+         Vervollstaendigung wird sie genau einmal verarbeitet."
+      - "Ein erster Aufruf liefert alle vollstaendigen gueltigen Records; ein
+         Aufruf ohne Dateizuwachs liefert nichts erneut; nach Anhaengen liefert
+         der naechste Aufruf ausschliesslich das Neue."
+      - "Reader-Aufrufe veraendern das Log nicht und erzeugen keine Dateien."
+      - "snapshot-Events und Records unbekannten Typs werden unveraendert als
+         Events geliefert (Ref-Namen verfuegbar); der Reader berechnet keine
+         Diffs."
+  ReadResult:
+    fields:
+      events: "geparste Records in Dateireihenfolge, als Mappings mit ALLEN
+               Originalfeldern"
+      problems: "Liste von ReadProblem"
+    description: "Events und Probleme sind eindeutig getrennt."
+  ReadProblem:
+    fields:
+      kind: '"bad_line" | "seq_gap"'
+      line_no: "betroffene Zeilennummer (line_no und/oder byte_offset gesetzt)"
+      byte_offset: "betroffener Byte-Offset (line_no und/oder byte_offset gesetzt)"
+      expected: "nur bei seq_gap: erwartete seq"
+      found: "nur bei seq_gap: gefundene seq"
+    invariants:
+      - "Eine Luecke in der seq-Folge wird als seq_gap gemeldet (mit
+         expected/found), nicht still ueberlesen; Events vor und nach der
+         Luecke bleiben verfuegbar."
+      - "Eine vollstaendige, nicht parsbare Zeile wird als bad_line fuer diese
+         Zeile gemeldet; alle nachfolgenden vollstaendigen Zeilen werden
+         weiterhin geliefert."
 
-# --- Aufgabe B: agent.run/codex.review-Spans (GUI-SPEC §4.4) ----------------
-# Die Spans liegen an der Aufrufstelle in phases.py (nicht mehr im Runner)
-# und erscheinen daher auch im Dry-Run (Mock-Runner). Payload-Schema
-# unveraendert gegenueber §4.4 — hier gepinnt, weil das Erscheinen im
-# Dry-Run neue, extern beobachtbare Flaeche ist. Wie das Handle an die
-# Runner gereicht wird und wie das argv gebaut wird, ist Mechanik.
-instrumentation_span_events:
-  agent.run:
-    kind: span
-    start_payload:  # an der Aufrufstelle bekannt — auch im Dry-Run Pflicht
-      - agent
-      - model
-      - tools          # list
-      - allowed_tools  # list
-      - cwd
-      - resume_session
-      - prompt
-      - system_append
-    end_payload:    # tatsaechlich zurueckgegebene Ergebnisfelder — auch im Dry-Run Pflicht
-      - session_id
-      - result_text
-      - is_error
-    runner_only:    # NUR bei echten Laeufen; im Dry-Run zu Recht abwesend
-      - usage
-      - cost_usd
-      - "agent.message / agent.tool.call / agent.tool.result (Stream, Point-Events)"
-    invariants:
-      - "Jede ctx.agents.run(...)-Aufrufstelle in phases.py ist von genau
-         einem agent.run-Span umschlossen — Mock- wie Echt-Runner."
-      - "Start- und End-Event eines Spans tragen dieselbe Span-ID."
-      - "Ein Dry-Run enthaelt mindestens einen vollstaendig geschlossenen
-         agent.run-Span (start + end, gleiche Span-ID)."
-      - "Im Dry-Run werden keine Stream-Events und keine synthetischen
-         Usage-/Kostenwerte erfunden."
-  codex.review:
-    kind: span
-    start_payload:  # an der Aufrufstelle bekannt — auch im Dry-Run Pflicht
-      - kind
-      - argv          # list — das vollstaendige, vom Runner tatsaechlich ausgefuehrte argv
-      - cwd
-      - custom_prompt
-    end_payload:    # tatsaechlich zurueckgegebene Ergebnisfelder — auch im Dry-Run Pflicht
-      - findings
-      - raw_stdout
-      - parse_ok
-    invariants:
-      - "Jede ctx.codex.review(...)-Aufrufstelle in phases.py ist von genau
-         einem codex.review-Span umschlossen — Mock- wie Echt-Runner."
-      - "Start- und End-Event eines Spans tragen dieselbe Span-ID."
-      - "Ein Dry-Run enthaelt mindestens einen vollstaendig geschlossenen
-         codex.review-Span (start + end, gleiche Span-ID)."
-      - "argv liegt vollstaendig im Start-Event (kein nachtraegliches
-         Befuellen); beim Echt-Lauf identisch mit dem ausgefuehrten argv."
-    exclusions:
-      - "ctx.codex.author(...) erhaelt KEINEN Span — §4.4 kennt keinen
-         author-Event-Typ; AC 4 nennt nur agent.run und codex.review."
+# --- Aufgabe B2: adw.gui.model ----------------------------------------------
+model_api:
+  module: adw.gui.model
+  build_tree:
+    signature: "build_tree(events) -> list[SpanNode]"
+    description: "Die Wurzeln in Log-Reihenfolge (die run-Spans; bei Resume
+                  mehrere, je Lauf-Segment eine)."
+  SpanNode:
+    fields:
+      - span_id
+      - type
+      - seq            # Start-seq (im end-only-Fall aus AC 19: die End-seq)
+      - start_ts       # None nur im end-only-Fall (AC 19)
+      - end_ts         # None solange laufend
+      - duration       # None solange laufend
+      - running        # bool
+      - start_payload  # None nur im end-only-Fall (AC 19)
+      - end_payload    # None solange laufend
+      - start_record   # vollstaendiger Original-Start-Record; None nur im end-only-Fall (AC 19)
+      - end_record     # vollstaendiger Original-End-Record; None solange laufend
+      - children       # geordnete Liste aus SpanNode und PointNode
+  PointNode:
+    fields:
+      - type
+      - seq
+      - ts
+      - payload
+      - record         # vollstaendiger Original-Record
+
+span_tree_structure:
+  span_formation:
+    - "start/end mit derselben Span-ID werden zu genau einem Knoten; duration
+       aus der ts-Differenz. Ein Span ohne end hat running=true und weder
+       end_ts noch duration."
+  roots_and_resume:
+    - "Verschachtelung folgt dem parent-Feld, soweit gesetzt."
+    - "Die Wurzeln sind die run-Spans in Log-Reihenfolge."
+    - "Ein Resume-Log (§12: zweiter run-Start in derselben Datei,
+       resumed_from_seq markiert die Naht, seq zaehlt durch) ergibt mehrere
+       Wurzeln, je Lauf-Segment eine."
+    - "Ein Log ohne run-Start (degeneriert/truncatiert) bricht nicht ab;
+       elternlose Spans werden dann selbst Wurzeln."
+  orphan_containment:   # GUI-SPEC §4.2, normativ (AC 14/15) — rein zeitbasiert
+    - "Eine Waise (Span mit parent:null, der nicht die run-Wurzel ist) gehoert
+       zum INNERSTEN Span, dessen Intervall das Intervall der Waise
+       [start ts, end ts] echt enthaelt — unter allen enthaltenden Kandidaten
+       der mit dem spaetesten Start; bei Gleichstand entscheidet die hoehere
+       seq."
+    - "Intervalle je Knotenart: gepaarter Span [start ts, end ts]; laufender
+       Span [start ts, unendlich) — er gilt als enthaltend fuer alles nach
+       seinem Start; End-only-Span [end ts, end ts]; Punkt-Event [ts, ts]."
+    - "run-Spans nehmen als Kandidaten regulaer teil; eine Waise eines
+       Resume-Segments faellt an dessen run-Span (spaeterer Start gewinnt gegen
+       einen noch offenen frueheren run)."
+    - "Eine Waise, die nichts enthaelt, bleibt Kind der run-Wurzel — bei
+       mehreren Wurzeln: der spaetesten Wurzel, deren Start nicht nach dem Start
+       der Waise liegt, sonst der ersten."
+    - "Die Regel ist ausschliesslich zeitbasiert (seq als Tiebreaker) und
+       haengt NICHT von phase/lane ab; sie funktioniert, wenn diese ueberall
+       null sind."
+  points:
+    - "Punkt-Events haengen an dem Span, dessen ID sie im Feld span tragen."
+  unknown_types:
+    - "Unbekannte type-Werte werden generisch als Knoten uebernommen — nie
+       verworfen, nie als Fehler. Der Original-Record inkl. Payload bleibt ueber
+       stabile Knotenfelder zugaenglich: SpanNode.start_record/end_record bzw.
+       PointNode.record — mit ALLEN Originalfeldern. Unbekannte Span-Typen
+       nehmen regulaer an Spanbildung/Verschachtelung teil, unbekannte
+       Punkt-Typen werden regulaer ihrem span zugeordnet."
+  dangling_references:  # AC 19 — deterministisch, nie abbrechend, kein Recordverlust
+    - "end ohne bekannten start: Span-Knoten allein aus dem End-Record —
+       start_ts/start_payload/start_record/duration=None, running=false,
+       end_ts/end_payload/end_record/seq aus dem End-Record; eingeordnet ueber
+       parent falls aufloesbar, sonst nach orphan_containment mit Intervall
+       [end ts, end ts]."
+    - "Span mit nicht-nullem, im Bestand unbekanntem parent: wie eine Waise
+       nach orphan_containment."
+    - "Punkt-Event mit fehlendem/null/unbekanntem span: wie eine Waise nach
+       orphan_containment mit Intervall [ts, ts]."
+  children_order:
+    - "Kinder jedes Knotens chronologisch nach ts, bei Gleichstand nach seq."
+    - "Das Modell liefert fuer einen vollstaendigen und fuer einen inkrementell
+       erweiterten Eventbestand denselben beobachtbaren Baum."
+
+# --- Aufgabe B3: adw.gui.registry -------------------------------------------
+registry_api:
+  module: adw.gui.registry
+  register_repo:
+    signature: "register_repo(path) -> RepoEntry"
+    description: "Legt den Eintrag an bzw. aktualisiert last_seen. Je
+                  kanonischem Repo-Pfad hoechstens ein Eintrag. Fail-open: ein
+                  Registry-Fehler verhindert den adw-run nie."
+  load_registry:
+    signature: "load_registry() -> Registry"
+  Registry:
+    attributes:
+      repos: "Liste von RepoEntry"
+    methods:
+      resolve: "resolve(slug) -> RepoEntry | None"
+  RepoEntry:
+    fields:
+      - path       # absoluter, kanonischer Pfad
+      - slug       # stabiler, URL-tauglicher Slug
+      - last_seen  # UTC-Zeitstempel, ISO-8601
+      - exists     # bool — ob der Pfad aktuell existiert
+  invariants:
+    - "adw run registriert sein aufgeloestes, kanonisches Ziel-Repo automatisch
+       bzw. aktualisiert dessen last_seen; ein Registry-Fehler verhindert den
+       Run nie."
+    - "Stabiler Slug: derselbe Pfad ergibt stets denselben Slug — ein
+       bestehender Eintrag behaelt beim Aktualisieren seinen Slug; verschiedene
+       kanonische Pfade verschiedene Slugs (auch bei gleichem
+       Verzeichnisnamen); ein Slug enthaelt nie einen rohen Dateisystempfad
+       (§7.4) und ist per resolve zu seinem Eintrag aufloesbar."
+    - "Nicht mehr existierende Pfade werden ueber exists=false gekennzeichnet;
+       sie bleiben auflistbar und per Slug aufloesbar und fuehren nie zu einem
+       Fehler."
+    - "Eine fehlende oder unlesbare Registry-Datei fuehrt zu einer leeren,
+       nutzbaren Registry, nicht zu einem ungefangenen Fehler; das naechste
+       erfolgreiche Registrieren schreibt wieder ein gueltiges Format."
+    - "Jeder Schreibvorgang schreibt die vollstaendige neue Registry in eine
+       Temp-Datei im selben Verzeichnis und ersetzt repos.json atomar
+       (os.replace); ein vor dem Ersetzen scheiternder/abgebrochener
+       Schreibvorgang laesst den vorherigen Inhalt unversehrt."
+  not_pinned:
+    - "Slug-Bildungsverfahren (Basename+Hash o. Ae.), solange die Invarianten
+       gelten."
+    - "Interne Datenhaltung und os/tempfile-Mechanik des atomaren Writes."
+    - "Ort des Registrierungs-Hooks im CLI-Code (siehe Plan)."
+
+registry_file_format:
+  path: "~/.adw/repos.json"
+  schema:
+    version: 1
+    repos:
+      - path: "/absoluter/kanonischer/pfad"
+        slug: "stabiler-url-tauglicher-slug"
+        last_seen: "UTC-Zeitstempel im ISO-8601-Format"
+  notes:
+    - "exists ist KEIN persistiertes Feld — es wird beim Laden/Auflisten aus dem
+       aktuellen Dateisystemzustand abgeleitet."
+    - "Die Datei ist die einzige erlaubte Persistenz dieses Laufs (keine Index-,
+       Cache- oder Offset-Dateien)."
