@@ -336,17 +336,27 @@ def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
             # Reachable repo, but no readable/valid runs directory (none yet, or an
             # escaping runs root): contribute nothing — never a false 'unavailable'.
             continue
-        for child in sorted(runs_dir.iterdir()):
+        try:
+            children = sorted(runs_dir.iterdir())
+        except OSError:
+            # Unreadable runs directory (e.g. permissions): a run is only listable
+            # while its directory is readable — skip THIS repo, never fail the whole
+            # endpoint (contract: one repo's failure does not drop the others).
+            continue
+        for child in children:
             if not RUN_ID_RE.fullmatch(child.name):
                 continue
-            run_dir = _contained(child, runs_root)  # skip symlinks escaping the tree
-            if run_dir is None or not run_dir.is_dir():
-                continue
-            events_file = _contained(run_dir / "events.jsonl", runs_root)
-            if events_file is None or not events_file.is_file():
-                continue
-            events = EventReader(events_file).read().events
-            state = _load_state(run_dir, runs_root, ref.path, child.name)
+            try:
+                run_dir = _contained(child, runs_root)  # skip symlinks escaping the tree
+                if run_dir is None or not run_dir.is_dir():
+                    continue
+                events_file = _contained(run_dir / "events.jsonl", runs_root)
+                if events_file is None or not events_file.is_file():
+                    continue
+                events = EventReader(events_file).read().events
+                state = _load_state(run_dir, runs_root, ref.path, child.name)
+            except OSError:
+                continue  # one unreadable run must not drop the rest of the repo
             entries.append(_summary(ref.slug, child.name, events, state))
     # Stable ordering: newest start first, then running runs pulled to the front.
     entries.sort(key=lambda e: e.get("start") or "", reverse=True)

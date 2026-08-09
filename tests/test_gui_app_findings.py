@@ -11,6 +11,7 @@ DOM (a headless browser is out of scope — E5 forbids a node/JS toolchain).
 import json
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
@@ -25,6 +26,7 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     find_node,
     home,
     parse_sse,
+    simple_run_lines,
     write_run,
     xss_lines,
 )
@@ -301,3 +303,52 @@ def test_reachable_repo_without_runs_is_not_reported_unavailable(home, tmp_path)
     data = client.get("/api/runs").json()
     slug = _slug_for(repo)
     assert not any(e.get("repo") == slug and e.get("repo_exists") is False for e in data)
+
+
+# --- P3: the live swap preserves the user's expand/collapse choices -------------
+
+
+def test_client_preserves_details_open_state_across_live_swap(home, tmp_path):  # noqa: F811
+    """P3/AC 13/§7.3: the wholesale live region swap must not reset collapsed
+    nodes (the server always renders ``<details open>``). The client records each
+    node's <details> open state (keyed by data-seq) and re-applies it to the
+    freshly fetched markup — keeping the no-createElement constraint."""
+    client, slug, _ = _client_with(tmp_path, "abcdef12", comprehensive_lines(), phase="done")
+    js = client.get("/static/app.js").text
+
+    assert "details" in js and ".open" in js  # reads AND re-applies the open state
+    assert "data-seq" in js                   # keyed by the node's data-seq
+    assert "replaceWith" in js                # still the shared-swap path ...
+    assert "createElement" not in js          # ... with no divergent JS rendering
+
+
+# --- P3: an unreadable repo must not break the whole listing --------------------
+
+
+def test_unreadable_repo_does_not_break_the_listing(home, tmp_path):  # noqa: F811
+    """P3: an unreadable ``.adw/runs`` on one repo must not 500 ``/api/runs`` — its
+    runs are skipped while every other repo stays listed (contract: one repo's
+    failure does not drop the others)."""
+    good = tmp_path / "good"
+    good.mkdir()
+    write_run(good, "aaaa1111", comprehensive_lines(), phase="done")
+
+    bad = tmp_path / "bad"
+    bad_runs = bad / ".adw" / "runs"
+    bad_runs.mkdir(parents=True)
+    write_run(bad, "bbbb2222", simple_run_lines("x"), phase="done")
+    os.chmod(bad_runs, 0)
+    if os.access(bad_runs, os.R_OK):  # root or a platform that ignores chmod
+        os.chmod(bad_runs, 0o755)
+        pytest.skip("chmod is ineffective here (root or unsupported platform)")
+
+    try:
+        client = TestClient(create_app(repos=[str(good), str(bad)]))
+        resp = client.get("/api/runs")
+        assert resp.status_code == 200  # not a 500 for everyone
+        data = resp.json()
+        assert any(e.get("run_id") == "aaaa1111" for e in data)  # good repo intact
+        assert all(e.get("run_id") != "bbbb2222" for e in data)  # unreadable run skipped
+        assert client.get("/").status_code == 200  # the HTML list survives too
+    finally:
+        os.chmod(bad_runs, 0o755)  # restore so tmp cleanup can remove it

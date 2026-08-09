@@ -56,8 +56,33 @@
     applySelection();
   });
 
+  // Record every node's <details> open/closed state, keyed by data-seq, so the
+  // wholesale region swap does not reset the user's expand/collapse choices
+  // (the server always renders <details open>). Nodes unseen before keep the
+  // server default (GUI-SPEC §7.3 / AC 13: the tree stays collapsible while live).
+  function captureOpenState() {
+    var state = {};
+    document.querySelectorAll(".node[data-seq]").forEach(function (node) {
+      var details = node.querySelector(":scope > details");
+      if (details) state[node.getAttribute("data-seq")] = details.open;
+    });
+    return state;
+  }
+
+  function reapplyOpenState(doc, state) {
+    doc.querySelectorAll(".node[data-seq]").forEach(function (node) {
+      var seq = node.getAttribute("data-seq");
+      var details = node.querySelector(":scope > details");
+      if (details && Object.prototype.hasOwnProperty.call(state, seq)) {
+        details.open = state[seq];
+      }
+    });
+  }
+
   function swapRegions(html) {
+    var openState = captureOpenState();
     var doc = new DOMParser().parseFromString(html, "text/html");
+    reapplyOpenState(doc, openState); // preserve collapse choices before swapping
     REGIONS.forEach(function (selector) {
       var next = doc.querySelector(selector);
       var current = document.querySelector(selector);
