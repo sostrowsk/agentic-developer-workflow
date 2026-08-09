@@ -111,6 +111,9 @@
 
   <main class="detail">
     <section class="trace">
+      {% if not detail.run.has_trace %}
+      <p class="no-trace-hint">no trace &mdash; kein Event-Log für diesen Lauf</p>
+      {% endif %}
       <ul>{% for node in detail.tree %}{{ tree_item(node) }}{% endfor %}</ul>
     </section>
 

@@ -95,3 +95,6 @@ table.findings { border-collapse: collapse; }
 table.findings th, table.findings td { border: 1px solid var(--border); padding: 0.2rem 0.4rem; }
 
 .problems .problem { color: #a33; }
+
+/* Aufgabe G: the 'no trace' hint on the detail page (empty tree/panes explained). */
+.trace .no-trace-hint { color: var(--muted); font-style: italic; margin: 0 0 0.5rem; }

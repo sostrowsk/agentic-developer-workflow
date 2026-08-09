@@ -91,6 +91,17 @@ def test_state_only_run_detail_html_shows_no_none_or_null(home, tmp_path):  # no
     assert "null" not in html
 
 
+def test_state_only_run_detail_html_shows_no_trace_hint(home, tmp_path):  # noqa: F811
+    """G2: opening the detail of a state-only run shows a clear 'no trace' hint, so
+    the empty tree/panes are explained (not just present on the run list)."""
+    repo = _repo_with_state_only_run(tmp_path)
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = _slug_for(repo)
+
+    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+    assert "no trace" in html.lower()
+
+
 def test_state_only_run_html_list_shows_no_trace_hint(home, tmp_path):  # noqa: F811
     """G2: the list page shows the run and a clear indication that no trace exists
     (how the hint is embedded is not contractual — the word 'trace' surfaces it)."""
