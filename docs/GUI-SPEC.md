@@ -144,6 +144,24 @@ Rules:
 - Unknown `type` values MUST be rendered generically by the GUI (icon +
   raw payload) instead of dropped or fatal — the log format stays
   forward-compatible.
+- **Orphan spans and the containment rule.** `parent` is derived from a
+  thread-local stack, so a span opened in a worker thread carries
+  `parent: null` even though it is logically nested. This happens on every
+  run (dual authoring writes both drafts in a `ThreadPoolExecutor`) and in
+  parallel lanes. The emitter is deliberately *not* extended with an explicit
+  parent argument — the tree is repaired on read instead, by exactly this
+  rule, which every consumer MUST implement identically:
+
+  > An orphan (a span with `parent: null` that is not the `run` root) belongs
+  > to the **innermost** span whose interval strictly contains the orphan's
+  > `[start ts, end ts]` — that is, among all containing candidates the one
+  > with the latest start; ties are broken by the higher `seq`. A span still
+  > running counts as containing everything after its start. An orphan that
+  > nothing contains stays a child of the `run` root.
+
+  Consequence, stated plainly: the tree is **not** derivable from `parent`
+  alone, and the log is not self-describing on this point. That is the
+  accepted price for leaving the emitter unchanged.
 
 ### 4.3 Writing: locking, ordering, fail-open
 

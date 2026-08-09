@@ -146,6 +146,26 @@ Regeln:
 - Unbekannte `type`-Werte MUSS die GUI generisch rendern (Icon + rohes Payload)
   statt sie zu verwerfen oder daran zu scheitern — das Format bleibt
   vorwärtskompatibel.
+- **Waisen-Spans und die Enthaltungsregel.** `parent` wird aus einem
+  thread-lokalen Stack abgeleitet. Ein in einem Worker-Thread geöffneter Span
+  trägt deshalb `parent: null`, obwohl er logisch verschachtelt ist. Das
+  passiert bei **jedem** Lauf (Dual Authoring schreibt beide Entwürfe in einem
+  `ThreadPoolExecutor`) und zusätzlich bei parallelen Lanes. Der Emitter wird
+  bewusst **nicht** um ein explizites Parent-Argument erweitert — der Baum wird
+  stattdessen beim Lesen repariert, und zwar nach genau dieser Regel, die jeder
+  Konsument identisch umsetzen MUSS:
+
+  > Eine Waise (ein Span mit `parent: null`, der nicht die `run`-Wurzel ist)
+  > gehört zu dem **innersten** Span, dessen Intervall das Intervall der Waise
+  > `[start ts, end ts]` echt enthält — also unter allen enthaltenden
+  > Kandidaten der mit dem spätesten Start; bei Gleichstand entscheidet die
+  > höhere `seq`. Ein noch laufender Span gilt als enthaltend für alles nach
+  > seinem Start. Eine Waise, die nichts enthält, bleibt Kind der
+  > `run`-Wurzel.
+
+  Die Konsequenz, klar benannt: Der Baum ist **nicht** allein aus `parent`
+  ableitbar, und das Log beschreibt sich an dieser Stelle nicht selbst. Das ist
+  der akzeptierte Preis dafür, den Emitter unverändert zu lassen.
 
 ### 4.3 Schreiben: Locking, Reihenfolge, Fail-open
 
