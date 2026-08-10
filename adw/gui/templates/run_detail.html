@@ -47,45 +47,18 @@
     </details>
   </li>
 {% endmacro %}
-{% macro pane(node, limit) %}
-  <div class="pane pane-{{ node.type | replace('.', '-') }}" data-seq="{{ node.seq }}">
-    <h3>{{ node.label }} <small class="type">{{ node.type }}</small></h3>
-    {% if node.type == "agent.run" %}
-      <div class="tabs" data-tabs>
-        <div class="tab-buttons" role="tablist">
-          <button type="button" class="tab-btn active" data-tab="prompt">Prompt</button>
-          <button type="button" class="tab-btn" data-tab="answer">Answer</button>
-          <button type="button" class="tab-btn" data-tab="tools">Tools</button>
-          {% if node.diff_from and node.diff_to %}
-          <button type="button" class="tab-btn" data-tab="diff">Diff</button>
-          {% endif %}
-        </div>
-        <section class="tab tab-prompt active" data-tab-panel="prompt">
-          <pre>{{ node.payload.prompt if node.payload else "" }}
-{{ node.payload.system_append if node.payload else "" }}</pre>
-        </section>
-        <section class="tab tab-answer" data-tab-panel="answer">
-          <pre class="final">{{ node.end_payload.result_text if node.end_payload else "" }}</pre>
-          {% for c in node.children if c.type == "agent.message" %}
-          <pre class="assistant">{{ c.payload.text if c.payload else "" }}</pre>
-          {% endfor %}
-        </section>
-        <section class="tab tab-tools" data-tab-panel="tools">
-          {% set tools = node.children | selectattr("type", "in", ["agent.tool.call", "agent.tool.result"]) | list %}
-          <ul class="tool-list">
-          {% for c in tools[:limit] %}{{ tool_entry(c) }}{% endfor %}
-          </ul>
-          {% if tools|length > limit %}
-          {{ load_more(tools|length - limit, limit) }}
-          {% endif %}
-        </section>
-        {% if node.diff_from and node.diff_to %}
-        <section class="tab tab-diff" data-tab-panel="diff" data-diff-from="{{ node.diff_from }}" data-diff-to="{{ node.diff_to }}">
-          <pre class="diff-body">Open the Diff tab to load the changes for this step.</pre>
-        </section>
-        {% endif %}
-      </div>
-    {% elif node.type in ["agent.tool.call", "agent.tool.result"] %}
+{# A standalone Diff tab-panel + its button — reused for every bracketed node so
+   the Diff tab follows the derived bracket, not the node type (AC-B5: build-lane
+   agent runs, gate iterations, the RED stage). The patch is fetched on demand. #}
+{% macro diff_panel(node) %}
+  <section class="tab tab-diff" data-tab-panel="diff" data-diff-from="{{ node.diff_from }}" data-diff-to="{{ node.diff_to }}">
+    <pre class="diff-body">Open the Diff tab to load the changes for this step.</pre>
+  </section>
+{% endmacro %}
+{# The type-specific body of a node (no Diff tab — that is added uniformly by the
+   pane wrapper for any bracketed node). #}
+{% macro node_body(node, limit) %}
+    {% if node.type in ["agent.tool.call", "agent.tool.result"] %}
       <div class="tool-detail">
         <pre class="tool-body" data-load-seq="{{ node.seq }}"></pre>
       </div>
@@ -115,6 +88,56 @@
     {% else %}
       <pre class="raw">{{ node.payload | tojson }}</pre>
     {% endif %}
+{% endmacro %}
+{% macro pane(node, limit) %}
+  <div class="pane pane-{{ node.type | replace('.', '-') }}" data-seq="{{ node.seq }}">
+    <h3>{{ node.label }} <small class="type">{{ node.type }}</small></h3>
+    {% set bracketed = node.diff_from and node.diff_to %}
+    {% if node.type == "agent.run" %}
+      <div class="tabs" data-tabs>
+        <div class="tab-buttons" role="tablist">
+          <button type="button" class="tab-btn active" data-tab="prompt">Prompt</button>
+          <button type="button" class="tab-btn" data-tab="answer">Answer</button>
+          <button type="button" class="tab-btn" data-tab="tools">Tools</button>
+          {% if bracketed %}<button type="button" class="tab-btn" data-tab="diff">Diff</button>{% endif %}
+        </div>
+        <section class="tab tab-prompt active" data-tab-panel="prompt">
+          <pre>{{ node.payload.prompt if node.payload else "" }}
+{{ node.payload.system_append if node.payload else "" }}</pre>
+        </section>
+        <section class="tab tab-answer" data-tab-panel="answer">
+          <pre class="final">{{ node.end_payload.result_text if node.end_payload else "" }}</pre>
+          {% for c in node.children if c.type == "agent.message" %}
+          <pre class="assistant">{{ c.payload.text if c.payload else "" }}</pre>
+          {% endfor %}
+        </section>
+        <section class="tab tab-tools" data-tab-panel="tools">
+          {% set tools = node.children | selectattr("type", "in", ["agent.tool.call", "agent.tool.result"]) | list %}
+          <ul class="tool-list">
+          {% for c in tools[:limit] %}{{ tool_entry(c) }}{% endfor %}
+          </ul>
+          {% if tools|length > limit %}
+          {{ load_more(tools|length - limit, limit) }}
+          {% endif %}
+        </section>
+        {% if bracketed %}{{ diff_panel(node) }}{% endif %}
+      </div>
+    {% elif bracketed %}
+      {# Any other bracketed node (gate iteration, RED stage, …): its own content
+         under a Details tab plus its own derived Diff tab (AC-B5/B8). #}
+      <div class="tabs" data-tabs>
+        <div class="tab-buttons" role="tablist">
+          <button type="button" class="tab-btn active" data-tab="details">Details</button>
+          <button type="button" class="tab-btn" data-tab="diff">Diff</button>
+        </div>
+        <section class="tab tab-details active" data-tab-panel="details">
+          {{ node_body(node, limit) }}
+        </section>
+        {{ diff_panel(node) }}
+      </div>
+    {% else %}
+      {{ node_body(node, limit) }}
+    {% endif %}
   </div>
 {% endmacro %}
 {% macro all_panes(node, limit) %}
@@ -124,17 +147,23 @@
 {# Run-level Raw tab (Aufgabe C): the event log as a filterable list — the
    fallback that works even for event types the GUI does not model. The first
    `limit` rows are server-rendered; "Load more" raises the window server-side. #}
-{% macro raw_view(detail, limit) %}
+{% macro raw_view(detail, limit, raw_q, raw_type) %}
   <div class="raw">
-    <div class="raw-controls">
+    {# The filters submit (GET, same route) so the ``type`` and free-text search
+       run SERVER-SIDE over the FULL serialized payload — a match beyond the
+       rendered preview is still found (AC-C2). The client also narrows the loaded
+       rows instantly as you type; pressing Enter runs the exhaustive search. #}
+    <form class="raw-controls" method="get">
+      <input type="hidden" name="limit" value="{{ limit }}">
       <label class="raw-type-label">type
-        <select class="raw-type-filter">
+        <select class="raw-type-filter" name="raw_type">
           <option value="">(all types)</option>
-          {% for t in detail.raw.types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+          {% for t in detail.raw.types %}<option value="{{ t }}"{% if t == raw_type %} selected{% endif %}>{{ t }}</option>{% endfor %}
         </select>
       </label>
-      <input type="search" class="raw-search" placeholder="filter payload text…" aria-label="filter payload text">
-    </div>
+      <input type="search" class="raw-search" name="raw_q" value="{{ raw_q }}" placeholder="filter payload text…" aria-label="filter payload text">
+      <button type="submit" class="raw-search-all">Search all</button>
+    </form>
     {% if detail.problems %}
     <ul class="raw-problem-list">
     {% for p in detail.problems %}
@@ -149,13 +178,21 @@
       <li class="raw-row" data-type="{{ e.type }}" data-seq="{{ e.seq }}">
         <span class="raw-seq">#{{ e.seq }}</span>
         <span class="raw-type">{{ e.type }}</span>
-        <pre class="raw-payload">{{ e.payload_text }}</pre>
+        {# Preview in the summary; expanding loads the COMPLETE payload on demand
+           from the events route (AC-C4 — the full payload is reachable here). #}
+        <details class="raw-full-wrap">
+          <summary><span class="raw-payload">{{ e.payload_text }}</span></summary>
+          <pre class="tool-body raw-payload-full" data-load-seq="{{ e.seq }}"></pre>
+        </details>
       </li>
     {% endfor %}
     </ol>
+    {% if not detail.raw.window %}
+    <p class="raw-empty-server">No matching events.</p>
+    {% endif %}
     <p class="raw-empty" hidden>No matching events.</p>
     {% if detail.raw.total > detail.raw.window|length %}
-    {{ load_more(detail.raw.total - detail.raw.window|length, limit) }}
+    <a class="load-more" href="?limit={{ limit * 4 }}{% if raw_q %}&amp;raw_q={{ raw_q|urlencode }}{% endif %}{% if raw_type %}&amp;raw_type={{ raw_type|urlencode }}{% endif %}">Load more ({{ detail.raw.total - detail.raw.window|length }} hidden)</a>
     {% endif %}
   </div>
 {% endmacro %}
@@ -204,7 +241,7 @@
       </section>
 
       <section class="tab tab-raw" data-tab-panel="raw">
-        {{ raw_view(detail, limit) }}
+        {{ raw_view(detail, limit, raw_q, raw_type) }}
       </section>
     </div>
   </main>

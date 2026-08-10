@@ -15,6 +15,7 @@ Derived from .adw/spec.md (AC-C1..C4), .adw/contract.yaml
 (x-adw-template-behavior.raw) and .adw/plan.md §6.
 """
 
+import json
 import os
 
 from fastapi.testclient import TestClient
@@ -22,7 +23,9 @@ from fastapi.testclient import TestClient
 from adw.gui.app import create_app
 from adw.gui.registry import _slug
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+    DEEP_PAYLOAD_MARK,
     RAW_UNKNOWN_MARK,
+    deep_payload_lines,
     home,
     large_event_log_lines,
     raw_event_mark,
@@ -43,6 +46,18 @@ def _raw_client(tmp_path):
     write_run(repo, RUN_ID, large_event_log_lines(COUNT), phase="done")
     client = TestClient(create_app(repos=[str(repo)]))
     return client, _slug_for(repo)
+
+
+def _raw_panel(html):
+    """Just the Raw panel of the detail HTML (everything after its marker), so an
+    assertion targets the Raw tab and not the trace panes."""
+    return html.split('data-tab-panel="raw"', 1)[1]
+
+
+def _raw_rows(html):
+    """Only the rendered ``<ol class="raw-list">`` rows of the Raw panel — excludes
+    the filter form (which echoes the query) and the load-more link."""
+    return _raw_panel(html).split('class="raw-list"', 1)[1].split("</ol>", 1)[0]
 
 
 def test_raw_tab_present_and_shows_known_and_unknown_types(home, tmp_path):  # noqa: F811
@@ -95,6 +110,50 @@ def test_raw_initial_render_is_windowed_for_a_large_log(home, tmp_path):  # noqa
 
     assert raw_event_mark(4) in html          # early event materialised
     assert raw_event_mark(COUNT) not in html  # a late event is not inlined
+
+
+def test_raw_free_text_search_covers_full_payload_beyond_preview(home, tmp_path):  # noqa: F811
+    """AC-C2 (P2): free-text search matches text occurring BEYOND the rendered
+    preview — the filter runs server-side over the full serialized payload. The
+    event whose marker sits past the preview is returned by ``?raw_q=<marker>``
+    (a preview-only filter would miss it), and a non-matching query returns none."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    write_run(repo, RUN_ID, deep_payload_lines(), phase="done")
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = _slug_for(repo)
+    base = f"/runs/{slug}/{RUN_ID}"
+
+    match_html = client.get(base, params={"raw_q": DEEP_PAYLOAD_MARK}).text
+    rows = _raw_rows(match_html)
+    # The event is returned even though the marker is past the preview — so the
+    # marker itself is NOT in the rendered row (the match was over the full
+    # payload, which the row only lazy-loads on demand): server-side, not preview.
+    assert rows.count('class="raw-row"') == 1
+    assert DEEP_PAYLOAD_MARK not in rows
+
+    none = _raw_rows(client.get(base, params={"raw_q": "NOSUCHTEXTANYWHERE"}).text)
+    assert none.count('class="raw-row"') == 0
+
+
+def test_raw_row_exposes_complete_payload_on_demand(home, tmp_path):  # noqa: F811
+    """AC-C4 (P2): the complete payload of every event is reachable FROM the Raw
+    tab — each row carries a lazy full-payload anchor, and the events route the
+    client loads it from returns the full payload (including text past the
+    preview)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    write_run(repo, RUN_ID, deep_payload_lines(), phase="done")
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = _slug_for(repo)
+
+    raw = _raw_panel(client.get(f"/runs/{slug}/{RUN_ID}").text)
+    assert "data-load-seq" in raw  # each row can open its complete payload
+
+    rec = client.get(
+        f"/api/runs/{slug}/{RUN_ID}/events", params={"from_seq": 2, "to_seq": 2}
+    ).json()
+    assert DEEP_PAYLOAD_MARK in json.dumps(rec[0]["payload"])  # full payload delivered
 
 
 def test_every_event_stays_reachable_with_full_payload(home, tmp_path):  # noqa: F811

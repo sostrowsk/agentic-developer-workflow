@@ -23,9 +23,11 @@ from fastapi.testclient import TestClient
 from adw.gui.app import create_app
 from adw.gui.registry import _slug
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+    bracketed_gate_lines,
     bracketed_lane_lines,
     build_diff_run,
     comprehensive_lines,
+    find_node,
     find_node_by_label,
     home,
     write_run,
@@ -105,6 +107,25 @@ def test_diff_tab_present_for_bracketed_and_absent_for_unbracketed(home, tmp_pat
     client2, slug2 = _detail(tmp_path, comprehensive_lines(), run_id="cccc3333")
     html2 = client2.get(f"/runs/{slug2}/cccc3333").text
     assert "Diff" not in html2  # no bracketing snapshot -> no Diff tab
+
+
+def test_bracketed_gate_node_offers_its_own_diff(home, tmp_path):  # noqa: F811
+    """AC-B5 (P2): the Diff tab follows the derived bracket, not the node type — a
+    bracketed GATE iteration (not an agent.run) resolves its own from/to pair and
+    its detail pane offers a Diff tab requesting exactly that pair."""
+    client, slug = _detail(tmp_path, bracketed_gate_lines(RUN_ID))
+
+    tree = client.get(f"/api/runs/{slug}/{RUN_ID}").json()["tree"]
+    gate = find_node(tree, "gate")
+    assert gate["diff_from"] == f"refs/adw/{RUN_ID}/1"
+    assert gate["diff_to"] == f"refs/adw/{RUN_ID}/2"
+
+    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+    # The gate's pane offers a Diff tab wired to its own derived pair.
+    assert "Diff" in html
+    assert f'data-diff-from="refs/adw/{RUN_ID}/1"' in html
+    assert f'data-diff-to="refs/adw/{RUN_ID}/2"' in html
+    assert "ruff check ." in html  # the gate's own details are still shown
 
 
 def test_large_diff_patch_is_not_inlined_in_the_detail_html(home, tmp_path):  # noqa: F811

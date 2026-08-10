@@ -560,6 +560,55 @@ def bracketed_lane_lines(run_id="aaaa1111"):
     ]
 
 
+def bracketed_gate_lines(run_id="aaaa1111"):
+    """A build lane whose two snapshots bracket a NON-agent.run node — a ``gate``
+    iteration (AC-B5 lists gate iterations and the RED stage alongside build-lane
+    agent runs). Drives the P2 fix that the Diff tab must follow the derived
+    bracket, not the node type. The gate resolves (refs/.../1, refs/.../2)."""
+    def ref(n):
+        return f"refs/adw/{run_id}/{n}"
+
+    def snap(seq, n, label):
+        return rec(seq, "snapshot", "point", "L", sec=seq, lane="backend",
+                   payload={"lane": "backend", "tree": f"t{n}", "ref": ref(n), "label": label})
+
+    return [
+        rec(1, "run", "start", "R", None, sec=1, payload=run_start_payload("Bracketed gate")),
+        rec(2, "phase", "start", "PB", "R", sec=2,
+            payload={"name": "build", "from_phase": "build"}),
+        rec(3, "lane", "start", "L", "PB", sec=3, lane="backend", payload={
+            "name": "backend", "branch": "adw/backend", "worktree": "wt",
+            "base_sha": None, "ports": {}}),
+        snap(4, 1, "before gate"),
+        rec(5, "gate", "start", "G", "L", sec=5, lane="backend",
+            payload={"name": "lint", "cmd": "ruff check .", "timeout": 30, "cwd": "wt"}),
+        rec(6, "gate", "end", "G", "L", sec=6, lane="backend",
+            payload={"passed": False, "exit_code": 1, "timed_out": False, "output": "E501"}),
+        snap(7, 2, "after gate"),
+        rec(8, "lane", "end", "L", "PB", sec=8, lane="backend",
+            payload={"completed": True, "gate_iterations": 1, "fix_cycles": 0}),
+        rec(9, "phase", "end", "PB", "R", sec=9, payload={"name": "build", "to_phase": "done"}),
+        rec(10, "run", "end", "R", None, sec=10, payload=run_end_payload("done")),
+    ]
+
+
+DEEP_PAYLOAD_MARK = "DEEPPAYLOADMARK"
+
+
+def deep_payload_lines(marker=DEEP_PAYLOAD_MARK, *, filler=3000, issue="Deep payload"):
+    """A run with one event whose payload carries ``marker`` AFTER ``filler``
+    characters — beyond the Raw tab's server-rendered preview. Drives the P2 fix
+    that free-text search must cover the FULL serialized payload (not just the
+    preview) and that the complete payload stays reachable from the Raw tab. The
+    key sorts after the filler so the marker is genuinely past the preview cut."""
+    return [
+        rec(1, "run", "start", "R", None, ts=ts_at(1), payload=run_start_payload(issue)),
+        rec(2, "note.deep", "point", "R", ts=ts_at(2),
+            payload={"a_filler": "x" * filler, "zmark": marker}),
+        rec(3, "run", "end", "R", None, ts=ts_at(3), payload=run_end_payload("done")),
+    ]
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-C", str(repo), *args],

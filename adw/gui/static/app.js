@@ -193,12 +193,16 @@
     if (empty) empty.hidden = any;
   }
 
-  // Delegated so the filters keep working after the live region swap.
+  // Delegated so the filters keep working after the live region swap. Typing
+  // narrows the loaded rows instantly (over the previews); the `type` select and
+  // the "Search all" submit run the exhaustive server-side filter over the FULL
+  // payloads (a match beyond the preview is found there).
   document.addEventListener("input", function (event) {
     if (event.target.closest && event.target.closest(".raw-controls")) applyRawFilter();
   });
   document.addEventListener("change", function (event) {
-    if (event.target.closest && event.target.closest(".raw-controls")) applyRawFilter();
+    var sel = event.target.closest ? event.target.closest(".raw-type-filter") : null;
+    if (sel && sel.form) sel.form.submit();  // exhaustive server-side type filter
   });
 
   // Record every node's <details> open/closed state, keyed by data-seq, so the

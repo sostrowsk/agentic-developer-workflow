@@ -11,6 +11,7 @@ is only consumed here, never modified.
 
 import json
 import os
+import re
 import subprocess
 import time
 from dataclasses import asdict, dataclass
@@ -603,29 +604,42 @@ def _serialize(node, tool_names=None, *, lane=None, own_ranges=None, snaps=None)
     }
 
 
-def _raw_view(events, limit) -> dict:
-    """Run-level Raw tab data (Aufgabe C): the distinct event types, a bounded
-    first window of ``limit`` rows (seq, type, a payload-text preview for
-    filtering), and the total count. Every event — including those beyond the
-    window and their full payloads — stays reachable through the events route and
-    the ``?limit`` paging the server renders."""
+def _serialize_payload(payload) -> str:
+    try:
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    except (TypeError, ValueError):
+        return str(payload)
+
+
+def _raw_view(events, limit, *, q=None, type_filter=None) -> dict:
+    """Run-level Raw tab data (Aufgabe C): the distinct event types, and a bounded
+    window of ``limit`` matching rows (seq, type, a payload-text preview). The
+    ``type``/free-text filters are applied SERVER-SIDE over the FULL serialized
+    payload — not the preview — so a match beyond the preview is still found
+    (AC-C2). Every matching event, and each event's COMPLETE payload, stays
+    reachable through the events route (the rows lazy-load the full payload) and
+    the ``?limit`` paging (AC-C4). ``types`` lists all types of the log so the
+    filter offers them even when the current window is filtered down."""
     types = sorted({e.get("type") for e in events if e.get("type")})
-    window = []
-    for e in events[:limit]:
-        try:
-            text = json.dumps(e.get("payload"), ensure_ascii=False, sort_keys=True)
-        except (TypeError, ValueError):
-            text = str(e.get("payload"))
-        window.append({
-            "seq": e.get("seq"),
-            "type": e.get("type"),
-            "payload_text": text[:_RAW_PAYLOAD_PREVIEW],
-        })
-    return {"total": len(events), "types": types, "window": window}
+    q_low = q.lower() if q else None
+    matches = []
+    for e in events:
+        if type_filter and e.get("type") != type_filter:
+            continue
+        full = _serialize_payload(e.get("payload"))
+        if q_low and q_low not in full.lower() and q_low not in str(e.get("type") or "").lower():
+            continue
+        matches.append((e, full))
+    window = [
+        {"seq": e.get("seq"), "type": e.get("type"), "payload_text": full[:_RAW_PAYLOAD_PREVIEW]}
+        for e, full in matches[:limit]
+    ]
+    return {"total": len(matches), "types": types, "window": window}
 
 
 def _run_detail(
-    ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path, *, limit=_DISPLAY_WINDOW
+    ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path, *,
+    limit=_DISPLAY_WINDOW, raw_q=None, raw_type=None,
 ) -> dict:
     events, problems = _read_events(run_dir, runs_root)
     state = _load_state(run_dir, runs_root, ref.path, run_id)
@@ -640,11 +654,25 @@ def _run_detail(
             for n in build_tree(events)
         ],
         "problems": [asdict(p) for p in problems],
-        "raw": _raw_view(events, limit),
+        "raw": _raw_view(events, limit, q=raw_q, type_filter=raw_type),
     }
 
 
 # --- read-only snapshot diff (Aufgabe B, AC-B1/B2/B4) ---------------------------
+
+
+def _is_snapshot_ref(value, run_id) -> bool:
+    """Whether ``value`` has the EXACT snapshot-ref structure of this run:
+    ``refs/adw/<run_id>/<seq>`` with a numeric seq. This rejects malformed,
+    range-like (``a..b``) and option-like (``--output=…``, ``-p``) values and
+    foreign-run refs BEFORE git is ever invoked — so a crafted or corrupt snapshot
+    event whose ``ref`` is not a plain snapshot ref can never reach git as an
+    option or revision (AC-B2/B3, strictly read-only). Membership in the event-log
+    allowlist is still required in addition to this structural check."""
+    return (
+        isinstance(value, str)
+        and re.fullmatch(rf"refs/adw/{re.escape(run_id)}/[0-9]+", value) is not None
+    )
 
 
 def _snapshot_refs(events) -> set:
@@ -864,8 +892,12 @@ def create_app(repos=None) -> FastAPI:
         to = request.query_params.get("to")
         if not frm or not to:
             raise HTTPException(status_code=400, detail="Missing 'from'/'to' snapshot ref")
-        # AC-B2: accept ONLY refs drawn from this run's snapshot events — validated
-        # against the event-log list, not a mere pattern — BEFORE git is executed.
+        # AC-B2/B3: a value must BOTH have the exact snapshot-ref structure of this
+        # run AND appear in its snapshot events — both checks run BEFORE git, so a
+        # malformed/option-like/range value (even one recorded in the log) is never
+        # passed to git and can never be interpreted as a git option or revision.
+        if not (_is_snapshot_ref(frm, run_id) and _is_snapshot_ref(to, run_id)):
+            raise HTTPException(status_code=400, detail="Malformed snapshot ref")
         events, _problems = _read_events(run_dir, runs_root)
         allowed = _snapshot_refs(events)
         if frm not in allowed or to not in allowed:
@@ -893,9 +925,15 @@ def create_app(repos=None) -> FastAPI:
         # server materialises (a bounded DOM by default). "Load more" is a plain
         # server-rendered link that raises it — no divergent client-side rendering.
         limit = _parse_limit(request.query_params.get("limit"))
-        detail = _run_detail(ref, run_id, run_dir, runs_root, limit=limit)
+        # Raw-tab filters (Aufgabe C): applied server-side over the full payload so
+        # a match beyond the rendered preview is still found; empty -> no filter.
+        raw_q = request.query_params.get("raw_q") or None
+        raw_type = request.query_params.get("raw_type") or None
+        detail = _run_detail(
+            ref, run_id, run_dir, runs_root, limit=limit, raw_q=raw_q, raw_type=raw_type
+        )
         html = _TEMPLATES.get_template("run_detail.html").render(
-            {"detail": detail, "limit": limit}
+            {"detail": detail, "limit": limit, "raw_q": raw_q or "", "raw_type": raw_type or ""}
         )
         return HTMLResponse(html)
 

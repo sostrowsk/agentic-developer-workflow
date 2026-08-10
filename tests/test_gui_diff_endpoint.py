@@ -23,6 +23,10 @@ from adw.gui.registry import _slug
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     build_diff_run,
     home,
+    rec,
+    run_end_payload,
+    run_start_payload,
+    write_run,
 )
 
 RUN_ID = "aaaa1111"
@@ -237,6 +241,41 @@ def test_diff_endpoint_keeps_containment_behavior(home, tmp_path):  # noqa: F811
     assert client.get(f"/api/runs/no-such-slug/{RUN_ID}/diff", params=good).status_code == 404
     assert client.get(f"/api/runs/{info['slug']}/zzzzzzzz/diff", params=good).status_code == 400
     assert client.get(f"/api/runs/{info['slug']}/deadbeef/diff", params=good).status_code == 404
+
+
+def test_malformed_ref_recorded_in_event_log_is_rejected_without_git(home, tmp_path, monkeypatch):  # noqa: F811,E501
+    """AC-B2/B3 (P1): a value must have the exact ``refs/adw/<run_id>/<seq>``
+    structure, not merely appear in a snapshot event. A crafted/corrupt snapshot
+    event whose ``ref`` is option-like or range-like must be rejected (400/404)
+    and NEVER reach git — even though it IS in the event-log allowlist — so it can
+    never be interpreted as a git option/revision or cause a write."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    option_like = "--output=/tmp/pwned"
+    range_like = "refs/adw/aaaa1111/1..refs/adw/aaaa1111/2"
+    lines = [
+        rec(1, "run", "start", "R", None, payload=run_start_payload("crafted")),
+        rec(2, "snapshot", "point", "R",
+            payload={"lane": "backend", "tree": "t", "ref": option_like, "label": "a"}),
+        rec(3, "snapshot", "point", "R",
+            payload={"lane": "backend", "tree": "t", "ref": range_like, "label": "b"}),
+        rec(4, "run", "end", "R", None, payload=run_end_payload("done")),
+    ]
+    write_run(repo, "aaaa1111", lines, phase="done")
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = _slug_for(repo)
+    url = f"/api/runs/{slug}/aaaa1111/diff"
+
+    real_run = subprocess.run
+    calls = []
+    monkeypatch.setattr(
+        subprocess, "run", lambda cmd, *a, **k: (calls.append(cmd), real_run(cmd, *a, **k))[1]
+    )
+
+    for bad in (option_like, range_like):
+        # Present in the log, but not a structural snapshot ref -> rejected.
+        assert client.get(url, params={"from": bad, "to": bad}).status_code in (400, 404), bad
+    assert not any(isinstance(c, (list, tuple)) and c and c[0] == "git" for c in calls)
 
 
 def test_large_diff_patch_and_counts_are_fully_reachable(home, tmp_path):  # noqa: F811
