@@ -12,12 +12,24 @@
     {% if node.duration is not none %}<span class="dur">{{ node.duration | fmt_duration }}</span>{% endif %}
     {% if node.type == "round" and node.n is defined %}<span class="round">{{ node.n }}/{{ node.cap }}</span>{% endif %}
 {% endmacro %}
-{% macro tree_item(node) %}
+{% macro load_more(hidden, limit) %}
+  <a class="load-more" href="?limit={{ limit * 4 }}">Load more ({{ hidden }} hidden — bounded by DOM node count)</a>
+{% endmacro %}
+{# The trace tree is windowed by node COUNT (Aufgabe A): only the first `limit`
+   children of any node are materialised; a node with more shows a server-rendered
+   "Load more" link that raises the window. The DOM stays bounded while every entry
+   remains reachable (E8). #}
+{% macro tree_item(node, limit) %}
   <li class="node node-{{ node.status }}" data-seq="{{ node.seq }}">
     {% if node.children %}
     <details open>
       <summary>{{ tree_row(node) }}</summary>
-      <ul>{% for child in node.children %}{{ tree_item(child) }}{% endfor %}</ul>
+      <ul>
+        {% for child in node.children[:limit] %}{{ tree_item(child, limit) }}{% endfor %}
+        {% if node.children|length > limit %}
+        <li class="node-more">{{ load_more(node.children|length - limit, limit) }}</li>
+        {% endif %}
+      </ul>
     </details>
     {% else %}
     {{ tree_row(node) }}
@@ -35,33 +47,43 @@
     </details>
   </li>
 {% endmacro %}
-{% macro pane(node) %}
+{% macro pane(node, limit) %}
   <div class="pane pane-{{ node.type | replace('.', '-') }}" data-seq="{{ node.seq }}">
     <h3>{{ node.label }} <small class="type">{{ node.type }}</small></h3>
     {% if node.type == "agent.run" %}
       <div class="tabs" data-tabs>
         <div class="tab-buttons" role="tablist">
           <button type="button" class="tab-btn active" data-tab="prompt">Prompt</button>
-          <button type="button" class="tab-btn" data-tab="antwort">Antwort</button>
+          <button type="button" class="tab-btn" data-tab="answer">Answer</button>
           <button type="button" class="tab-btn" data-tab="tools">Tools</button>
+          {% if node.diff_from and node.diff_to %}
+          <button type="button" class="tab-btn" data-tab="diff">Diff</button>
+          {% endif %}
         </div>
         <section class="tab tab-prompt active" data-tab-panel="prompt">
           <pre>{{ node.payload.prompt if node.payload else "" }}
 {{ node.payload.system_append if node.payload else "" }}</pre>
         </section>
-        <section class="tab tab-antwort" data-tab-panel="antwort">
+        <section class="tab tab-answer" data-tab-panel="answer">
           <pre class="final">{{ node.end_payload.result_text if node.end_payload else "" }}</pre>
           {% for c in node.children if c.type == "agent.message" %}
           <pre class="assistant">{{ c.payload.text if c.payload else "" }}</pre>
           {% endfor %}
         </section>
         <section class="tab tab-tools" data-tab-panel="tools">
+          {% set tools = node.children | selectattr("type", "in", ["agent.tool.call", "agent.tool.result"]) | list %}
           <ul class="tool-list">
-          {% for c in node.children if c.type in ["agent.tool.call", "agent.tool.result"] %}
-            {{ tool_entry(c) }}
-          {% endfor %}
+          {% for c in tools[:limit] %}{{ tool_entry(c) }}{% endfor %}
           </ul>
+          {% if tools|length > limit %}
+          {{ load_more(tools|length - limit, limit) }}
+          {% endif %}
         </section>
+        {% if node.diff_from and node.diff_to %}
+        <section class="tab tab-diff" data-tab-panel="diff" data-diff-from="{{ node.diff_from }}" data-diff-to="{{ node.diff_to }}">
+          <pre class="diff-body">Open the Diff tab to load the changes for this step.</pre>
+        </section>
+        {% endif %}
       </div>
     {% elif node.type in ["agent.tool.call", "agent.tool.result"] %}
       <div class="tool-detail">
@@ -95,9 +117,47 @@
     {% endif %}
   </div>
 {% endmacro %}
-{% macro all_panes(node) %}
-  {{ pane(node) }}
-  {% for child in node.children %}{{ all_panes(child) }}{% endfor %}
+{% macro all_panes(node, limit) %}
+  {{ pane(node, limit) }}
+  {% for child in node.children[:limit] %}{{ all_panes(child, limit) }}{% endfor %}
+{% endmacro %}
+{# Run-level Raw tab (Aufgabe C): the event log as a filterable list — the
+   fallback that works even for event types the GUI does not model. The first
+   `limit` rows are server-rendered; "Load more" raises the window server-side. #}
+{% macro raw_view(detail, limit) %}
+  <div class="raw">
+    <div class="raw-controls">
+      <label class="raw-type-label">type
+        <select class="raw-type-filter">
+          <option value="">(all types)</option>
+          {% for t in detail.raw.types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </label>
+      <input type="search" class="raw-search" placeholder="filter payload text…" aria-label="filter payload text">
+    </div>
+    {% if detail.problems %}
+    <ul class="raw-problem-list">
+    {% for p in detail.problems %}
+      <li class="raw-problem">{{ p.kind }}{% if p.line_no is not none %} &middot; line {{ p.line_no }}{% endif %}{% if p.byte_offset is not none %} &middot; byte {{ p.byte_offset }}{% endif %}{% if p.expected is not none %} &middot; expected {{ p.expected }} found {{ p.found }}{% endif %}</li>
+    {% endfor %}
+    </ul>
+    {% else %}
+    <p class="raw-no-problems">No problems reported.</p>
+    {% endif %}
+    <ol class="raw-list" data-raw-shown="{{ detail.raw.window|length }}" data-raw-total="{{ detail.raw.total }}">
+    {% for e in detail.raw.window %}
+      <li class="raw-row" data-type="{{ e.type }}" data-seq="{{ e.seq }}">
+        <span class="raw-seq">#{{ e.seq }}</span>
+        <span class="raw-type">{{ e.type }}</span>
+        <pre class="raw-payload">{{ e.payload_text }}</pre>
+      </li>
+    {% endfor %}
+    </ol>
+    <p class="raw-empty" hidden>No matching events.</p>
+    {% if detail.raw.total > detail.raw.window|length %}
+    {{ load_more(detail.raw.total - detail.raw.window|length, limit) }}
+    {% endif %}
+  </div>
 {% endmacro %}
 <body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}">
   <header class="run-header">
@@ -110,29 +170,43 @@
   </header>
 
   <main class="detail">
-    <section class="trace">
-      {% if not detail.run.has_trace %}
-      <p class="no-trace-hint">no trace &mdash; kein Event-Log für diesen Lauf</p>
-      {% endif %}
-      <ul>{% for node in detail.tree %}{{ tree_item(node) }}{% endfor %}</ul>
-    </section>
+    <div class="tabs run-tabs" data-tabs>
+      <div class="tab-buttons" role="tablist">
+        <button type="button" class="tab-btn active" data-tab="trace">Trace</button>
+        <button type="button" class="tab-btn" data-tab="raw">Raw</button>
+      </div>
+      <section class="tab tab-trace active" data-tab-panel="trace">
+        <div class="trace-layout">
+          <section class="trace">
+            {% if not detail.run.has_trace %}
+            <p class="no-trace-hint">no trace &mdash; no event log for this run</p>
+            {% endif %}
+            <ul>{% for node in detail.tree %}{{ tree_item(node, limit) }}{% endfor %}</ul>
+          </section>
 
-    <section class="panes">
-      {% for node in detail.tree %}{{ all_panes(node) }}{% endfor %}
-    </section>
+          <section class="panes">
+            {% for node in detail.tree %}{{ all_panes(node, limit) }}{% endfor %}
+          </section>
+        </div>
 
-    <section class="problems">
-      <h2>Reader problems</h2>
-      {% if detail.problems %}
-      <ul class="problem-list">
-      {% for p in detail.problems %}
-        <li class="problem">{{ p.kind }}{% if p.line_no is not none %} &middot; line {{ p.line_no }}{% endif %}{% if p.byte_offset is not none %} &middot; byte {{ p.byte_offset }}{% endif %}{% if p.expected is not none %} &middot; expected {{ p.expected }} found {{ p.found }}{% endif %}</li>
-      {% endfor %}
-      </ul>
-      {% else %}
-      <p class="no-problems">No problems reported.</p>
-      {% endif %}
-    </section>
+        <section class="problems">
+          <h2>Reader problems</h2>
+          {% if detail.problems %}
+          <ul class="problem-list">
+          {% for p in detail.problems %}
+            <li class="problem">{{ p.kind }}{% if p.line_no is not none %} &middot; line {{ p.line_no }}{% endif %}{% if p.byte_offset is not none %} &middot; byte {{ p.byte_offset }}{% endif %}{% if p.expected is not none %} &middot; expected {{ p.expected }} found {{ p.found }}{% endif %}</li>
+          {% endfor %}
+          </ul>
+          {% else %}
+          <p class="no-problems">No problems reported.</p>
+          {% endif %}
+        </section>
+      </section>
+
+      <section class="tab tab-raw" data-tab-panel="raw">
+        {{ raw_view(detail, limit) }}
+      </section>
+    </div>
   </main>
 
   <script src="/static/app.js"></script>

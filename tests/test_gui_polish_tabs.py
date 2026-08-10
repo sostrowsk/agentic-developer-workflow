@@ -1,13 +1,14 @@
 """RED tests for Aufgabe D — the agent.run detail pane uses switchable tabs.
 
-GUI-SPEC §7.2 requires the tabs **Prompt**, **Antwort**, **Tools** for agent.run,
-switchable (exactly one active at a time) rather than stacked sections. The old
-stacked "Answer" section becomes the "Antwort" tab. No Diff tab this run.
+GUI-SPEC §7.2 requires switchable tabs **Prompt**, **Answer**, **Tools** for
+agent.run (exactly one active at a time) rather than stacked sections. The
+run-detail view is uniformly English (E9): the label read "Antwort" during the
+polish run and is now "Answer" again.
 
 Derived from .adw/spec.md (D1/D2), .adw/contract.yaml
-(x-adw-template-behavior.run_detail.detail_pane) and .adw/plan.md. Markup is not
-contractual, so the tab labels and the switching affordance are checked as
-observable content, never as exact markup.
+(x-adw-template-behavior.run_detail.detail_pane, .language) and .adw/plan.md.
+Markup is not contractual, so the tab labels and the switching affordance are
+checked as observable content, never as exact markup.
 """
 
 from fastapi.testclient import TestClient
@@ -31,15 +32,16 @@ def _detail_html(tmp_path, run_id="aaaa1111"):
     return resp.text
 
 
-def test_agent_run_offers_prompt_antwort_tools_tabs(home, tmp_path):  # noqa: F811
-    """D1/D2: exactly the three tabs Prompt/Antwort/Tools; the old English
-    "Answer" heading is gone (renamed to Antwort) and there is no Diff tab."""
+def test_agent_run_offers_prompt_answer_tools_tabs(home, tmp_path):  # noqa: F811
+    """D1/D2/E9: the three tabs Prompt/Answer/Tools; the run-detail view is
+    uniformly English, so "Antwort" no longer appears. A snapshot-less run offers
+    no Diff tab."""
     html = _detail_html(tmp_path)
 
     assert "Prompt" in html
-    assert "Antwort" in html
+    assert "Answer" in html
     assert "Tools" in html
-    assert "Answer" not in html
+    assert "Antwort" not in html
     assert "Diff" not in html
 
 

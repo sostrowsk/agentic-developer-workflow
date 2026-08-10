@@ -80,13 +80,17 @@ def test_run_list_timestamp_does_not_wrap(home, tmp_path):  # noqa: F811
 def test_detail_html_formats_durations_and_aggregate_cost(home, tmp_path):  # noqa: F811
     """E1/E2 (regression): the run DETAIL formats durations and the aggregate cost
     too — tree rows, the phase badge and the aggregate pane show ``47m 9s`` /
-    ``$5.80``, never raw seconds or a raw float."""
+    ``$5.80``, never raw seconds or a raw float. The run-level Raw tab (Aufgabe C)
+    is the deliberate exception: it shows the event log VERBATIM, so the negative
+    assertions are scoped to the formatted Trace view (everything before the raw
+    panel)."""
     html = _detail_html(tmp_path, "aaaa1111", long_duration_lines())
+    trace_view = html.split('data-tab-panel="raw"')[0]  # the formatted Trace view
 
-    assert "47m 9s" in html                   # tree row + phase badge + aggregate
-    assert "$5.80" in html                    # aggregate cost, readably
-    assert "2828.7s" not in html              # no raw ``%.1fs`` seconds remain
-    assert "5.795072500000001" not in html    # no raw cost float remains
+    assert "47m 9s" in html                         # tree row + phase badge + aggregate
+    assert "$5.80" in html                          # aggregate cost, readably
+    assert "2828.7s" not in trace_view              # no raw ``%.1fs`` seconds remain
+    assert "5.795072500000001" not in trace_view    # no raw cost float remains
 
 
 def test_missing_duration_and_cost_render_empty_not_zero(home, tmp_path):  # noqa: F811

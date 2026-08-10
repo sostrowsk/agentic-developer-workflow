@@ -11,6 +11,7 @@ is only consumed here, never modified.
 
 import json
 import os
+import subprocess
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -21,6 +22,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from adw.env import safe_env
 from adw.gui.model import build_tree
 from adw.gui.reader import EventReader
 from adw.gui.registry import _slug, _unique_slug, load_registry
@@ -28,6 +30,32 @@ from adw.state import RUN_ID_RE, RUNS_RELPATH, RunState, StateNotFoundError
 
 _HERE = Path(__file__).resolve().parent
 _TEMPLATES = Jinja2Templates(directory=str(_HERE / "templates"))
+
+# Aufgabe A/C: the bottleneck is DOM NODE COUNT, not payload size. The server
+# renders only this many entries per child list / raw page; the rest stay fully
+# reachable through the read-only events route the client pages from (E8 — the
+# display is windowed, the log is never truncated). The concrete windowing
+# mechanism is an implementation choice and is not pinned by the contract.
+_DISPLAY_WINDOW = 100
+# Upper bound for the ``?limit`` paging so a crafted value cannot ask the server to
+# materialise an unbounded amount at once.
+_LIMIT_MAX = 200000
+# Server-rendered raw rows preview only this many payload characters (the full
+# payload stays reachable via the events route); keeps a page with a few huge
+# early payloads from inlining megabytes into the initial HTML.
+_RAW_PAYLOAD_PREVIEW = 2000
+# git-diff timeout (seconds); the diff endpoint reads only — mirrors snapshots.py.
+_GIT_DIFF_TIMEOUT = 30
+
+
+def _parse_limit(raw) -> int:
+    """The ``?limit`` window size, clamped to [1, _LIMIT_MAX]; a missing or invalid
+    value falls back to the default display window."""
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return _DISPLAY_WINDOW
+    return max(1, min(value, _LIMIT_MAX))
 
 
 # --- presentation formatting (Aufgabe E): applied in the HTML templates only; the
@@ -431,16 +459,113 @@ def _tool_names_by_use_id(events) -> dict:
     return names
 
 
-def _serialize(node, tool_names=None) -> dict:
+# --- snapshot bracketing for the Diff tab (Aufgabe B, AC-B5/B8) -----------------
+# The Diff tab of a node requests the diff between the two snapshots that bracket
+# the node. The pair is derived observably from THIS run's event log: same-lane
+# snapshots only, by unique seq, so the pair is deterministic. Nothing here reads
+# git or mutates anything — it only reads the events already loaded for the view.
+
+
+def _span_seq_ranges(events) -> dict:
+    """Per span id, the (min, max) event seq over every event carrying that span
+    id (start, its point children, end). Subtree ranges are combined from these
+    while serializing, so a node's first/last event seq is known without touching
+    the model."""
+    own: dict = {}
+    for e in events:
+        sid = e.get("span")
+        seq = e.get("seq")
+        if sid is None or not isinstance(seq, int):
+            continue
+        lo, hi = own.get(sid, (seq, seq))
+        own[sid] = (min(lo, seq), max(hi, seq))
+    return own
+
+
+def _snapshots_by_lane(events) -> dict:
+    """``snapshot`` refs of this run grouped by their declared lane (payload.lane),
+    each list sorted by seq. These events are the SOLE source both for the Diff-tab
+    bracket (AC-B5) and — in the endpoint — for the ref allowlist (AC-B2)."""
+    by_lane: dict = {}
+    for e in events:
+        if e.get("type") != "snapshot":
+            continue
+        seq = e.get("seq")
+        payload = e.get("payload") or {}
+        lane = payload.get("lane")
+        ref = payload.get("ref")
+        if not isinstance(seq, int) or not lane or not isinstance(ref, str) or not ref:
+            continue
+        by_lane.setdefault(lane, []).append((seq, ref))
+    for lane in by_lane:
+        by_lane[lane].sort()
+    return by_lane
+
+
+def _bracket_pair(lo, hi, lane, snaps) -> tuple:
+    """AC-B5: ``from`` is the same-lane snapshot with the highest seq at or before
+    ``lo`` (the node's first event); ``to`` is the same-lane snapshot with the
+    lowest seq at or after ``hi`` (the node's last event). Snapshots of other lanes
+    are never considered. AC-B8: if either boundary is absent the node is not
+    bracketed and (None, None) is returned — no synthetic nearest pair."""
+    if not lane:
+        return None, None
+    cands = snaps.get(lane)
+    if not cands:
+        return None, None
+    frm = None
+    for seq, ref in cands:  # ascending by seq
+        if seq <= lo:
+            frm = ref
+        else:
+            break
+    to = None
+    for seq, ref in cands:
+        if seq >= hi:
+            to = ref
+            break
+    if frm is None or to is None:
+        return None, None
+    return frm, to
+
+
+def _subtree_seq_range(node, own_ranges, children) -> tuple:
+    lo, hi = own_ranges.get(node.span_id, (node.seq, node.seq))
+    if lo is None:
+        lo = hi = node.seq
+    for c in children:
+        cseq = c.get("seq")
+        if isinstance(cseq, int):
+            lo = min(lo, cseq)
+            hi = max(hi, cseq)
+        cend = c.get("end_seq")
+        if isinstance(cend, int):
+            hi = max(hi, cend)
+    return lo, hi
+
+
+def _serialize(node, tool_names=None, *, lane=None, own_ranges=None, snaps=None) -> dict:
     tool_names = tool_names or {}
+    own_ranges = own_ranges or {}
+    snaps = snaps or {}
     if _is_span(node):
         payload = node.start_payload if node.start_payload is not None else node.end_payload
+        node_lane = lane
+        if node.type == "lane" and isinstance(payload, dict) and payload.get("name"):
+            node_lane = payload["name"]
+        children = [
+            _serialize(c, tool_names, lane=node_lane, own_ranges=own_ranges, snaps=snaps)
+            for c in node.children
+        ]
+        lo, hi = _subtree_seq_range(node, own_ranges, children)
+        diff_from, diff_to = _bracket_pair(lo, hi, node_lane, snaps)
         d = {
             "type": node.type,
             "label": _node_label(node, tool_names),
             "duration": node.duration,
             "status": _node_status(node),
             "seq": node.seq,
+            "end_seq": hi,
             "span_id": node.span_id,
             "running": node.running,
             "start_ts": node.start_ts,
@@ -448,7 +573,11 @@ def _serialize(node, tool_names=None) -> dict:
             "payload": payload,
             "start_payload": node.start_payload,
             "end_payload": node.end_payload,
-            "children": [_serialize(c, tool_names) for c in node.children],
+            # The bracketing pair the node's Diff tab requests; both None when the
+            # node is not bracketed (AC-B6: no Diff tab is offered then).
+            "diff_from": diff_from,
+            "diff_to": diff_to,
+            "children": children,
         }
         if node.type == "round" and isinstance(node.start_payload, dict):
             d["n"] = node.start_payload.get("n")
@@ -468,20 +597,103 @@ def _serialize(node, tool_names=None) -> dict:
         "seq": node.seq,
         "ts": node.ts,
         "payload": node.payload,
+        "diff_from": None,
+        "diff_to": None,
         "children": [],
     }
 
 
-def _run_detail(ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path) -> dict:
+def _raw_view(events, limit) -> dict:
+    """Run-level Raw tab data (Aufgabe C): the distinct event types, a bounded
+    first window of ``limit`` rows (seq, type, a payload-text preview for
+    filtering), and the total count. Every event — including those beyond the
+    window and their full payloads — stays reachable through the events route and
+    the ``?limit`` paging the server renders."""
+    types = sorted({e.get("type") for e in events if e.get("type")})
+    window = []
+    for e in events[:limit]:
+        try:
+            text = json.dumps(e.get("payload"), ensure_ascii=False, sort_keys=True)
+        except (TypeError, ValueError):
+            text = str(e.get("payload"))
+        window.append({
+            "seq": e.get("seq"),
+            "type": e.get("type"),
+            "payload_text": text[:_RAW_PAYLOAD_PREVIEW],
+        })
+    return {"total": len(events), "types": types, "window": window}
+
+
+def _run_detail(
+    ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path, *, limit=_DISPLAY_WINDOW
+) -> dict:
     events, problems = _read_events(run_dir, runs_root)
     state = _load_state(run_dir, runs_root, ref.path, run_id)
     tool_names = _tool_names_by_use_id(events)
+    own_ranges = _span_seq_ranges(events)
+    snaps = _snapshots_by_lane(events)
     return {
         "run": _summary(ref.slug, run_id, events, state),
         "phases": _phase_bar(events, state.phase if state is not None else None),
-        "tree": [_serialize(n, tool_names) for n in build_tree(events)],
+        "tree": [
+            _serialize(n, tool_names, own_ranges=own_ranges, snaps=snaps)
+            for n in build_tree(events)
+        ],
         "problems": [asdict(p) for p in problems],
+        "raw": _raw_view(events, limit),
     }
+
+
+# --- read-only snapshot diff (Aufgabe B, AC-B1/B2/B4) ---------------------------
+
+
+def _snapshot_refs(events) -> set:
+    """The exact set of ref names appearing in ``snapshot`` events of this run —
+    the allowlist the diff endpoint validates ``from``/``to`` against (AC-B2). A
+    pattern match alone is never sufficient; membership in this set is required."""
+    refs = set()
+    for e in events:
+        if e.get("type") == "snapshot":
+            ref = (e.get("payload") or {}).get("ref")
+            if isinstance(ref, str) and ref:
+                refs.add(ref)
+    return refs
+
+
+def _parse_numstat(text: str) -> list:
+    """Parse ``git diff --numstat`` output into per-file counts, in git's order.
+    A binary file's ``-`` count becomes JSON ``null`` (mirroring numstat)."""
+    files = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        add_s, del_s = parts[0], parts[1]
+        files.append({
+            "path": "\t".join(parts[2:]),
+            "additions": None if add_s == "-" else int(add_s),
+            "deletions": None if del_s == "-" else int(del_s),
+        })
+    return files
+
+
+def _git_diff(repo_path, frm: str, to: str) -> dict:
+    """Run ``git diff`` between two already-allowlisted refs like the orchestrator
+    (AC-B4): a list argv (no shell), ``core.hooksPath=/dev/null``, ``safe_env()``,
+    a timeout. Reads only — no worktree switch, no ref created/updated/deleted."""
+    base = ["git", "-C", str(repo_path), "-c", "core.hooksPath=/dev/null"]
+    env = safe_env()
+    numstat = subprocess.run(
+        [*base, "diff", "--numstat", frm, to],
+        capture_output=True, text=True, timeout=_GIT_DIFF_TIMEOUT, env=env,
+    )
+    patch = subprocess.run(
+        [*base, "diff", frm, to],
+        capture_output=True, text=True, timeout=_GIT_DIFF_TIMEOUT, env=env,
+    )
+    return {"files": _parse_numstat(numstat.stdout), "patch": patch.stdout}
 
 
 def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
@@ -642,6 +854,24 @@ def create_app(repos=None) -> FastAPI:
             events = [e for e in events if isinstance(e.get("seq"), int) and e["seq"] <= to_seq]
         return events
 
+    @app.get("/api/runs/{repo}/{run_id}/diff")
+    def api_run_diff(repo: str, run_id: str, request: Request):
+        # Containment first (unknown slug 404, bad run_id 400, absent run 404).
+        ref, run_dir, runs_root = require_run(repo, run_id)
+        # `from`/`to` are read from the raw query so a missing/empty value is a
+        # controlled 400 (never a framework 422), and `from` (a keyword) is fine.
+        frm = request.query_params.get("from")
+        to = request.query_params.get("to")
+        if not frm or not to:
+            raise HTTPException(status_code=400, detail="Missing 'from'/'to' snapshot ref")
+        # AC-B2: accept ONLY refs drawn from this run's snapshot events — validated
+        # against the event-log list, not a mere pattern — BEFORE git is executed.
+        events, _problems = _read_events(run_dir, runs_root)
+        allowed = _snapshot_refs(events)
+        if frm not in allowed or to not in allowed:
+            raise HTTPException(status_code=404, detail="Unknown snapshot ref for this run")
+        return _git_diff(ref.path, frm, to)
+
     @app.get("/api/runs/{repo}/{run_id}/stream")
     def api_run_stream(repo: str, run_id: str, request: Request):
         _, run_dir, runs_root = require_run(repo, run_id)
@@ -657,10 +887,16 @@ def create_app(repos=None) -> FastAPI:
         return HTMLResponse(html)
 
     @app.get("/runs/{repo}/{run_id}", response_class=HTMLResponse)
-    def run_detail_page(repo: str, run_id: str):
+    def run_detail_page(repo: str, run_id: str, request: Request):
         ref, run_dir, runs_root = require_run(repo, run_id)
-        detail = _run_detail(ref, run_id, run_dir, runs_root)
-        html = _TEMPLATES.get_template("run_detail.html").render({"detail": detail})
+        # Aufgabe A/C: `?limit` is how much of each long list / the raw log the
+        # server materialises (a bounded DOM by default). "Load more" is a plain
+        # server-rendered link that raises it — no divergent client-side rendering.
+        limit = _parse_limit(request.query_params.get("limit"))
+        detail = _run_detail(ref, run_id, run_dir, runs_root, limit=limit)
+        html = _TEMPLATES.get_template("run_detail.html").render(
+            {"detail": detail, "limit": limit}
+        )
         return HTMLResponse(html)
 
     return app

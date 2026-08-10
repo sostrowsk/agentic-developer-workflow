@@ -45,12 +45,16 @@ tr.missing-repo { color: var(--muted); opacity: 0.55; font-style: italic; }
 .phase-pending { color: var(--muted); }
 .phase-failed { background: #fde5e5; }
 
-main.detail { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+main.detail { display: block; }
+/* Trace view: the two-column trace tree | detail panes layout. */
+.trace-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 /* Aufgabe F: grid/flex children need a shrink limit (min-width: 0), otherwise a
    wide descendant (a long prompt line, tool output, a table) forces the whole
    column — and the page — to grow horizontally. */
-main.detail > section { min-width: 0; }
+.trace-layout > section { min-width: 0; }
 .tabs, .tabs .tab, .pane, .panes { min-width: 0; }
+/* Aufgabe A: the windowed-tree overflow pointer to the paging affordance. */
+.node-more { color: var(--muted); font-style: italic; list-style: none; }
 .trace ul { list-style: none; padding-left: 1rem; }
 .node .dur { color: var(--muted); margin-left: 0.4rem; font-size: 0.8rem; }
 .node .round { color: var(--accent); margin-left: 0.3rem; }
@@ -98,3 +102,29 @@ table.findings th, table.findings td { border: 1px solid var(--border); padding:
 
 /* Aufgabe G: the 'no trace' hint on the detail page (empty tree/panes explained). */
 .trace .no-trace-hint { color: var(--muted); font-style: italic; margin: 0 0 0.5rem; }
+
+/* Aufgabe B: the node-level Diff tab (own means only — E5, no third-party asset). */
+.diff-files { list-style: none; padding-left: 0; margin: 0 0 0.5rem; font-size: 0.85rem; }
+.diff-files li { border-bottom: 1px solid var(--border); padding: 0.1rem 0; overflow-wrap: anywhere; }
+.diff-patch { font-size: 0.85rem; }
+
+/* Aufgabe C: the run-level Raw tab — a filterable event-log fallback. */
+.raw-controls { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+.raw-controls .raw-search { flex: 1 1 12rem; min-width: 0; }
+.raw-problem-list { list-style: none; padding-left: 0; margin: 0 0 0.5rem; }
+.raw-problem { color: #a33; font-size: 0.85rem; }
+.raw-no-problems { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.5rem; }
+.raw-list { list-style: none; padding-left: 0; margin: 0; }
+.raw-row { border-bottom: 1px solid var(--border); padding: 0.25rem 0; }
+.raw-row .raw-seq { color: var(--muted); margin-right: 0.4rem; font-size: 0.8rem; }
+.raw-row .raw-type { font-weight: 600; font-size: 0.85rem; }
+.raw-row .raw-payload { margin: 0.2rem 0 0; font-size: 0.8rem; }
+/* Aufgabe A/C: "Load more" is a server-rendered link that raises the ?limit
+   window — no client-side rendering divergence (GUI-SPEC §7.3). */
+.load-more {
+  display: inline-block; margin-top: 0.5rem;
+  border: 1px solid var(--border); background: #f0f0f0;
+  padding: 0.2rem 0.7rem; border-radius: 3px;
+  font-size: 0.85rem; text-decoration: none; color: var(--fg);
+}
+.raw-empty { color: var(--muted); font-style: italic; }

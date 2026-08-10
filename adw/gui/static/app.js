@@ -64,9 +64,11 @@
     applySelection();
   });
 
-  // --- switchable agent.run tabs (Aufgabe D): exactly one panel active at a time.
-  // Delegated so it survives the live region swap; toggles classes only (no DOM
-  // construction — the panels are already server-rendered).
+  // --- switchable tabs (Aufgabe D + the run-level Raw / node-level Diff tabs):
+  // exactly one panel active at a time. Delegated so it survives the live region
+  // swap; toggles classes only (panels are server-rendered). Tab groups nest (the
+  // agent.run tabs live inside the run-level tabs), so only members whose nearest
+  // [data-tabs] is THIS group are toggled — a nested group is left untouched.
   document.addEventListener("click", function (event) {
     var btn = event.target.closest ? event.target.closest(".tab-btn") : null;
     if (!btn) return;
@@ -74,12 +76,60 @@
     if (!tabs) return;
     var name = btn.getAttribute("data-tab");
     tabs.querySelectorAll(".tab-btn").forEach(function (b) {
-      b.classList.toggle("active", b === btn);
+      if (b.closest("[data-tabs]") === tabs) b.classList.toggle("active", b === btn);
     });
+    var active = null;
     tabs.querySelectorAll("[data-tab-panel]").forEach(function (panel) {
-      panel.classList.toggle("active", panel.getAttribute("data-tab-panel") === name);
+      if (panel.closest("[data-tabs]") !== tabs) return;
+      var on = panel.getAttribute("data-tab-panel") === name;
+      panel.classList.toggle("active", on);
+      if (on) active = panel;
     });
+    // The Diff patch is fetched on demand from the read-only diff endpoint so a
+    // large patch never inlines into the initial page (Aufgabe B7).
+    if (active && name === "diff") loadDiff(active);
   });
+
+  // --- node-level Diff tab (Aufgabe B): request exactly this node's derived
+  // from/to snapshot pair and render the changed-file list plus the patch. Own
+  // means only — no third-party highlighter (E5).
+  function loadDiff(panel) {
+    if (panel.getAttribute("data-loaded")) return;
+    var frm = panel.getAttribute("data-diff-from");
+    var to = panel.getAttribute("data-diff-to");
+    var body = panel.querySelector(".diff-body");
+    if (!frm || !to || !body) return;
+    panel.setAttribute("data-loaded", "1");
+    body.textContent = "Loading…";
+    fetch(base + "/diff?from=" + encodeURIComponent(frm) + "&to=" + encodeURIComponent(to))
+      .then(function (response) {
+        if (!response.ok) throw new Error("diff " + response.status);
+        return response.json();
+      })
+      .then(function (data) { renderDiff(body, data); })
+      .catch(function () {
+        panel.removeAttribute("data-loaded");
+        body.textContent = "(failed to load the diff — open the Diff tab again to retry)";
+      });
+  }
+
+  function renderDiff(body, data) {
+    var files = (data && data.files) || [];
+    var patch = (data && data.patch) || "";
+    if (files.length === 0 && !patch) {
+      body.textContent = "No changes in this step.";
+      return;
+    }
+    // Rendered as text into the existing <pre> (no divergent DOM construction):
+    // one file-summary line per changed file, then the unified patch. A binary
+    // file shows "bin" instead of inventing numeric counts (AC-B1/E5).
+    var header = files.map(function (f) {
+      var add = (f.additions === null || f.additions === undefined) ? "bin" : "+" + f.additions;
+      var del = (f.deletions === null || f.deletions === undefined) ? "" : " -" + f.deletions;
+      return f.path + "  " + add + del;
+    });
+    body.textContent = header.join("\n") + "\n\n" + patch;
+  }
 
   // --- lazy tool payloads (Aufgabe B): full tool inputs/results are NOT inlined
   // in the initial page (that caused the ~35 s freeze). Each collapsed entry
@@ -119,6 +169,37 @@
     var pre = details.querySelector ? details.querySelector("pre[data-load-seq]") : null;
     if (pre) loadToolBody(pre);
   }, true);
+
+  // --- Raw tab (Aufgabe C): filter the server-rendered rows by type and by free
+  // text over the payload. Toggling `hidden` only — no DOM construction, so the
+  // single server-rendered snapshot path stays authoritative (GUI-SPEC §7.3). The
+  // rest of a large log is reached via the server-rendered "Load more" links.
+  function applyRawFilter() {
+    var typeSel = document.querySelector(".raw-type-filter");
+    var search = document.querySelector(".raw-search");
+    var rows = document.querySelectorAll(".raw-list .raw-row");
+    if (!rows.length) return;
+    var type = typeSel ? typeSel.value : "";
+    var q = search ? search.value.toLowerCase() : "";
+    var any = false;
+    rows.forEach(function (row) {
+      var okType = !type || row.getAttribute("data-type") === type;
+      var okText = !q || row.textContent.toLowerCase().indexOf(q) !== -1;
+      var show = okType && okText;
+      row.hidden = !show;
+      if (show) any = true;
+    });
+    var empty = document.querySelector(".raw-empty");
+    if (empty) empty.hidden = any;
+  }
+
+  // Delegated so the filters keep working after the live region swap.
+  document.addEventListener("input", function (event) {
+    if (event.target.closest && event.target.closest(".raw-controls")) applyRawFilter();
+  });
+  document.addEventListener("change", function (event) {
+    if (event.target.closest && event.target.closest(".raw-controls")) applyRawFilter();
+  });
 
   // Record every node's <details> open/closed state, keyed by data-seq, so the
   // wholesale region swap does not reset the user's expand/collapse choices

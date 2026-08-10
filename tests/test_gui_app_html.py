@@ -36,15 +36,15 @@ def _detail_html(tmp_path, run_id, lines, phase="done"):
 
 
 def test_detail_html_renders_phase_bar_and_agent_tabs(home, tmp_path):  # noqa: F811
-    """AC 12/14: the header shows the seven phases; the agent.run pane shows
-    exactly the Prompt/Antwort/Tools tabs with their content — and NO Diff tab this
-    run (Aufgabe D renames the stacked "Answer" section to the "Antwort" tab)."""
+    """AC 12/14/E9: the header shows the seven phases; the agent.run pane shows the
+    Prompt/Answer/Tools tabs with their content — and NO Diff tab for this
+    snapshot-less run (a Diff tab only appears for bracketed nodes)."""
     html = _detail_html(tmp_path, "aaaa1111", comprehensive_lines())
 
     for phase in PHASE_ORDER:
         assert phase in html
-    assert "Prompt" in html and "Antwort" in html and "Tools" in html
-    assert "Diff" not in html  # the Diff tab is a later run (E-scope)
+    assert "Prompt" in html and "Answer" in html and "Tools" in html
+    assert "Diff" not in html  # no bracketing snapshot -> no Diff tab
     assert PROMPT in html and FINAL_ANSWER in html
     assert "Read" in html  # the tool call appears in the Tools list
 
