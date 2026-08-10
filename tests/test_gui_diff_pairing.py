@@ -30,6 +30,7 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     find_node,
     find_node_by_label,
     home,
+    malformed_snapshot_bracket_lines,
     write_run,
 )
 
@@ -107,6 +108,21 @@ def test_diff_tab_present_for_bracketed_and_absent_for_unbracketed(home, tmp_pat
     client2, slug2 = _detail(tmp_path, comprehensive_lines(), run_id="cccc3333")
     html2 = client2.get(f"/runs/{slug2}/cccc3333").text
     assert "Diff" not in html2  # no bracketing snapshot -> no Diff tab
+
+
+def test_malformed_recorded_refs_do_not_bracket_a_node(home, tmp_path):  # noqa: F811
+    """AC-B2/B8 (P2): snapshot events whose refs are malformed (option-like, or a
+    non-snapshot ref) must NOT bracket a node — the pairing applies the same
+    structural validation as the endpoint, so no derived pair and no Diff tab are
+    produced (which would otherwise request a pair the endpoint rejects)."""
+    client, slug = _detail(tmp_path, malformed_snapshot_bracket_lines(RUN_ID))
+
+    tree = client.get(f"/api/runs/{slug}/{RUN_ID}").json()["tree"]
+    node = find_node_by_label(tree, "malformed_node")
+    assert node.get("diff_from") is None and node.get("diff_to") is None
+
+    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+    assert "Diff" not in html  # no Diff tab for a node with only malformed snapshots
 
 
 def test_bracketed_gate_node_offers_its_own_diff(home, tmp_path):  # noqa: F811

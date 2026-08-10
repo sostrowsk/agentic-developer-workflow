@@ -592,6 +592,36 @@ def bracketed_gate_lines(run_id="aaaa1111"):
     ]
 
 
+def malformed_snapshot_bracket_lines(run_id="aaaa1111"):
+    """An ``agent.run`` surrounded by two ``snapshot`` events whose refs are
+    MALFORMED (option-like / a non-snapshot ref) — the kind a crafted or corrupt
+    log could carry. Because they fail the structural snapshot-ref validation, they
+    must NOT bracket the node: no derived pair, no Diff tab (otherwise the tab would
+    request a pair the endpoint rejects, showing a user-visible error)."""
+    def snap(seq, ref, label):
+        return rec(seq, "snapshot", "point", "L", sec=seq, lane="backend",
+                   payload={"lane": "backend", "tree": "t", "ref": ref, "label": label})
+
+    return [
+        rec(1, "run", "start", "R", None, sec=1, payload=run_start_payload("Malformed snaps")),
+        rec(2, "phase", "start", "PB", "R", sec=2,
+            payload={"name": "build", "from_phase": "build"}),
+        rec(3, "lane", "start", "L", "PB", sec=3, lane="backend", payload={
+            "name": "backend", "branch": "adw/backend", "worktree": "wt",
+            "base_sha": None, "ports": {}}),
+        snap(4, "--output=/tmp/pwned", "before"),          # option-like ref
+        rec(5, "agent.run", "start", "A", "L", sec=5, lane="backend",
+            payload={"agent": "malformed_node", "prompt": "p", "system_append": ""}),
+        rec(6, "agent.run", "end", "A", "L", sec=6, lane="backend",
+            payload={"result_text": "done", "is_error": False}),
+        snap(7, "refs/heads/main", "after"),                # not a snapshot ref
+        rec(8, "lane", "end", "L", "PB", sec=8, lane="backend",
+            payload={"completed": True, "gate_iterations": 1, "fix_cycles": 0}),
+        rec(9, "phase", "end", "PB", "R", sec=9, payload={"name": "build", "to_phase": "done"}),
+        rec(10, "run", "end", "R", None, sec=10, payload=run_end_payload("done")),
+    ]
+
+
 DEEP_PAYLOAD_MARK = "DEEPPAYLOADMARK"
 
 

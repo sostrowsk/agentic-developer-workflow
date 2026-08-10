@@ -278,6 +278,43 @@ def test_malformed_ref_recorded_in_event_log_is_rejected_without_git(home, tmp_p
     assert not any(isinstance(c, (list, tuple)) and c and c[0] == "git" for c in calls)
 
 
+def test_dangling_allowlisted_ref_is_not_a_false_empty_diff(home, tmp_path):  # noqa: F811
+    """AC-B (P2): an allowlisted, well-formed ref whose git object is gone (deleted
+    concurrently / gc'd) must NOT yield a 200 empty diff. git fails, so the endpoint
+    returns a controlled non-5xx error instead of silently losing the diff."""
+    client, info = _diff_client(tmp_path)
+    # The ref stays in the event-log allowlist, but its git ref is removed.
+    subprocess.run(
+        ["git", "-C", str(info["repo"]), "update-ref", "-d", info["ref2"]],
+        check=True, capture_output=True, text=True, timeout=60,
+    )
+
+    resp = client.get(info["url"], params={"from": info["ref1"], "to": info["ref2"]})
+    assert resp.status_code != 200           # never a false empty-diff success
+    assert resp.status_code < 500            # a controlled, non-5xx failure
+
+
+def test_one_sided_git_failure_is_not_reported_as_success(home, tmp_path, monkeypatch):  # noqa: F811,E501
+    """AC-B (P2): if one of the two git invocations fails (e.g. the patch call while
+    numstat succeeded), the endpoint must not build a success from the partial
+    output — an inconsistent files/patch pair is never returned as 200."""
+    client, info = _diff_client(tmp_path)
+
+    real_run = subprocess.run
+
+    def spy(cmd, *a, **k):
+        result = real_run(cmd, *a, **k)
+        if isinstance(cmd, (list, tuple)) and "--numstat" not in cmd and "diff" in cmd:
+            result.returncode = 1  # the unified-patch call fails, numstat succeeded
+        return result
+
+    monkeypatch.setattr(subprocess, "run", spy)
+
+    resp = client.get(info["url"], params={"from": info["ref1"], "to": info["ref2"]})
+    assert resp.status_code != 200
+    assert resp.status_code < 500
+
+
 def test_large_diff_patch_and_counts_are_fully_reachable(home, tmp_path):  # noqa: F811
     """AC-B7 (server side): the endpoint returns the FULL large patch — at least
     100 changed files and at least 1500 changed lines in total — so the display's

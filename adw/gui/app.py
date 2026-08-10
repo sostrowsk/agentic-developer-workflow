@@ -483,10 +483,13 @@ def _span_seq_ranges(events) -> dict:
     return own
 
 
-def _snapshots_by_lane(events) -> dict:
+def _snapshots_by_lane(events, run_id) -> dict:
     """``snapshot`` refs of this run grouped by their declared lane (payload.lane),
-    each list sorted by seq. These events are the SOLE source both for the Diff-tab
-    bracket (AC-B5) and — in the endpoint — for the ref allowlist (AC-B2)."""
+    each list sorted by seq. Only refs with the exact ``refs/adw/<run_id>/<seq>``
+    structure are kept — the SAME structural validation the endpoint applies — so a
+    malformed or option-like recorded ref never brackets a node (and never exposes
+    a Diff tab the endpoint would then reject). These events are the sole source
+    both for the bracket (AC-B5) and, in the endpoint, for the allowlist (AC-B2)."""
     by_lane: dict = {}
     for e in events:
         if e.get("type") != "snapshot":
@@ -495,7 +498,7 @@ def _snapshots_by_lane(events) -> dict:
         payload = e.get("payload") or {}
         lane = payload.get("lane")
         ref = payload.get("ref")
-        if not isinstance(seq, int) or not lane or not isinstance(ref, str) or not ref:
+        if not isinstance(seq, int) or not lane or not _is_snapshot_ref(ref, run_id):
             continue
         by_lane.setdefault(lane, []).append((seq, ref))
     for lane in by_lane:
@@ -645,7 +648,7 @@ def _run_detail(
     state = _load_state(run_dir, runs_root, ref.path, run_id)
     tool_names = _tool_names_by_use_id(events)
     own_ranges = _span_seq_ranges(events)
-    snaps = _snapshots_by_lane(events)
+    snaps = _snapshots_by_lane(events, run_id)
     return {
         "run": _summary(ref.slug, run_id, events, state),
         "phases": _phase_bar(events, state.phase if state is not None else None),
@@ -710,7 +713,12 @@ def _parse_numstat(text: str) -> list:
 def _git_diff(repo_path, frm: str, to: str) -> dict:
     """Run ``git diff`` between two already-allowlisted refs like the orchestrator
     (AC-B4): a list argv (no shell), ``core.hooksPath=/dev/null``, ``safe_env()``,
-    a timeout. Reads only — no worktree switch, no ref created/updated/deleted."""
+    a timeout. Reads only — no worktree switch, no ref created/updated/deleted.
+
+    BOTH git invocations are checked: if either fails (a dangling/removed ref, a
+    concurrent gc, a one-sided failure), the result is NOT a valid diff and must
+    never be presented as an (empty) success — a controlled non-5xx error is
+    raised so no diff data is silently lost or misrepresented."""
     base = ["git", "-C", str(repo_path), "-c", "core.hooksPath=/dev/null"]
     env = safe_env()
     numstat = subprocess.run(
@@ -721,6 +729,11 @@ def _git_diff(repo_path, frm: str, to: str) -> dict:
         [*base, "diff", frm, to],
         capture_output=True, text=True, timeout=_GIT_DIFF_TIMEOUT, env=env,
     )
+    if numstat.returncode != 0 or patch.returncode != 0:
+        # Allowlisted and well-formed, but git could not produce the diff (e.g. the
+        # snapshot object is gone). Report it as unavailable, never a false empty
+        # diff. Non-5xx, and never a partial/one-sided result.
+        raise HTTPException(status_code=404, detail="Snapshot diff unavailable")
     return {"files": _parse_numstat(numstat.stdout), "patch": patch.stdout}
 
 
