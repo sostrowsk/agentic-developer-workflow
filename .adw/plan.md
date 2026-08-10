@@ -1,311 +1,334 @@
-# Plan — GUI-Politur Lauf 5 (sieben Korrekturen an der Run-Inspector-Web-App)
+# Plan — Run detail: Tools responsiveness, Diff tab, Raw tab
 
-Maßgeblich bleibt `docs/GUI-SPEC.md` (§7.2 Views, §9 Performance); bei Widerspruch
-gilt die GUI-SPEC. Dieser Plan setzt `.adw/spec.md` um und baut strikt gegen
-`.adw/contract.yaml`. **Single-Lane:** es gibt genau den Workstream **backend** —
-die Web-Schicht der GUI (`adw/gui/app.py`, die Jinja2-Templates und die
-mitgelieferten Vanilla-Assets `static/app.css`, `static/app.js`) gehört ganz in
-diese eine Lane; eine eigenständige Frontend-Lane existiert nicht. Behoben werden
-ausschließlich die sieben Aufgaben A–G; es ist **Politur an Vorhandenem**, kein
-Neubau und kein Redesign.
+Authoritative on conflict: `docs/GUI-SPEC.md`, especially §5 (snapshots and step
+diffs), §7.2 (views), §7.4 (API), §8 (security). This plan implements
+`.adw/spec.md` and builds strictly against `.adw/contract.yaml`. **Single-lane:**
+there is exactly one workstream, **backend** — the GUI web layer
+(`adw/gui/app.py`, the Jinja2 templates, and the packaged vanilla assets
+`static/app.css`, `static/app.js`) belongs wholly to this one lane; no separate
+frontend lane exists. This run completes the run-detail view with three tasks
+(A/B/C) plus a language fix (D); it is completion of an existing view, not a
+redesign. The mechanism for bounded DOM rendering (windowing, paging,
+virtualization, lazy loading) remains an implementation choice and is not pinned.
 
-## Leitplanken
+## Guardrails
 
-- **Nur die Web-Schicht.** Geändert werden ausschließlich `adw/gui/app.py`, die
-  Templates (`adw/gui/templates/*.html`), die Eigen-Assets (`adw/gui/static/*`)
-  und die zugehörigen Tests/Fixtures — samt der statusableitenden
-  Modell-**Anbindung in der Web-Schicht**. `adw/events.py`, `adw/snapshots.py`,
-  `adw/gui/reader.py`, `adw/gui/model.py` und der Orchestrator bleiben
-  **unverändert**. Ist eine Aufgabe ohne eine solche Änderung nicht lösbar, ist
-  das ein **Befund für den Bericht**, keine stille Ausweitung (Non-Goal).
-- **Strikt read-only.** Kein Codepfad der GUI schreibt in `state.json`, ins Repo
-  oder ins Event-Log; keine schreibende HTTP-Route; kein Ausführen eines externen
-  Programms. Run-Daten werden weiterhin nur unterhalb des aufgelösten
-  `.adw/runs/<run_id>/` gelesen — unter denselben Containment-/`RUN_ID_RE`-/
-  Slug-Backstops wie bisher.
-- **Keine neuen Views, keine neue Informationsarchitektur, kein Navigationsumbau.**
-  Korrektur der Statusableitung (A) und der Darstellung (B–G) an den vorhandenen
-  Views (`/`, `/runs/{repo}/{run_id}` und die `/api`-Routen).
-- **Neue HTTP-Routen nur, soweit Aufgabe B sie zwingend braucht**, und
-  ausschließlich read-only; sonst keine neue Route. Bevorzugter Weg (siehe
-  Aufgabe B): Nachladen über die **bereits vorhandene** Events-Route, dann
-  entsteht gar keine neue Route. Der Mechanismus für B bleibt
-  Umsetzungsentscheidung und ist **nicht kontraktuell**.
-- **Keine neuen Laufzeit-Dependencies, kein Frontend-Fremdasset** (Vanilla JS,
-  handgeschriebenes CSS, System-Fonts; kein CDN, keine node-Toolchain). Der
-  Web-Stack bleibt optionales Extra `adw[gui]` (E7).
-- Fehlende Werte werden durchgängig als fehlend behandelt und niemals zu
-  darzustellendem `0` oder `null` umgedeutet.
-- Reale Gates (E3): `uv run ruff check .` und `uv run pytest -x -q`. `flake8`,
-  `isort`, `black` tauchen nirgends auf.
-- Kappung/Einklappen/abschnittsweises Nachladen **in der Anzeige** ist per E8
-  ausdrücklich erlaubt und **kein** Verstoß gegen „keine Kappung von Payloads“
-  (das betrifft das Log, nicht die Darstellung).
+- **Web layer only.** Changes touch exclusively `adw/gui/app.py`, the templates
+  (`adw/gui/templates/*.html`), the own assets (`adw/gui/static/*`) and the
+  associated tests/fixtures. `adw/events.py`, `adw/snapshots.py`,
+  `adw/gui/reader.py`, `adw/gui/model.py` and the orchestrator stay
+  **unchanged**. If a task turns out not to be solvable without such a change,
+  that is a **finding for the report**, not a silent scope widening.
+- **Strictly read-only.** No GUI code path writes to `state.json`, the repo or
+  the event log; no write HTTP route. The diff endpoint runs `git diff`
+  **reading only** — no worktree switch, no ref created, updated or deleted.
+  Run data is read only below the resolved `.adw/runs/<run_id>/` directory,
+  under the same containment / `RUN_ID_RE` / slug backstops as today, applied
+  before any run is read or git is invoked.
+- **New HTTP route only where task B strictly requires it** — the diff
+  endpoint — and read-only. No other new route.
+- **No new runtime dependency, no third-party frontend asset** (E5): vanilla
+  JS, own CSS, system fonts; no CDN, no node toolchain, no browser-automation
+  dependency. The web stack stays the optional extra `adw[gui]` (E7).
+- **No new views beyond the specified tabs, no navigation rebuild.** The Diff
+  tab lives in the existing detail pane; the Raw tab lives at run level in the
+  existing detail view. No redesign, no timeline, no artifacts tab, no i18n,
+  no run-list/prune, no retention, no gzip, no config keys, no caching or
+  precomputation.
+- **E8 applies to the display, not the log.** Trimming / collapsing / paged
+  loading in the display is explicitly permitted and is **not** a violation of
+  "no payload truncation" (that concerns the log). A finding that reads task A,
+  B7 or C4 as such a violation is rejected with a reason. Every logged payload
+  stays fully reachable.
+- Missing values are treated as missing, never reinterpreted as a displayed
+  `0` or `null`.
+- Real gates (E3): `uv run ruff check .` and `uv run pytest -x -q`. `flake8`,
+  `isort`, `black` appear nowhere — not in dependencies, config, scripts or
+  validation commands.
 
-## Ausgangslage (verifiziert im Code)
+## Starting point (verified in the code)
 
-- **Statusableitung (Aufgabe A).** `app.py:_run_span` wählt per `next(...)` den
-  **ersten** `run`-Start und das **erste** `run`-End; `_summary` liest den Status
-  aus dessen End-Payload (`status` bzw. `"running"`, wenn kein End). Bei mehreren
-  `run`-Spans in einer Datei zeigen Liste **und** Detail damit den Status des
-  ersten Spans. Korrektur liegt vollständig in der Web-Schicht (`app.py`).
-- **Freeze (Aufgabe B).** `run_detail.html` rendert über `all_panes(...)` **alle**
-  Panes inline und bettet je `agent.run` **jeden** Tool-Call/-Result mit vollem
-  `payload | tojson` ein; zusätzlich steckt das gesamte `detail | tojson` als
-  `<script id="run-data">` in der Seite. Der Client (`app.js`) parst bei jedem
-  SSE-Refresh die **ganze** Seite per `DOMParser` neu. Bei einem mehrere MB
-  großen Log ist das die Ursache des ~35-s-Freezes. B verlangt beobachtbar:
-  Die Auswahl blockiert die Oberfläche nicht spürbar, und alle vollen Inhalte
-  bleiben erreichbar — ob dafür die initiale Auslieferung begrenzt oder die
-  volle Auslieferung nicht-blockierend materialisiert wird, ist
-  Umsetzungsentscheidung.
-- **Tool-Call-Labels (Aufgabe C).** `_node_label` liefert für `agent.tool.call`/
-  `agent.tool.result` nur den Typnamen; im Tools-Bereich steht `c.type` plus
-  rohes Payload-JSON. Werkzeugname und Hauptargument liegen im Payload bereit
-  (`tool`, `input`; bei Result `is_error`, `content`).
-- **Reiter (Aufgabe D).** `run_detail.html` hat für `agent.run` bereits
-  Abschnitte Prompt/Answer/Tools, aber als gleichzeitig sichtbare
-  `<section class="tab">` (gestapelt), nicht als umschaltbare Reiter. Ein
-  Diff-Reiter existiert nicht (bleibt so).
-- **Formatierung (Aufgabe E).** Dauern als `"%.1f"|format(..)+"s"`, Kosten als
-  roher Float, Zeitstempel als rohes ISO mit `Z`; in der Run-Liste bricht der
-  Start-Zeitstempel um. Aufbereitung erfolgt in der Web-Schicht (Serialisierung/
-  Template/CSS).
-- **Überlauf (Aufgabe F).** `app.css`: `pre` hat `overflow-x:auto` +
-  `white-space:pre-wrap`, aber Prompt-Pane/Seite laufen rechts aus dem Viewport —
-  typisch fehlende Schrumpfgrenzen (`min-width`) an Grid-/Flex-Containern.
-  Reine CSS-Korrektur.
-- **Läufe ohne Event-Log (Aufgabe G).** `_list_runs` überspringt Runs ohne
-  `events.jsonl` (`if events_file is None … continue`). `require_run` toleriert
-  bereits State-only-Runs (`has_events or has_state`). G ist damit eine
-  Web-Schicht-Änderung an `_list_runs` und der Detail-Aufbereitung.
-- **Fixtures/Tests.** `tests/gui_app_helpers.py` liefert die Builder (`rec`,
-  `write_run`, `comprehensive_lines` …) und die `home`-Fixture; die App wird über
-  `create_app(repos=…)` mit FastAPIs `TestClient` gegen Fixture-Logs geprüft.
-  Neue Tests bauen auf diesen Helfern auf.
+- **Detail delivery (`app.py`).** `_run_detail` builds `run`/`phases`/`tree`/
+  `problems` from the read layer; `_serialize` embeds each node's payloads and
+  recursively its `children`. `run_detail.html` renders the tree and the tabbed
+  detail pane; `app.js` drives selection and the SSE live tail. The Tools tab
+  and the trace tree are where the ≥ 1500-entry node count must stay
+  responsive (task A).
+- **Tabs (`run_detail.html:44-46`).** The detail pane already has switchable
+  tabs **Prompt / Antwort / Tools** (`data-tab` buttons + `data-tab-panel`
+  sections). The label reads **"Antwort"** — task D renames it to **"Answer"**.
+  No Diff tab and no Raw tab exist yet; this run adds both.
+- **Snapshots (read-only inputs).** `snapshots.py` emits one `snapshot` point
+  event per step with payload `lane` / `tree` / `ref` / `label`, where `ref` is
+  `refs/adw/<run_id>/<seq>` and `<seq>` is unique per run. These events,
+  already in the log this run reads, are the sole source both for the
+  endpoint's ref allowlist (B2) and for the Diff tab's bracketing pair (B5).
+  `snapshots.py` is **not** modified — the GUI only reads the events it
+  produced.
+- **git invocation pattern.** `snapshots.py:_run_git` shows the orchestrator's
+  invocation to mirror (B4): `["git", "-C", cwd, "-c",
+  "core.hooksPath=/dev/null", *args]`, `capture_output=True`, `text=True`,
+  `timeout=…`, `env=safe_env(...)`, no shell. The diff endpoint reuses this
+  shape (read-only subcommands only).
+- **Containment backstops (`app.py`).** `require_run` already enforces
+  `RUN_ID_RE`, slug resolution and symlink containment and answers 404 on the
+  error cases; the diff endpoint reuses it before doing anything else.
+- **Fixtures/tests.** `tests/gui_app_helpers.py` provides the builders (`rec`,
+  `write_run`, …) and the `home` fixture; the app is exercised via
+  `create_app(repos=…)` with FastAPI's `TestClient` against fixture logs /
+  temp repos. New tests build on these helpers.
 
 ## Workstream: backend
 
-### Aufgabe A — Statusableitung (Defekt)
+### 1. Build deterministic large-run and diff fixtures
 
-- **A1.** Die Run-Status-Ableitung in der Web-Schicht (`app.py`) so korrigieren,
-  dass sie den Status des **letzten** `run`-Spans (in Log-Reihenfolge) verwendet —
-  in Run-Liste (`/api/runs`, `/`) **und** Run-Detail (`/api/runs/{repo}/{run_id}`,
-  `/runs/{repo}/{run_id}`) identisch; ältere abgeschlossene oder wartende
-  `run`-Spans überschreiben den sichtbaren Status nicht.
-- **A2.** Hat der letzte `run`-Span noch kein `end`, wird der Lauf als `running`
-  angezeigt.
-- **A3.** Für das Beispiel-Log aus dem Issue (drei `run`-Spans, letzter
-  `status=done`) erscheint der Lauf als `done`, nicht als `awaiting_approval` — in
-  Liste und Detail gleich.
+- Extend the existing GUI test-fixture support with deterministic data for
+  (Definition of Done §3):
+  - an `agent.run` with at least **1500 tool entries** (calls and results
+    combined, small contents) — tasks A1–A3;
+  - a run log with at least **3000 events**, including an unknown event type,
+    a `seq` gap and a broken line reported by the existing reader — tasks
+    C1–C4;
+  - a temporary git repository whose two snapshot refs differ in at least
+    **100 files** and at least **1500 changed lines**, plus a case with a
+    changed **binary** file — tasks B1/B7;
+  - a run with at least **two bracketed nodes in one lane**, plus snapshot
+    events in another lane that must not affect pairing — task B8;
+  - nodes missing either or both same-lane snapshot boundaries — tasks B6/B8.
+- Keep large fixtures generated by the helpers rather than checked in as bulky
+  artifacts.
+- Reuse these fixtures for endpoint tests, template-behavior tests,
+  reachability tests and the manual responsiveness evidence.
 
-Tests A:
-- Log mit mehreren `run`-Spans (älterer Span `awaiting_approval`, letzter
-  `status=done`): Liste und Detail zeigen `done` (A1/A3).
-- Log, dessen letzter `run`-Span kein `end` hat: `running` (A2).
-- Deckt A1–A3 ab (A4: Regressionstest über mehrere `run`-Spans).
+### 2. Derive snapshot brackets for detail nodes
 
-### Aufgabe B — Auswahl eines Knotens blockiert die Oberfläche nicht (Defekt)
+- In the GUI app layer, derive the snapshot ref allowlist exclusively from
+  `snapshot` events in the requested run's event log.
+- For each detail node, identify its first event (lowest `seq`) and last event
+  (highest `seq`).
+- Compute a bracket only within the node's lane (B5):
+  - `from` is the same-lane `snapshot` event with the **highest `seq` at or
+    before** the node's first event;
+  - `to` is the same-lane `snapshot` event with the **lowest `seq` at or
+    after** the node's last event.
+- Snapshot events of other lanes are never used; because `seq` is unique, the
+  rule is deterministic.
+- Treat a node as unbracketed if it has no lane or either boundary is absent
+  (B8 → B6). Never substitute a snapshot from another lane or synthesize a
+  nearest pair.
+- Expose only the derived bracket information the detail template needs; no
+  internal model or reader API is added or pinned.
 
-- **B1. Deterministische Fixture.** Eine reproduzierbar erzeugte `events.jsonl`
-  mit einem `agent.run`-Span, der **≥ 40** Tool-Call-/Tool-Result-Paare mit vollen
-  Ein-/Ausgaben enthält; Payloads zusammen **≥ 5 MB**, darunter mindestens ein
-  einzelnes Tool-Ergebnis **≥ 1 MB** (deutlich unter der 200-MB-Grenze aus §9).
-  Dieselbe Fixture dient manuellem Check und automatisierten Tests. Sie wird in
-  den Testhelfern deterministisch erzeugt (nicht als großes Binärartefakt
-  eingecheckt, sofern vermeidbar).
-- **B2. Anforderung (beobachtbar) und Mechanismus (Umsetzungsentscheidung).**
-  Beobachtbar gefordert ist nur: Das Auswählen eines `agent.run`-Knotens
-  blockiert die Oberfläche nicht spürbar (Messgrenze aus B1/B4), und der Nutzer
-  kommt an **jeden** vollständigen Inhalt heran (Prompt, Antwort, jeder
-  Tool-Call-Input, jedes Tool-Ergebnis) — nicht zwingend sofort und alles auf
-  einmal, aber erreichbar. Der **Inhalt der initialen HTTP-Auslieferung wird
-  nicht vorgeschrieben.** Zulässige Mechanismen sind z. B.: (a) die initiale
-  Auslieferung begrenzen und volle Inhalte pro Abschnitt nachladen, oder
-  (b) die vollen Daten initial ausliefern, aber nicht synchron in einen
-  blockierenden DOM materialisieren (nur den sichtbaren Ausschnitt rendern,
-  Inhalte eingeklappt/gekürzt, Aufklappen bei Bedarf). Ein Reiterwechsel bleibt
-  während etwaigen Nachladens/Renderns unmittelbar sichtbar; Fehler beim
-  Nachladen werden im Pane verständlich angezeigt. Die Wahl des Mechanismus
-  bleibt frei und ist nicht kontraktuell.
-- **B3. Bevorzugt keine neue Route.** Braucht der Mechanismus Nachladen, wird
-  zuerst die **vorhandene** read-only Route
-  `GET /api/runs/{repo}/{run_id}/events` genutzt — dann entsteht keine neue
-  Route. Nur wenn das nachweislich nicht genügt, entsteht **read-only** und
-  ausschließlich soweit zwingend nötig eine neue HTTP-Route unter denselben
-  Containment-/`RUN_ID_RE`-/Slug-Backstops (nie ein Zugriff außerhalb
-  `.adw/runs/<run_id>/`, nie 5xx auf den gepinnten Fehlerfällen); die
-  Begründung des zwingenden Bedarfs geht in den Bericht. Der genaue Routenpfad
-  ist **nicht kontraktuell**.
-- **B4. Nachweis.** Die 2-Sekunden-Grenze wird durch einen dokumentierten,
-  reproduzierbaren **manuellen** Browser-Check an der B1-Fixture belegt: Messung
-  **beginnt mit dem Klick** auf den `agent.run`-Knoten; **unmittelbar danach**
-  Reiterwechsel (z. B. auf **Tools**); Messung **endet, sobald der gewählte Reiter
-  sichtbar aktiv ist** und Inhalt zeigt; Gesamtzeit ≤ 2 s. Ablauf und Ergebnis
-  gehen in den Bericht. Automatisierte Browser-/Performance-Messung ist Deferred
-  (würde eine neue Toolchain erfordern).
+Tests:
+- Exact pairing for at least two bracketed nodes in one lane — each resolves
+  its **own** `from`/`to` pair (B8).
+- Snapshots of another lane are never chosen.
+- The inclusive boundary rule at the node's first and last `seq`.
+- A missing before- or after-boundary yields the unbracketed state.
 
-Tests B (automatisierbarer Teil, gegen die B1-Fixture mit `TestClient`; die
-Tests decken den **beobachtbaren Effekt des gewählten Mechanismus** ab und
-richten sich nach ihm):
-- Bei Mechanismus (a) — begrenzte Auslieferung: die initiale Detail-Auslieferung
-  (`/runs/{repo}/{run_id}` bzw. `/api/runs/{repo}/{run_id}`) enthält nicht
-  sämtliche vollen Payloads auf einmal (z. B. Antwortgröße deutlich unter der
-  Summe der Payloads, oder das größte Tool-Ergebnis nicht vollständig inline).
-- Bei Mechanismus (b) — volle Auslieferung mit nicht-blockierendem Rendern: das
-  initial materialisierte/sichtbare Markup des Detail-Panes trägt nicht
-  sämtliche vollen Payloads gleichzeitig als gerenderten Inhalt (begrenzte
-  initiale DOM-Materialisierung als beobachtbarer Effekt; das Aufklappen
-  liefert den vollen Inhalt).
-- In beiden Fällen: Jeder vollständige Inhalt bleibt erreichbar (der vom
-  Mechanismus vorgesehene Weg liefert das ≥ 1 MB große Tool-Ergebnis
-  vollständig).
-- Wird für B doch eine neue Route eingeführt: sie ist read-only, respektiert
-  `RUN_ID_RE`/Slug/Containment und liefert nie 5xx auf den Fehlerfällen.
+### 3. Add the read-only diff endpoint
 
-### Aufgabe C — Lesbarkeit der Tool-Call-Einträge
+- Add `GET /api/runs/{repo}/{run_id}/diff?from=REF&to=REF` in the existing
+  FastAPI app.
+- Resolve repo and run through the existing slug / run-ID / containment checks
+  (`require_run`) before anything else.
+- Require one non-empty, well-formed `from` and `to`; missing or malformed
+  parameters yield **400 or 404**, never 5xx (B3).
+- **Security (B2, non-negotiable):** before executing git, load this run's
+  `snapshot` events and require each supplied value to equal, exactly, a ref
+  from that allowlist (`refs/adw/<run_id>/<seq>`). A pattern match alone is
+  insufficient. Any ref not in the list — arbitrary git refs, revisions,
+  ranges, option-like strings, refs of another run — is rejected with 400 or
+  404, never 5xx, and **without executing git**.
+- For allowed refs, run git like the orchestrator (B4): no shell, separate
+  arguments, a timeout, `safe_env()`, `-c core.hooksPath=/dev/null`. Reads
+  only — no worktree switch, no ref mutation.
+- Obtain the unified patch and the `git diff --numstat` data, both over the
+  two validated refs, in git's reported order. Convert counts to non-negative
+  integers; binary-file `-` counts become JSON `null`.
+- Return exactly the contract shape (B1):
+  `{"files": [{"path": string, "additions": int|null, "deletions": int|null}], "patch": string}`;
+  an empty diff is HTTP 200 with `{"files": [], "patch": ""}`.
+- The 400/404-never-5xx guarantee covers exactly the pinned pre-execution
+  validation failures (B2/B3). A genuine execution failure after two valid
+  refs reach git (e.g. a timeout) follows the app's existing error handling;
+  no additional client-facing status is defined for it.
 
-- **C1.** Ein `agent.tool.call`-Knoten zeigt Werkzeugname und werkzeugspezifisches
-  Hauptargument aus dem Payload. Feldpriorität: **Read → Dateipfad**,
-  **Bash → Kommandozeile** (ggf. gekürzt), **Grep → Suchmuster** (z. B.
-  „Read models.py“, „Bash pytest -x -q“, „Grep RUN_ID_RE“). Für andere Werkzeuge:
-  Werkzeugname plus im Payload eindeutig identifizierbares Hauptargument, sonst
-  Werkzeugname allein. Keine Unterstützung über den Payload-Inhalt hinaus.
-- **C2.** Ein `agent.tool.result`-Knoten zeigt kompakt seinen Ausgang
-  (Fehler/Erfolg; bei Bash der Exit-Code, sofern im Payload vorhanden).
-- **C3. Rückfall — nichts wird erfunden.** Fehlt der **Werkzeugname**, bleibt der
-  unveränderte Typname (`agent.tool.call`/`agent.tool.result`). Ist der
-  Werkzeugname da, aber das Hauptargument fehlt, wird der Werkzeugname allein
-  gezeigt — kein Ersatzwert. Fehlen bei einem Ergebnis die Ausgangsfelder, bleibt
-  es beim Typnamen.
+Tests:
+- Two real snapshot refs in a temp repo return the correct patch and per-file
+  +/- counts in the exact B1 schema and git order; one case has a **binary**
+  changed file with `null`/`null`; the empty-diff case returns
+  `{"files": [], "patch": ""}`.
+- Missing, empty, malformed, option-like, arbitrary, range, foreign-run and
+  unknown refs each return 400 or 404, never 5xx (B2/B3).
+- A git-invocation spy proves **no git execution happens on rejection**.
+- Allowed execution uses no shell, disabled hooks, `safe_env()` and a timeout,
+  and performs no ref or worktree mutation.
+- Invalid repo slugs, run IDs and absent runs keep the existing controlled
+  containment behavior.
 
-Tests C:
-- Read/Bash/Grep sowie mindestens ein weiteres Werkzeug zeigen Werkzeug +
-  Hauptargument nach der Feldpriorität (C1).
-- `agent.tool.result` zeigt Fehler/Erfolg, bei Bash den Exit-Code, sofern
-  vorhanden (C2).
-- Rückfälle: fehlender Werkzeugname → Typname; fehlendes Argument →
-  Werkzeugname allein; Result ohne Ausgangsfelder → Typname (C3).
+### 4. Add the node-level Diff tab
 
-### Aufgabe D — Reiter im Detail-Pane
+- Show a **Diff** tab for nodes with a complete bracket from step 2
+  (build-lane agent runs, gate iterations, the RED stage) (B5).
+- On activation, request exactly that node's derived `from`/`to` pair from the
+  diff endpoint.
+- Render the changed-file list in response order with +/- counts (binary
+  counts shown without inventing numbers), and the unified patch below it.
+  Any highlighting uses first-party markup/CSS/JS only; simple is fine (E5).
+- For an unbracketed node (authoring and review agents, phases, rounds,
+  boundary-missing nodes), either omit the Diff tab or show a clear
+  "no snapshot exists for this step" state. No error, no unexplained empty
+  area (B6).
+- Render a large patch in bounded windows/pages so tab activation responds
+  visibly within **2 seconds** against the ≥ 100-file / ≥ 1500-line fixture,
+  while the full patch stays reachable (B7).
 
-- **D1.** Für `agent.run` bietet das Detail-Pane die Reiter **Prompt**,
-  **Antwort** und **Tools** als umschaltbare Reiter (immer genau einer
-  sichtbar/aktiv), statt gestapelter Abschnitte; Umschaltung per Vanilla JS.
-  Die Beschriftung ist per Spec D1 genau „Prompt“, „Antwort“, „Tools“; der
-  vorhandene gestapelte Abschnitt „Answer“ wird dabei zum Reiter „Antwort“.
-  Inhalte wie bisher: Prompt = voller Task-String inkl.
-  System-Append; Antwort = finaler Text plus Zwischen-Assistant-Messages;
-  Tools = chronologische Tool-Call-Liste (mit den Labels aus C, voller Inhalt
-  über den B-Mechanismus erreichbar).
-- **D2.** **Kein** Diff-Reiter in diesem Lauf (ebenso kein Raw-/Artefakte-/
-  Timeline-Reiter — Non-Goals).
+Tests:
+- Bracketed nodes expose the Diff behavior with their exact derived pair;
+  multiple bracketed nodes in one lane request their own pairs (B5/B8).
+- Unbracketed nodes show the specified unavailable state — never an error or
+  unexplained empty area (B6).
+- File list, counts, binary state, empty-diff state, patch, loading state and
+  controlled endpoint-error state render intelligibly.
+- Against the B7 fixture: bounded initial materialization; traversing the
+  mechanism's pages/windows reaches the full patch. The 2-second threshold
+  itself is evidenced by the manual browser check (below).
 
-Tests D:
-- Das `agent.run`-Detail bietet genau die drei umschaltbaren Reiter Prompt/
-  Antwort/Tools und keinen Diff-Reiter (D1/D2).
+### 5. Make the Tools tab and the trace tree responsive by node count
 
-### Aufgabe E — Formatierung von Zahlen und Zeiten
+- Replace eager materialization of all tool entries in the Tools pane with a
+  bounded, lazy, paged or windowed first-party mechanism (A1); apply the same
+  principle to the tool entries in the trace tree (A3).
+- Selecting the Tools tab for the ≥ 1500-entry fixture shows actionable
+  content within **2 seconds**; not all entries need to be in the DOM at once.
+- Preserve chronological order and a deterministic path to **every**
+  call/result entry and its complete content (A2, E8); no payload is
+  truncated or discarded.
+- Keep selection, tab switching and loading/error feedback usable while
+  further entries are materialized.
 
-- **E1.** Dauern lesbar formatiert (z. B. `2828.7s` → `47m 9s`) statt roher
-  Sekunden.
-- **E2.** Kosten lesbar als Geldbetrag mit zwei Nachkommastellen (z. B.
-  `5.795072500000001` → `$5.80`) statt roher Float.
-- **E3.** Zeitstempel als `YYYY-MM-DD HH:MM:SS` in **UTC** — ohne `Z`-Suffix,
-  ohne Sekundenbruchteile (deterministisch, umgebungsunabhängig testbar; die
-  Quelldaten liegen als ISO-UTC vor).
-- **E4.** In der Run-Listen-Tabelle steht ein Zeitstempel auf **einer** Zeile,
-  ohne Umbruch (geprüft am Tabellen-Standardfall).
-- **E5.** Fehlende Werte bleiben leer; nie `0` oder `null` als Text.
+Tests:
+- Initial Tools-pane and trace-tree materialization is bounded for the
+  ≥ 1500-entry fixture (observable effect of the chosen mechanism).
+- The union of paged/lazy responses (or the mechanism's reachability path)
+  contains **every** tool entry in order with complete content — this also
+  evidences A2.
+- Calls and results remain distinguishable and selectable.
+- The mechanism's loading and terminal states are stable for an empty list and
+  the large list.
 
-Tests E:
-- Dauer-Formatierung (E1), Kosten-Formatierung (E2), UTC-Zeitstempelformat ohne
-  `Z`/Sekundenbruchteile (E3).
-- Kein Umbruch des Zeitstempels in der Run-Liste (E4, am Standardfall).
-- Fehlende Dauer/Kosten/Zeit bleiben leer, nie `0`/`null` als Text (E5).
+### 6. Add the run-level Raw tab
 
-### Aufgabe F — Kein horizontaler Überlauf
+- Add a **Raw** tab at run level over the run's complete event log (C1).
+- Render every event generically enough that unknown `type` values remain
+  visible rather than dropped.
+- Provide at least a `type` filter and free-text search over the serialized
+  payload (C2), each with a clear empty-result state.
+- Surface the reader's reported problems (`seq` gaps, broken lines) inside
+  the Raw tab, not only in the detail pane (C3).
+- Bound/window the list so opening the tab and applying a filter each respond
+  visibly within **2 seconds** against the ≥ 3000-event fixture; every
+  matching event and its complete payload stay reachable (C4).
 
-- **F1.** Breite Inhalte (Prompts, Tool-Ausgaben, Tabellen) scrollen innerhalb
-  ihres eigenen Kastens oder brechen um. Dazu an Page-, Grid- und
-  Flex-Containern die nötigen Schrumpfgrenzen setzen (z. B. `min-width: 0`),
-  damit breite Kinder den Viewport nicht verbreitern.
-- **F2.** Die Seite selbst scrollt nie horizontal; das Prompt-Pane läuft nicht
-  rechts aus dem Viewport, kein Text wird abgeschnitten.
+Tests:
+- Known and unknown event types appear in Raw (C1).
+- Type filtering, payload free-text filtering, clearing filters and no-match
+  behavior each work (C2); each required filter is tested independently.
+- Reader-reported `seq` gaps and broken lines are visible in Raw (C3).
+- Against the ≥ 3000-event fixture: bounded initial and filtered
+  materialization; the mechanism's path reaches every matching event with
+  complete payload (C4).
 
-Tests F:
-- Automatisierbarer Anteil: die relevanten Container tragen die
-  containment-/umbruch-erzeugenden Regeln (geprüft am ausgelieferten CSS/Markup,
-  ohne Headless-Browser). Die visuelle Bestätigung von „Seite scrollt nie
-  horizontal“ ist Teil des manuellen Browser-Checks (kein neuer Headless-Stack —
-  Deferred).
+### 7. Restore English-only run-detail labels
 
-### Aufgabe G — Läufe ohne Event-Log
+- Rename the tab labeled **"Antwort"** (`run_detail.html:45`) to **"Answer"**
+  (D1, E9).
+- Check the affected templates and client-generated labels so no
+  mixed-language label remains in the run-detail view.
 
-- **G1.** Läufe mit `state.json`, aber ohne `events.jsonl` (z. B. `8f8dc4ff`,
-  `e680e005`) erscheinen in der Run-Liste — mit den Angaben aus dem State;
-  `_list_runs` nimmt `events.jsonl` nur noch optional hinzu. Nicht belegbare
-  Werte bleiben leer (E5).
-- **G2.** Für solche Läufe zeigt die Oberfläche einen klaren Hinweis, dass kein
-  Trace existiert.
-- **G3.** Der Aufruf ihres Details führt nie zu einem Fehler; auch die
-  vorhandene Events-Oberfläche antwortet für einen solchen gültigen Run
-  kontrolliert und ohne Serverfehler (leere Events-Liste).
+Tests:
+- The agent-run answer tab is labeled "Answer"; "Antwort" and any other
+  mixed-language run-detail label are absent.
 
-Tests G:
-- Ein Repo mit einem State-only-Run: der Run erscheint in `/api/runs` und `/` mit
-  den State-Angaben (G1) und mit einem klaren „kein Trace“-Hinweis (G2).
-- Das Detail eines State-only-Runs (`/runs/{repo}/{run_id}` und
-  `/api/runs/{repo}/{run_id}`) antwortet fehlerfrei (G3).
+### 8. Verification and handoff
 
-## Guardrail Testumfang
+- Run `uv run ruff check .` and `uv run pytest -x -q` (E3).
+- Perform and document the reproducible **manual browser check** against the
+  named fixtures (see "Responsiveness evidence" below): Tools tab and trace
+  tree at ≥ 1500 tool entries; Diff tab at ≥ 100 files / ≥ 1500 changed lines;
+  Raw tab plus filter at ≥ 3000 events.
+- Confirm the fixture cardinalities, full-content reachability, the read-only
+  property, and that no forbidden file, dependency, third-party asset or
+  validation command changed.
+- Keep the new automated suite roughly within the guideline of **18–25 tests**
+  across A, B and C; add no tests unrelated to the acceptance criteria.
 
-Richtwert rund **15–22** neue Tests für A–G zusammen (Richtwert aus dem Issue,
-keine harte Grenze). Maßgeblich ist die Abdeckung der Akzeptanzkriterien, nicht
-die exakte Anzahl; deutlich mehr ist ein Signal für Scope-Drift. Ausnahme von der
-Test-Abdeckung: die 2-Sekunden-Grenze aus B1 wird gemäß B4 durch den
-dokumentierten manuellen Browser-Check belegt; der automatisierbare Teil von B
-ist durch Tests abgedeckt.
+## Responsiveness evidence (shared)
+
+The 2-second thresholds (A1/A3, B7, C4) are evidenced at the **browser** level
+by a documented, reproducible **manual** check against the named fixtures:
+measurement **begins with the click** on the node, tab or filter and **ends
+when the visible reaction** defined in A1 appears; total ≤ 2 s. The procedure
+and result go into the report. In addition, automated tests assert the
+**observable effect of the chosen mechanism** (initial delivery does not
+inline all entries; the union of paged responses / the reachability path
+contains every entry). **No browser-automation dependency is introduced.**
+
+## Test-scope guardrail
+
+Guideline (not a hard gate): roughly **18–25 new tests** across A, B and C.
+Coverage of the acceptance criteria is what matters, not the exact count;
+markedly more is a signal of scope drift.
 
 ## Definition of Done
 
-1. Alle Akzeptanzkriterien A1–A4, B1–B4, C1–C3, D1–D2, E1–E5, F1–F2, G1–G3 sind
-   erfüllt. Alle sind durch automatisierte Tests abgedeckt — mit einer Ausnahme:
-   die 2-Sekunden-Grenze aus B1 wird gemäß B4 durch den dokumentierten,
-   reproduzierbaren manuellen Browser-Check belegt; der automatisierbare Teil von
-   B ist durch Tests abgedeckt.
-2. `uv run ruff check .` ist grün.
-3. `uv run pytest -x -q` ist grün (die bestehenden 653 Tests plus die neuen
-   A–G-Tests).
-4. Keine der unter Non-Goals genannten Dateien (`adw/events.py`,
-   `adw/snapshots.py`, `adw/gui/reader.py`, `adw/gui/model.py`, Orchestrator)
-   wurde geändert; ist eine Aufgabe ohne solche Änderung nicht lösbar, steht das
-   als Befund im Bericht statt als stille Ausweitung.
-5. Keine neue Laufzeit-Dependency und kein Frontend-Fremdasset ist hinzugekommen;
-   neue HTTP-Routen nur die für Aufgabe B zwingend nötigen (bevorzugt: keine),
-   alle read-only. Die GUI bleibt strikt read-only.
-6. Der manuelle B4-Ablauf und sein Ergebnis stehen im Bericht.
+1. Server-observable behavior — the diff route, its exact JSON schema (B1) and
+   its rejections (B2/B3), the snapshot pairing (B5/B8), paged/windowed
+   delivery and the Raw filters — is covered by tests against fixture logs /
+   temp repos via FastAPI `TestClient`.
+2. The responsiveness thresholds (A1/A3, B7, C4) are evidenced by the
+   documented manual browser check against the named fixtures, plus automated
+   tests asserting the observable effect of the chosen mechanism. No
+   browser-automation dependency is introduced. The manual procedure and its
+   result are in the report.
+3. The fixtures embody the stated sizes (≥ 1500 tool entries; ≥ 100 files /
+   ≥ 1500 changed lines; ≥ 3000 events; ≥ 2 bracketed nodes in one lane).
+4. The diff endpoint's rejection of foreign/unknown/malformed refs (B2/B3) is
+   tested, including that no git execution happens on rejection.
+5. The step diff between two real snapshot refs shows the correct patch and
+   correct per-file +/- counts in the exact B1 schema (temp repo test),
+   including the binary-file `null` case and the empty-diff case.
+6. Snapshot pairing follows the inclusive same-lane `seq` rule for every node,
+   including multiple bracketed nodes in one lane and missing-boundary cases.
+7. No change to `adw/events.py`, `adw/snapshots.py`, `adw/gui/reader.py`,
+   `adw/gui/model.py` or the orchestrator; the GUI remains read-only; allowed
+   git execution uses disabled hooks, `safe_env()`, a timeout, no shell, and
+   no ref or worktree mutation.
+8. No new runtime dependency and no third-party frontend asset are introduced;
+   the run-detail view is uniformly English and uses "Answer" (D1).
+9. Real gates green (E3): `uv run ruff check .` and `uv run pytest -x -q`.
+   `flake8`, `isort` and `black` are not added to dependencies, configuration,
+   scripts or validation commands.
+10. Guideline (not a hard gate): roughly 18–25 new tests across A, B and C.
 
-## Deferred (bewusst nicht gebaut)
+## Deferred (deliberately not built)
 
-Weitergehende Härtungs- oder Erweiterungsideen — auch aus den Codex-Review-Runden
-— gehören hierher, nicht in die Akzeptanzkriterien. Ein Finding, das einen dieser
-Punkte oder einen vorentschiedenen Punkt einführen will, wird abgewiesen und mit
-Begründung dokumentiert, nicht umgesetzt.
+Hardening or extension ideas that are defensible but out of proportion to this
+run go here, not into acceptance criteria. Findings from review rounds that would
+re-introduce a deferred or pre-decided point are rejected with a reason, not
+implemented.
 
-- Timeline-Reiter, Artefakte-Reiter, Raw-Reiter, Diff-Reiter, Diff-Endpoint.
-- i18n / Sprachumschaltung.
-- Prunen / Retention / `trace:`-Config-Key.
-- Änderungen an der `run`-Span-Grenze (E1) oder an den Waisen-Spans/`events.py`
-  (E2).
-- Kappung von Payloads im **Log**: Der Deferred-Punkt „keine Kappung von
-  Payloads“ betrifft das Log, nicht die Darstellung (E8). Aufgabe B kürzt,
-  klappt ein oder lädt abschnittsweise **in der Anzeige** und verstößt damit
-  nicht gegen „keine Kappung“; ein Review-Finding, das B als solchen Verstoß
-  wertet, wird abgewiesen.
-- Redesign, neue Views, neue Informationsarchitektur, Umbau der Navigation.
-- HTTP-Routen über die für Aufgabe B zwingend nötigen hinaus.
-- Automatisierte Browser-/Responsiveness-Messung (Headless-Browser,
-  Performance-Harness): würde eine neue Toolchain erfordern (E5) und ist für
-  den Nachweis von B1 nicht nötig — der dokumentierte manuelle Check genügt.
-- Zeitzonen-Umschaltung / Anzeige in Lokalzeit statt UTC.
+- **Diff for non-bracketed nodes** by synthesizing a nearest-snapshot pair — the
+  issue explicitly accepts "no snapshot for this step" for those nodes (AC-B6).
+- **Diffing arbitrary refs / ranges / revisions**, or a general git-diff surface —
+  deliberately excluded by the allowlist security model (AC-B2).
+- **Response-size caps or server-side pagination of the diff/Raw payload**
+  beyond what responsiveness needs — E8 governs display, not the log; the
+  criterion is node/event count, not bytes.
+- **Rate limiting / auth / non-loopback hardening** of the new endpoint — the GUI
+  binds to loopback per GUI-SPEC §8; unchanged here.
+- **Caching or precomputation of diffs**; **filesystem-watch** instead of polling.
+- **Timeline, artifacts tab, i18n / language switch, `adw runs list|prune`,
+  retention, gzip, `trace:` config key** — assigned to later runs by the scope
+  ceiling.

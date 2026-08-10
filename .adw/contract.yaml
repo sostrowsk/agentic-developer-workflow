@@ -1,34 +1,38 @@
 openapi: 3.1.0
 info:
-  title: ADW Read-only GUI — Lauf 5 (GUI polish)
-  version: 5.0.0
+  title: ADW Read-only GUI — Run detail: Tools responsiveness, Diff tab, Raw tab
+  version: 6.0.0
   description: |
-    Minimal external contract for the single backend workstream of GUI-polish
-    run 5. The GUI web app already exists (built in run 4b) and stays a strictly
-    read-only inspector. This run corrects seven narrowly scoped issues (A–G) in
-    the web layer only.
+    Minimal external contract for the single backend workstream of this run. The
+    read-only GUI web app already exists; this run completes the run-detail view
+    with three tasks (A/B/C) plus a language fix (D). Authoritative on conflict:
+    docs/GUI-SPEC.md, especially §5, §7.2, §7.4, §8.
 
     Pinned here are ONLY the externally observable surfaces named in the issue's
-    contract note: (1) the corrected run-status semantics, (2) the presence of
-    the agent.run detail tabs, (3) the readability of tool-call tree entries,
-    (4) the behavior for runs without an event log, and (5) the assurance that
-    selecting a node does not block the UI (including that any HTTP route added
-    for it is read-only). NOT pinned: internal helper signatures, the span-tree
-    serialization mechanics, template/CSS/JS file structure and markup, the
-    concrete rendering/loading mechanism for task B (including whether a new
-    route exists and its exact path), and the display formatting details of
-    tasks E/F (spec acceptance criteria cover those; they are not contract
-    surface). Implementation and scope guardrails — the named source files that
-    must remain unchanged, dependency/tooling constraints, and the filesystem
-    containment / RUN_ID_RE / slug enforcement mechanisms — live in the spec and
-    plan, not in this contract. Field lists are minimum requirements; JSON
-    objects may carry additional fields.
+    contract note:
+      (1) the new diff endpoint — route, parameters, exact JSON response schema,
+          and its rejection of foreign/unknown/malformed refs (400/404, never
+          5xx);
+      (2) the presence and observable behavior of the Diff tab (bracketed nodes)
+          and the Raw tab (run level), including the deterministic snapshot
+          pairing rule that decides which pair a Diff tab requests;
+      (3) the responsiveness assurance, stated as a node/event-count criterion.
 
-    The full observable surface pinned in run 4b (the `/`, `/runs/{repo}/{run_id}`,
-    `/api/runs`, `/api/runs/{repo}/{run_id}`, `/api/runs/{repo}/{run_id}/events`
-    and `/api/runs/{repo}/{run_id}/stream` routes, their response/SSE formats, the
-    CLI, the packaging boundary and the read-only invariants) remains in force
-    unchanged except where corrected below.
+    NOT pinned: internal helper signatures, the span-tree serialization
+    mechanics, template/CSS/JS file structure and markup, and the concrete
+    rendering/paging/windowing/virtualization mechanism (an implementation
+    choice). Implementation and scope guardrails — the named source files that
+    must remain unchanged, dependency/tooling constraints, and the filesystem
+    containment / RUN_ID_RE / slug enforcement mechanisms — live in the spec
+    and plan, not here. Field lists are minimum requirements unless marked
+    exact; JSON objects may carry additional fields except where an exact shape
+    is pinned (the diff response).
+
+    The full observable surface pinned by earlier runs (the `/`,
+    `/runs/{repo}/{run_id}`, `/api/runs`, `/api/runs/{repo}/{run_id}`,
+    `/api/runs/{repo}/{run_id}/events` and `/api/runs/{repo}/{run_id}/stream`
+    routes, their response/SSE formats, the CLI, the packaging boundary and the
+    read-only invariants) remains in force unchanged except as extended below.
 
 servers:
   - url: http://127.0.0.1:8765
@@ -42,107 +46,286 @@ x-adw-scope:
     - json
     - template_behavior
   invariants:
-    - "The GUI exposes no write or control route and stays strictly read-only."
-    - "No route is added beyond what task B strictly requires. The plan's
-       preferred mechanism reuses the existing read-only events route, in which
-       case NO new route exists. If one is added after all, it is read-only and
-       never returns 5xx on the pinned error cases (unknown slug, invalid
-       run_id, absent run_id). The exact route path is not contractual."
+    - "The GUI exposes no write or control route and stays strictly read-only.
+       The diff endpoint runs `git diff` — reading only: no worktree switch, no
+       ref created, updated or deleted."
+    - "The diff endpoint never returns 5xx on the pinned error cases (foreign,
+       unknown, missing or malformed `from`/`to`); it answers 400 or 404."
+    - "No event payload, tool entry, raw event or patch line is discarded merely
+       to keep the DOM bounded (E8 governs the display, not the log); unknown
+       event types remain renderable."
 
-# --- (A) Corrected run-status semantics -----------------------------------------
-x-adw-status-semantics:
-  applies_to:
-    - "GET /api/runs and GET / (run list)"
-    - "GET /api/runs/{repo}/{run_id} and GET /runs/{repo}/{run_id} (run detail)"
+paths:
+  /api/runs/{repo}/{run_id}/diff:
+    get:
+      operationId: getRunSnapshotDiff
+      summary: "(B) Step diff between two snapshot refs of THIS run"
+      description: |
+        Computes the diff between two snapshot refs of this run with `git diff`
+        and returns the per-file +/- counts and the unified patch. Both `from`
+        and `to` are accepted ONLY if the exact ref name appears in a `snapshot`
+        event of exactly this run (`refs/adw/<run_id>/<seq>`); validation is
+        against the ref list drawn from this run's event log — a pattern match
+        alone is insufficient.
+      parameters:
+        - name: repo
+          in: path
+          required: true
+          description: Existing registered repository slug.
+          schema:
+            type: string
+            minLength: 1
+        - name: run_id
+          in: path
+          required: true
+          description: Existing run identifier resolved under the repository.
+          schema:
+            type: string
+            minLength: 1
+        - name: from
+          in: query
+          required: true
+          description: |
+            Exact ref name present in a snapshot event of this run. It has the
+            snapshot form refs/adw/<run_id>/<seq>, but matching that form
+            without event-log membership is insufficient.
+          schema:
+            type: string
+            minLength: 1
+        - name: to
+          in: query
+          required: true
+          description: |
+            Exact ref name present in a snapshot event of this run. It has the
+            snapshot form refs/adw/<run_id>/<seq>, but matching that form
+            without event-log membership is insufficient.
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: |
+            The diff between the two snapshot refs, including the empty-diff
+            case. Exact shape: `files` holds one object per changed file, in
+            the order git reports them; `patch` is the unified patch as a
+            single string. An empty diff (no changes between the two refs) is
+            200 with {"files": [], "patch": ""}.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiffResponse"
+              examples:
+                text:
+                  value:
+                    files:
+                      - path: src/example.py
+                        additions: 3
+                        deletions: 1
+                    patch: "diff --git a/src/example.py b/src/example.py\n..."
+                binary:
+                  value:
+                    files:
+                      - path: assets/example.bin
+                        additions: null
+                        deletions: null
+                    patch: "diff --git a/assets/example.bin b/assets/example.bin\n..."
+                empty:
+                  value:
+                    files: []
+                    patch: ""
+        "400":
+          description: |
+            A `from`/`to` parameter is missing, empty, malformed, option-like,
+            or a revision/range expression; alternatively the implementation
+            uses 400 for a ref absent from this run's snapshot-event allowlist.
+            Never 5xx.
+        "404":
+          description: |
+            Unknown repo slug, invalid run_id, absent run, or — at the
+            endpoint's choice — a rejected ref. Never 5xx.
+      x-adw-validation:
+        source: "Snapshot events in exactly the requested run's event log."
+        both_refs_must_be_allowlisted: true
+        pattern_match_alone_sufficient: false
+        rejected_inputs:
+          - missing parameters
+          - malformed parameters
+          - arbitrary git refs or revisions
+          - revision ranges
+          - option-like strings
+          - refs from another run
+          - refs absent from the requested run's snapshot events
+        rejected_statuses: [400, 404]
+        rejected_never_5xx: true
+
+components:
+  schemas:
+    DiffResponse:
+      type: object
+      description: "Exact shape asserted by endpoint tests (AC-B1)."
+      additionalProperties: false
+      required: [files, patch]
+      properties:
+        files:
+          type: array
+          description: One entry per changed file, in the order reported by git.
+          items:
+            $ref: "#/components/schemas/DiffFile"
+        patch:
+          type: string
+          description: "Unified git diff text as one string; \"\" for no changes."
+    DiffFile:
+      type: object
+      additionalProperties: false
+      required: [path, additions, deletions]
+      properties:
+        path:
+          type: string
+          description: Repository-relative path reported by git.
+        additions:
+          description: |
+            Non-negative line count, or null exactly for a binary file
+            (mirroring `git diff --numstat`). Endpoint tests assert the binary
+            case with null counts.
+          oneOf:
+            - type: integer
+              minimum: 0
+            - type: "null"
+        deletions:
+          description: |
+            Non-negative line count, or null exactly for a binary file
+            (mirroring `git diff --numstat`). Endpoint tests assert the binary
+            case with null counts.
+          oneOf:
+            - type: integer
+              minimum: 0
+            - type: "null"
+
+# --- (B) Snapshot pairing rule for the Diff tab ---------------------------------
+x-adw-snapshot-pairing:
+  applies_to: Detail-pane nodes.
+  event_order_key: seq
   rules:
-    - "For a run whose events.jsonl contains several `run` spans, the reported
-       status is that of the LAST `run` span in log order — identical in the run
-       list and the run detail. Earlier finished or waiting `run` spans never
-       override the visible status."
-    - "If the last `run` span has no `end` record, the run is reported as
-       `running`."
-    - "Example: three `run` spans with the last one `status=done` is reported as
-       `done`, not `awaiting_approval`, in list and detail alike."
+    - "A node's first event is its lowest event seq; its last event is its
+       highest event seq."
+    - "AC-B5: the `from` boundary is the `snapshot` event of the node's lane
+       with the highest seq at or before the node's first event; the `to`
+       boundary is the `snapshot` event of the same lane with the lowest seq at
+       or after the node's last event."
+    - "Snapshot events of OTHER lanes are never used. Because seq is unique,
+       the pair is deterministic."
+    - "AC-B8: if either same-lane boundary is absent, the node is not bracketed
+       and AC-B6 applies."
+  request_behavior:
+    - "Each bracketed node's Diff tab requests exactly its own derived
+       from/to pair — also with multiple bracketed nodes in one lane."
+  non_bracketed_behavior:
+    oneOf:
+      - The Diff tab is absent.
+      - The Diff tab clearly states that no snapshot exists for this step.
+    forbidden:
+      - unexplained empty area
+      - synthetic nearest-snapshot pair
+      - error caused solely by the missing bracket
 
-# --- (G) Runs without an event log ----------------------------------------------
-x-adw-runs-without-log:
-  rules:
-    - "A run with state.json but no events.jsonl appears in the run list (GET
-       /api/runs and GET /) with the metadata available from its state; values
-       not derivable from the state stay empty."
-    - "Such a run carries a clear indication that no trace exists; how this
-       indication is embedded (field name / markup) is not contractual."
-    - "Opening the detail of such a run (GET /runs/{repo}/{run_id} and GET
-       /api/runs/{repo}/{run_id}) never produces an error; the existing events
-       surface answers for such a valid run without a server error (empty
-       event list)."
+# --- (B/C/A) Observable template behavior ---------------------------------------
+x-adw-template-behavior:
+  diff:
+    scope: node detail
+    bracketed_nodes:
+      tab_label: Diff
+      applies_to: "Nodes bracketed by two snapshots (build-lane agent runs,
+        gate iterations, the RED stage)."
+      content:
+        - Changed-file list in response order with +/- counts per file.
+        - Binary counts displayed without inventing numeric values.
+        - Unified patch below the file list.
+      large_input:
+        minimum_changed_files: 100
+        minimum_changed_lines: 1500
+        visible_response_seconds_maximum: 2
+        full_patch_reachable: true
+    unbracketed_nodes:
+      behavior:
+        - Diff tab absent
+        - Clear no-snapshot state
+  raw:
+    scope: run
+    tab_label: Raw
+    content:
+      - Complete event log as a list.
+      - Unknown event types rendered generically rather than dropped.
+      - Reader-reported seq gaps visible in this tab.
+      - Reader-reported broken lines visible in this tab.
+    filters:
+      type:
+        required: true
+      payload_free_text:
+        required: true
+    large_input:
+      minimum_events: 3000
+      tab_visible_response_seconds_maximum: 2
+      filter_visible_response_seconds_maximum: 2
+      every_matching_event_reachable: true
+      full_payload_reachable: true
+  tools:
+    scope: agent.run node
+    tab_label: Tools
+    large_input:
+      minimum_entries: 1500
+      entries_include:
+        - agent.tool.call
+        - agent.tool.result
+      visible_response_seconds_maximum: 2
+      every_entry_reachable: true
+      full_content_reachable: true
+      all_entries_need_not_be_in_dom_at_once: true
+  trace_tree:
+    large_input:
+      minimum_tool_entries: 1500
+      visible_response_seconds_maximum: 2
+      every_entry_reachable: true
+      full_content_reachable: true
+      all_entries_need_not_be_in_dom_at_once: true
+  language:
+    run_detail_language: English
+    required_label:
+      agent_answer_tab: Answer
+    forbidden_label:
+      - Antwort
 
-# --- (B) Selecting a node does not block the UI ---------------------------------
-x-adw-detail-responsiveness:
-  guarantee:
-    - "Selecting an agent.run node keeps the UI usable — even for an agent.run
-       with very many and very large tool results. The manual measurement
-       (click on the agent.run node, immediately followed by a tab switch, until
-       the chosen tab is visibly active and shows content) is at most 2 seconds,
-       verified per the documented manual browser check (not automated — an
-       automated browser / performance harness is deferred)."
-    - "The user can reach every full content — the full prompt, the full answer,
-       every tool-call input and every tool result; not necessarily immediately
-       and all at once, but reachable."
+# --- (A/B/C) Responsiveness as a node/event-count criterion ---------------------
+x-adw-responsiveness:
+  visible_response_definition: "The selected tab, tree or filter shows content
+    the user can act on; not all entries need to be in the DOM at once."
+  measurement:
+    starts: User click on the node, tab, or filter.
+    ends: The defined visible response appears.
+  maximum_seconds: 2
+  mechanism_not_pinned:
+    - windowed rendering
+    - paging
+    - virtualization
+    - lazy rendering
   notes:
-    - "The concrete mechanism (truncate/collapse in the display, section
-       loading, render only the visible slice, or receiving the data while
-       avoiding synchronous DOM materialization) is an implementation decision
-       and not contractual; the spec's acceptance criteria define what the
-       automated tests must show for the chosen mechanism."
-    - "Trimming / collapsing / section-loading in the DISPLAY is explicitly
+    - "Trimming / collapsing / paged loading in the DISPLAY is explicitly
        permitted (spec E8); it is not a violation of the log's 'no payload
        truncation' rule."
 
-# --- Observable template behavior corrected by this run -------------------------
-x-adw-template-behavior:
-  run_detail:
-    detail_pane:
-      agent.run:
-        tabs:
-          - Prompt
-          - Antwort
-          - Tools
-        notes:
-          - "(D) Exactly these three tabs, labelled per spec D1, presented as
-             switchable tabs (exactly one visible/active at a time) rather than
-             stacked sections. No Diff tab in this run (and no
-             Raw/Artifacts/Timeline tab either)."
-          - "Prompt: the full task string including the system append."
-          - "Antwort: the final text plus intermediate assistant messages."
-          - "Tools: chronological tool calls with the readable labels below;
-             full input and full result remain reachable via the task-B
-             mechanism."
-    trace_tree_tool_entries:
-      # (C) Readability of tool-call / tool-result entries in the trace tree.
-      agent.tool.call:
-        - "Shows the tool name and the tool-specific main argument from the
-           payload. Field priority for the named cases: Read -> file path,
-           Bash -> command line (may be shortened), Grep -> search pattern (e.g.
-           'Read models.py', 'Bash pytest -x -q', 'Grep RUN_ID_RE')."
-        - "For other tools: tool name plus a main argument when one is
-           unambiguously identifiable in the payload, otherwise the tool name
-           alone. Nothing beyond the payload content is required."
-      agent.tool.result:
-        - "Shows its outcome compactly (error / success; for Bash the exit code
-           when present in the payload)."
-      fallbacks:
-        - "Nothing is invented. If the tool NAME is missing, the entry keeps the
-           unchanged type name (agent.tool.call / agent.tool.result)."
-        - "If the tool name is present but the main argument is missing, only the
-           tool name is shown — no substitute value."
-        - "If a result lacks its outcome fields, it keeps the type name."
-  not_pinned:
-    - "Template/CSS/JS file structure and markup details."
-    - "The concrete rendering / loading mechanism for task B, including whether
-       a new read-only route exists and its exact path."
-    - "How the 'no trace' indication and the readable tool labels are embedded
-       beyond the observable behavior described above."
-    - "The display formatting of durations, costs, timestamps and the overflow
-       behavior (tasks E/F) — covered by spec acceptance criteria, not pinned
-       as contract surface."
+not_pinned:
+  - "Internal helper signatures and the span-tree serialization mechanics."
+  - "The git invocation and execution mechanics (subprocess safety, timeout,
+     environment, hooks configuration, execution order relative to validation) —
+     required by the spec (AC-B2/B4) and enforced via plan tests, not contract
+     surface."
+  - "Template/CSS/JS file structure and markup details."
+  - "The concrete rendering / paging / windowing / virtualization mechanism for
+     tasks A, B7 and C4."
+  - "How the 'no snapshot for this step' indication (AC-B6) and the Raw-tab
+     filters/problem surfacing are embedded beyond the observable behavior
+     pinned above."
+  - "Whether and how any diff highlighting is rendered — the asset constraint
+     (E5, own means only) is a spec/plan guardrail, not contract surface."
+  - "How the responsiveness thresholds are evidenced (manual check procedure,
+     automated-test strategy, tooling constraints) — verification method lives
+     in the spec and plan."
