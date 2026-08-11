@@ -1,199 +1,268 @@
-# Specification — Run detail: Tools responsiveness, Diff tab, Raw tab
+# Spec — Timeline tab, Artifacts tab, measurable response time
 
-Source: `.adw/issue.md`. Authoritative reference on conflict: `docs/GUI-SPEC.md`,
-especially §5 (snapshots and step diffs), §7.2 (views), §7.4 (API), §8
-(security). This closes the last of the four debug questions — "what did this
-step change in the code?" — and adds the always-works fallback view.
+Scope source: `.adw/issue.md` (tasks A, B, C). Governing document on any
+conflict: `docs/GUI-SPEC.md`, in particular §7.2 (Views), §7.4 (API), §8
+(Security), §9 (Performance), §12 (Open points). The run-level tabs completed
+already are `Trace` and `Raw`; this run adds the two remaining tabs of
+GUI-SPEC §11 step 10 (`Timeline`, `Artifacts`) and makes the "reaction ≤ 2 s"
+promise checkable.
+
+The GUI stays strictly read-only. No production module outside the GUI viewer
+is touched; `adw/events.py`, `adw/snapshots.py`, `adw/gui/reader.py`,
+`adw/gui/model.py` and the orchestrator stay as they are (issue non-goals, E1,
+E2). The UI is English throughout (E9). Rendering uses own means only — vanilla
+JS, own CSS, system fonts, inline-generated SVG where needed; no CDN, no
+third-party frontend asset, no charting and no Markdown library (E5, E10).
 
 ## Goal
 
-Complete the run-detail view of `adw gui` so that:
+A person inspecting an ADW run in `adw gui` can, without reading source code:
 
-1. Selecting an `agent.run` node with very many tool entries and switching to the
-   **Tools** tab no longer blocks the interface — the bottleneck is DOM node
-   count, not payload size (task A, carried over from the polish run).
-2. A **Diff** endpoint and a **Diff** tab answer "what did this step change?"
-   for nodes bracketed by two snapshots, using only refs that provably belong to
-   this run (task B).
-3. A run-level **Raw** tab shows the event log as a filterable list — the
-   fallback that works even for event types the GUI does not model (task C).
-
-Product behavior only: observable interface, response format, data states. The
-mechanism (windowed rendering, paging, virtualization) is an implementation
-choice and is deliberately not pinned.
+1. see **where a run's time goes** — which strand was active and which was
+   merely waiting (CI polling, gate runtime) — on a run-level `Timeline` tab,
+   and jump from any bar to the matching node in the `Trace` tab;
+2. **read every artifact** the run produced — including the two dual-authoring
+   drafts of each artifact side by side against the synthesis — on a run-level
+   `Artifacts` tab, over a route that only ever serves files from *this* run's
+   directory through a fixed name whitelist;
+3. **prove the ≤ 2 s reaction promise** for node selection, tab switching and
+   artifact opening, by reading a named `performance.measure()` in the browser
+   — no browser automation, following a short written guide in the repo.
 
 ## Scope
 
-- Run-detail server routes and templates/JS/CSS under `adw/gui/` (app layer).
-- The new diff endpoint `GET /api/runs/{repo}/{run_id}/diff?from=REF&to=REF`.
-- The Diff tab in the detail pane and the Raw tab at run level.
-- Windowed/lazy rendering of the Tools tab, the trace tree, the Diff patch and
-  the Raw list so that large inputs stay responsive.
-- Fixtures needed to exercise the node-count and event-count criteria.
-- Renaming the tab "Antwort" back to "Answer" so the UI is uniformly English (E9).
+- Two further run-level tabs so the run detail view carries the full §7.2 set:
+  `Trace` (default) · `Timeline` · `Artifacts` · `Raw`.
+- **Timeline** derives its lanes and bars from the already-loaded event log of
+  the run (the same events `Trace` uses); it introduces no new reader, no
+  change to `model.py`.
+- **Artifacts** is served by a new read-only artifact-content route under the
+  existing run-detail API surface (GUI-SPEC §7.4:
+  `GET /api/runs/{repo}/{run_id}/artifacts/{name}`), guarded by the same
+  containment discipline the diff/events routes already use.
+- Client-side `performance.mark()`/`performance.measure()` instrumentation of
+  node selection, tab switching and artifact opening, with stable documented
+  names and defined completion semantics, plus a short guide document in the
+  repo.
+
+Artifact name whitelist (top-level files in the run directory):
+`issue.md`, `spec.md`, `plan.md`, `contract.yaml`, `escalation.md`,
+`followups.md`, `spec-summary.md`, `plan-summary.md`; plus the `drafts/`
+directory holding the per-author drafts `<stem>.claude.<ext>` and
+`<stem>.codex.<ext>` of a whitelisted artifact (e.g. `spec.claude.md`,
+`spec.codex.md`, `plan.claude.md`, `contract.codex.yaml`).
 
 ## Non-goals
 
-Explicit scope ceiling from the issue — NOT built in this run:
+Explicit ceilings from the issue and the pre-decided points — not built in this
+run, and a review finding that reintroduces one is rejected with a reason
+(Deferred valve):
 
-- No timeline, no artifacts tab (next run).
-- No i18n, no language switch, no `adw runs list`, no `adw runs prune`, no
-  retention, no gzip, no `trace:` config key (run after next).
+- No i18n, no language switch; the UI stays English until i18n (E9).
+- No `adw runs list`, no `adw runs prune`, no retention, no gzip, no `trace:`
+  config key.
 - No change to `adw/events.py`, `adw/snapshots.py`, `adw/gui/reader.py`,
-  `adw/gui/model.py`, or the orchestrator. Orphan spans (E2) and the `run` span
-  boundary (E1) stay as they are.
-- No write path: the GUI stays strictly read-only. The diff endpoint runs
-  `git diff` — reading only, no worktree switch, no ref set or delete.
-- No new runtime dependencies, no third-party frontend asset (E5): vanilla JS,
-  own CSS, system fonts.
-- No redesign of the existing views.
-- No requirement on how the highlighting looks; simple is fine (E5).
+  `adw/gui/model.py` or the orchestrator. Orphan spans and the `run`-span
+  boundary stay as they are; any repair is on read, in the finished model
+  (E1, E2).
+- No write path anywhere; the GUI stays strictly read-only.
+- No new runtime dependency, no third-party frontend asset, no charting library
+  and no Markdown library. Artifacts render as faithful monospace text; the
+  §7.2 phrase "rendered as Markdown" is met that way for this run (E5, E10).
+- No automated browser measurement; no Playwright, no Selenium.
+- No redesign of the existing `Trace`/`Raw` views.
 
 ## Acceptance criteria
 
-Each criterion traces to a concrete task in the issue and is externally
-observable. The interface surface pinned by the contract is the diff route
-(parameters, response format, rejection of foreign refs), the presence and
-behavior of the Diff and Raw tabs, and the responsiveness promise stated as a
-node/event-count criterion. Internal helper signatures, template/CSS/JS
-structure and the concrete rendering mechanism are NOT pinned.
+### A — Timeline tab
 
-### A — Tools tab and trace tree responsive by node count
+- **A1.** The run detail view offers a run-level `Timeline` tab in the §7.2 tab
+  set `Trace` (default) · `Timeline` · `Artifacts` · `Raw`. Selecting it shows
+  horizontal swimlanes with time running left to right; `Trace` remains the
+  default tab.
+- **A2.** There is one lane per strand present in the run: orchestrator, spec,
+  plan, each build lane, codex, CI. A strand absent from a run contributes no
+  lane and is never an error.
+- **A3.** Active sections and waiting sections are visually distinguishable.
+  Waiting covers at least CI polling and gate runtime — the intervals where
+  time passes without anyone working.
+- **A4.** The timeline header shows total duration, total cost, and tokens per
+  model for the run. A value the log does not carry (e.g. cost/tokens under a
+  dry run, where mocks produce no `usage`) renders empty, never a false `0`
+  (GUI-SPEC §12).
+- **A5.** Clicking a bar navigates to the corresponding node in the `Trace` tab
+  (switches to `Trace` and reveals/selects that node).
+- **A6.** A span still running has its bar drawn to the current right edge
+  rather than omitted; the timeline renders for a live run and a finished run
+  through the same path.
+- **A7.** The timeline is drawn with own means only — CSS and, where needed,
+  inline-generated SVG. No charting library and no third-party asset is
+  introduced (E5).
+- **A8.** A run with no event log shows the timeline empty with a clear "no
+  trace" indication, never a 5xx (parallel to the existing no-trace handling).
 
-- **AC-A1** — An `agent.run` node with at least **1500 tool entries** (calls and
-  results combined, small contents) responds visibly within **2 seconds** when
-  the Tools tab is selected. "Visibly responds" means the tab shows content the
-  user can act on; not all entries need to be in the DOM at once.
-- **AC-A2** — The user can reach **every** tool entry of such a node (e.g. by
-  paging or scrolling that loads further entries); full content of each entry
-  remains reachable (E8 — collapsing/paging the display is allowed, no payload
-  is dropped).
-- **AC-A3** — The trace tree on the left, which lists the same entries, holds the
-  same responsiveness under the same input.
+### B — Artifacts tab
 
-### B — Diff endpoint and Diff tab
+- **B1.** The run detail view offers a run-level `Artifacts` tab listing the
+  whitelisted artifacts of the run: `issue.md`, `spec.md`, `plan.md`,
+  `contract.yaml`, `escalation.md`, `followups.md`, the summaries
+  (`spec-summary.md`, `plan-summary.md`), and the dual-authoring drafts.
+- **B2.** For an artifact that was dual-authored, the two drafts
+  (`<stem>.claude.<ext>`, `<stem>.codex.<ext>`) are presented against the
+  synthesis so a reader can compare what each author contributed. A missing
+  draft — including one whose author failed and left only a failure marker
+  (e.g. `spec.codex.FAILED`) instead of the draft file — is shown as missing,
+  not an error.
+- **B3.** An absent artifact (e.g. `escalation.md` on a run that did not
+  escalate, or a missing draft) is marked as missing; it is never an error and
+  never a 5xx.
+- **B4.** Artifact content is served by a read-only route
+  (`GET /api/runs/{repo}/{run_id}/artifacts/{name}`, GUI-SPEC §7.4) that
+  returns only files from *this* run's directory. `{name}` is a **single path
+  segment** and is never treated as a filesystem path; it is resolved through
+  a deterministic lookup against the fixed whitelist:
+  - a top-level whitelist name (e.g. `spec.md`) maps to that file in the run
+    directory;
+  - a draft name of the exact form `<stem>.<author>.<ext>` with
+    `author ∈ {claude, codex}` and `<stem>.<ext>` in the top-level whitelist
+    (e.g. `spec.claude.md`) maps to `drafts/<name>` in the run directory —
+    drafts are addressed by their **flat filename**, never by a
+    `drafts/…`-prefixed name;
+  - every other name is unknown.
+- **B5.** An unknown name yields **404**, never 5xx, and never a file read
+  outside the run directory — consistent with the containment used by the
+  existing diff/events routes (GUI-SPEC §8). Endpoint tests cover at least:
+  - `GET …/artifacts/spec.claude.md` → 200, serving `drafts/spec.claude.md`;
+  - `GET …/artifacts/drafts/spec.claude.md` and the encoded-separator form
+    `GET …/artifacts/drafts%2Fspec.claude.md` → 404;
+  - traversal attempts (`..%2F…`, absolute path, any raw or encoded `/` or
+    `\` in the name) → 404 without touching the filesystem;
+  - a whitelisted name whose file is a symlink pointing out of the run
+    directory → 404, the target is never read;
+  - an unknown flat name (e.g. `spec.gpt.md`, `state.json`) → 404.
+- **B6.** Only files reachable through the B4 mapping are served. Any other
+  `drafts/` entry — including failure markers like `spec.codex.FAILED` — has
+  no external name and is never served; the corresponding draft counts as
+  missing per B2/B3.
+- **B7.** Content renders as faithful monospace text (E10). Opening an
+  artifact inserts only a **bounded initial portion** into the DOM — bounded
+  meaning its size does not grow with the artifact — and the full content
+  stays reachable through explicit further loading or bounded incremental
+  steps (E8: paging/collapsing the display is allowed, no content is
+  dropped). The test fixtures include a large artifact of at least **2 MB
+  and 20,000 lines**; automated tests verify the route serves its full
+  content and the initial render is bounded. That opening this fixture does
+  not block the interface is proven via the `adw:artifact` measure (C2):
+  read per the guide, it satisfies the ≤ 2 s promise — a documented manual
+  check, not a browser-automated one.
 
-- **AC-B1** — `GET /api/runs/{repo}/{run_id}/diff?from=REF&to=REF` returns, for
-  two snapshot refs of this run, HTTP 200 with a JSON object of exactly this
-  shape:
+### C — Measurable response time
 
-  ```json
-  {
-    "files": [{"path": "<repo-relative path>", "additions": 0, "deletions": 0}],
-    "patch": "<unified git diff text>"
-  }
-  ```
-
-  `files` holds one object per changed file, in the order git reports them;
-  `path` is a string, `additions` and `deletions` are each a **non-negative
-  integer or `null`** — `null` exactly for binary files, mirroring
-  `git diff --numstat`. `patch` is the unified patch as a single string. An
-  empty diff (no changes between the two refs) is HTTP 200 with
-  `{"files": [], "patch": ""}`. Endpoint tests assert this exact schema,
-  including one case with a binary changed file and its `null` counts.
-- **AC-B2** (security, non-negotiable) — Both `from` and `to` are accepted
-  **only** if the exact ref name appears in a `snapshot` event of **exactly this
-  run** (`refs/adw/<run_id>/<seq>`). Validation is against the ref list drawn
-  from this run's event log, not merely a pattern match. Any ref not in that
-  list — arbitrary git refs, revisions, ranges, option-like strings, refs of
-  another run — is rejected with **400 or 404**, never a 5xx, and **without
-  executing git**.
-- **AC-B3** — A missing or malformed `from`/`to` parameter yields **400 or 404**,
-  never 5xx.
-- **AC-B4** — When the endpoint does run git, it runs it like the orchestrator:
-  `core.hooksPath=/dev/null`, `safe_env()`, a timeout, no shell. It reads only —
-  no worktree switch, no ref created, updated or deleted.
-- **AC-B5** — The detail pane shows a **Diff** tab for nodes bracketed by two
-  snapshots (build-lane agent runs, gate iterations, the RED stage). The
-  bracketing pair is determined observably from this run's event log: `from` is
-  the `snapshot` event of the node's lane with the **highest `seq` at or
-  before** the node's first event; `to` is the `snapshot` event of the same
-  lane with the **lowest `seq` at or after** the node's last event. Snapshot
-  events of other lanes are never used; because `seq` is unique, the rule is
-  deterministic. The tab shows the per-file list with +/- counts and, below
-  it, the patch. Any highlighting uses own means only (no third-party asset).
-- **AC-B6** — A node **not** bracketed by two snapshots (authoring and review
-  agents, phases, rounds) either has **no Diff tab** or a Diff tab that states
-  clearly that no snapshot exists for this step. No error, no unexplained empty
-  area.
-- **AC-B7** — A large patch does not block the interface: against a fixture
-  diff with at least **100 changed files** and at least **1500 changed lines**
-  in total, the Diff tab responds visibly within **2 seconds** (same threshold
-  and meaning as AC-A1). Windowed/paged/lazy display is allowed; the full
-  patch stays reachable.
-- **AC-B8** — If either boundary of the AC-B5 rule does not exist (no same-lane
-  snapshot at or before the start, or at or after the end), the node counts as
-  not bracketed and AC-B6 applies. With multiple bracketed nodes in the same
-  lane (several agent runs, several gate iterations), each node's Diff tab
-  requests exactly its own pair per the AC-B5 rule — verified against a
-  fixture containing at least two bracketed nodes in one lane.
-
-### C — Raw tab
-
-- **AC-C1** — A run-level **Raw** tab shows the event log as a list, including
-  events of a `type` the GUI does not model (rendered generically, not dropped).
-- **AC-C2** — The Raw list can be filtered at least by `type` and by free-text
-  search over the payload.
-- **AC-C3** — Problems the reader reports for this log (`seq` gaps, broken lines)
-  are visible in the Raw tab, not only in the detail pane.
-- **AC-C4** — Against a fixture log with at least **3000 events**, selecting
-  the Raw tab and applying a filter each respond visibly within **2 seconds**
-  (same threshold and meaning as AC-A1). Not all events need to be in the DOM
-  at once; every event stays reachable.
-
-### D — Language consistency
-
-- **AC-D1** — The interface is uniformly English (E9). The tab previously labeled
-  "Antwort" reads **"Answer"**; no mixed-language labels remain in the run-detail
-  view.
+- **C1.** For each instrumented interaction the client sets a start
+  `performance.mark()` at the triggering input event and an end mark **only
+  once the interaction is observably complete**: the resulting content has
+  been inserted into the DOM **and the browser has painted it**. Because a
+  `requestAnimationFrame` callback runs *before* the associated paint, the
+  end mark is recorded in a task scheduled *from within* a
+  `requestAnimationFrame` callback (e.g. rAF → `setTimeout(0)`), which runs
+  after that paint — the same post-paint sequence for all three
+  interactions. Asynchronously loaded content counts toward the measure —
+  the sequence starts after the fetched content is rendered, not when the
+  request is issued; a loading indicator is not completion. Between the
+  marks a named `performance.measure()` is created, readable via
+  `performance.getEntriesByName(...)` and in the browser's Performance
+  panel.
+- **C2.** The mark and measure names are stable and documented. The pinned
+  names and their completion conditions (per C1) are:
+  - node selection: marks `adw:select:start` / `adw:select:end`, measure
+    `adw:select` — complete when the detail pane for the selected node is
+    rendered;
+  - tab switch: marks `adw:tab:start` / `adw:tab:end`, measure `adw:tab` —
+    complete when the target tab's content is rendered;
+  - artifact opening: marks `adw:artifact:start` / `adw:artifact:end`,
+    measure `adw:artifact` — complete when the artifact's bounded initial
+    portion (B7) is rendered.
+- **C3.** A short guide document in the repo describes the procedure: which
+  run and which node to pick (an `agent.run` node with a large payload — the
+  class of node that blocked for 30 s before — and the large fixture artifact
+  from B7), which measure name to read, the exact post-paint completion
+  sequence from C1, and the passing value (measure duration ≤ 2000 ms) — so a
+  person can verify the promise in about a minute rather than inferring from
+  a screenshot timeout. The guide also contains a short rapid-reselection
+  check confirming that clicking on while an interaction is still loading
+  yields no stale measure (C5).
+- **C4.** The measurement path adds no new dependency and no
+  browser-automation tool; it is vanilla `performance` API usage in the
+  existing client script.
+- **C5.** Interactions supersede each other (**latest-interaction-wins**):
+  each instrumented interaction starts a new generation, and when a newer
+  interaction begins before an older one completes, the older one is stale —
+  its late completion neither updates the DOM nor records an end mark or a
+  measure. A superseded interaction produces **no measure**; the public
+  measure names stay exactly as pinned in C2, and every recorded measure
+  pairs the start and end of one and the same generation. This is what makes
+  the readings reproducible in the very scenario that motivated task C:
+  clicking around while diagnosing a stall.
 
 ## Definition of Done
 
-1. Server-observable behavior — routes, the diff endpoint's exact JSON schema
-   (AC-B1) and its rejections (AC-B2/B3), the snapshot pairing (AC-B5/B8),
-   paged/windowed delivery and filters — is covered by tests against a fixture
-   log / temp repo via FastAPI `TestClient` (as the existing GUI tests do).
-2. The responsiveness thresholds (AC-A1/A3, AC-B7, AC-C4) are evidenced at the
-   browser level by a documented manual check against the named fixtures —
-   measurement starts with the click on the node, tab or filter and ends when
-   the visible reaction defined in AC-A1 appears — plus automated tests that
-   assert the observable effect of the chosen mechanism (e.g. the initial
-   delivery does not inline all entries; the union of paged responses contains
-   every entry, which also evidences AC-A2 reachability). No browser-automation
-   dependency is introduced.
-3. The fixtures embody the stated sizes: at least 1500 tool entries with small
-   contents (A), a diff with at least 100 files and 1500 changed lines (AC-B7),
-   a log with at least 3000 events (AC-C4), and a run with at least two
-   bracketed nodes in one lane (AC-B8).
-4. The diff endpoint's rejection of foreign/unknown/malformed refs (AC-B2/B3) is
-   tested, including that no git execution happens on rejection.
-5. The step diff between two real snapshot refs shows the correct patch and
-   correct per-file +/- counts in the exact AC-B1 schema (temp repo test).
-6. No change to `adw/events.py`, `adw/snapshots.py`, `adw/gui/reader.py`,
-   `adw/gui/model.py` or the orchestrator; the GUI remains read-only.
-7. No new runtime dependency and no third-party frontend asset are introduced.
-8. Real gates green (E3): `uv run ruff check .` and `uv run pytest -x -q`.
-   `flake8`, `isort` and `black` are not added to dependencies, configuration,
-   scripts or validation commands.
-9. Guideline (not a hard gate): roughly **18–25 new tests** across A, B and C.
+1. All acceptance criteria A1–A8, B1–B7, C1–C5 are met. Verification is split
+   explicitly, since browser automation is excluded:
+   - **Automated** (server/static, via `pytest`): route behavior, the B4 name
+     mapping and B5 rejection cases, tab presence in the rendered view,
+     bounded serving/rendering wiring for B7, the pinned mark/measure names,
+     the post-paint completion sequence (C1) and the supersession wiring (C5)
+     in the served client script. Source-text assertions attest wiring and
+     stable names only; they are not presented as proof of runtime behavior.
+   - **Documented manual checks** (a short checklist in the C3 guide): the
+     visual active/waiting distinction (A3), bar-click navigation to the
+     trace node (A5), the ≤ 2 s readings of `adw:select`, `adw:tab` and
+     `adw:artifact` against the fixtures named in the guide (C, B7), and the
+     rapid-reselection check for stale completions (C5).
+2. `Timeline` and `Artifacts` are reachable run-level tabs in the run detail
+   view; `Trace` stays the default and the existing `Trace`/`Raw` views are
+   unchanged in behavior.
+3. The artifact route serves only names resolvable through the B4 mapping;
+   unknown name, nested/encoded-separator, traversal and escaping-symlink
+   attempts return 404 and never read outside the run directory, verified
+   against the FastAPI `TestClient` with a fixture run directory (including
+   the large B7 artifact, drafts and a `*.FAILED` marker).
+4. The performance instrumentation carries the documented names, the C1
+   post-paint completion semantics (end mark in a task scheduled from a
+   `requestAnimationFrame` callback, after the paint) and the C5
+   latest-interaction-wins supersession; tests assert the served client
+   script contains the pinned names, instruments all three interactions and
+   carries the supersession wiring; the guide document is present in the
+   repo, names the same measures, the fixtures, the post-paint sequence and
+   the passing value, and contains the manual checklist from DoD 1.
+5. No new runtime dependency, no third-party frontend asset, no charting and
+   no Markdown library is added; the web stack stays the optional `adw[gui]`
+   extra (E5, E7, E10).
+6. Roughly 18–25 new tests across A, B and C (issue guideline).
+7. Real gates green: `uv run ruff check .` and `uv run pytest -x -q`.
+   (`flake8`, `isort`, `black` must not appear as dependency, config or
+   command — E3.)
 
 ## Deferred (deliberately not built)
 
-Hardening or extension ideas that are defensible but out of proportion to this
-run go here, not into acceptance criteria. Findings from review rounds that would
-re-introduce a deferred or pre-decided point are rejected with a reason, not
-implemented.
+Ideas that are defensible but out of proportion or explicitly ceilinged for
+this run go here, not into acceptance criteria. A review finding that asks for
+one of these is rejected with this rationale documented, not implemented.
 
-- **Diff for non-bracketed nodes** by synthesizing a nearest-snapshot pair — the
-  issue explicitly accepts "no snapshot for this step" for those nodes (AC-B6).
-- **Diffing arbitrary refs / ranges / revisions**, or a general git-diff surface —
-  deliberately excluded by the allowlist security model (AC-B2).
-- **Response-size caps or server-side pagination of the diff/Raw payload**
-  beyond what responsiveness needs — E8 governs display, not the log; the
-  criterion is node/event count, not bytes.
-- **Rate limiting / auth / non-loopback hardening** of the new endpoint — the GUI
-  binds to loopback per GUI-SPEC §8; unchanged here.
-- **Caching or precomputation of diffs**; **filesystem-watch** instead of polling.
-- **Timeline, artifacts tab, i18n / language switch, `adw runs list|prune`,
-  retention, gzip, `trace:` config key** — assigned to later runs by the scope
-  ceiling.
+- **Real Markdown rendering** of artifacts (a Markdown library). Faithful
+  monospace text meets §7.2 for spec/plan/contract files this run; a library
+  would be a new dependency of low value here (E10).
+- **Retention / run management**: `adw runs list`, `adw runs prune`, gzip,
+  the `trace:` config key — next run (issue ceiling).
+- **i18n / language switch** — until the dedicated i18n step (E9).
+- **Automated browser timing** (Playwright/Selenium) or any in-app latency
+  budget/alerting. The proof is a documented manual read of a `performance`
+  measure; automation is explicitly out (issue non-goal).
+- **Surfacing draft-failure details** (e.g. rendering the content of
+  `*.FAILED` marker files). The Artifacts tab marks the draft as missing;
+  diagnosing the failure belongs to the trace, not the artifact view.
+- **Cross-run or A/B timeline comparison** and cost/latency trends — needs a
+  corpus first (GUI-SPEC §2 non-goals).
+- **Emitter/model changes** to make the tree self-describing or to carry patch
+  text for the timeline — the boundary and orphan handling stay as they are
+  (E1, E2).
