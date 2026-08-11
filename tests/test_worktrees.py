@@ -1,10 +1,62 @@
 import socket
 import subprocess
+import threading
+import time
 
+import adw.worktrees as worktrees
 from adw.worktrees import create_lane_worktree, ports_for, remove_lane_worktree
 from tests.conftest import git
 
 RUN_ID = "ab12cd34"
+
+
+def test_concurrent_lane_worktree_creation_is_serialized(target_repo, monkeypatch):
+    """Regression (CI flake): run_build_phase fans out create_lane_worktree across
+    lanes via a ThreadPoolExecutor. Concurrent ``git worktree add`` on the same
+    repo races on ``.git/worktrees`` metadata (e.g. 'failed to read
+    .git/worktrees/frontend/commondir'), so the worktree mutations must be
+    serialized. Two lanes created from two threads must not run their
+    ``git worktree add`` intervals overlapping, and both must succeed."""
+    intervals = []
+    intervals_lock = threading.Lock()
+    real_effect = worktrees._git_effect
+
+    def timed_effect(repo, *args):
+        is_add = len(args) >= 2 and args[0] == "worktree" and args[1] == "add"
+        t_in = time.monotonic()
+        if is_add:
+            time.sleep(0.2)  # widen the window so an UNserialized add overlaps
+        result = real_effect(repo, *args)
+        if is_add:
+            with intervals_lock:
+                intervals.append((t_in, time.monotonic()))
+        return result
+
+    monkeypatch.setattr(worktrees, "_git_effect", timed_effect)
+
+    errors = []
+    start = threading.Barrier(2)
+
+    def make(lane):
+        try:
+            start.wait()
+            create_lane_worktree(target_repo, RUN_ID, lane, "staging")
+        except Exception as exc:  # noqa: BLE001 — surface any worktree error to the assert
+            errors.append((lane, exc))
+
+    threads = [threading.Thread(target=make, args=(lane,)) for lane in ("backend", "frontend")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, errors
+    assert len(intervals) == 2, intervals
+    (first_in, first_out), (second_in, second_out) = sorted(intervals)
+    # Serialized: the second `git worktree add` starts only after the first ends.
+    assert second_in >= first_out, f"worktree add intervals overlapped: {intervals}"
+    for lane in ("backend", "frontend"):
+        assert worktrees.lane_worktree_path(target_repo, RUN_ID, lane).is_dir()
 
 
 def test_worktree_is_created_on_lane_branch_from_base(target_repo):

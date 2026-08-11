@@ -3,6 +3,7 @@
 import shlex
 import socket
 import subprocess
+import threading
 from pathlib import Path
 
 from adw.config import Gate
@@ -11,6 +12,13 @@ from adw.gates import run_gates
 from adw.state import RUNS_RELPATH
 
 _GIT_TIMEOUT = 60
+
+# run_build_phase fans out create_lane_worktree across lanes in a ThreadPoolExecutor
+# (adw/phases.py). Concurrent `git worktree add`/`remove`/`prune` on the SAME repo
+# race on the shared .git/worktrees metadata and corrupt it (e.g. a half-written
+# .git/worktrees/<lane>/commondir another add then fails to read). git offers no
+# per-repo locking for these, so serialize every worktree mutation in-process.
+_WORKTREE_MUTATION_LOCK = threading.Lock()
 
 
 class WorktreeError(Exception):
@@ -78,35 +86,38 @@ def create_lane_worktree(repo: Path, run_id: str, lane: str, base_branch: str) -
     path = lane_worktree_path(repo, run_id, lane)
     branch = lane_branch(run_id, lane)
     ready = _ready_marker(path)
-    if _worktree_registered(repo, path):
-        if path.is_dir() and ready.exists():
-            current = _git(path, "rev-parse", "--abbrev-ref", "HEAD")
-            if current != branch:
-                raise WorktreeError(
-                    f"Worktree {path} steht auf '{current}' statt '{branch}' — "
-                    "Lane-Isolation verletzt, bitte manuell klären"
-                )
-            return path
-        # Ohne Ready-Marker ist der Worktree ein Rest eines fehlgeschlagenen
-        # add (z. B. Hook-Fail) oder auf Platte gelöscht: wegräumen und neu.
-        if path.is_dir():
-            # Doppeltes --force: auch gelockte Worktrees (abgebrochenes add
-            # hinterlässt "initializing"-Lock) sind unsere und müssen weg.
-            _git_effect(repo, "worktree", "remove", "--force", "--force", str(path))
-        _git_effect(repo, "worktree", "prune")
-    # Vor JEDEM add-Versuch einen evtl. veralteten Marker entfernen — er darf
-    # einen fehlschlagenden (Neu-)Aufbau nicht nachträglich adeln, auch wenn
-    # der alte Worktree außerhalb von uns entfernt wurde.
-    ready.unlink(missing_ok=True)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if _branch_exists(repo, branch):
-        # Resume-Fall: Lane-Branch existiert schon — auschecken statt -b.
-        _git_effect(repo, "worktree", "add", str(path), branch)
-    else:
-        _git_effect(repo, "worktree", "add", "-b", branch, str(path), base_branch)
-    # Marker erst NACH erfolgreichem add — nur vollständige Worktrees zählen.
-    ready.touch()
-    return path
+    # Serialize every worktree-metadata read/mutation for this repo: parallel lanes
+    # otherwise run `git worktree add` concurrently and corrupt .git/worktrees.
+    with _WORKTREE_MUTATION_LOCK:
+        if _worktree_registered(repo, path):
+            if path.is_dir() and ready.exists():
+                current = _git(path, "rev-parse", "--abbrev-ref", "HEAD")
+                if current != branch:
+                    raise WorktreeError(
+                        f"Worktree {path} steht auf '{current}' statt '{branch}' — "
+                        "Lane-Isolation verletzt, bitte manuell klären"
+                    )
+                return path
+            # Ohne Ready-Marker ist der Worktree ein Rest eines fehlgeschlagenen
+            # add (z. B. Hook-Fail) oder auf Platte gelöscht: wegräumen und neu.
+            if path.is_dir():
+                # Doppeltes --force: auch gelockte Worktrees (abgebrochenes add
+                # hinterlässt "initializing"-Lock) sind unsere und müssen weg.
+                _git_effect(repo, "worktree", "remove", "--force", "--force", str(path))
+            _git_effect(repo, "worktree", "prune")
+        # Vor JEDEM add-Versuch einen evtl. veralteten Marker entfernen — er darf
+        # einen fehlschlagenden (Neu-)Aufbau nicht nachträglich adeln, auch wenn
+        # der alte Worktree außerhalb von uns entfernt wurde.
+        ready.unlink(missing_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if _branch_exists(repo, branch):
+            # Resume-Fall: Lane-Branch existiert schon — auschecken statt -b.
+            _git_effect(repo, "worktree", "add", str(path), branch)
+        else:
+            _git_effect(repo, "worktree", "add", "-b", branch, str(path), base_branch)
+        # Marker erst NACH erfolgreichem add — nur vollständige Worktrees zählen.
+        ready.touch()
+        return path
 
 
 def _ready_marker(path: Path) -> Path:
@@ -118,13 +129,15 @@ def _ready_marker(path: Path) -> Path:
 def remove_lane_worktree(repo: Path, run_id: str, lane: str) -> None:
     repo = repo.resolve()
     path = lane_worktree_path(repo, run_id, lane)
-    _ready_marker(path).unlink(missing_ok=True)
-    if _worktree_registered(repo, path):
-        _git_effect(repo, "worktree", "remove", "--force", str(path))
-    # Existenz explizit prüfen statt lokalisierte stderr-Texte zu parsen —
-    # nur der verifizierte Schon-weg-Fall wird übersprungen.
-    if _branch_exists(repo, lane_branch(run_id, lane)):
-        _git_effect(repo, "branch", "-D", lane_branch(run_id, lane))
+    # Same shared .git/worktrees metadata as create → same serialization.
+    with _WORKTREE_MUTATION_LOCK:
+        _ready_marker(path).unlink(missing_ok=True)
+        if _worktree_registered(repo, path):
+            _git_effect(repo, "worktree", "remove", "--force", str(path))
+        # Existenz explizit prüfen statt lokalisierte stderr-Texte zu parsen —
+        # nur der verifizierte Schon-weg-Fall wird übersprungen.
+        if _branch_exists(repo, lane_branch(run_id, lane)):
+            _git_effect(repo, "branch", "-D", lane_branch(run_id, lane))
 
 
 def _branch_exists(repo: Path, branch: str) -> bool:
