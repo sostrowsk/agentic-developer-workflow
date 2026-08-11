@@ -113,8 +113,7 @@ def test_measurement_guide_document_is_present_and_complete():
     ]
     assert guides, "no guide document naming both adw:select and adw:tab measures"
 
-    text = guides[0].read_text(encoding="utf-8", errors="ignore").lower()
-    for token in (
+    required = (
         "getentriesbyname",       # how to read the measure
         "requestanimationframe",  # the post-paint completion sequence
         "settimeout",
@@ -123,5 +122,14 @@ def test_measurement_guide_document_is_present_and_complete():
         "checklist",              # the documented-manual checklist
         "waiting",                # A3 active/waiting distinction
         "bar",                    # A5 bar-click navigation
-    ):
-        assert token in text, token
+    )
+    # Any one document must be complete -- other files (handover notes, changelogs)
+    # may mention the measure names in passing without being the guide.
+    missing = {}
+    for guide in guides:
+        text = guide.read_text(encoding="utf-8", errors="ignore").lower()
+        missing[guide] = [t for t in required if t not in text]
+    assert any(not gaps for gaps in missing.values()), (
+        "no complete guide document; closest candidates are missing: "
+        + ", ".join(f"{g.name}: {gaps}" for g, gaps in missing.items())
+    )
