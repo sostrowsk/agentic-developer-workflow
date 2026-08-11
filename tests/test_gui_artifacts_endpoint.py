@@ -27,6 +27,7 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     artifact_body,
     home,
     large_artifact_body,
+    tab_panel,
     write_artifacts_run,
     write_symlink_escape_artifact,
 )
@@ -129,6 +130,35 @@ def test_escaping_symlink_is_404_and_target_is_never_read(home, tmp_path, monkey
     assert resp.status_code == 404
     assert SECRET_OUTSIDE not in resp.text
     assert not any(str(outside) in r for r in reads)  # the target is never read
+
+
+def test_symlink_to_sibling_run_is_404_and_target_never_read(home, tmp_path, monkeypatch):  # noqa: F811,E501
+    """B4/B5/B6: a whitelisted name that is a symlink into a SIBLING run's directory
+    resolves inside the runs tree but OUTSIDE this run's directory — it must be 404
+    and the sibling target (here a ``*.FAILED`` marker that must never be served) is
+    never read. The Artifacts tab also lists the name as missing, not a fetch anchor."""
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    # Sibling run B holds a *.FAILED marker (never externally servable).
+    write_artifacts_run(
+        repo, "bbbb2222", drafts=("spec.claude.md",), failed_markers=("spec.codex.FAILED",)
+    )
+    target = repo / ".adw" / "runs" / "bbbb2222" / "drafts" / "spec.codex.FAILED"
+    assert target.is_file()
+    # Run A: a whitelisted name symlinked INTO the sibling run.
+    write_symlink_escape_artifact(repo, RUN_ID, target, name="spec.md")
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = _slug_for(repo)
+    base = f"/api/runs/{slug}/{RUN_ID}/artifacts"
+
+    reads = _read_spy(monkeypatch)
+    resp = client.get(f"{base}/spec.md")
+    assert resp.status_code == 404
+    assert not any(str(target) in r for r in reads)  # the sibling target is never read
+
+    # The listing marks the sibling-symlinked artifact missing, not present.
+    panel = tab_panel(client.get(f"/runs/{slug}/{RUN_ID}").text, "artifacts")
+    assert 'data-artifact="spec.md"' not in panel
 
 
 def test_unknown_flat_names_are_404(home, tmp_path):  # noqa: F811

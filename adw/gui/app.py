@@ -758,12 +758,23 @@ def _timeline(events) -> dict:
         elif typ == "lane":
             label = str(payload.get("name") or "lane")
             key = "lane:" + label
-        elif typ in ("agent.run", "gate"):
+        elif typ == "agent.run":
             lane_name = s.get("lane")
             if not lane_name:
-                continue  # a bar only lands on a build lane it belongs to
+                continue  # an agent.run bar only lands on a build lane it belongs to
             label = str(lane_name)
             key = "lane:" + label
+        elif typ == "gate":
+            lane_name = s.get("lane")
+            if lane_name:
+                label = str(lane_name)
+                key = "lane:" + label
+            else:
+                # A gate outside any lane (e.g. the integration E2E gate,
+                # phases._run_e2e_gate) carries lane=None: its runtime is still
+                # WAITING and must be drawn — on the orchestrator lane — so the
+                # active/waiting distinction is not lost (A3).
+                key, label = "orchestrator", "orchestrator"
         elif typ in ("codex.review", "codex.author"):
             key, label = "codex", "codex"
         elif typ == "ci.wait":
@@ -848,12 +859,15 @@ def _resolve_artifact(run_dir: Path, name: str) -> Path | None:
     return None
 
 
-def _artifact_present(run_dir: Path, runs_root: Path, relpath: str) -> bool:
-    contained = _contained(run_dir / relpath, runs_root)
+def _artifact_present(run_dir: Path, relpath: str) -> bool:
+    # Contain against THIS run's directory (not the whole runs tree): a whitelisted
+    # name symlinked to a SIBLING run's file resolves outside run_dir and must count
+    # as missing, never present (B4/B5/B6).
+    contained = _contained(run_dir / relpath, run_dir)
     return contained is not None and contained.is_file()
 
 
-def _artifacts_listing(run_dir: Path, runs_root: Path) -> list[dict]:
+def _artifacts_listing(run_dir: Path) -> list[dict]:
     """The whitelisted artifacts of the run and, for the dual-authored ones, their
     two drafts — each marked present (a fetch anchor) or missing (B1/B2/B3). A
     missing artifact/draft is never an error."""
@@ -864,11 +878,11 @@ def _artifacts_listing(run_dir: Path, runs_root: Path) -> list[dict]:
             for dname in _draft_names(name):
                 drafts.append({
                     "name": dname,
-                    "present": _artifact_present(run_dir, runs_root, f"drafts/{dname}"),
+                    "present": _artifact_present(run_dir, f"drafts/{dname}"),
                 })
         items.append({
             "name": name,
-            "present": _artifact_present(run_dir, runs_root, name),
+            "present": _artifact_present(run_dir, name),
             "drafts": drafts,
         })
     return items
@@ -1154,15 +1168,18 @@ def create_app(repos=None) -> FastAPI:
     @app.get("/api/runs/{repo}/{run_id}/artifacts/{name}")
     def api_run_artifact(repo: str, run_id: str, name: str):
         # Containment first (unknown slug 404, bad run_id 400, absent run 404).
-        _, run_dir, runs_root = require_run(repo, run_id)
+        _, run_dir, _ = require_run(repo, run_id)
         # Resolve the single-segment name through the whitelist BEFORE any file
         # access: an unknown/nested/encoded/traversal name is 404 without a read.
         mapped = _resolve_artifact(run_dir, name)
         if mapped is None:
             raise HTTPException(status_code=404, detail=f"Unknown artifact: {name!r}")
-        # Resolve through the same containment discipline the diff/events routes
-        # use, so an escaping symlink is 404 and its target is never read.
-        contained = _contained(mapped, runs_root)
+        # Contain against THIS run's directory (run_dir is already fully resolved),
+        # so a whitelisted name that is a symlink escaping the run directory — out
+        # of the runs tree OR into a SIBLING run — is 404 and its target is never
+        # read (B4/B5/B6). runs_root is the wider bound the diff/events routes use;
+        # for a single artifact the run directory is the correct, tighter bound.
+        contained = _contained(mapped, run_dir)
         if contained is None or not contained.is_file():
             raise HTTPException(status_code=404, detail=f"No artifact {name}")
         # Serve the RAW bytes verbatim — no lossy decode — so the complete, faithful
@@ -1208,7 +1225,7 @@ def create_app(repos=None) -> FastAPI:
         html = _TEMPLATES.get_template("run_detail.html").render({
             "detail": detail, "limit": limit, "raw_q": raw_q or "", "raw_type": raw_type or "",
             "timeline": _timeline(events),
-            "artifacts": _artifacts_listing(run_dir, runs_root),
+            "artifacts": _artifacts_listing(run_dir),
         })
         return HTMLResponse(html)
 

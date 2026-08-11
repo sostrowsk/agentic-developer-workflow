@@ -28,6 +28,7 @@ from adw.gui.registry import _slug
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     home,
     rec,
+    run_end_payload,
     run_start_payload,
     simple_run_lines,
     tab_panel,
@@ -140,6 +141,25 @@ def test_dry_run_header_renders_cost_and_tokens_empty_never_zero(home, tmp_path)
     assert "1500" not in panel
     low = panel.lower()
     assert "tokens: 0" not in low and "0 tokens" not in low
+
+
+def test_lane_less_gate_is_drawn_as_waiting_on_orchestrator_lane(home, tmp_path):  # noqa: F811
+    """A3 (root cause): a gate that runs OUTSIDE any lane (e.g. the integration E2E
+    gate, whose span carries lane=None) still represents waiting time and must be
+    drawn — not silently absorbed into the orchestrator's active run bar. Its bar
+    is rendered as a waiting bar carrying its own data-seq."""
+    lines = [
+        rec(1, "run", "start", "R", None, sec=0, payload=run_start_payload("E2E gate run")),
+        rec(2, "gate", "start", "G", "R", sec=1,
+            payload={"name": "e2e", "cmd": "pytest", "timeout": 60, "cwd": "."}),
+        rec(3, "gate", "end", "G", "R", sec=5,
+            payload={"passed": True, "exit_code": 0, "timed_out": False, "output": "ok"}),
+        rec(4, "run", "end", "R", None, sec=6, payload=run_end_payload("done")),
+    ]
+    panel = tab_panel(_detail_html(tmp_path, lines), "timeline")
+
+    # The lane-less gate (seq 2) is drawn as a waiting bar (not omitted).
+    assert re.search(r'bar-waiting[^>]*data-seq="2"', panel), panel[:800]
 
 
 def test_bars_carry_target_node_data_seq_for_trace_navigation(home, tmp_path):  # noqa: F811
