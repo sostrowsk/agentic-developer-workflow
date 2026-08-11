@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -722,8 +722,17 @@ def _timeline(events) -> dict:
 
     epochs = [x for x in (_ts_epoch(e.get("ts")) for e in events) if x is not None]
     t0 = min(epochs) if epochs else 0.0
-    t_now = max(epochs) if epochs else 0.0
-    total = (t_now - t0) or 1.0
+    max_epoch = max(epochs) if epochs else 0.0
+    # A6: a still-running span extends to the CURRENT edge, not to the newest logged
+    # event. For a live run (any unended span) the timeline endpoint — used for the
+    # total scale and for every open span — is the current time; a finished run
+    # keeps the last event time so its bars stay stable and deterministic.
+    has_open = any(sid not in ends for sid in starts)
+    if has_open:
+        t_end = max(datetime.now(UTC).timestamp(), max_epoch)
+    else:
+        t_end = max_epoch
+    total = (t_end - t0) or 1.0
 
     lanes_map: dict = {}
     lane_order: list = []
@@ -763,8 +772,8 @@ def _timeline(events) -> dict:
             continue
         s0 = _ts_epoch(s.get("ts"))
         s0 = t0 if s0 is None else s0
-        s1 = _ts_epoch(e.get("ts")) if e is not None else t_now
-        s1 = t_now if s1 is None else s1
+        s1 = _ts_epoch(e.get("ts")) if e is not None else t_end
+        s1 = t_end if s1 is None else s1
         left = max((s0 - t0) / total * 100.0, 0.0)
         width = max((s1 - s0) / total * 100.0, 0.5)
         lane(key, label)["bars"].append({
@@ -1151,7 +1160,13 @@ def create_app(repos=None) -> FastAPI:
         contained = _contained(mapped, runs_root)
         if contained is None or not contained.is_file():
             raise HTTPException(status_code=404, detail=f"No artifact {name}")
-        return PlainTextResponse(contained.read_text(encoding="utf-8", errors="replace"))
+        # Serve the RAW bytes verbatim — no lossy decode — so the complete, faithful
+        # content is returned (the client renders it as monospace text, E10). The
+        # media type is not pinned by the contract; only the full-content and
+        # faithful-bytes properties are (B4/B7).
+        return Response(
+            content=contained.read_bytes(), media_type="text/plain; charset=utf-8"
+        )
 
     @app.get("/api/runs/{repo}/{run_id}/stream")
     def api_run_stream(repo: str, run_id: str, request: Request):

@@ -42,6 +42,20 @@
       }, 0);
     });
   }
+  // Complete the measure only once any asynchronously loaded content is rendered:
+  // an interaction that triggers a fetch (node selection -> loadToolBody, tab
+  // switch -> loadDiff) passes that load's promise here, and the post-paint end
+  // mark is scheduled only after it SETTLES — so a loading placeholder is never
+  // mistaken for completion (C1). An interaction with no fetch passes no promise
+  // and completes immediately (after the next paint).
+  function perfEndAfterContent(startMark, endMark, measure, loadPromise) {
+    var finish = function () { perfEndAfterPaint(startMark, endMark, measure); };
+    if (loadPromise && typeof loadPromise.then === "function") {
+      loadPromise.then(finish, finish);  // settle (fulfilled OR rejected), then paint
+    } else {
+      finish();
+    }
+  }
 
   // The live regions replaced on every refresh — the same nodes the server
   // renders for a completed snapshot.
@@ -72,11 +86,14 @@
     // A tool-node's own pane holds a standalone (not inside <details>) load anchor;
     // the toggle-based lazy load never fires for it, so load it on selection —
     // otherwise selecting a tool node directly would show a permanently empty box.
+    // Return the load promise so a caller (the adw:select measure) can complete
+    // only once the fetched pane content is inserted, not when the box is empty.
     if (selectedSeq) {
       var selectedPane = document.querySelector('.pane[data-seq="' + selectedSeq + '"]');
       var pre = selectedPane && selectedPane.querySelector(".tool-detail pre[data-load-seq]");
-      if (pre) loadToolBody(pre);
+      if (pre) return loadToolBody(pre);
     }
+    return Promise.resolve();
   }
 
   // Delegated on document so it keeps working after main.detail is swapped. A
@@ -97,8 +114,10 @@
     } else {
       selectedSeq = node.getAttribute("data-seq");
     }
-    applySelection();
-    perfEndAfterPaint("adw:select:start", "adw:select:end", "adw:select");
+    // Complete the measure only after the (possibly fetched) detail pane content is
+    // rendered — applySelection returns the tool-body load promise when the
+    // selected node lazy-loads its payload (C1).
+    perfEndAfterContent("adw:select:start", "adw:select:end", "adw:select", applySelection());
   });
 
   // --- switchable tabs (Aufgabe D + the run-level Raw / node-level Diff tabs):
@@ -119,9 +138,11 @@
       if (on) active = panel;
     });
     // The Diff patch is fetched on demand from the read-only diff endpoint so a
-    // large patch never inlines into the initial page (Aufgabe B7).
-    if (active && name === "diff") loadDiff(active);
-    return active;
+    // large patch never inlines into the initial page (Aufgabe B7). Return the
+    // load's promise so the adw:tab measure completes only after the patch renders;
+    // a tab with no fetch returns an already-resolved promise (immediate).
+    if (active && name === "diff") return loadDiff(active);
+    return Promise.resolve();
   }
 
   // Switch the run-level tab group (used by timeline bar-click navigation).
@@ -136,22 +157,26 @@
     var tabs = btn.closest("[data-tabs]");
     if (!tabs) return;
     perfMark("adw:tab:start");
-    activateTab(tabs, btn.getAttribute("data-tab"));
-    perfEndAfterPaint("adw:tab:start", "adw:tab:end", "adw:tab");
+    // Complete the measure only after the target tab's content is rendered —
+    // activateTab returns the diff load promise for the Diff tab, else resolves
+    // immediately (C1).
+    perfEndAfterContent("adw:tab:start", "adw:tab:end", "adw:tab", activateTab(tabs, btn.getAttribute("data-tab")));
   });
 
   // --- node-level Diff tab (Aufgabe B): request exactly this node's derived
   // from/to snapshot pair and render the changed-file list plus the patch. Own
   // means only — no third-party highlighter (E5).
   function loadDiff(panel) {
-    if (panel.getAttribute("data-loaded")) return;
+    if (panel.getAttribute("data-loaded")) return Promise.resolve();
     var frm = panel.getAttribute("data-diff-from");
     var to = panel.getAttribute("data-diff-to");
     var body = panel.querySelector(".diff-body");
-    if (!frm || !to || !body) return;
+    if (!frm || !to || !body) return Promise.resolve();
     panel.setAttribute("data-loaded", "1");
     body.textContent = "Loading…";
-    fetch(base + "/diff?from=" + encodeURIComponent(frm) + "&to=" + encodeURIComponent(to))
+    // The returned promise resolves once the patch is rendered, so a caller (the
+    // adw:tab measure) completes only after the diff content is in the DOM (C1).
+    return fetch(base + "/diff?from=" + encodeURIComponent(frm) + "&to=" + encodeURIComponent(to))
       .then(function (response) {
         if (!response.ok) throw new Error("diff " + response.status);
         return response.json();
@@ -187,14 +212,16 @@
   // events route on first expand, so selecting an agent.run node never blocks on
   // rendering megabytes at once, yet every full payload stays reachable.
   function loadToolBody(pre) {
-    if (pre.getAttribute("data-loaded")) return;
+    if (pre.getAttribute("data-loaded")) return Promise.resolve();
     var seq = pre.getAttribute("data-load-seq");
-    if (!seq) return;
+    if (!seq) return Promise.resolve();
     pre.setAttribute("data-loaded", "1");
     pre.textContent = "Loading…";
     // Fetch ONLY this record (from_seq == to_seq), not the whole tail from seq to
-    // the log end — expanding an early entry must not transfer the entire log.
-    fetch(base + "/events?from_seq=" + encodeURIComponent(seq) + "&to_seq=" + encodeURIComponent(seq))
+    // the log end — expanding an early entry must not transfer the entire log. The
+    // returned promise resolves once the payload has been inserted into the pane,
+    // so a caller can time the interaction to that render (C1).
+    return fetch(base + "/events?from_seq=" + encodeURIComponent(seq) + "&to_seq=" + encodeURIComponent(seq))
       .then(function (response) { return response.json(); })
       .then(function (records) {
         var found = null;

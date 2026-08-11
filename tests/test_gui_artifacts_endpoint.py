@@ -166,6 +166,24 @@ def test_large_artifact_is_served_in_full(home, tmp_path):  # noqa: F811
     assert len(resp.text) >= 500 * 1024
 
 
+def test_artifact_content_is_served_byte_for_byte(home, tmp_path):  # noqa: F811
+    """B4/B7: the route returns the COMPLETE, faithful content of the file — the
+    raw bytes, with no lossy UTF-8 decode. An artifact carrying invalid UTF-8 bytes
+    comes back byte-for-byte identical (a ``errors='replace'`` decode would mangle
+    it and drop faithful content)."""
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    write_artifacts_run(repo, RUN_ID)
+    raw = b"# spec\n\xff\xfe not valid utf-8 \x80\x81\x00 bytes\nEND-spec.md\n"
+    (repo / ".adw" / "runs" / RUN_ID / "spec.md").write_bytes(raw)
+    client = TestClient(create_app(repos=[str(repo)]))
+    base = f"/api/runs/{_slug_for(repo)}/{RUN_ID}/artifacts"
+
+    resp = client.get(f"{base}/spec.md")
+    assert resp.status_code == 200
+    assert resp.content == raw  # byte-for-byte, no lossy decode
+
+
 def test_absent_or_non_file_artifact_is_404_not_5xx(home, tmp_path):  # noqa: F811
     """B3: a resolvable-but-absent file (``escalation.md`` on a run that did not
     escalate) and a mapped name resolving to a NON-file (a directory) are 404 —

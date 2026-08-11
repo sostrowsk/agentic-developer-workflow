@@ -27,6 +27,8 @@ from adw.gui.app import create_app
 from adw.gui.registry import _slug
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     home,
+    rec,
+    run_start_payload,
     simple_run_lines,
     tab_panel,
     timeline_lines,
@@ -146,6 +148,28 @@ def test_running_span_renders_to_current_edge_same_path_as_finished(home, tmp_pa
     assert live and done
     assert "running" in live.lower()      # the open ci.wait/run bar is drawn as running
     assert "running" not in done.lower()  # a finished run has no open span
+
+
+def test_open_span_extends_to_current_timeline_endpoint(home, tmp_path):  # noqa: F811
+    """A6 (root cause): a running span extends to the CURRENT timeline endpoint
+    (now), not the timestamp of the newest logged event. When the open span is
+    itself the newest event, ending it at the last event would degenerate its bar
+    to a sliver at the right edge. Here the open ``ci.wait`` (seq 4) is the newest
+    event yet its bar must span essentially the whole track to the current edge."""
+    lines = [
+        rec(1, "run", "start", "R", None, sec=0, payload=run_start_payload("Open last")),
+        rec(2, "phase", "start", "S", "R", sec=1, payload={"name": "spec", "from_phase": "spec"}),
+        rec(3, "phase", "end", "S", "R", sec=2, payload={"name": "spec", "to_phase": "plan"}),
+        rec(4, "ci.wait", "start", "CI", "R", sec=3,
+            payload={"provider": "gitlab", "pipeline_ref": "b"}),
+    ]
+    panel = tab_panel(_detail_html(tmp_path, lines), "timeline")
+
+    m = re.search(r'data-seq="4"[^>]*style="left:([0-9.]+)%;width:([0-9.]+)%"', panel)
+    assert m, panel[:800]
+    left, width = float(m.group(1)), float(m.group(2))
+    assert width >= 90.0         # the open bar spans to the current edge...
+    assert left + width >= 99.0  # ...reaching the right edge, not a 0.5% sliver
 
 
 def test_no_event_log_shows_empty_timeline_with_no_trace_indication(home, tmp_path):  # noqa: F811

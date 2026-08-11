@@ -62,6 +62,28 @@ def test_both_interactions_use_the_performance_api(home):  # noqa: F811
         assert banned not in js.lower(), banned
 
 
+def test_end_mark_awaits_async_loaded_content(home):  # noqa: F811
+    """C1 (root cause): for an interaction that triggers a fetch — node selection ->
+    ``loadToolBody``, tab switch -> ``loadDiff`` — the end mark is recorded only
+    AFTER the fetched content is inserted, not after the loading placeholder is
+    painted. The async loaders return their fetch promise and the completion is
+    gated on that promise settling (a loading indicator is not completion)."""
+    js = _client_script()
+
+    # The async loaders return a promise a caller can await for content render.
+    assert js.count("return fetch(") >= 2  # loadToolBody + loadDiff
+    # Both instrumented interactions complete through the promise-gated helper —
+    # not by scheduling the end mark immediately at the input event.
+    assert 'perfEndAfterContent("adw:select:start"' in js
+    assert 'perfEndAfterContent("adw:tab:start"' in js
+    # The helper schedules the post-paint end mark only after the load promise
+    # settles (.then) and then goes through the post-paint sequence.
+    start = js.find("function perfEndAfterContent")
+    assert start != -1, "no promise-gated completion helper"
+    window = js[start:start + 500]
+    assert ".then(" in window and "perfEndAfterPaint" in window
+
+
 def test_end_mark_is_scheduled_from_a_raf_callback_after_paint(home):  # noqa: F811
     """C1: the end mark is recorded in a task scheduled from WITHIN a
     ``requestAnimationFrame`` callback (rAF → ``setTimeout``), which runs AFTER the
