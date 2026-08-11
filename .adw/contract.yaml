@@ -1,160 +1,119 @@
-# Interface-Kontrakt — Vier Robustheits-Fixes am ADW-Orchestrator
-#
-# Single-Lane-Projekt (Workstream: backend): keine HTTP-Routen, keine Events
-# als externe API. Der Kontrakt pinnt AUSSCHLIESSLICH die extern beobachtbare
-# Fläche der vier Fehlerpfade: CLI-Verhalten (Exit-Codes, Meldungsgehalt,
-# State-Wirkung), den neuen Config-Key codex.timeout und die
-# Nie-Eskalation-/Nie-Verwerfen-Garantien. NICHT im Kontrakt: interne
-# Helper-Signaturen, Callback-Mechanik, Marker-Dateinamen, Event-Typnamen,
-# Session-Persistenz-Interna.
+openapi: 3.1.0
+info:
+  title: ADW Read-only GUI — response time (bounded DOM, supersession, adw:artifact)
+  version: 8.0.0
+  description: |
+    Minimal external contract for the single backend workstream of this run.
+    Per the issue's contract note, exactly three externally observable surfaces
+    are pinned:
+      (1) the bound on materialised entry nodes and the reachability of every
+          entry (A1/A2/A3);
+      (2) the supersession behaviour of node selection (B1/B2);
+      (3) the names and observable completion semantics of the three
+          performance measures adw:select, adw:tab, adw:artifact.
+    Nothing else is pinned. In particular, verification and documentation
+    policy — fixture sizes and shapes, counting selectors and marker strategy,
+    what the guide documents, which tests exist and what they navigate to —
+    lives exclusively in the spec and plan, as do implementation technique,
+    tooling, dependency and packaging constraints, and the unchanged
+    pre-existing routes. This run adds no new HTTP route.
 
-contract_version: 1
-scope: "single-lane (workstream: backend)"
+servers:
+  - url: http://127.0.0.1:8765
 
-# --- Config-Fläche (A3/A4) ---------------------------------------------------
-config:
-  file: .adw/config.yaml
-  new_key:
-    path: codex.timeout
-    type: integer
-    unit: seconds
-    required: false
-    default: 900
-    constraints:
-      - "> 0 (streng positiv)"
-      - "ganzzahlig (kein Float)"
-      - "kein Boolean (YAML true/false wird abgelehnt)"
-    semantics: >
-      Gilt für die codex-exec-Subprozesse (Autor UND Review teilen den
-      Timeout-Wert; die Review-SEMANTIK bleibt unverändert). Fehlt der Key
-      `codex` oder `codex.timeout`, ist das effektive Zeitlimit unverändert 900s.
-    invalid_value_behavior:
-      # A4: ungültiger Wert wird über die bestehende Config-Fehlerbehandlung
-      # abgelehnt, BEVOR der Lauf startet.
-      exit_nonzero: true
-      error_type: ConfigError
-      run_started: false
+paths: {}
 
-# --- CLI-Verhalten der vier Fehlerpfade -------------------------------------
-# Exit-Codes des bestehenden Schemas: 0 = done, 2 = awaiting_approval,
-# 1 = Eskalation/Fehler (unverändert).
-cli:
+x-adw-scope:
+  workstreams:
+    - backend
+  surfaces:
+    - template_behavior
+    - dom_state
+    - performance_user_timing
 
-  # A1/A2 — Codex-AUTOR-Ausfall wird kontrollierte Degradation, kein Crash.
-  codex_author_failure:
-    applies_to:
-      - spec-Dual-Authoring-Draft
-      - plan/contract-Dual-Authoring-Draft
-    trigger: >
-      Der Codex-Autor wirft im Dual-Authoring einen CodexError (jeder
-      Subprozess-Fehlschlag, einschließlich Timeout).
-    observable:
-      run_aborts: false
-      python_traceback: false
-      exit_1_from_codex_failure: false
-      manual_recovery_required: false
-      state_phase_escalated_by_codex_failure_alone: false
-      phase_completes_regularly: true            # Pflicht-Artefakte + Summary existieren
-      synthesis_basis: single-source             # bestehender "kein Codex-Entwurf"-Zweig
-      codex_author_auto_retry: false             # E1
-    note: >
-      FAILED-Marker-Mechanik und Draft-Interna sind NICHT Teil des Kontrakts —
-      beobachtbar ist nur: kein Crash, Phase schließt einquellig regulär ab.
+# --- (1) Bounded entry-node DOM and reachability --------------------------------
+x-adw-bounded-rendering:
+  scope: run detail view
+  pinned:
+    entry_node_bound:
+      rule: "The number of entry nodes materialised in the DOM is bounded by a
+        hard cap of AT MOST 200 per collection, independent of the total number
+        of entries in the collection. The cap is global per collection over the
+        complete document — not per subtree, per sibling group or per pane —
+        and for tool entries it covers every tool entry present anywhere in the
+        detail-pane DOM, including hidden/non-active panes."
+      cap_max: 200
+      holds: "On initial render AND throughout navigation (after paging,
+        scrolling, expansion or jumping); the bound is not an
+        initial-render-only property."
+    reachability:
+      rule: "Every trace-tree entry and every tool entry remains reachable
+        through the existing views, including entries outside the currently
+        materialised subset. Reaching an entry brings it into the DOM and it
+        renders correctly; reaching any entry does not require materialising
+        all preceding entries; no entry is dropped or made permanently
+        unreachable."
+    presentation_fidelity:
+      rule: "Bounded rendering changes presentation only: displayed entries
+        appear in the underlying order, displayed content is not truncated or
+        reordered relative to the data served — tool entries keep their
+        call/result identity — and the complete payload of every entry stays
+        reachable."
+  not_pinned:
+    - "The choice of windowing vs. paging vs. expand-on-demand and every other
+       mechanism or markup detail."
+    - "How the bound is counted or evidenced (markers, selectors, fixture sizes,
+       navigation test scenarios, guide documentation) — verification policy in
+       the spec and plan."
 
-  # B1/B4 — Arbeitsbaum-Prüfung vor jedem Kommando, das den Phasen-Executor
-  # betritt: `adw run`, `adw resume` UND `adw approve`. Kein anderes Kommando
-  # (status, gui) ist betroffen.
-  worktree_check:
-    applies_to:
-      - adw run
-      - adw resume
-      - adw approve
-    runs_before_any_state_mutation: true         # eine Verweigerung darf nichts persistiert haben
-    never_escalates: true                        # B1: NIE Eskalation (run, resume, approve)
-    self_heal_paths_exactly:                     # B2/B3/E2: feste Liste, nicht konfigurierbar, kein Glob
-      - .adw/issue.md
-      - .adw/spec.md
-      - .adw/plan.md
-      - .adw/contract.yaml
-      - .adw/spec-summary.md
-      - .adw/plan-summary.md
-    cases:
-      clean:
-        action: proceed
-      only_adw_artifacts_dirty:
-        # B2: ausschließlich Pfade der Liste dirty
-        action: self_heal_then_proceed
-        heal: "getrackt -> git checkout; ungetrackt -> löschen"
-        proceeds: true
-      foreign_file_dirty:
-        # B4: mindestens ein Pfad außerhalb der Liste
-        action: refuse
-        exit_nonzero: true
-        escalated: false
-        escalation_report_created: false
-        run_state_unchanged: true                # inhaltlich unverändert
-        new_persistent_run_created: false        # Verweigerung bei `adw run` legt keinen Run an
-        approval_grant_persisted: false          # Verweigerung bei `adw approve`: Zusage bleibt ungesetzt
-        resume_possible_afterwards: true
-        discards_anything: false                 # fremde Datei NIE verworfen
-        message_present: true                    # klare Meldung
-      mixed:
-        # B4: mind. ein ADW-Artefakt UND mind. eine fremde Datei
-        action: refuse
-        exit_nonzero: true
-        escalated: false
-        escalation_report_created: false
-        run_state_unchanged: true
-        new_persistent_run_created: false
-        approval_grant_persisted: false          # Verweigerung bei `adw approve`: Zusage bleibt ungesetzt
-        resume_possible_afterwards: true
-        discards_anything: false                 # weder eigen noch fremd verworfen; keine Teilheilung
-        message_present: true
+# --- (2) Latest-interaction-wins / supersession ---------------------------------
+x-adw-supersession:
+  scope: node selection and its asynchronously loaded detail content
+  pinned:
+    correct_final_content:
+      rule: "Given a quick succession of two node selections (A then B), the detail
+        pane ends showing node B's content. A superseded selection's late-returning
+        fetch does NOT write its content into the DOM while a newer node is
+        selected (B1). This holds whether the supersession happens before or
+        after the earlier selection's fetch was dispatched."
+    no_measure_for_superseded:
+      rule: "A superseded interaction records no end mark and produces NO measure;
+        only the winning (latest) interaction is measured. Start and end marks from
+        different selections are never paired into one measure (B2)."
+  not_pinned:
+    - "The internal cancellation/generation strategy; cancellation is not a
+       separately exposed product state or interface. The only observable
+       requirement is that obsolete results have no observable effect."
 
-  # C1/C2 — Partieller Synthese-Ausfall wird genau EIN In-Session-Retry.
-  synthesis_partial_failure:
-    trigger: >
-      Nach einem Synthese-Lauf fehlt ein Pflicht-Artefakt (Artefakte des
-      Schritts oder seine Summary) oder ist leer; Nur-Whitespace zählt als
-      leer.
-    observable:
-      retries_same_step: 1                        # genau einer, über die vorhandene Session (E4)
-      retry_hint_names_missing_artifact: true
-      on_retry_success:
-        run_continues_regularly: true
-        already_correct_artifacts_preserved: true
-      on_retry_failure:
-        escalates: true                           # wie heute; kein zweiter Versuch
-        total_synthesis_calls_before_escalation: 2
-      consumes_authoring_round: false             # C3: Reparatur, kein Review-Zyklus
-      consumes_review_round: false
-
-  # D2 — Session-ID sofort persistiert; Resume knüpft an begonnene Session an.
-  session_checkpoint:
-    observable:
-      session_id_persisted_when_known: true       # sobald sie im Stream erscheint, nicht erst nach Abschluss
-      abort_after_session_id_keeps_id_in_state: true
-      abort_stays_resumable_not_escalated: true   # Abbruch = Nichtnull-Exit in resumierbarer Phase
-      resume_passes_persisted_session_id: true    # an den fortgesetzten Agent-Lauf, kein Neustart
-      resume_semantics_unchanged: true            # expected_head, Orchestrator-only-Commits, Gate-Wiederholung (E5)
-
-# --- Garantien (B1/B4, querschnittlich) -------------------------------------
-guarantees:
-  worktree_check_never_escalates: true
-  foreign_files_never_discarded: true
-  mixed_dirty_set_never_partially_healed: true
-  self_heal_list_fixed_not_configurable_not_glob: true   # E2
-
-# --- Bewusst NICHT im Kontrakt ----------------------------------------------
-not_pinned:
-  - interne Helper-Signaturen
-  - Callback-Mechanik der Session-Persistierung
-  - FAILED-Marker-Dateinamen und Draft-Ordner-Layout
-  - konkrete Event-Typnamen (neue Typen nur über die bestehende Emitter-API)
-  - Meldungs-Wortlaut (nur "klare Meldung vorhanden" ist zugesichert)
-  - Scope-/Implementierungs-Constraints (kein Retry-Framework, keine neuen
-    Laufzeit-Dependencies, Review-Loop-Policy-Interna) — diese stehen als
-    Non-goals und Gates in .adw/spec.md und .adw/plan.md, nicht im Kontrakt
-  - unverändertes Bestandsverhalten (Codex-Review-Fehlersemantik,
-    Approval-Stopp) — Nicht-Änderung ist Non-goal/Regressionsgegenstand in
-    Spec und Plan, keine Kontraktfläche der vier Fehlerpfade
+# --- (3) The three performance measure names and completion outcomes -------------
+x-adw-measures:
+  completion_semantics:
+    rule: "Each measure's end mark is recorded only once the interaction is
+      observably complete: the resulting content is in the DOM AND the browser
+      has painted it."
+    async_content_counts: "Asynchronously fetched content counts toward the
+      measure: a loading indicator, request dispatch or response arrival is not
+      completion."
+  measures:
+    node_selection:
+      start_mark: "adw:select:start"
+      end_mark: "adw:select:end"
+      measure: "adw:select"
+      completes_when: "The detail pane for the selected node is painted."
+    tab_switch:
+      start_mark: "adw:tab:start"
+      end_mark: "adw:tab:end"
+      measure: "adw:tab"
+      completes_when: "The target tab's content is painted."
+    artifact_open:
+      start_mark: "adw:artifact:start"
+      end_mark: "adw:artifact:end"
+      measure: "adw:artifact"
+      completes_when: "The opened artifact's content is painted."
+      note: "New in this run. If the artifact display is bounded, the complete
+        artifact content stays reachable."
+  not_pinned:
+    - "The internal completion technique (e.g. the rAF -> task construction) —
+       an implementation requirement stated in the plan, not contract surface."
+    - "Thresholds, measurement procedure and evidence recording — verification
+       policy in the spec, plan and guide."

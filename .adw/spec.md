@@ -1,248 +1,206 @@
-# Spezifikation — Vier Robustheits-Fixes an den Fehlerpfaden des ADW-Orchestrators
+# Specification — GUI responsiveness: keep the ≤ 2 s promise, supersession, `adw:artifact`
 
-Quelle: `.adw/issue.md` (Aufgaben A–D, Fehlerbilder F1–F5). Jeder Fix ist ein
-Bugfix im Sinne der TDD-Regel: zuerst ein Test, der das Fehlerbild reproduziert
-und RED ist, dann der Fix. Die vorentschiedenen Punkte E1–E5 und die
-Scope-Deckel des Issues sind bindend; ein Review-Finding, das einen Deferred-
-oder vorentschiedenen Punkt einführen will, wird abgewiesen und mit Begründung
-dokumentiert, nicht umgesetzt (Deferred-Ventil — gilt ausdrücklich auch für den
-Codex-Review-Loop).
+Authoritative reference: `docs/GUI-SPEC.md`, in particular §9 (Performance and
+limits) and §7.2 (Views). On any conflict between this spec and the GUI-SPEC,
+the GUI-SPEC wins — **except** where the issue's pre-decided points (E1–E10)
+and scope ceilings override older GUI-SPEC text for this run. Concretely:
+GUI-SPEC §7.2 says artifacts are "rendered as Markdown"; the binding E10
+decision supersedes that wording — artifacts are shown as **monospace text, no
+Markdown library**. This spec describes **product behaviour only** —
+observable behaviour, DOM/data states, and the pinned measure contract. It
+prescribes no rendering mechanism, no template/CSS/JS structure, and no
+internal helper signatures.
 
 ## Goal
 
-Der Orchestrator übersteht die dokumentierten Fehlerbilder F1–F5 ohne manuelle
-Recovery und ohne Verlust wiederaufnehmbarer Läufe, ohne jemals fremde
-uncommittete Änderungen zu verwerfen:
+Make the read-only run inspector actually honour the "reaction ≤ 2 s" promise
+on real, heavy runs, and restore the two pieces of correctness / verifiability
+that were dropped in the prior run:
 
-1. Ein Ausfall des Codex-Autors im Dual-Authoring (einschließlich Timeout)
-   wird kontrollierte Degradation: Die Phase läuft mit dem verbliebenen
-   Claude-Entwurf regulär weiter statt mit Traceback und Exit 1 zu crashen
-   (F1). Das Zeitlimit der `codex exec`-Subprozesse wird über
-   `.adw/config.yaml` konfigurierbar (F2).
-2. Die Arbeitsbaum-Prüfung eskaliert nie einen Lauf — sie verweigert höchstens
-   die Ausführung und lässt den Lauf resumierbar (F3). ADWs eigene
-   Authoring-Reste heilen sich selbst; jede fremde Änderung blockiert weiterhin
-   und wird nie verworfen.
-3. Ein partieller Synthese-Ausfall (ein Pflicht-Artefakt fehlt oder ist leer)
-   wird genau ein In-Session-Schritt-Retry statt einer permanenten Eskalation
-   der ganzen Phase (F4).
-4. Die Session-ID eines Agent-Laufs wird persistiert, sobald sie bekannt ist,
-   sodass `adw resume` nach einem Abbruch mitten im Lauf an die begonnene
-   Session anknüpfen kann, statt bereits verbrauchte Tokens zu verlieren (F5).
+1. **A —** Node selection (`adw:select`) and tab switch (`adw:tab`) complete in
+   ≤ 2000 ms on a run with **≥ 2000 tool nodes**, because the number of entry
+   nodes materialised in the DOM initially is bounded independently of the
+   total number of entries — on both sides: the trace tree (left) and the
+   detail pane including its Tools tab (right). Every entry stays reachable.
+2. **B —** Latest-interaction-wins: a superseded selection never writes into
+   the detail pane and never produces a measure, so the pane always reflects
+   the node the user last chose. This is a **correctness** requirement — a
+   debug tool must never display data of the wrong node.
+3. **C —** A third measure, `adw:artifact`, makes the "large artifacts do not
+   block the surface" promise verifiable, measured on an artifact of ≥ 2 MB.
+
+The root cause is established and not in dispute: pure render load from DOM
+node **count**, not a broken code path (real run `bf831719`: node `spec_agent`,
+2 126 tool nodes, 12 738 total DOM nodes; the click never completed after
+40 s, no JS error). Offloading only the *contents* (lazy payload fetch,
+collapsing) was tried twice and is insufficient.
 
 ## Scope
 
-- Der Codex-**Autor**-Pfad des Dual-Authorings (`_draft_stage`) für Spec sowie
-  Plan/Contract: Degradation auf den FAILED-Marker-Pfad bei jedem `CodexError`.
-- Der neue optionale Config-Key `codex.timeout` in `.adw/config.yaml`; er
-  steuert die `codex exec`-Subprozesse (Autor und Review teilen den
-  Ausführungspfad, nur der Timeout-Wert ist gemeinsam — die Review-Semantik
-  bleibt unberührt).
-- Die Arbeitsbaum-Prüfung vor `adw run` und `adw resume`, einschließlich
-  Selbstheilung exakt dieser sechs ADW-eigenen Dateien im Haupt-Checkout:
-  `.adw/issue.md`, `.adw/spec.md`, `.adw/plan.md`, `.adw/contract.yaml`,
-  `.adw/spec-summary.md`, `.adw/plan-summary.md`.
-- Die Vollständigkeitsprüfung nach dem Synthese-Agent-Lauf und ein einmaliger
-  Reparaturaufruf über dessen bestehende Session.
-- Das frühzeitige Persistieren der im SDK-Message-Stream bekannt gewordenen
-  Agent-Session-ID in den Run-State (nur der Zeitpunkt ändert sich, E5).
-- Dokumentation der Konvention im README/Handbuch, dass die sechs genannten
-  Authoring-Artefakte ADW-eigen sind und ausschließlich darauf beschränkte
-  uncommittete Änderungen automatisch zurückgesetzt werden.
-- Etwaige Protokollierung neuer Ereignisse (z. B. Synthese-Retry) über die
-  BESTEHENDE Emitter-API; neue Event-Typen sind zulässig (vorwärtskompatibles
-  Format), neue Emitter-Fähigkeiten nicht.
+- The client-side rendering of the run-detail view (`adw/gui/static/app.js`,
+  `adw/gui/static/app.css`, `adw/gui/templates/run_detail.html`) and, only
+  where needed to bound the initially rendered node set, the server-side
+  rendering that produces that markup (`adw/gui/app.py` and the templates).
+- Bounded rendering of entry collections: the visible DOM may contain only a
+  subset of the complete data, but the user can reach every entry through the
+  existing views.
+- Latest-interaction-wins behaviour for node selection and its asynchronously
+  loaded detail content.
+- The three User Timing measures `adw:select`, `adw:tab`, `adw:artifact`.
+- The response-time guide `docs/gui-response-time.md`: it gains the third
+  measure and records the performed manual measurements.
+
+The mechanism for bounding the DOM is an implementation decision — windowing
+(only the visible slice in the DOM), paging, expand-a-section-on-demand.
+Windowing, if chosen, is written by hand (no library). The only requirement is
+that the user can still reach every entry, just not all at once in the DOM.
 
 ## Non-goals
 
-- Keine Verlagerung des Authorings in einen Scratch-Worktree, kein
-  Spec-Amendment-Schritt (Struktur-Paket, eigener späterer Lauf).
-- Kein Off-limits-Enforcement, keine Skill-/Template-Änderungen.
-- Keine Änderung am Codex-**Review**-Pfad: Schlägt Codex im Review-Loop fehl,
-  gilt die heutige Semantik unverändert.
-- Keine Änderung an `adw/events.py`, `adw/snapshots.py`, `adw/gui/**`; keine
-  neuen Emitter-Fähigkeiten.
-- Kein genereller Retry-Mechanismus, keine Retry-Zähler in der Config, kein
-  Backoff — genau die vier beschriebenen Fixes. Kein automatischer Retry des
-  Codex-Autors (E1); der Synthese-Retry ist genau einer (E4).
-- Die Selbstheilungs-Liste ist weder konfigurierbar noch glob-basiert (E2);
-  keine Heilung weiterer Dateiklassen.
-- Keine neuen Laufzeit-Dependencies.
-- Keine Änderung an Limits, Circuit-Breaker, Review-Loop-Policy oder
-  Phasenreihenfolge; keine Änderung der Resume-Logik (`expected_head`,
-  Orchestrator-only-Commits, Gate-Wiederholung) — Aufgabe D ändert nur den
-  Zeitpunkt der Session-Persistierung (E5).
-- Keine Einführung von `flake8`, `isort` oder `black` als Dependency,
-  Konfiguration oder Kommando; das Projekt nutzt `ruff` (E3).
+Nothing in the following list is built in this run.
+
+- No i18n, no language switch, no `adw runs list`, no `adw runs prune`, no
+  retention, no gzip, no `trace:` config key. (Next and final run.)
+- No new views, no redesign, no new tabs.
+- No change to `adw/events.py`, `adw/snapshots.py`, `adw/gui/reader.py`,
+  `adw/gui/model.py`.
+- No change to any orchestrator file: `phases.py`, `cli.py`, `gates.py`,
+  `codex.py`, `worktrees.py`, `state.py`, `triage.py`, `ci.py`, `github.py`.
+  A bug found there is a **finding in the report, not a diff** — even a
+  correct fix. (In the prior run `worktrees.py` was changed against this
+  boundary; that must not recur.)
+- No new runtime dependencies, no third-party frontend asset, no
+  virtualisation library.
+- No browser automation, no Playwright, no Selenium.
+- Pre-decided and not reopened: E1 (`run`-span boundary unchanged), E2 (orphan
+  spans unchanged, `events.py` untouched, repair stays in the finished model),
+  E3 (**ruff** only — no `flake8`/`isort`/`black` as dependency, config or
+  command), E5 (vanilla JS, own CSS, system fonts), E7 (web stack only as the
+  optional `adw[gui]` extra), E8 ("no payload capping" concerns the LOG, not
+  the DISPLAY — bounded *rendering* is explicitly wanted as long as the full
+  content stays reachable; a finding that reads Task A as violating E8 is
+  rejected), E9 (UI is English throughout until i18n), E10 (artifacts shown as
+  monospace text, no Markdown library).
 
 ## Acceptance criteria
 
-### A — Codex-Ausfall wird kontrollierter Ausfall (F1 + F2)
+### A — The 2 s promise, actually kept
 
-- **A1.** Wirft der Codex-**Autor** im Dual-Authoring einen `CodexError`
-  (jeder Subprozess-Fehlschlag, einschließlich Timeout), bricht der Lauf NICHT
-  ab: Der `<kind>.codex.FAILED`-Marker wird geschrieben (wie heute), danach
-  läuft die Phase mit dem verbliebenen Claude-Entwurf regulär weiter — über
-  denselben Pfad, der heute schon greift, wenn der Marker aus einem früheren
-  Anlauf vorliegt. Kein Python-Traceback, kein Exit 1, keine manuelle
-  Recovery; der Run-State wird durch den Codex-Ausfall allein nicht auf
-  `escalated` gesetzt.
-- **A2.** Ergebnis der degradierten Phase ist regulär: Die Pflicht-Artefakte
-  und die Summary existieren, und die Synthese arbeitet auf Einquellen-Basis
-  (bestehender „kein Codex-Entwurf“-Zweig). Der Codex-Autor wird für diesen
-  Draft-Schritt nicht automatisch erneut ausgeführt — ein Ausfall kostet den
-  Gegenentwurf, mehr nicht (E1).
-- **A3.** `.adw/config.yaml` akzeptiert den optionalen Key `codex.timeout`:
-  ganzzahlige Sekunden, größer als 0, Default 900. Er gilt für die
-  `codex exec`-Subprozesse. Fehlt `codex` oder `codex.timeout`, bleibt das
-  effektive Zeitlimit unverändert 900 Sekunden.
-- **A4.** Ein ungültiger Wert (≤ 0, nicht-ganzzahlig, Boolean) wird über die
-  bestehende Config-Fehlerbehandlung abgelehnt, bevor der Lauf startet.
-- **A5.** Regressionstests: Ein CodexRunner, der `CodexError` wirft, lässt den
-  Lauf mit einem Entwurf zu Ende laufen; der Marker existiert; das
-  Phasenergebnis ist regulär (Artefakte + Summary vorhanden). Tests decken
-  außerdem Default, gültigen Override und ungültigen Wert von `codex.timeout`
-  ab.
+- **A1 (bounded initial DOM, automated).** The number of **entry nodes**
+  materialised in the DOM on initial render is bounded by a hard cap
+  independent of the total number of entries: for otherwise equivalent
+  collections of 200, 2 000 and 20 000 entries, the initial count of rendered
+  entry nodes is **at most 200 per collection** at every fixture size. This
+  holds for both collections that list entries: the **trace tree** on the left
+  and the **Tools** tab of a selected node in the **detail pane** on the
+  right. *Counting definition:* an entry node is an element carrying a stable
+  machine-readable DOM marker (a `data-` attribute or ARIA role, exactly one
+  marked element per rendered trace-tree entry resp. per rendered tool entry);
+  the concrete selector is the implementation's choice, is documented in
+  `docs/gui-response-time.md`, and is the selector the automated tests count.
+  The fixture must have the correct shape — node count, not byte size, and
+  enough nodes.
+- **A2 (reachability, automated).** Every trace-tree entry and every Tools
+  entry remains reachable through the existing views, including entries
+  outside the initially rendered subset. Reaching a not-yet-materialised entry
+  (via scrolling window, paging, or section expand) brings it into the DOM and
+  it renders correctly; no entry is dropped or made permanently unreachable.
+- **A3 (presentation fidelity).** Bounded rendering changes presentation only:
+  displayed entries appear in the underlying order, displayed content is not
+  truncated or reordered relative to the data served, and the complete payload
+  of every entry remains reachable (E8). This is asserted on the rendered
+  output; immutability of the underlying event log is **not** an automated
+  assertion — the log-producing files are off limits and unchanged by this
+  run.
+- **A4 (measured on a heavy run, manual, documented).** Following
+  `docs/gui-response-time.md`, on a run with **≥ 2000 tool nodes**, the
+  `adw:select` and `adw:tab` measures are read off and are each **≤ 2000 ms**.
+  The guide records the performed measurement — the identified run, its tool
+  node count, and the read-off values. A fixture alone is **not** accepted as
+  evidence for A4; twice a fixture mirrored the wrong size (bytes instead of
+  nodes, then too few nodes) while the real view blocked.
 
-### B — Blocker bleibt Blocker, eigene Reste heilen sich (F3)
+### B — Latest-interaction-wins (supersession)
 
-- **B1.** Die Arbeitsbaum-Prüfung ESKALIERT NIE einen Lauf — weder bei
-  `adw run` noch bei `adw resume`. Sie verweigert höchstens die Ausführung mit
-  klarer Meldung und Nichtnull-Exit-Code; der Run-State bleibt inhaltlich
-  unverändert (kein `escalated`, kein Eskalations-Report), ein späterer
-  `adw resume` bleibt möglich. Eine Verweigerung ist eine Verweigerung, keine
-  Eskalation.
-- **B2.** Betreffen die uncommitteten Änderungen AUSSCHLIESSLICH die sechs im
-  Scope genannten ADW-eigenen Authoring-Artefakte, setzt ADW sie selbst
-  zurück — getrackte Dateien per Checkout, ungetrackte per Löschen — und
-  setzt den angeforderten Lauf bzw. Resume regulär fort.
-- **B3.** Die Selbstheilung greift nur, wenn sämtliche dirty Pfade exakt zur
-  festgelegten Liste gehören; die Liste ist weder konfigurierbar noch
-  glob-basiert (E2).
-- **B4.** Jede andere dirty Datei blockiert weiterhin mit Meldung (nie
-  Eskalation). Ein gemischter Zustand — mindestens ein ADW-eigenes Artefakt
-  UND mindestens eine fremde Datei — wird verweigert, nicht geheilt: ADW
-  verwirft dabei nichts, weder die fremde noch die ADW-eigene Datei.
-- **B5.** README/Handbuch dokumentieren die ADW-eigen-Konvention für die sechs
-  Artefakte am bestehenden Ort der Projektdokumentation. Das Repo führt jede
-  Doku als Sprachpaar (`README.md`/`README.de.md`,
-  `docs/handbuch/ADW-USER-HANDBUCH.md`/`.de.md` usw.); die Konvention wird
-  daher in BEIDEN Fassungen des gewählten Dokuments ergänzt, inhaltlich
-  gleichwertig. Welches Dokument (README oder Handbuch) der Ort ist, bleibt
-  Umsetzungsentscheidung; eine einsprachige Ergänzung ist nicht ausreichend.
-- **B6.** Regressionstests: (a) dirty `.adw/spec.md` + `adw resume` → Lauf
-  läuft weiter, Datei zurückgesetzt, keine Eskalation; (b) dirty fremde
-  Datei → Ausführung verweigert, Run-State unverändert, Resume danach möglich;
-  (c) gemischter Zustand → verweigert, nichts verworfen.
+- **B1 (correct final content).** Given a quick succession of two node
+  selections (A then B), the detail pane ends showing node **B**'s content. A
+  superseded selection's late-returning fetch does **not** write its content
+  into the DOM while a newer node is selected.
+- **B2 (no measure for a superseded interaction).** A superseded interaction
+  records no end mark and produces **no** measure; only the winning (latest)
+  interaction is measured. Start and end marks from different selections are
+  never paired into one measure.
 
-### C — Partieller Synthese-Ausfall wird Schritt-Retry (F4)
+### C — Third measure `adw:artifact`
 
-- **C1.** Fehlt nach einem Synthese-Lauf ein Pflicht-Artefakt oder ist es leer
-  (Pflicht-Artefakte umfassen die Artefakte des Schritts und seine Summary),
-  wird GENAU EINMAL derselbe Synthese-Schritt wiederholt — über die vorhandene
-  Session, mit dem Hinweis, welches Artefakt fehlt bzw. leer ist.
-- **C2.** Liefert der Reparaturaufruf das fehlende Artefakt, wird das
-  Authoring regulär fortgesetzt; bereits korrekt erzeugte Artefakte bleiben
-  erhalten. Liefert auch der Retry das Artefakt nicht, eskaliert der Lauf wie
-  heute — es gibt keinen zweiten Reparaturversuch (E4).
-- **C3.** Der Retry verbraucht keine Authoring-Runde und keine Review-Runde —
-  er ist Reparatur, kein Review-Zyklus; Rundenzähler und Review-Loop-Policy
-  (Severity-Schwelle, Circuit-Breaker, Rundendeckel) bleiben unberührt.
-- **C4.** Eine etwaige Protokollierung des Retries nutzt ausschließlich die
-  bestehende Emitter-API (neuer Event-Typ zulässig, keine neuen
-  Emitter-Fähigkeiten).
-- **C5.** Regressionstests: Ein Mock-Agent, der beim ersten Aufruf nur eines
-  von zwei Artefakten schreibt und beim zweiten das fehlende (dieselbe
-  Session), führt zu einem regulär abgeschlossenen Authoring; einer, der es
-  zweimal nicht liefert, führt nach genau zwei Aufrufen zur Eskalation.
+- **C1 (measure exists, correct completion semantics).** Opening an artifact
+  is instrumented with a measure named **`adw:artifact`**: the start mark is
+  set when the artifact is opened, the end mark and measure are recorded only
+  **after the browser has painted the artifact's content**, using the same
+  construction as `adw:select`/`adw:tab` (a task scheduled from a
+  `requestAnimationFrame` callback, i.e. rAF → task after paint).
+  Asynchronously fetched content counts toward the measure — a loading
+  indicator, request dispatch, or response arrival is not completion.
+- **C2 (measured on a ≥ 2 MB artifact, manual, documented).** Following the
+  guide, opening an artifact of **≥ 2 MB** yields an `adw:artifact` measure of
+  **≤ 2000 ms**; the performed measurement, with the artifact size and the
+  read-off value, is recorded in the guide.
+- **C3 (documented).** `docs/gui-response-time.md` documents `adw:artifact`
+  alongside `adw:select` and `adw:tab`: its completion semantics per C1, how
+  to read it, and the ≤ 2000 ms threshold. If the artifact display is bounded,
+  the complete artifact content remains reachable (E8/E10).
 
-### D — Session-ID sofort checkpointen (F5)
+### Measure contract (pinned observable surface)
 
-- **D1.** Die Session-ID eines Agent-Laufs wird im persistenten Run-State
-  gespeichert, SOBALD sie bekannt ist (sie erscheint früh im
-  SDK-Message-Stream) — nicht erst nach Abschluss des Laufs. Der Mechanismus
-  (Callback aus dem Runner, Zwischenspeichern im State) ist
-  Umsetzungsentscheidung und wird hier nicht festgeschrieben.
-- **D2.** Wirkung: Nach einem Abbruch mitten im Agent-Lauf kann `adw resume`
-  an die begonnene Session anknüpfen, statt den Agent-Lauf von vorn zu
-  beginnen. Die bestehende Resume-Semantik (`expected_head`,
-  Orchestrator-only-Commits, Gate-Wiederholung) bleibt unverändert (E5).
-- **D3.** Regressionstests: (a) Ein Runner-Abbruch nach Erscheinen der
-  Session-ID und vor Abschluss des Laufs hinterlässt die ID im persistierten
-  State; (b) ein anschließendes `adw resume` übergibt genau diese persistierte
-  Session-ID an den fortgesetzten Agent-Lauf — nachgewiesen über die
-  bestehende Resume-Semantik, ohne neue Resume-Mechanik (E5).
+| Interaction    | Measure name   | Completes when                                    |
+| -------------- | -------------- | ------------------------------------------------- |
+| Node selection | `adw:select`   | the detail pane for the selected node is painted  |
+| Tab switch     | `adw:tab`      | the target tab's content is painted               |
+| Artifact open  | `adw:artifact` | the opened artifact's content is painted          |
 
-### Kontraktfläche (Single-Lane-Projekt)
-
-Der Kontrakt pinnt nur die extern beobachtbare Fläche — keine internen
-Helper-Signaturen, keine Callback- oder Marker-Mechanik:
-
-- das CLI-Verhalten in den vier Fehlerpfaden: Exit-Codes, Meldungen,
-  State-Wirkung (A1/A2, B1, C1/C2, D2);
-- den Config-Key `codex.timeout` (A3/A4);
-- die Zusicherungen aus B1/B4: Die Arbeitsbaum-Prüfung eskaliert nie, fremde
-  Dateien werden nie verworfen.
+Also pinned: the bound on initially rendered entry nodes (A1), the
+reachability of every entry (A2), and the supersession behaviour (B1/B2). Not
+pinned: internal helper signatures, template/CSS/JS structure, or the choice
+of windowing vs. paging vs. expand-on-demand.
 
 ## Definition of Done
 
-1. Alle Akzeptanzkriterien A1–A5, B1–B6, C1–C5, D1–D3 sind umgesetzt und
-   durch Tests abgedeckt (TDD: pro Fix zuerst ein RED-Test, der das
-   Fehlerbild reproduziert, dann der Fix).
-2. Ein simulierter `CodexError` im Autor-Pfad hinterlässt den FAILED-Marker,
-   propagiert nicht mehr als Traceback/Exit 1 und die Phase schließt
-   einquellig regulär ab. `codex.timeout` ist optional, validiert (> 0,
-   ganzzahlig, Default 900); ohne den Key ist das Verhalten unverändert.
-3. Die Arbeitsbaum-Prüfung eskaliert in keinem `run`- oder `resume`-Pfad.
-   Exakt die sechs ADW-Artefakte heilen sich selbst; jede andere oder
-   gemischte dirty Menge blockiert mit Meldung, ohne etwas zu verwerfen, und
-   erhält Run-State und Resume-Fähigkeit. Die Konvention ist im
-   README/Handbuch dokumentiert — in beiden Sprachfassungen des gewählten
-   Dokuments (Paar-Konvention des Repos).
-4. Der Synthese-Schritt wird bei fehlendem/leerem Pflicht-Artefakt genau
-   einmal in derselben Session mit Fehlhinweis wiederholt, ohne eine
-   Authoring-Runde zu verbrauchen; fortgesetzte Unvollständigkeit eskaliert
-   wie heute.
-5. Die Session-ID ist ab ihrem Erscheinen im Stream persistiert; ein Abbruch
-   danach lässt `adw resume` an die Session anknüpfen. Tests decken sowohl
-   die Persistierung als auch die Übergabe der persistierten ID an den
-   fortgesetzten Agent-Lauf ab. Resume-Semantik unverändert.
-6. Keine neuen Laufzeit-Dependencies; `adw/events.py`, `adw/snapshots.py`,
-   `adw/gui/**` unverändert (neue Event-Typen nur über die bestehende
-   Emitter-API); Limits, Circuit-Breaker, Review-Loop-Policy und
-   Phasenreihenfolge unverändert.
-7. Die realen Gates sind grün: `uv run ruff check .` und
-   `uv run pytest -x -q`. `flake8`, `isort` und `black` tauchen nirgends als
-   Dependency, Konfiguration oder Kommando auf (E3).
+1. A1, A2, A3, B1, B2 and C1 are covered by automated tests (server-rendered
+   markup and DOM node-count assertions via FastAPI `TestClient`; JS-level
+   supersession and measure semantics via the project's existing
+   client-behaviour test approach — no browser automation). Guideline: roughly
+   12–18 new tests across A, B and C.
+2. A4 and C2 are performed manually per `docs/gui-response-time.md`, and their
+   read-off values are recorded in that guide as completed measurements, each
+   ≤ 2000 ms. The guide documents all three measures (C3).
+3. No file listed under Non-goals is modified; any bug discovered in an
+   off-limits file is written up as a finding in the report, not fixed in the
+   diff.
+4. No new runtime dependency and no third-party frontend asset (E5/E7); the
+   web stack remains the optional `adw[gui]` extra.
+5. Existing behaviour of the trace, timeline, artifacts, raw and diff views
+   remains available; no existing entry or payload becomes unreachable.
+6. Gates green: `uv run ruff check .` and `uv run pytest -x -q`.
 
-Hinweis (nicht bindend, keine Abnahmebedingung): Der Richtwert des Issues von
-rund 16–24 neuen Tests für A–D dient der Planung; abgenommen wird über die
-Abdeckung der spezifizierten Verhaltensweisen, nicht über eine Testzahl. Die
-Regel, dass Review-Findings zu Deferred- oder vorentschiedenen Punkten
-abgewiesen und dokumentiert werden, bleibt Review-Leitlinie (siehe Präambel
-und Deferred), nicht Abnahmebedingung der Implementierung.
+## Deferred (deliberately not built)
 
-## Deferred (bewusst nicht gebaut)
+Hardening or extension ideas beyond the above — including findings from the
+Codex review rounds — belong here, not in the acceptance criteria:
 
-Vertretbare, aber unverhältnismäßige oder ausdrücklich gedeckelte Ideen
-gehören hierher, nicht in Akzeptanzkriterien. Ein Review-Finding, das einen
-dieser Punkte fordert, wird mit dieser Begründung abgewiesen — das Ventil
-bindet auch den Codex-Review-Loop.
-
-- Ein generelles Retry-Framework: Retry-Zähler in der Config, Backoff,
-  Timeout-Adaption, Telemetrie. Dieser Lauf baut genau die vier Fixes; der
-  Synthese-Retry ist genau einer (E4), der Codex-Autor bekommt keinen (E1).
-- Automatischer oder konfigurierbarer Retry des Codex-Autors: Ein Ausfall
-  kostet den Gegenentwurf, mehr nicht (E1).
-- Heilung weiterer Dateiklassen oder eine konfigurierbare/glob-basierte
-  Selbstheilungs-Liste (E2); fremde Dateien werden nie automatisch
-  zurückgesetzt, nur verweigert.
-- Änderung der Codex-REVIEW-Fehlerbehandlung (z. B. Degradation statt
-  Eskalation bei Review-Ausfall); `codex.timeout` berührt nur den geteilten
-  Subprozess-Timeout-Wert.
-- Verlagerung des Authorings in einen Scratch-Worktree und ein
-  Spec-Amendment-Schritt (Struktur-Paket, eigener späterer Lauf);
-  Off-limits-Enforcement; Skill-/Template-Änderungen.
-- Neue Emitter-Fähigkeiten oder GUI-/Snapshot-Änderungen zur Visualisierung
-  der neuen Ereignisse; zusätzliche persistente Retry-Zustände zur Absicherung
-  weiterer Crash-Fenster ohne dokumentiertes Schadensbild.
+- Wall-clock performance assertions in automated tests (CI timing is flaky and
+  browser-dependent); the automated half proves the DOM bound (A1–A3), the
+  wall-clock ≤ 2 s evidence is the manual A4/C2 per the guide, by decision of
+  the issue.
+- Cancellation as a separately exposed product state or interface; the
+  required behaviour is only that obsolete results have no observable effect —
+  the internal cancellation strategy is an implementation choice.
+- A pinned bound on initially rendered artifact bytes; C2 fixes the observable
+  outcome (≤ 2 s on ≥ 2 MB), the display mechanism stays free.
+- Search, jump indexes, or navigation controls beyond what is necessary to
+  make every entry reachable.
+- Extending the bound/measure approach to further views beyond what A1/A2
+  already require (e.g. Raw or Timeline internals).
+- Persistent latency records, telemetry, performance dashboards or alerts; the
+  User Timing measures plus the guide are sufficient.
+- Retention, `adw runs list`/`prune`, gzip, the `trace:` config key, i18n —
+  the next and final run.
