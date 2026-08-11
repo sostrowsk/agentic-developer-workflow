@@ -116,6 +116,20 @@ def test_header_shows_duration_cost_and_tokens_per_model(home, tmp_path):  # noq
     assert "1500" in panel         # tokens for that model (1000 in + 500 out)
 
 
+def test_live_run_header_shows_elapsed_duration(home, tmp_path):  # noqa: F811
+    """A4 (root cause): the timeline header shows total duration for a LIVE run too
+    — the elapsed time from the run start to the current timeline endpoint — not an
+    empty value just because no run-end record exists yet. Live and finished runs
+    stay observably consistent."""
+    panel = tab_panel(_detail_html(tmp_path, timeline_lines(running=True)), "timeline")
+
+    m = re.search(r'class="tl-duration">([^<]*)</span>', panel)
+    assert m, panel[:500]
+    # The rendered duration carries a real elapsed value (digits), not just its
+    # label (an empty duration would render the label alone).
+    assert re.search(r"\d", m.group(1)), m.group(1)
+
+
 def test_dry_run_header_renders_cost_and_tokens_empty_never_zero(home, tmp_path):  # noqa: F811
     """A4 / GUI-SPEC §12: under a dry run the mocks produce no ``usage``, so the
     header renders cost and tokens EMPTY — never a false 0 and never a ``$0``."""

@@ -788,8 +788,13 @@ def _timeline(events) -> dict:
     start_rec, end_rec = _run_span(events)
     totals = ((end_rec or {}).get("payload") or {}).get("totals") or {}
     duration = totals.get("duration")
-    if duration is None and end_rec is not None:
-        a, b = _ts_epoch((start_rec or {}).get("ts")), _ts_epoch(end_rec.get("ts"))
+    if duration is None:
+        a = _ts_epoch((start_rec or {}).get("ts"))
+        # A finished run measures to its run-end; a live/open run measures the
+        # ELAPSED time to the current timeline endpoint, so the header shows a
+        # non-empty duration for a live run too (A4) — consistent with the open
+        # span bars, which also extend to `t_end`.
+        b = _ts_epoch(end_rec.get("ts")) if end_rec is not None else t_end
         duration = (b - a) if (a is not None and b is not None) else None
     cost = totals.get("cost")
     if cost is None:
