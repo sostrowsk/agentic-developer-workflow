@@ -20,6 +20,29 @@
   var detailUrl = "/runs/" + encodeURIComponent(repo) + "/" + encodeURIComponent(runId);
   var streamUrl = base + "/stream";
 
+  // --- Aufgabe C: response-time instrumentation (vanilla performance API only, no
+  // dependency, no browser automation). Each instrumented interaction sets a start
+  // mark at the triggering input event and an end mark ONLY once the browser has
+  // painted the resulting content. Because a requestAnimationFrame callback runs
+  // BEFORE the associated paint, the end mark is recorded in a task scheduled from
+  // WITHIN a rAF callback (rAF -> setTimeout 0), which runs after that paint.
+  // Between the marks a named performance.measure() is created, readable via
+  // performance.getEntriesByName(...) and in the browser's Performance panel. The
+  // pinned names are documented in docs/gui-response-time.md.
+  function perfMark(name) {
+    try { performance.mark(name); } catch (e) { /* performance API unavailable */ }
+  }
+  function perfEndAfterPaint(startMark, endMark, measure) {
+    requestAnimationFrame(function () {
+      setTimeout(function () {
+        try {
+          performance.mark(endMark);
+          performance.measure(measure, startMark, endMark);
+        } catch (e) { /* performance API unavailable */ }
+      }, 0);
+    });
+  }
+
   // The live regions replaced on every refresh — the same nodes the server
   // renders for a completed snapshot.
   var REGIONS = ["header.run-header", "main.detail"];
@@ -56,12 +79,26 @@
     }
   }
 
-  // Delegated on document so it keeps working after main.detail is swapped.
+  // Delegated on document so it keeps working after main.detail is swapped. A
+  // timeline bar (Aufgabe A) carries its target node's data-seq: clicking it
+  // navigates to that node in the Trace tab (switch to Trace, then select it),
+  // reusing the same data-seq selection path (A5). Node selection is instrumented
+  // with the adw:select measure (Aufgabe C).
   document.addEventListener("click", function (event) {
-    var node = event.target.closest ? event.target.closest(".node[data-seq]") : null;
-    if (!node) return;
-    selectedSeq = node.getAttribute("data-seq");
+    var target = event.target;
+    if (!target || !target.closest) return;
+    var bar = target.closest(".tl-bar[data-seq]");
+    var node = target.closest(".node[data-seq]");
+    if (!bar && !node) return;
+    perfMark("adw:select:start");
+    if (bar) {
+      selectedSeq = bar.getAttribute("data-seq");
+      activateRunTab("trace");  // reveal the node in the Trace tab
+    } else {
+      selectedSeq = node.getAttribute("data-seq");
+    }
     applySelection();
+    perfEndAfterPaint("adw:select:start", "adw:select:end", "adw:select");
   });
 
   // --- switchable tabs (Aufgabe D + the run-level Raw / node-level Diff tabs):
@@ -69,14 +106,10 @@
   // swap; toggles classes only (panels are server-rendered). Tab groups nest (the
   // agent.run tabs live inside the run-level tabs), so only members whose nearest
   // [data-tabs] is THIS group are toggled — a nested group is left untouched.
-  document.addEventListener("click", function (event) {
-    var btn = event.target.closest ? event.target.closest(".tab-btn") : null;
-    if (!btn) return;
-    var tabs = btn.closest("[data-tabs]");
-    if (!tabs) return;
-    var name = btn.getAttribute("data-tab");
+  function activateTab(tabs, name) {
     tabs.querySelectorAll(".tab-btn").forEach(function (b) {
-      if (b.closest("[data-tabs]") === tabs) b.classList.toggle("active", b === btn);
+      if (b.closest("[data-tabs]") === tabs)
+        b.classList.toggle("active", b.getAttribute("data-tab") === name);
     });
     var active = null;
     tabs.querySelectorAll("[data-tab-panel]").forEach(function (panel) {
@@ -88,6 +121,23 @@
     // The Diff patch is fetched on demand from the read-only diff endpoint so a
     // large patch never inlines into the initial page (Aufgabe B7).
     if (active && name === "diff") loadDiff(active);
+    return active;
+  }
+
+  // Switch the run-level tab group (used by timeline bar-click navigation).
+  function activateRunTab(name) {
+    var group = document.querySelector(".run-tabs[data-tabs]");
+    if (group) activateTab(group, name);
+  }
+
+  document.addEventListener("click", function (event) {
+    var btn = event.target.closest ? event.target.closest(".tab-btn") : null;
+    if (!btn) return;
+    var tabs = btn.closest("[data-tabs]");
+    if (!tabs) return;
+    perfMark("adw:tab:start");
+    activateTab(tabs, btn.getAttribute("data-tab"));
+    perfEndAfterPaint("adw:tab:start", "adw:tab:end", "adw:tab");
   });
 
   // --- node-level Diff tab (Aufgabe B): request exactly this node's derived
@@ -161,6 +211,64 @@
       });
   }
 
+  // --- Aufgabe B: the Artifacts tab loads a whitelisted artifact's content on
+  // demand from the read-only artifacts route. The full content is NOT inlined in
+  // the initial page (bounded initial render, E8): only a bounded portion is
+  // inserted, the rest reachable through an explicit "Show more" — no content is
+  // dropped. Rendered as faithful monospace text via textContent (E10, escaped).
+  var ARTIFACT_CHUNK = 20000;
+
+  // Show the first `shown` characters in the <pre> and reveal the server-rendered
+  // "Show more" anchor while content remains. No DOM is constructed in JS (the one
+  // shared server-snapshot rendering path stays authoritative, GUI-SPEC §7.3): the
+  // full text is held in a JS property and sliced into the existing <pre>.
+  function showArtifactSlice(pre, more, shown) {
+    var text = pre._fullText || "";
+    pre.textContent = text.slice(0, shown);
+    if (more) {
+      if (text.length > shown) {
+        more._nextShown = shown + ARTIFACT_CHUNK;
+        more.hidden = false;
+      } else {
+        more.hidden = true;
+      }
+    }
+  }
+
+  function loadArtifact(summary) {
+    if (summary.getAttribute("data-loaded")) return;
+    var name = summary.getAttribute("data-artifact");
+    var wrap = summary.closest(".artifact-wrap");
+    var pre = wrap ? wrap.querySelector("[data-artifact-body]") : null;
+    var more = wrap ? wrap.querySelector("[data-artifact-more]") : null;
+    if (!name || !pre) return;
+    summary.setAttribute("data-loaded", "1");
+    pre.textContent = "Loading…";
+    fetch(base + "/artifacts/" + encodeURIComponent(name))
+      .then(function (response) {
+        if (!response.ok) throw new Error("artifact " + response.status);
+        return response.text();
+      })
+      .then(function (text) {
+        pre._fullText = text;
+        showArtifactSlice(pre, more, ARTIFACT_CHUNK);
+      })
+      .catch(function () {
+        summary.removeAttribute("data-loaded");  // allow a retry on re-open
+        pre.textContent = "(failed to load — open again to retry)";
+      });
+  }
+
+  // "Show more" reveals the next bounded chunk of an already-fetched artifact.
+  document.addEventListener("click", function (event) {
+    var more = event.target.closest ? event.target.closest("[data-artifact-more]") : null;
+    if (!more) return;
+    event.preventDefault();
+    var wrap = more.closest(".artifact-wrap");
+    var pre = wrap ? wrap.querySelector("[data-artifact-body]") : null;
+    if (pre) showArtifactSlice(pre, more, more._nextShown || ARTIFACT_CHUNK);
+  });
+
   // The native <details> toggle event does not bubble, so listen in the capture
   // phase; load the body only when a details element is being opened.
   document.addEventListener("toggle", function (event) {
@@ -168,6 +276,8 @@
     if (!details || details.tagName !== "DETAILS" || !details.open) return;
     var pre = details.querySelector ? details.querySelector("pre[data-load-seq]") : null;
     if (pre) loadToolBody(pre);
+    var summary = details.querySelector ? details.querySelector("summary[data-artifact]") : null;
+    if (summary) loadArtifact(summary);
   }, true);
 
   // --- Raw tab (Aufgabe C): filter the server-rendered rows by type and by free

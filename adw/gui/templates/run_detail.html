@@ -210,6 +210,8 @@
     <div class="tabs run-tabs" data-tabs>
       <div class="tab-buttons" role="tablist">
         <button type="button" class="tab-btn active" data-tab="trace">Trace</button>
+        <button type="button" class="tab-btn" data-tab="timeline">Timeline</button>
+        <button type="button" class="tab-btn" data-tab="artifacts">Artifacts</button>
         <button type="button" class="tab-btn" data-tab="raw">Raw</button>
       </div>
       <section class="tab tab-trace active" data-tab-panel="trace">
@@ -238,6 +240,79 @@
           <p class="no-problems">No problems reported.</p>
           {% endif %}
         </section>
+      </section>
+
+      {# Run-level Timeline tab (Aufgabe A): horizontal swimlanes drawn with own
+         means only (CSS bars) — orchestrator, spec, plan, each build lane, codex,
+         CI. Active vs. waiting (CI polling, gate runtime) differ visually; a
+         running span's bar reaches the current edge; each bar carries its target
+         node's data-seq so a click selects it in Trace. #}
+      <section class="tab tab-timeline" data-tab-panel="timeline">
+        {% if not timeline.has_trace %}
+        <p class="no-trace-hint">no trace &mdash; no event log for this run</p>
+        {% else %}
+        <div class="timeline-header">
+          <span class="tl-duration">duration {{ timeline.duration | fmt_duration }}</span>
+          {% if timeline.cost is not none %}<span class="tl-cost">cost {{ timeline.cost | fmt_cost }}</span>{% endif %}
+          {% for m in timeline.models %}<span class="tl-model">{{ m.model }} {{ m.tokens }} tokens</span>{% endfor %}
+        </div>
+        <div class="timeline-lanes">
+          {% for lane in timeline.lanes %}
+          <div class="tl-lane">
+            <span class="tl-lane-label">{{ lane.label }}</span>
+            <span class="tl-track">
+              {% for bar in lane.bars %}
+              <span class="tl-bar bar-{{ bar.state }}{% if bar.running %} bar-running{% endif %}" data-seq="{{ bar.seq }}" style="left:{{ bar.left }}%;width:{{ bar.width }}%" title="{{ bar.label }}">{{ bar.label }}</span>
+              {% endfor %}
+            </span>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </section>
+
+      {# Run-level Artifacts tab (Aufgabe B): the whitelisted artifacts of the run
+         and, for the dual-authored ones, the two drafts against the synthesis. A
+         present artifact is a fetch anchor (data-artifact) loaded on demand from
+         the read-only artifacts route (never inlined — bounded initial render); a
+         missing artifact/draft is marked missing, never an error. #}
+      <section class="tab tab-artifacts" data-tab-panel="artifacts">
+        <ul class="artifact-list">
+        {% for a in artifacts %}
+          <li class="artifact-group">
+            <div class="artifact-synthesis">
+              <span class="artifact-name">{{ a.name }}</span>
+              {% if a.present %}
+              <details class="artifact-wrap">
+                <summary class="artifact-open" data-artifact="{{ a.name }}">open</summary>
+                <pre class="artifact-body" data-artifact-body></pre>
+                <a class="artifact-more" href="#" data-artifact-more hidden>Show more</a>
+              </details>
+              {% else %}
+              <span class="artifact-missing">missing</span>
+              {% endif %}
+            </div>
+            {% if a.drafts %}
+            <ul class="artifact-drafts">
+            {% for d in a.drafts %}
+              <li class="artifact-draft">
+                <span class="draft-name">{{ d.name }}</span>
+                {% if d.present %}
+                <details class="artifact-wrap">
+                  <summary class="artifact-open" data-artifact="{{ d.name }}">open draft</summary>
+                  <pre class="artifact-body" data-artifact-body></pre>
+                  <a class="artifact-more" href="#" data-artifact-more hidden>Show more</a>
+                </details>
+                {% else %}
+                <span class="artifact-missing">missing</span>
+                {% endif %}
+              </li>
+            {% endfor %}
+            </ul>
+            {% endif %}
+          </li>
+        {% endfor %}
+        </ul>
       </section>
 
       <section class="tab tab-raw" data-tab-panel="raw">

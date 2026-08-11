@@ -128,3 +128,32 @@ table.findings th, table.findings td { border: 1px solid var(--border); padding:
   font-size: 0.85rem; text-decoration: none; color: var(--fg);
 }
 .raw-empty { color: var(--muted); font-style: italic; }
+
+/* Aufgabe A: the run-level Timeline tab — horizontal swimlanes drawn with own
+   means only (CSS bars, no charting library — E5). Active vs. waiting (CI polling,
+   gate runtime) differ visually; a still-running span's bar reaches the edge. */
+.timeline-header { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.6rem; font-size: 0.9rem; }
+.timeline-header .tl-cost, .timeline-header .tl-model { color: var(--muted); }
+.timeline-lanes { display: flex; flex-direction: column; gap: 0.25rem; }
+.tl-lane { display: flex; align-items: center; gap: 0.5rem; }
+.tl-lane-label { flex: 0 0 7rem; text-align: right; font-size: 0.8rem; color: var(--muted); }
+.tl-track { position: relative; flex: 1 1 auto; height: 1.2rem; background: #f6f6f6; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
+.tl-bar { position: absolute; top: 0; height: 100%; box-sizing: border-box; font-size: 0.7rem; line-height: 1.2rem; white-space: nowrap; overflow: hidden; cursor: pointer; border-radius: 2px; }
+/* Active work — a solid bar. */
+.tl-bar.bar-active { background: #6aa9e9; color: #04203f; }
+/* Waiting (CI polling, gate runtime) — a distinct hatched, muted bar so time
+   spent NOT working is visually separable from active work (A3). */
+.tl-bar.bar-waiting { color: #444; background: repeating-linear-gradient(45deg, #e6e0c8, #e6e0c8 4px, #d3caa6 4px, #d3caa6 8px); }
+/* A still-running span reaches the current edge, marked with an open border. */
+.tl-bar.bar-running { border-right: 2px dashed #04203f; }
+
+/* Aufgabe B: the run-level Artifacts tab — whitelisted files + dual-author drafts
+   rendered as faithful monospace text (E10, no Markdown library). */
+.artifact-list { list-style: none; padding-left: 0; margin: 0; }
+.artifact-group { border-bottom: 1px solid var(--border); padding: 0.3rem 0; }
+.artifact-name { font-weight: 600; }
+.artifact-missing { color: var(--muted); font-style: italic; margin-left: 0.4rem; }
+.artifact-drafts { list-style: none; padding-left: 1.2rem; margin: 0.2rem 0 0; }
+.artifact-draft .draft-name { color: var(--muted); font-size: 0.85rem; }
+.artifact-body { margin: 0.2rem 0 0; font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.artifact-more { display: inline-block; margin-top: 0.3rem; font-size: 0.85rem; }

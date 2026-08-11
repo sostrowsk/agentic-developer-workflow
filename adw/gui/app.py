@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -640,6 +640,226 @@ def _raw_view(events, limit, *, q=None, type_filter=None) -> dict:
     return {"total": len(matches), "types": types, "window": window}
 
 
+# --- Timeline tab (Aufgabe A) ---------------------------------------------------
+# The timeline derives its swimlanes and bars from the run's ALREADY-loaded event
+# log (the same events Trace uses) — no new reader, no change to model.py (A2). One
+# lane per strand present: orchestrator (the run span), spec, plan, each build lane,
+# codex, CI. Active vs. waiting (CI polling, gate runtime) is distinguished; a
+# still-running span is drawn to the current edge; the header shows total duration,
+# total cost and tokens per model. Drawn with own means only (CSS) — no library.
+
+
+def _tokens_per_model(events) -> list[dict]:
+    """Sum ``usage`` tokens per model over the run's ``agent.run`` spans (the model
+    is on the start, the usage on the end). A dry run carries no ``usage`` → an
+    empty list → the header renders no token line (never a false 0, GUI-SPEC §12)."""
+    model_by_span: dict = {}
+    for e in events:
+        if e.get("type") == "agent.run" and e.get("kind") == "start":
+            model_by_span[e.get("span")] = (e.get("payload") or {}).get("model")
+    per: dict = {}
+    for e in events:
+        if e.get("type") == "agent.run" and e.get("kind") == "end":
+            usage = (e.get("payload") or {}).get("usage")
+            if not isinstance(usage, dict):
+                continue
+            model = model_by_span.get(e.get("span")) or "?"
+            tokens = sum(
+                v for v in usage.values()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            )
+            per[model] = per.get(model, 0) + int(tokens)
+    return [{"model": m, "tokens": t} for m, t in per.items()]
+
+
+def _events_cost(events):
+    """Total ``cost_usd`` over the run's ``agent.run`` spans, or None when none
+    carries a cost (a dry run → empty, never a false 0)."""
+    total = None
+    for e in events:
+        if e.get("type") == "agent.run" and e.get("kind") == "end":
+            cost = (e.get("payload") or {}).get("cost_usd")
+            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+                total = (total or 0.0) + float(cost)
+    return total
+
+
+# The event types whose spans are pure WAITING (time passes without work): CI
+# polling and gate runtime (A3).
+_WAITING_TYPES = {"ci.wait", "gate"}
+
+
+def _timeline_bar_label(node_type, payload) -> str:
+    if isinstance(payload, dict):
+        if node_type in ("phase", "lane") and payload.get("name"):
+            return str(payload["name"])
+        if node_type == "agent.run" and payload.get("agent"):
+            return str(payload["agent"])
+        if node_type == "gate" and payload.get("name"):
+            return str(payload["name"])
+    return node_type or "?"
+
+
+def _timeline(events) -> dict:
+    """Swimlanes + bars + header for the Timeline tab, derived from ``events``. A
+    run with no event log yields ``has_trace=False`` so the tab shows a clear
+    "no trace" indication rather than an error (A8)."""
+    if not events:
+        return {"has_trace": False, "lanes": [], "duration": None, "cost": None,
+                "models": []}
+
+    starts: dict = {}
+    ends: dict = {}
+    order: list = []
+    for e in events:
+        sid = e.get("span")
+        if e.get("kind") == "start":
+            if sid not in starts:
+                starts[sid] = e
+                order.append(sid)
+        elif e.get("kind") == "end":
+            ends[sid] = e
+
+    epochs = [x for x in (_ts_epoch(e.get("ts")) for e in events) if x is not None]
+    t0 = min(epochs) if epochs else 0.0
+    t_now = max(epochs) if epochs else 0.0
+    total = (t_now - t0) or 1.0
+
+    lanes_map: dict = {}
+    lane_order: list = []
+
+    def lane(key, label):
+        if key not in lanes_map:
+            lanes_map[key] = {"key": key, "label": label, "bars": []}
+            lane_order.append(key)
+        return lanes_map[key]
+
+    for sid in order:
+        s = starts[sid]
+        e = ends.get(sid)
+        typ = s.get("type")
+        payload = s.get("payload") or {}
+        if typ == "run":
+            key, label = "orchestrator", "orchestrator"
+        elif typ == "phase":
+            name = payload.get("name")
+            if name not in ("spec", "plan"):
+                continue  # build/integration/… are shown via their lane/strand
+            key, label = name, name
+        elif typ == "lane":
+            label = str(payload.get("name") or "lane")
+            key = "lane:" + label
+        elif typ in ("agent.run", "gate"):
+            lane_name = s.get("lane")
+            if not lane_name:
+                continue  # a bar only lands on a build lane it belongs to
+            label = str(lane_name)
+            key = "lane:" + label
+        elif typ in ("codex.review", "codex.author"):
+            key, label = "codex", "codex"
+        elif typ == "ci.wait":
+            key, label = "ci", "CI"
+        else:
+            continue
+        s0 = _ts_epoch(s.get("ts"))
+        s0 = t0 if s0 is None else s0
+        s1 = _ts_epoch(e.get("ts")) if e is not None else t_now
+        s1 = t_now if s1 is None else s1
+        left = max((s0 - t0) / total * 100.0, 0.0)
+        width = max((s1 - s0) / total * 100.0, 0.5)
+        lane(key, label)["bars"].append({
+            "seq": s.get("seq"),
+            "label": _timeline_bar_label(typ, payload),
+            "state": "waiting" if typ in _WAITING_TYPES else "active",
+            "running": e is None,  # an unended span is drawn to the current edge
+            "left": round(left, 3),
+            "width": round(width, 3),
+        })
+
+    start_rec, end_rec = _run_span(events)
+    totals = ((end_rec or {}).get("payload") or {}).get("totals") or {}
+    duration = totals.get("duration")
+    if duration is None and end_rec is not None:
+        a, b = _ts_epoch((start_rec or {}).get("ts")), _ts_epoch(end_rec.get("ts"))
+        duration = (b - a) if (a is not None and b is not None) else None
+    cost = totals.get("cost")
+    if cost is None:
+        cost = _events_cost(events)
+    return {
+        "has_trace": True,
+        "lanes": [lanes_map[k] for k in lane_order],
+        "duration": duration,
+        "cost": cost,
+        "models": _tokens_per_model(events),
+    }
+
+
+# --- Artifacts tab + content route (Aufgabe B) ----------------------------------
+# The Artifacts tab lists the whitelisted artifacts of the run and the dual-author
+# drafts; content is served by the read-only route below. `{name}` is a SINGLE path
+# segment, resolved through a fixed whitelist — never treated as a filesystem path.
+
+# The eight whitelisted top-level artifact names (GUI-SPEC §7.2 / contract).
+_ARTIFACT_TOP_LEVEL = [
+    "issue.md", "spec.md", "plan.md", "contract.yaml",
+    "escalation.md", "followups.md", "spec-summary.md", "plan-summary.md",
+]
+_ARTIFACT_TOP_LEVEL_SET = set(_ARTIFACT_TOP_LEVEL)
+# The artifacts produced through dual authoring — each has a claude/codex draft.
+_ARTIFACT_DUAL = ["spec.md", "plan.md", "contract.yaml"]
+_DRAFT_AUTHORS = ("claude", "codex")
+
+
+def _draft_names(top_name: str) -> list[str]:
+    stem, ext = top_name.rsplit(".", 1)
+    return [f"{stem}.{author}.{ext}" for author in _DRAFT_AUTHORS]
+
+
+def _resolve_artifact(run_dir: Path, name: str) -> Path | None:
+    """Map a single-segment artifact ``name`` to a file path inside ``run_dir`` via
+    the fixed whitelist, or None if the name is unknown. The name is NEVER treated
+    as a filesystem path: any separator, ``..`` or absolute form makes it unknown
+    without any filesystem access (B4/B5)."""
+    if not name or "/" in name or "\\" in name or name in (".", ".."):
+        return None
+    if name in _ARTIFACT_TOP_LEVEL_SET:
+        return run_dir / name
+    parts = name.split(".")
+    if len(parts) >= 3:
+        author = parts[-2]
+        stem_ext = ".".join(parts[:-2]) + "." + parts[-1]
+        if author in _DRAFT_AUTHORS and stem_ext in _ARTIFACT_TOP_LEVEL_SET:
+            # Drafts are addressed by their FLAT filename → drafts/<name>.
+            return run_dir / "drafts" / name
+    return None
+
+
+def _artifact_present(run_dir: Path, runs_root: Path, relpath: str) -> bool:
+    contained = _contained(run_dir / relpath, runs_root)
+    return contained is not None and contained.is_file()
+
+
+def _artifacts_listing(run_dir: Path, runs_root: Path) -> list[dict]:
+    """The whitelisted artifacts of the run and, for the dual-authored ones, their
+    two drafts — each marked present (a fetch anchor) or missing (B1/B2/B3). A
+    missing artifact/draft is never an error."""
+    items = []
+    for name in _ARTIFACT_TOP_LEVEL:
+        drafts = []
+        if name in _ARTIFACT_DUAL:
+            for dname in _draft_names(name):
+                drafts.append({
+                    "name": dname,
+                    "present": _artifact_present(run_dir, runs_root, f"drafts/{dname}"),
+                })
+        items.append({
+            "name": name,
+            "present": _artifact_present(run_dir, runs_root, name),
+            "drafts": drafts,
+        })
+    return items
+
+
 def _run_detail(
     ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path, *,
     limit=_DISPLAY_WINDOW, raw_q=None, raw_type=None,
@@ -917,6 +1137,22 @@ def create_app(repos=None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Unknown snapshot ref for this run")
         return _git_diff(ref.path, frm, to)
 
+    @app.get("/api/runs/{repo}/{run_id}/artifacts/{name}")
+    def api_run_artifact(repo: str, run_id: str, name: str):
+        # Containment first (unknown slug 404, bad run_id 400, absent run 404).
+        _, run_dir, runs_root = require_run(repo, run_id)
+        # Resolve the single-segment name through the whitelist BEFORE any file
+        # access: an unknown/nested/encoded/traversal name is 404 without a read.
+        mapped = _resolve_artifact(run_dir, name)
+        if mapped is None:
+            raise HTTPException(status_code=404, detail=f"Unknown artifact: {name!r}")
+        # Resolve through the same containment discipline the diff/events routes
+        # use, so an escaping symlink is 404 and its target is never read.
+        contained = _contained(mapped, runs_root)
+        if contained is None or not contained.is_file():
+            raise HTTPException(status_code=404, detail=f"No artifact {name}")
+        return PlainTextResponse(contained.read_text(encoding="utf-8", errors="replace"))
+
     @app.get("/api/runs/{repo}/{run_id}/stream")
     def api_run_stream(repo: str, run_id: str, request: Request):
         _, run_dir, runs_root = require_run(repo, run_id)
@@ -945,9 +1181,15 @@ def create_app(repos=None) -> FastAPI:
         detail = _run_detail(
             ref, run_id, run_dir, runs_root, limit=limit, raw_q=raw_q, raw_type=raw_type
         )
-        html = _TEMPLATES.get_template("run_detail.html").render(
-            {"detail": detail, "limit": limit, "raw_q": raw_q or "", "raw_type": raw_type or ""}
-        )
+        # The Timeline derives from the same events Trace uses; the Artifacts tab
+        # lists the whitelisted files of the run. Both are page-render concerns and
+        # stay out of the JSON detail contract.
+        events, _problems = _read_events(run_dir, runs_root)
+        html = _TEMPLATES.get_template("run_detail.html").render({
+            "detail": detail, "limit": limit, "raw_q": raw_q or "", "raw_type": raw_type or "",
+            "timeline": _timeline(events),
+            "artifacts": _artifacts_listing(run_dir, runs_root),
+        })
         return HTMLResponse(html)
 
     return app

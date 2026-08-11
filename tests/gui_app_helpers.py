@@ -646,6 +646,171 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+# --- Run 77f19a94 fixtures: Timeline strands (A), Artifacts (B), perf (C) --------
+#
+# These builders keep large fixtures generated in-memory (never checked in) as
+# .adw/plan.md §1 requires. The timeline log exercises every strand of GUI-SPEC
+# §7.2 (orchestrator, spec, plan, per lane, codex, CI) including the WAITING
+# intervals (CI polling, gate runtime) and a still-running span. The artifact
+# builder populates the whitelisted top-level files plus the drafts/ directory.
+
+
+def timeline_lines(*, running=False, dry_run=False, issue="Timeline run"):
+    """An event log covering every timeline strand: orchestrator (the ``run``
+    span), ``spec``, ``plan``, a build lane (``backend``), ``codex`` and ``CI``
+    (a ``ci.wait`` span whose ``ci.poll`` points are pure WAITING), plus a
+    ``gate`` (waiting). ``running`` leaves the ``ci.wait`` (and thus the run) open
+    — no end — so a live run renders with an open-ended bar (A6). ``dry_run``
+    drops all ``usage``/cost so the header renders cost/tokens EMPTY, never a
+    false 0 (A4, GUI-SPEC §12)."""
+    model = "opus-4.8"
+    if dry_run:
+        agent_end = {"result_text": "done", "is_error": False}
+    else:
+        agent_end = {
+            "result_text": "done", "is_error": False, "cost_usd": 0.42,
+            "usage": {"input": 1000, "output": 500, "cache_read": 0, "cache_creation": 0},
+        }
+    lines = [
+        rec(1, "run", "start", "R", None, sec=0, payload=run_start_payload(issue)),
+        rec(2, "phase", "start", "S", "R", sec=1, payload={"name": "spec", "from_phase": "spec"}),
+        rec(3, "phase", "end", "S", "R", sec=3, payload={"name": "spec", "to_phase": "plan"}),
+        rec(4, "phase", "start", "PL", "R", sec=3, payload={"name": "plan", "from_phase": "plan"}),
+        rec(5, "phase", "end", "PL", "R", sec=6, payload={"name": "plan", "to_phase": "build"}),
+        rec(6, "phase", "start", "PB", "R", sec=6,
+            payload={"name": "build", "from_phase": "build"}),
+        rec(7, "lane", "start", "L", "PB", sec=7, lane="backend", payload={
+            "name": "backend", "branch": "adw/backend", "worktree": "wt",
+            "base_sha": None, "ports": {}}),
+        rec(8, "agent.run", "start", "A", "L", sec=8, lane="backend", payload={
+            "agent": "build_agent", "model": model, "prompt": "p", "system_append": ""}),
+        rec(9, "agent.run", "end", "A", "L", sec=14, lane="backend", payload=agent_end),
+        rec(10, "gate", "start", "G", "L", sec=14, lane="backend",
+            payload={"name": "lint", "cmd": "ruff check .", "timeout": 30, "cwd": "wt"}),
+        rec(11, "gate", "end", "G", "L", sec=18, lane="backend",
+            payload={"passed": True, "exit_code": 0, "timed_out": False, "output": "ok"}),
+        rec(12, "lane", "end", "L", "PB", sec=18, lane="backend",
+            payload={"completed": True, "gate_iterations": 1, "fix_cycles": 0}),
+        rec(13, "codex.review", "start", "C", "PB", sec=18, payload={
+            "kind": "code", "argv": ["codex", "review"], "cwd": "wt", "custom_prompt": None}),
+        rec(14, "codex.review", "end", "C", "PB", sec=22,
+            payload={"findings": [], "raw_stdout": "codex ok", "parse_ok": True}),
+        rec(15, "ci.wait", "start", "CI", "R", sec=22,
+            payload={"provider": "gitlab", "pipeline_ref": "adw/backend"}),
+        rec(16, "ci.poll", "point", "CI", sec=24,
+            payload={"provider": "gitlab", "status": "running", "job": None}),
+        rec(17, "ci.poll", "point", "CI", sec=27,
+            payload={"provider": "gitlab", "status": "success", "job": None}),
+    ]
+    if running:
+        # The CI wait — and so the run — never ends: the live run must still
+        # render, its open bar drawn to the current edge (A6).
+        return lines
+    lines.append(rec(18, "ci.wait", "end", "CI", "R", sec=30,
+                     payload={"status": "success", "polls": 2, "duration": 8}))
+    lines.append(rec(19, "phase", "end", "PB", "R", sec=30,
+                     payload={"name": "build", "to_phase": "done"}))
+    if dry_run:
+        end_payload = {"status": "done", "totals": {"duration": 30.0}}
+    else:
+        end_payload = {"status": "done",
+                       "totals": {"duration": 30.0, "cost": 0.42, "tokens": 1500}}
+    lines.append(rec(20, "run", "end", "R", None, sec=30, payload=end_payload))
+    return lines
+
+
+# The eight whitelisted top-level artifact names (contract x-adw-artifact-mapping).
+ARTIFACT_TOP_LEVEL = [
+    "issue.md", "spec.md", "plan.md", "contract.yaml",
+    "escalation.md", "followups.md", "spec-summary.md", "plan-summary.md",
+]
+
+# Sentinels bracketing the large generated artifact so a test proves the route
+# serves the FULL content (head + tail) while the tab's initial render is bounded.
+LARGE_ARTIFACT_HEAD = "LARGEARTIFACTHEADSENTINEL"
+LARGE_ARTIFACT_TAIL = "LARGEARTIFACTTAILSENTINEL"
+
+
+def artifact_body(name):
+    """Deterministic, unique content for artifact/draft ``name`` so a served-
+    content assertion is exact and a draft is distinguishable from its synthesis."""
+    return f"# artifact {name}\nCONTENT-{name}-BODY-LINE\nbody text for {name}\nEND-{name}\n"
+
+
+def large_artifact_body(lines=25000):
+    """A large (~0.8 MB) artifact body bracketed by the head/tail sentinels. Big
+    enough that an unbounded initial render would demonstrably grow with input
+    size; no fixed threshold is pinned (review descope)."""
+    body = "\n".join(f"large artifact content line {i:06d}" for i in range(lines))
+    return f"{LARGE_ARTIFACT_HEAD}\n{body}\n{LARGE_ARTIFACT_TAIL}\n"
+
+
+def _draft_author(draft_name):
+    parts = draft_name.split(".")
+    return parts[-2] if len(parts) >= 3 else None
+
+
+def write_artifacts_run(
+    repo: Path, run_id: str, *,
+    lines=None, phase="done",
+    top_level=("issue.md", "spec.md", "plan.md", "contract.yaml",
+               "followups.md", "spec-summary.md", "plan-summary.md"),
+    drafts=("spec.claude.md", "spec.codex.md", "plan.claude.md", "contract.codex.yaml"),
+    failed_markers=(),
+    large_name=None,
+    large_body=None,
+):
+    """Write a run directory populated with the whitelisted top-level artifacts and
+    a ``drafts/`` directory of per-author drafts (B1/B2). ``top_level`` omits
+    ``escalation.md`` by default (not every run escalates → it is MISSING).
+    ``failed_markers`` are ``*.FAILED`` files a failed author left instead of the
+    draft (B6): they have no external name and the draft counts as missing.
+    ``large_name`` (a whitelisted name) is overwritten with ``large_body`` (or the
+    default large body) for the B7 case."""
+    run_dir = repo / ".adw" / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    write_run(repo, run_id, timeline_lines() if lines is None else lines, phase=phase)
+    for name in top_level:
+        (run_dir / name).write_text(artifact_body(name))
+    drafts_dir = run_dir / "drafts"
+    drafts_dir.mkdir(exist_ok=True)
+    for draft in drafts:
+        (drafts_dir / draft).write_text(artifact_body(draft))
+    for marker in failed_markers:
+        (drafts_dir / marker).write_text("draft author failed; details in the trace\n")
+    if large_name is not None:
+        (run_dir / large_name).write_text(large_body or large_artifact_body())
+    return run_dir
+
+
+def write_symlink_escape_artifact(repo: Path, run_id: str, outside_target: Path,
+                                  *, name="followups.md"):
+    """A run whose whitelisted artifact ``name`` is a SYMLINK pointing OUTSIDE the
+    run directory. Resolving the mapped file through the containment discipline
+    must yield 404 and never read the target (B5)."""
+    run_dir = repo / ".adw" / "runs" / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    write_run(repo, run_id, timeline_lines(), phase="done")
+    link = run_dir / name
+    if link.exists() or link.is_symlink():
+        link.unlink()
+    link.symlink_to(outside_target)
+    return run_dir
+
+
+def tab_panel(html: str, name: str) -> str:
+    """The inner HTML of the run-level tab panel ``name`` (``data-tab-panel``),
+    sliced to the next sibling panel. Run-level panels are flat siblings, so this
+    scopes an assertion to one tab without pinning the surrounding markup."""
+    key = f'data-tab-panel="{name}"'
+    i = html.find(key)
+    if i == -1:
+        return ""
+    rest = html[i + len(key):]
+    j = rest.find('data-tab-panel="')
+    return rest if j == -1 else rest[:j]
+
+
 def build_diff_run(repo: Path, run_id="aaaa1111", *, large=False):
     """Create a real git repo with two snapshot refs of ``run_id`` whose ``git
     diff`` is deterministic, and write the run's events.jsonl referencing EXACTLY
