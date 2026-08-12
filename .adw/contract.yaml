@@ -1,304 +1,160 @@
-openapi: 3.1.0
-info:
-  title: ADW Read-only GUI — Timeline tab, Artifacts tab, measurable response time
-  version: 7.0.0
-  description: |
-    Minimal external contract for the single backend workstream of this run. The
-    read-only GUI web app already exists; this run adds the two remaining
-    run-level tabs of §7.2 (Timeline, Artifacts, GUI-SPEC §11 step 10) and makes
-    the "reaction ≤ 2 s" promise checkable through pinned `performance` measures.
-    Authoritative on conflict: docs/GUI-SPEC.md, especially §7.2, §7.4, §8, §9,
-    §12.
+# Interface-Kontrakt — Vier Robustheits-Fixes am ADW-Orchestrator
+#
+# Single-Lane-Projekt (Workstream: backend): keine HTTP-Routen, keine Events
+# als externe API. Der Kontrakt pinnt AUSSCHLIESSLICH die extern beobachtbare
+# Fläche der vier Fehlerpfade: CLI-Verhalten (Exit-Codes, Meldungsgehalt,
+# State-Wirkung), den neuen Config-Key codex.timeout und die
+# Nie-Eskalation-/Nie-Verwerfen-Garantien. NICHT im Kontrakt: interne
+# Helper-Signaturen, Callback-Mechanik, Marker-Dateinamen, Event-Typnamen,
+# Session-Persistenz-Interna.
 
-    Pinned here are ONLY the externally observable surfaces named in the issue's
-    contract note:
-      (1) the new read-only artifact-content endpoint — route, single-segment
-          `{name}`, the deterministic whitelist name-mapping (top-level names and
-          flat draft names), and its rejection of unknown/nested/encoded/traversal
-          names and escaping symlinks (404, never 5xx, never a read outside the
-          run directory);
-      (2) the presence and observable behavior of the Timeline tab and the
-          Artifacts tab at run level, and the full run-level tab set / default;
-      (3) the pinned performance mark/measure NAMES of task C — node selection
-          and tab switch, the two interactions the issue names — and their
-          post-paint completion semantics.
+contract_version: 1
+scope: "single-lane (workstream: backend)"
 
-    NOT pinned: internal helper signatures, the span-tree/timeline derivation
-    mechanics, template/CSS/JS file structure and markup, the timeline's concrete
-    drawing (CSS vs. inline SVG), the concrete rendering/paging/windowing
-    mechanism for bounded artifact display (an implementation choice), the
-    artifact response media type, concurrent-interaction behavior, and any
-    large-input fixture size threshold (review descope: no supersession
-    protocol, no third measure, no fixed 2 MB / 20,000-line cardinality).
-    Implementation and scope guardrails — the named source files that must remain
-    unchanged, dependency/tooling constraints, and the filesystem containment /
-    RUN_ID_RE / slug enforcement mechanisms — live in the spec and plan, not here.
-    Field lists are minimum requirements unless marked exact.
+# --- Config-Fläche (A3/A4) ---------------------------------------------------
+config:
+  file: .adw/config.yaml
+  new_key:
+    path: codex.timeout
+    type: integer
+    unit: seconds
+    required: false
+    default: 900
+    constraints:
+      - "> 0 (streng positiv)"
+      - "ganzzahlig (kein Float)"
+      - "kein Boolean (YAML true/false wird abgelehnt)"
+    semantics: >
+      Gilt für die codex-exec-Subprozesse (Autor UND Review teilen den
+      Timeout-Wert; die Review-SEMANTIK bleibt unverändert). Fehlt der Key
+      `codex` oder `codex.timeout`, ist das effektive Zeitlimit unverändert 900s.
+    invalid_value_behavior:
+      # A4: ungültiger Wert wird über die bestehende Config-Fehlerbehandlung
+      # abgelehnt, BEVOR der Lauf startet.
+      exit_nonzero: true
+      error_type: ConfigError
+      run_started: false
 
-    The full observable surface pinned by earlier runs (the `/`,
-    `/runs/{repo}/{run_id}`, `/api/runs`, `/api/runs/{repo}/{run_id}`,
-    `/api/runs/{repo}/{run_id}/events`, `/api/runs/{repo}/{run_id}/diff` and
-    `/api/runs/{repo}/{run_id}/stream` routes, their response/SSE formats, the
-    existing Trace/Raw run-level tabs and node-level Diff tab, the CLI, the
-    packaging boundary and the read-only invariants) remains in force unchanged
-    except as extended below.
+# --- CLI-Verhalten der vier Fehlerpfade -------------------------------------
+# Exit-Codes des bestehenden Schemas: 0 = done, 2 = awaiting_approval,
+# 1 = Eskalation/Fehler (unverändert).
+cli:
 
-servers:
-  - url: http://127.0.0.1:8765
+  # A1/A2 — Codex-AUTOR-Ausfall wird kontrollierte Degradation, kein Crash.
+  codex_author_failure:
+    applies_to:
+      - spec-Dual-Authoring-Draft
+      - plan/contract-Dual-Authoring-Draft
+    trigger: >
+      Der Codex-Autor wirft im Dual-Authoring einen CodexError (jeder
+      Subprozess-Fehlschlag, einschließlich Timeout).
+    observable:
+      run_aborts: false
+      python_traceback: false
+      exit_1_from_codex_failure: false
+      manual_recovery_required: false
+      state_phase_escalated_by_codex_failure_alone: false
+      phase_completes_regularly: true            # Pflicht-Artefakte + Summary existieren
+      synthesis_basis: single-source             # bestehender "kein Codex-Entwurf"-Zweig
+      codex_author_auto_retry: false             # E1
+    note: >
+      FAILED-Marker-Mechanik und Draft-Interna sind NICHT Teil des Kontrakts —
+      beobachtbar ist nur: kein Crash, Phase schließt einquellig regulär ab.
 
-x-adw-scope:
-  workstreams:
-    - backend
-  read_only: true
-  externally_observable_surfaces:
-    - http
-    - json
-    - template_behavior
-  invariants:
-    - "The GUI exposes no write or control route and stays strictly read-only.
-       The artifact endpoint reads files only, never outside the resolved run
-       directory."
-    - "The artifact endpoint never returns 5xx on the pinned error cases (unknown
-       name, nested/encoded separator, traversal, escaping symlink, absent or
-       non-file target); it answers 404, and never reads outside the run
-       directory."
-    - "No artifact content is discarded merely to keep the DOM bounded (E8
-       governs the display, not the log/file); the full content of every served
-       artifact stays reachable."
-    - "No charting library and no Markdown library is introduced; artifacts
-       render as faithful monospace text (E5, E10)."
-    - "Trace remains the default run-level tab; the existing Trace and Raw views
-       are unchanged in behavior."
+  # B1/B4 — Arbeitsbaum-Prüfung vor jedem Kommando, das den Phasen-Executor
+  # betritt: `adw run`, `adw resume` UND `adw approve`. Kein anderes Kommando
+  # (status, gui) ist betroffen.
+  worktree_check:
+    applies_to:
+      - adw run
+      - adw resume
+      - adw approve
+    runs_before_any_state_mutation: true         # eine Verweigerung darf nichts persistiert haben
+    never_escalates: true                        # B1: NIE Eskalation (run, resume, approve)
+    self_heal_paths_exactly:                     # B2/B3/E2: feste Liste, nicht konfigurierbar, kein Glob
+      - .adw/issue.md
+      - .adw/spec.md
+      - .adw/plan.md
+      - .adw/contract.yaml
+      - .adw/spec-summary.md
+      - .adw/plan-summary.md
+    cases:
+      clean:
+        action: proceed
+      only_adw_artifacts_dirty:
+        # B2: ausschließlich Pfade der Liste dirty
+        action: self_heal_then_proceed
+        heal: "getrackt -> git checkout; ungetrackt -> löschen"
+        proceeds: true
+      foreign_file_dirty:
+        # B4: mindestens ein Pfad außerhalb der Liste
+        action: refuse
+        exit_nonzero: true
+        escalated: false
+        escalation_report_created: false
+        run_state_unchanged: true                # inhaltlich unverändert
+        new_persistent_run_created: false        # Verweigerung bei `adw run` legt keinen Run an
+        approval_grant_persisted: false          # Verweigerung bei `adw approve`: Zusage bleibt ungesetzt
+        resume_possible_afterwards: true
+        discards_anything: false                 # fremde Datei NIE verworfen
+        message_present: true                    # klare Meldung
+      mixed:
+        # B4: mind. ein ADW-Artefakt UND mind. eine fremde Datei
+        action: refuse
+        exit_nonzero: true
+        escalated: false
+        escalation_report_created: false
+        run_state_unchanged: true
+        new_persistent_run_created: false
+        approval_grant_persisted: false          # Verweigerung bei `adw approve`: Zusage bleibt ungesetzt
+        resume_possible_afterwards: true
+        discards_anything: false                 # weder eigen noch fremd verworfen; keine Teilheilung
+        message_present: true
 
-paths:
-  /api/runs/{repo}/{run_id}/artifacts/{name}:
-    get:
-      operationId: getRunArtifact
-      summary: "(B) Read-only content of a whitelisted artifact of THIS run"
-      description: |
-        Serves the content of one whitelisted artifact of this run. `{name}` is a
-        SINGLE path segment and is never treated as a filesystem path; it is
-        resolved through a deterministic lookup against the fixed whitelist:
-          - a top-level whitelist name (e.g. `spec.md`) maps to that file in the
-            run directory;
-          - a draft name of the EXACT form `<stem>.<author>.<ext>` with
-            author ∈ {claude, codex} and `<stem>.<ext>` in the top-level
-            whitelist (e.g. `spec.claude.md`) maps to `drafts/<name>` in the run
-            directory — drafts are addressed by their FLAT filename, never by a
-            `drafts/…`-prefixed name;
-          - every other name is unknown.
-        Only files reachable through this mapping are served; any other `drafts/`
-        entry (including failure markers like `spec.codex.FAILED`) has no external
-        name and is never served. A resolvable-but-absent file (e.g. `escalation.md`
-        on a non-escalating run, or a mapped draft whose file is missing) and a
-        mapped name resolving to a non-file are 404.
-      parameters:
-        - name: repo
-          in: path
-          required: true
-          description: Existing registered repository slug.
-          schema:
-            type: string
-            minLength: 1
-        - name: run_id
-          in: path
-          required: true
-          description: Existing run identifier resolved under the repository.
-          schema:
-            type: string
-            minLength: 1
-        - name: name
-          in: path
-          required: true
-          description: |
-            A single path segment: a top-level whitelist name or a flat draft
-            name `<stem>.<author>.<ext>` (author ∈ {claude, codex}). Any raw or
-            encoded `/` or `\`, absolute path, `..` sequence, or `drafts/`-prefix
-            is not a valid name and yields 404 without a filesystem read.
-          schema:
-            type: string
-            minLength: 1
-      responses:
-        "200":
-          description: |
-            The full content of the resolved, present, contained artifact file,
-            served as faithful text (E10). The route returns the COMPLETE
-            content, including for the large B7 fixture; the client's bounded
-            initial render is a display concern, not the route's. The response
-            media type is deliberately not pinned (see not_pinned) — only the
-            full-content and faithful-text properties are contractual.
-        "404":
-          description: |
-            Unknown repo slug, invalid run_id, absent run; OR an unknown name, a
-            nested/encoded-separator name (`drafts/…`, `drafts%2F…`), a traversal
-            attempt (`..`, absolute path, raw/encoded `/` or `\`), an escaping
-            symlink whose target is never read, a resolvable-but-absent file, or
-            a mapped name resolving to a non-file. Never 5xx, and never a
-            filesystem read outside the run directory.
-      x-adw-artifact-mapping:
-        name_is_single_segment: true
-        name_is_never_a_filesystem_path: true
-        top_level_whitelist:
-          - issue.md
-          - spec.md
-          - plan.md
-          - contract.yaml
-          - escalation.md
-          - followups.md
-          - spec-summary.md
-          - plan-summary.md
-        draft_names:
-          form: "<stem>.<author>.<ext>"
-          authors: [claude, codex]
-          stem_ext_must_be_top_level_whitelist: true
-          maps_to: "drafts/<name>"
-          addressed_by_flat_filename: true
-          drafts_prefixed_name_rejected: true
-        never_served:
-          - "Any drafts/ entry not matching a draft name (e.g. *.FAILED markers)."
-          - "Any name outside the two mapping cases."
-        rejected_inputs:
-          - unknown flat name (e.g. spec.gpt.md, state.json)
-          - "nested/encoded separator (drafts/spec.claude.md, drafts%2Fspec.claude.md)"
-          - "traversal (.., absolute path, raw or encoded / or \\)"
-          - escaping symlink (target never read)
-          - resolvable-but-absent file
-          - mapped name resolving to a non-file
-        rejected_status: 404
-        rejected_never_5xx: true
-        rejected_never_reads_outside_run_dir: true
-        endpoint_test_cases:
-          - "GET …/artifacts/spec.claude.md -> 200, serves drafts/spec.claude.md"
-          - "GET …/artifacts/drafts/spec.claude.md -> 404"
-          - "GET …/artifacts/drafts%2Fspec.claude.md -> 404"
-          - "traversal/absolute/encoded-separator names -> 404, no filesystem read"
-          - "whitelisted name whose file is an escaping symlink -> 404, target unread"
-          - "unknown flat name (spec.gpt.md, state.json) -> 404"
+  # C1/C2 — Partieller Synthese-Ausfall wird genau EIN In-Session-Retry.
+  synthesis_partial_failure:
+    trigger: >
+      Nach einem Synthese-Lauf fehlt ein Pflicht-Artefakt (Artefakte des
+      Schritts oder seine Summary) oder ist leer; Nur-Whitespace zählt als
+      leer.
+    observable:
+      retries_same_step: 1                        # genau einer, über die vorhandene Session (E4)
+      retry_hint_names_missing_artifact: true
+      on_retry_success:
+        run_continues_regularly: true
+        already_correct_artifacts_preserved: true
+      on_retry_failure:
+        escalates: true                           # wie heute; kein zweiter Versuch
+        total_synthesis_calls_before_escalation: 2
+      consumes_authoring_round: false             # C3: Reparatur, kein Review-Zyklus
+      consumes_review_round: false
 
-# --- (A/B) Observable run-level tab set and tab behavior -------------------------
-x-adw-template-behavior:
-  run_level_tabs:
-    scope: run detail view
-    set: [Trace, Timeline, Artifacts, Raw]
-    default: Trace
-    note: "Trace and Raw already existed; Timeline and Artifacts are added between
-      them. The existing Trace/Raw views are unchanged in behavior."
-  timeline:
-    scope: run
-    tab_label: Timeline
-    content:
-      - "Horizontal swimlanes with time running left to right (A1)."
-      - "One lane per strand present in the run: orchestrator, spec, plan, each
-         build lane, codex, CI. An absent strand contributes no lane and is never
-         an error (A2)."
-      - "Active and waiting sections are visually distinguishable; waiting covers
-         at least CI polling and gate runtime (A3)."
-      - "A header showing total duration, total cost, and tokens per model (A4)."
-      - "A running span's bar is drawn to the current right edge, not omitted; a
-         live run and a finished run render through the same path (A6)."
-    derivation:
-      source: "The run's already-loaded event log (the same events Trace uses)."
-      no_new_reader: true
-      no_model_change: true
-    missing_values:
-      rule: "A value the log does not carry (cost/tokens under a dry run with no
-        usage) renders EMPTY, never a false 0 (GUI-SPEC §12)."
-    bar_click:
-      navigates_to: "The corresponding node in the Trace tab (switches to Trace,
-        reveals/selects that node) (A5)."
-    drawing:
-      own_means_only: true
-      allowed: [CSS, inline-generated SVG]
-      forbidden: [charting library, third-party asset]
-    no_event_log:
-      behavior: "Empty timeline with a clear no-trace indication; never a 5xx (A8)."
-  artifacts:
-    scope: run
-    tab_label: Artifacts
-    content:
-      - "Lists the whitelisted artifacts of the run (issue.md, spec.md, plan.md,
-         contract.yaml, escalation.md, followups.md, the summaries) and the
-         dual-authoring drafts (B1)."
-      - "For a dual-authored artifact, the two drafts (<stem>.claude.<ext>,
-         <stem>.codex.<ext>) are presented against the synthesis (B2)."
-      - "A missing artifact or draft — including a draft left only as a *.FAILED
-         marker — is shown as MISSING, never an error, never a 5xx (B2/B3)."
-    content_source:
-      route: /api/runs/{repo}/{run_id}/artifacts/{name}
-      rendered_as: "Faithful monospace text (E10, no Markdown library)."
-    large_input:
-      route_serves_full_content: true
-      initial_render_bounded: true
-      bounded_meaning: "Initial DOM insertion does not grow with artifact size."
-      full_content_reachable: true
-      non_blocking: "Opening a large artifact does not block the interface;
-        evidenced by a proportionate generated large-input test of the bounded
-        initial render. No fixed byte/line threshold is contractually pinned
-        (review descope)."
-  language:
-    run_detail_language: English
+  # D2 — Session-ID sofort persistiert; Resume knüpft an begonnene Session an.
+  session_checkpoint:
+    observable:
+      session_id_persisted_when_known: true       # sobald sie im Stream erscheint, nicht erst nach Abschluss
+      abort_after_session_id_keeps_id_in_state: true
+      abort_stays_resumable_not_escalated: true   # Abbruch = Nichtnull-Exit in resumierbarer Phase
+      resume_passes_persisted_session_id: true    # an den fortgesetzten Agent-Lauf, kein Neustart
+      resume_semantics_unchanged: true            # expected_head, Orchestrator-only-Commits, Gate-Wiederholung (E5)
 
-# --- (C) Pinned performance mark/measure names and completion semantics ----------
-x-adw-performance:
-  api: "Vanilla performance.mark() / performance.measure() only."
-  no_new_dependency: true
-  no_browser_automation: true
-  readable_via:
-    - "performance.getEntriesByName(<measure>)"
-    - "the browser's Performance panel"
-  completion_semantics:
-    rule: "The end mark is recorded only once the interaction is observably
-      complete: the resulting content is inserted into the DOM AND the browser has
-      painted it (C1)."
-    post_paint_sequence: "The end mark is recorded in a task scheduled from WITHIN
-      a requestAnimationFrame callback (e.g. rAF -> setTimeout(0)), which runs
-      after the paint. A rAF callback alone runs BEFORE the paint and is
-      insufficient."
-    async_content_counts: "For asynchronously loaded content the sequence starts
-      after the fetched content is rendered, not when the request is issued; a
-      loading indicator is not completion."
-  interactions:
-    node_selection:
-      start_mark: "adw:select:start"
-      end_mark: "adw:select:end"
-      measure: "adw:select"
-      complete_when: "The detail pane for the selected node is rendered."
-    tab_switch:
-      start_mark: "adw:tab:start"
-      end_mark: "adw:tab:end"
-      measure: "adw:tab"
-      complete_when: "The target tab's content is rendered."
-  scope_note: "Exactly these two interactions are instrumented — the two the
-    issue names. No third measure and no supersession/generation protocol is
-    contract surface (review descope)."
-  passing_value_ms_maximum: 2000
+# --- Garantien (B1/B4, querschnittlich) -------------------------------------
+guarantees:
+  worktree_check_never_escalates: true
+  foreign_files_never_discarded: true
+  mixed_dirty_set_never_partially_healed: true
+  self_heal_list_fixed_not_configurable_not_glob: true   # E2
 
-# --- Guide document (C3) --------------------------------------------------------
-x-adw-guide:
-  present_in_repo: true
-  describes:
-    - "Which run and node to pick (an agent.run node with a large payload)."
-    - "Which measure name to read (adw:select, adw:tab) and how."
-    - "The exact post-paint completion sequence (C1)."
-    - "The passing value (measure duration <= 2000 ms)."
-    - "The manual checklist for the documented-manual checks (A3 active/waiting
-       distinction, A5 bar-click navigation, the two <= 2 s readings)."
-
+# --- Bewusst NICHT im Kontrakt ----------------------------------------------
 not_pinned:
-  - "Internal helper signatures and the span-tree / timeline derivation mechanics."
-  - "The timeline's concrete drawing (CSS vs. inline SVG) and layout."
-  - "Template/CSS/JS file structure and markup details."
-  - "The concrete rendering / paging / windowing mechanism for bounded artifact
-     display (an implementation choice)."
-  - "The artifact response media type and content-type/streaming mechanics —
-     only the full-content and faithful-text properties are contractual."
-  - "Concurrent-interaction behavior (stale requests, supersession, generation
-     bookkeeping) — not contract surface (review descope)."
-  - "Any large-input fixture size threshold; the large-input test is
-     proportionate, not a pinned cardinality (review descope)."
-  - "The filesystem containment / RUN_ID_RE / slug enforcement mechanisms — a
-     spec/plan guardrail reused from the existing routes, not new contract
-     surface."
-  - "How the responsiveness thresholds are evidenced (manual check procedure,
-     automated source-assertion strategy, tooling constraints) — verification
-     method lives in the spec and plan."
+  - interne Helper-Signaturen
+  - Callback-Mechanik der Session-Persistierung
+  - FAILED-Marker-Dateinamen und Draft-Ordner-Layout
+  - konkrete Event-Typnamen (neue Typen nur über die bestehende Emitter-API)
+  - Meldungs-Wortlaut (nur "klare Meldung vorhanden" ist zugesichert)
+  - Scope-/Implementierungs-Constraints (kein Retry-Framework, keine neuen
+    Laufzeit-Dependencies, Review-Loop-Policy-Interna) — diese stehen als
+    Non-goals und Gates in .adw/spec.md und .adw/plan.md, nicht im Kontrakt
+  - unverändertes Bestandsverhalten (Codex-Review-Fehlersemantik,
+    Approval-Stopp) — Nicht-Änderung ist Non-goal/Regressionsgegenstand in
+    Spec und Plan, keine Kontraktfläche der vier Fehlerpfade

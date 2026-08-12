@@ -1,397 +1,340 @@
-# Plan — Timeline tab, Artifacts tab, measurable response time
+# Implementierungsplan — Vier Robustheits-Fixes an den Fehlerpfaden des ADW-Orchestrators
 
-Authoritative on conflict: `docs/GUI-SPEC.md`, especially §7.2 (views), §7.4
-(API), §8 (security), §9 (performance), §12 (open points). This plan implements
-`.adw/spec.md` and builds strictly against `.adw/contract.yaml`. **Single-lane:**
-there is exactly one workstream, **backend** — the GUI web layer
-(`adw/gui/app.py`, the Jinja2 templates, and the packaged vanilla assets
-`static/app.css`, `static/app.js`) belongs wholly to this one lane; no separate
-frontend lane exists. This run adds the two remaining run-level tabs of §7.2
-(`Timeline`, `Artifacts`, GUI-SPEC §11 step 10) and makes the "reaction ≤ 2 s"
-promise checkable through pinned `performance` measures. It completes an existing
-view; it is not a redesign. The mechanism for bounded DOM rendering (windowing,
-paging, incremental loading) and the timeline's concrete drawing (CSS/SVG) remain
-implementation choices and are not pinned.
+Quelle: `.adw/spec.md`; gebaut wird strikt gegen `.adw/contract.yaml`. Vier
+Bugfixes (A–D) an bereits existierenden Fehlerpfaden. TDD ist bindend: pro Fix
+zuerst ein RED-Test, der das Fehlerbild reproduziert, dann der minimale Fix.
+Die vorentschiedenen Punkte E1–E5, die Scope-Deckel und der
+`Deferred`-Abschnitt sind bindend und werden unverändert durchgereicht — ein
+Review-Finding, das einen Deferred- oder vorentschiedenen Punkt einführen
+will, wird abgewiesen und dokumentiert, nicht umgesetzt (Deferred-Ventil,
+gilt auch für den Codex-Review-Loop).
 
-**Review descope (Codex round 1, resolved in favor of the issue):** task C
-instruments exactly the two interactions the issue names — node selection and
-tab switch. The earlier draft's third measure (`adw:artifact`), the
-latest-interaction-wins supersession protocol with its rapid-reselection check,
-and the fixed 2 MB / 20,000-line fixture cardinality are removed as beyond the
-issue's scope. Bounded artifact rendering (B7) is validated with a
-proportionate generated large-input test instead of a prescribed size.
+Single-Lane-Projekt: Es existiert nur der Workstream **backend**, keine
+`frontend`-Lane. Der Kontrakt pinnt ausschließlich die extern beobachtbare
+Fläche (CLI-Verhalten der vier Fehlerpfade, `codex.timeout`, die
+Nie-Eskalation-/Nie-Verwerfen-Garantien) — keine internen Helper-Signaturen,
+keine Callback- oder Marker-Mechanik.
 
-## Guardrails
+## Betroffene Module (Orientierung, keine Contract-Fläche)
 
-- **Web layer only.** Changes touch exclusively `adw/gui/app.py`, the templates
-  (`adw/gui/templates/*.html`), the own assets (`adw/gui/static/*`), a new short
-  guide document in the repo, and the associated tests/fixtures. `adw/events.py`,
-  `adw/snapshots.py`, `adw/gui/reader.py`, `adw/gui/model.py` and the orchestrator
-  stay **unchanged** (issue non-goals, E1, E2). Orphan spans and the `run`-span
-  boundary stay as they are; any repair is on read, in the finished model. If a
-  task turns out not to be solvable without such a change, that is a **finding
-  for the report**, not a silent scope widening.
-- **Strictly read-only.** No GUI code path writes to `state.json`, the repo or
-  the event log; no write HTTP route. Run data is read only below the resolved
-  `.adw/runs/<run_id>/` directory, under the same containment / `RUN_ID_RE` /
-  slug backstops as today, applied before any run is read.
-- **One new HTTP route only** — the read-only artifact-content route task B
-  strictly requires (GUI-SPEC §7.4). No other new route.
-- **No new runtime dependency, no third-party frontend asset** (E5): vanilla JS,
-  own CSS, system fonts, inline-generated SVG where needed; no CDN, no node
-  toolchain, **no charting library, no Markdown library** (E10), no
-  browser-automation tool (E5, C4). The web stack stays the optional extra
-  `adw[gui]` (E7).
-- **The UI is English throughout** until i18n (E9).
-- **E8 applies to the display, not the log.** Collapsing / paging / bounded
-  initial rendering in the display is explicitly permitted and is **not** a
-  violation of "no payload truncation" (that concerns the log). A finding that
-  reads B7 or C as such a violation is rejected with a reason. Every logged
-  payload and every whitelisted artifact's full content stays reachable.
-- **Missing values are treated as missing**, never reinterpreted as a displayed
-  `0` or `null` (A4, GUI-SPEC §12: cost/tokens under a dry run render empty).
-- **The Deferred valve binds the review loop too.** A finding that asks to
-  re-introduce a deferred or pre-decided point (Markdown library, i18n, run
-  management, browser automation, emitter/model change, rendering `*.FAILED`
-  content) is rejected with the documented rationale, not implemented.
-- Real gates (E3): `uv run ruff check .` and `uv run pytest -x -q`. `flake8`,
-  `isort`, `black` appear nowhere — not in dependencies, config, scripts or
-  validation commands.
+- `adw/codex.py` — `CODEX_TIMEOUT` (harte Modul-Konstante, `:36`); der
+  Subprozess-Timeout in `CodexRunner._execute` (`:427/:429`).
+- `adw/config.py` — Pydantic-Config-Modelle; `PositiveSeconds` (`:11`)
+  existiert bereits und trägt genau die geforderte Validierung
+  (int, `gt=0`, `strict`).
+- `adw/phases.py` — `_codex_draft` (Degradations-/Marker-Pfad, `:707`),
+  `_draft_stage` (`:576`), `_reviewed_authoring_loop` (Synthese-Loop, `:819`;
+  Vollständigkeits-Check `:879`), die getrackt-dirty-Prüfung im Authoring-Pfad
+  (`:355`–`:371`), die Build-Lane-Session-Persistenz (`:1347`),
+  `_agent_run` (`:115`).
+- `adw/agents.py` — `SdkAgentRunner._collect` (Session-ID erscheint im
+  Stream, `:551`), `AgentResult` (`:161`).
+- `adw/state.py` — `RunState.authoring_session` (`:128`),
+  `LaneState.session_id` (`:44`).
+- `adw/cli.py` — `run` (`:118`), `resume` (`:190`), `approve` (`:217`); Ort des
+  neuen Vorflugs. Maßgeblich sind die DREI Aufrufstellen von `_execute(ctx)`:
+  `:186` (run), `:213` (resume), `:249` (approve).
+- `adw/mock.py` — Mock-Runner muss den Session-ID-Vertrag mittragen.
+- `README*.md` / `docs/handbuch/ADW-USER-HANDBUCH*.md` — Doku (B5).
 
-## Starting point (verified in the code)
+---
 
-- **Run-level tabs (`run_detail.html:210-246`).** The run detail view already
-  has switchable run-level tabs **Trace** (default) and **Raw** (`data-tab`
-  buttons + `data-tab-panel` sections inside `.run-tabs[data-tabs]`). `Trace`
-  carries the trace tree and the per-node detail panes; `Raw` carries the
-  filterable event list. This run adds **Timeline** and **Artifacts** between
-  them so the set becomes `Trace` (default) · `Timeline` · `Artifacts` · `Raw`;
-  `Trace` stays the default and the existing `Trace`/`Raw` views are unchanged.
-- **Detail delivery (`app.py`).** `_run_detail` builds `run`/`phases`/`tree`/
-  `problems`/`raw` from the read layer; `require_run` enforces `RUN_ID_RE`, slug
-  resolution and symlink containment (`_contained`, `_runs_root`) and answers 404
-  on the error cases; `_read_events` loads the run's events. The Timeline derives
-  its lanes and bars from these **same** already-loaded events — no new reader,
-  no change to `model.py`.
-- **Tab machinery (`app.js:72-91`).** Tab switching is delegated on `document`,
-  toggles `active` classes only, and already scopes to the nearest `[data-tabs]`
-  so nested groups (the `agent.run` tabs inside the run-level tabs) are left
-  untouched. Node selection (`applySelection`) is a pure `data-seq` match between
-  a tree `.node` and its `.pane`. Timeline bar-click reuses this selection path.
-- **Containment discipline (`app.py`).** The diff/events routes resolve every
-  path through `_contained(path, runs_root)`, which returns the real path only if
-  it stays within the resolved runs tree after resolving **every** symlink, and
-  reject escaping symlinks with 404. The new artifact route reuses exactly this
-  discipline (B5).
-- **Fixtures/tests.** `tests/gui_app_helpers.py` provides the builders (`rec`,
-  `write_run`, `write_state_only_run`, `run_start_payload`, `run_end_payload`, …),
-  the `home` fixture, and helpers that keep large fixtures **generated in-memory**
-  rather than checked in as bulky artifacts. The app is exercised via
-  `create_app(repos=…)` with FastAPI's `TestClient`. New tests build on these.
+# Workstream: backend
 
-## Workstream: backend
+Reihenfolge A → B → C → D; die Fixes sind unabhängig, aber A liefert den
+Config-Key, an dem sich B/C/D beim Testen nicht stören. Jeder Schritt endet
+mit grünen Gates (`uv run ruff check .`, `uv run pytest -x -q`).
 
-### 1. Build the run-directory and large-artifact fixtures
+## A — Codex-Ausfall wird kontrollierter Ausfall (F1 + F2)
 
-- Extend the GUI test-fixture support with deterministic data for Definition of
-  Done §3, keeping large fixtures **generated by the helpers**, not checked in:
-  - a run directory populated with the whitelisted top-level artifacts
-    (`issue.md`, `spec.md`, `plan.md`, `contract.yaml`, `followups.md`, the
-    summaries `spec-summary.md`/`plan-summary.md`) plus a `drafts/` directory
-    holding per-author drafts `<stem>.claude.<ext>` / `<stem>.codex.<ext>`
-    (e.g. `spec.claude.md`, `spec.codex.md`, `plan.claude.md`,
-    `contract.codex.yaml`) — task B1/B2;
-  - a run **without** `escalation.md` and with at least one **missing draft**
-    represented by a failure marker `*.FAILED` (e.g. `spec.codex.FAILED`) in
-    `drafts/` instead of the draft file — tasks B2/B3/B6;
-  - a **large generated artifact** in the run directory — proportionate, i.e.
-    big enough that an unbounded initial render would demonstrably grow with
-    input size; no fixed byte/line threshold is prescribed — with sentinels
-    near its head and tail so a test can prove the route serves the FULL
-    content while the initial render is bounded — task B7;
-  - a symlink under the run directory whose target points **outside** it, and
-    the encoded-/nested-separator and traversal inputs, for the B5 rejection
-    tests;
-  - an event log exercising the timeline lanes (orchestrator/spec/plan/build
-    lane(s)/codex/CI), including CI-polling and gate-runtime **waiting**
-    intervals, a **still-running** span (no end), a **dry-run** log whose
-    `agent.run` ends carry no `usage` (so header cost/tokens are absent), and a
-    run with **no event log** (state-only) — tasks A2/A3/A4/A6/A8.
-- Reuse these fixtures for the endpoint tests, the template-behavior tests, the
-  reachability tests and the manual timing evidence in the guide.
+Erfüllt A1–A5. Zwei Teile: Degradation (F1) und konfigurierbarer Timeout (F2).
 
-### 2. Add the read-only artifact-content route
+### A.1 — RED-Tests zuerst
 
-- Add `GET /api/runs/{repo}/{run_id}/artifacts/{name}` in the existing FastAPI
-  app (GUI-SPEC §7.4).
-- Resolve repo and run through the existing slug / run-ID / containment checks
-  (`require_run`) before anything else.
-- Treat `{name}` as a **single path segment**, never as a filesystem path.
-  Resolve it through a deterministic lookup against the fixed whitelist (B4):
-  - a top-level whitelist name (`issue.md`, `spec.md`, `plan.md`,
-    `contract.yaml`, `escalation.md`, `followups.md`, `spec-summary.md`,
-    `plan-summary.md`) maps to that file in the run directory;
-  - a draft name of the **exact** form `<stem>.<author>.<ext>` with
-    `author ∈ {claude, codex}` and `<stem>.<ext>` in the top-level whitelist
-    (e.g. `spec.claude.md`) maps to `drafts/<name>` in the run directory —
-    drafts are addressed by their **flat filename**, never by a
-    `drafts/…`-prefixed name;
-  - every other name is unknown.
-- **Security (B5, non-negotiable):** an unknown name yields **404**, never 5xx,
-  and never a filesystem read outside the run directory. Resolve the mapped file
-  through the same `_contained(path, runs_root)` discipline the diff/events
-  routes use, so a whitelisted name whose file is a symlink pointing out of the
-  run directory yields 404 and the target is never read. Any raw or encoded `/`
-  or `\`, absolute path, or `..` sequence in the name fails the single-segment /
-  whitelist check and yields 404 without touching the filesystem.
-- Only files reachable through the B4 mapping are served (B6). Any other
-  `drafts/` entry — including failure markers like `spec.codex.FAILED` — has no
-  external name and is never served; the corresponding draft counts as missing.
-- On a resolvable-but-absent file (e.g. `escalation.md` on a run that did not
-  escalate, or a mapped draft whose file is missing) or a mapped name that
-  resolves to a **non-file** (e.g. a directory) return 404 — a missing artifact
-  is never a 5xx (B3).
-- For a resolvable, present, contained file: serve its content as faithful text
-  (E10), streamed/read so the route can return the full content of the large
-  fixture (B7). The concrete content-type/streaming mechanics are an
-  implementation choice and are not pinned.
+1. **F1-Regression** (`tests/test_phases.py`): Ein Codex-Fake, dessen
+   Autor-Aufruf bei jedem Aufruf `CodexError` wirft, lässt eine
+   Authoring-Phase über `_draft_stage` → `_reviewed_authoring_loop` regulär zu
+   Ende laufen: der `<kind>.codex.FAILED`-Marker existiert im
+   `drafts/`-Ordner, Pflicht-Artefakte und Summary existieren, der Run-State
+   steht NICHT auf `escalated`, kein Traceback/Exit 1. Nachweis der
+   Einquellen-Synthese: der Synthese-Task enthält den „kein
+   Codex-Entwurf“-Zweig. Zusätzlich nachweisen, dass derselbe Draft-Schritt
+   den Codex-Autor wegen des Markers nicht automatisch erneut startet (E1).
+   Den Test für Spec UND Plan/Contract an den gemeinsamen Draft-Pfad
+   anbinden, ohne den unveränderten Review-Fehlerpfad umzudeuten.
+2. **F2-Config-Tests** (`tests/test_config.py`): (a) fehlender `codex`-Key →
+   effektiver Timeout 900; (b) `codex.timeout: 120` → effektiver Timeout 120;
+   (c) ungültige Werte (`0`, `-5`, `1.5`, `true`) → `ConfigError` vor
+   Laufstart.
+3. **F2-Durchreich-Test** (`tests/test_codex.py`): der konfigurierte Wert
+   kommt am gemeinsamen `codex exec`-Subprozesspfad als effektives Timeout an.
 
-Tests (FastAPI `TestClient`, fixture run directory):
-- `GET …/artifacts/spec.claude.md` → 200, serving `drafts/spec.claude.md`.
-- `GET …/artifacts/spec.md` → 200, serving the top-level file; content matches.
-- `GET …/artifacts/drafts/spec.claude.md` and the encoded-separator form
-  `…/artifacts/drafts%2Fspec.claude.md` → 404.
-- Traversal attempts (`..%2F…`, absolute path, any raw or encoded `/` or `\` in
-  the name) → 404 **without touching the filesystem** (a read spy proves it).
-- A whitelisted name whose file is a symlink pointing out of the run directory
-  → 404; the target is never read.
-- An unknown flat name (`spec.gpt.md`, `state.json`) → 404.
-- A `*.FAILED` marker has no external name → 404; the draft counts as missing.
-- `…/artifacts/<large fixture name>` → 200 serving the FULL large-fixture
-  content (head and tail sentinels both present).
-- Invalid repo slugs, run IDs and absent runs keep the existing controlled
-  containment behavior.
+### A.2 — Fix Degradation (F1)
 
-### 3. Add the run-level Artifacts tab
+- Sicherstellen, dass jeder `CodexError` des **Autors** (inkl.
+  `subprocess.TimeoutExpired` → `CodexError` in `_execute`, `:428`) im
+  `_codex_draft`-`except CodexError`-Zweig (`:743`) endet: Marker schreiben,
+  `_log_warning`, `return` — der Draft-Pool-Worker eskaliert nie durch einen
+  Codex-Autor-Ausfall. Prüfen, dass `codex_future.result()` (`:635`) den
+  degradierten Worker nicht doch mit einer propagierten Exception quittiert.
+- KEIN automatischer Retry des Codex-Autors (E1). Der bestehende
+  Einquellen-Zweig (`_synthesis_task`, `:787`–`:793`) bleibt der Weiterlauf;
+  das Gesamtergebnis des CLI-Kommandos folgt dem normalen Phasenpfad,
+  einschließlich eines gegebenenfalls regulären Approval-Stopps.
+- Unerwartete Nicht-`CodexError`-Ausnahmen sowie der Claude-Autor behalten
+  ihre bestehende Semantik: der Claude-Autor degradiert nicht, er eskaliert
+  (`DraftSet`-Doku, `:538`).
 
-- Add an **Artifacts** tab at run level listing the whitelisted artifacts of the
-  run: `issue.md`, `spec.md`, `plan.md`, `contract.yaml`, `escalation.md`,
-  `followups.md`, the summaries, and the dual-authoring drafts (B1).
-- For a dual-authored artifact, present the two drafts (`<stem>.claude.<ext>`,
-  `<stem>.codex.<ext>`) against the synthesis so a reader can compare what each
-  author contributed (B2). A missing draft — including one whose author failed
-  and left only a `*.FAILED` marker — is shown as **missing**, not an error.
-- An absent artifact (e.g. `escalation.md` on a non-escalating run, or a missing
-  draft) is marked as missing; never an error, never a 5xx (B3).
-- Artifact content is fetched from the step-2 route and rendered as faithful
-  **monospace** text (E10, no Markdown library), escaped, never interpreted as
-  markup. Opening an artifact inserts only a **bounded initial portion** into
-  the DOM — bounded meaning its size does not grow with the artifact size —
-  while the full content stays reachable through explicit further loading or
-  bounded incremental steps (B7, E8). The concrete paging/collapsing mechanism
-  is an implementation choice and is not pinned; no content is dropped.
+### A.3 — Fix konfigurierbarer Timeout (F2)
 
-Tests:
-- The tab lists the whitelisted artifacts and the drafts; present vs. missing
-  artifacts render as such (B1/B3), including a `*.FAILED`-only draft shown as
-  missing (B2/B6).
-- Dual-authored artifacts present both drafts against the synthesis (B2).
-- Against the large generated fixture: the initial render is **bounded** (does
-  not grow with artifact size) and the full content stays reachable through
-  the mechanism's further-loading path (B7). This proportionate large-input
-  test is the evidence that a large artifact does not block the interface; no
-  separate artifact performance measure exists (review descope).
+- Neues optionales Config-Modell in `adw/config.py`: `CodexConfig` mit
+  `timeout: PositiveSeconds = 900`, als `codex: CodexConfig` mit
+  `default_factory` an `AdwConfig` (analog `ci: CiConfig`, `:96`),
+  `extra="forbid"` wie die übrigen Modelle. Damit greift die bestehende
+  Fehlerbehandlung (`ConfigError`) für ungültige Werte automatisch (A4) —
+  Default 900, `> 0`, ganzzahlig, `strict` (kein YAML-Boolean).
+- `CODEX_TIMEOUT` bleibt als Default-Wert `900` in `adw/codex.py` erhalten,
+  wird aber nicht mehr als effektives Limit hartverdrahtet: der effektive
+  Timeout wird dem `CodexRunner` zur Laufzeit aus der Config gereicht
+  (Konstruktor-Argument oder pro Aufruf — interne Umsetzungsentscheidung,
+  nicht Contract). Autor und Review teilen nur den Timeout-WERT; die
+  Review-Fehlerbehandlung und -Policy bleiben unberührt (Scope, Non-goals).
+- Verdrahtung dort, wo `CodexRunner` instanziiert wird (`RunContext`-Aufbau
+  in `adw/cli.py`): `config.codex.timeout` durchreichen.
 
-### 4. Derive and render the Timeline tab
+**Abnahme A:** A.1-Tests grün; simulierter `CodexError` hinterlässt Marker,
+Phase schließt einquellig regulär ab; `codex.timeout` optional/validiert.
 
-- Add a **Timeline** tab at run level (A1). Selecting it shows horizontal
-  swimlanes with time running left to right; `Trace` remains the default tab.
-- Derive lanes and bars from the run's **already-loaded** event log (the same
-  events `Trace` uses); introduce no new reader and no change to `model.py`
-  (A2). Pair span starts and ends by span identity; an unended span becomes an
-  open-ended interval. One lane per strand present in the run: orchestrator,
-  spec, plan, each build lane, codex, CI. A strand absent from a run
-  contributes no lane and is never an error.
-- Distinguish **active** sections from **waiting** sections visually; waiting
-  covers at least CI polling and gate runtime — the intervals where time passes
-  without anyone working (A3).
-- Show, in the timeline header, total duration, total cost, and tokens per model
-  for the run (A4). A value the log does not carry (cost/tokens under a dry run,
-  where mocks produce no `usage`) renders **empty**, never a false `0`
-  (GUI-SPEC §12).
-- Clicking a bar navigates to the corresponding node in the `Trace` tab —
-  switches to `Trace` and reveals/selects that node (A5), reusing the existing
-  `data-seq` selection path: each bar carries its target node's identity.
-- Draw a still-running span's bar to the current right edge rather than omitting
-  it; the timeline renders for a live run and a finished run through the **same**
-  path (A6).
-- Draw with own means only — CSS and, where needed, inline-generated SVG; no
-  charting library and no third-party asset (A7, E5). The concrete drawing
-  mechanism is an implementation choice and is not pinned.
-- A run with no event log shows the timeline empty with a clear "no trace"
-  indication, never a 5xx — parallel to the existing no-trace handling (A8).
+## B — Blocker bleibt Blocker, eigene Reste heilen sich (F3)
 
-Tests:
-- The run-level tab set is `Trace` (default) · `Timeline` · `Artifacts` · `Raw`;
-  `Trace` is the default (A1).
-- One lane per present strand; an absent strand contributes no lane and is no
-  error (A2).
-- Active and waiting sections (CI polling, gate runtime) are distinguishable
-  (A3, distinction attested at source/markup level; the visual check is manual).
-- The header shows duration, and shows cost/tokens when present but **empty**
-  (never `0`) for the dry-run fixture that carries no `usage` (A4).
-- A bar carries the target node's `data-seq` so a click can select it in Trace
-  (A5, wiring attested at source level; the navigation is a manual check).
-- A running-span fixture and a finished-span fixture both render through the
-  same path; the running bar reaches the current edge (A6).
-- A no-event-log run renders the empty timeline with the no-trace indication,
-  not a 5xx (A8).
+Erfüllt B1–B6. Kern: Die Arbeitsbaum-Prüfung darf NIE eskalieren; sie
+verweigert höchstens (Nichtnull-Exit, Run-State unverändert) oder heilt genau
+die sechs ADW-eigenen Artefakte selbst. Gilt für ALLE Kommandos, die den
+Phasen-Executor betreten — das sind genau die drei `_execute(ctx)`-Aufrufstellen
+in `adw/cli.py`: `adw run` (`:186`), `adw resume` (`:213`) und `adw approve`
+(`:249`). `approve` ist der Pfad, der die Authoring-Phase nach einer
+Gate-Pause wieder betritt; die Pause ist zugleich das Zeitfenster, in dem ein
+Mensch den Checkout dirty machen kann. Ein Vorflug, der nur `run`/`resume`
+abdeckt, ließe die heute eskalierende Prüfung in `adw/phases.py` als einzige
+Instanz auf dem `approve`-Pfad zurück — B1 („eskaliert NIE") wäre dort verletzt.
+Kein weiteres Kommando (`status`, `gui`) kommt in den Scope.
 
-### 5. Add the performance instrumentation (C)
+### B.1 — RED-Tests zuerst (`tests/test_cli.py`, ggf. Phasen-/Worktree-Tests)
 
-- In the served client script, instrument the **two** interactions the issue
-  names — node selection and tab switch — with the vanilla `performance` API
-  only; no new dependency, no browser-automation tool (C4). For each
-  interaction set a start `performance.mark()` at the triggering input event
-  and an end mark **only once the interaction is observably complete**: the
-  resulting content has been inserted into the DOM **and the browser has
-  painted it** (C1). Because a `requestAnimationFrame` callback runs *before*
-  the associated paint, record the end mark in a task scheduled *from within* a
-  `requestAnimationFrame` callback (e.g. rAF → `setTimeout(0)`), which runs
-  after that paint — the same post-paint sequence for both interactions.
-  Asynchronously loaded content counts toward the measure: the sequence starts
-  after the fetched content is rendered, not when the request is issued; a
-  loading indicator is not completion. Between the marks create a named
-  `performance.measure()`, readable via `performance.getEntriesByName(...)` and
-  in the browser's Performance panel.
-- Pin the mark/measure names and their completion conditions **exactly** (C2):
-  - node selection: marks `adw:select:start` / `adw:select:end`, measure
-    `adw:select` — complete when the detail pane for the selected node is
-    rendered;
-  - tab switch: marks `adw:tab:start` / `adw:tab:end`, measure `adw:tab` —
-    complete when the target tab's content is rendered.
-- No third measure and no supersession/generation protocol is built (review
-  descope): the issue requires marks and measures for node selection and tab
-  switch only.
+1. **B6(a):** dirty getracktes `.adw/spec.md` + `adw resume` → Lauf läuft
+   weiter, Datei zurückgesetzt (Selbstheilung), Phase NICHT `escalated`, kein
+   `escalation.md`.
+2. **B6(b):** dirty fremde Datei (z. B. `src/foo.py`) + `adw run`/`adw resume`
+   → Ausführung verweigert, Nichtnull-Exit + klare Meldung, Run-State
+   inhaltlich unverändert (kein `escalated`), fremde Datei bytegleich
+   unangetastet, ein anschließender `adw resume` (nach manueller Bereinigung)
+   bleibt möglich.
+3. **B6(c):** gemischter Zustand (mind. ein ADW-Artefakt UND mind. eine
+   fremde Datei dirty) → verweigert, NICHTS verworfen (weder eigen noch
+   fremd), Run-State unverändert.
+4. Ungetracktes ADW-Artefakt (z. B. `.adw/spec-summary.md` als neue Datei) im
+   Alleinzustand → per Löschen geheilt, Lauf läuft weiter.
+5. **`approve`-Pfad:** Run in `awaiting_spec_approval` (bzw.
+   `awaiting_approval`) + dirty fremde Datei + `adw approve` → verweigert,
+   Nichtnull-Exit, fremde Datei bytegleich, KEINE Eskalation, und die Zusage
+   ist NICHT gesetzt (`spec_approval_granted`/`approval_granted` unverändert),
+   der Run steht danach unverändert am selben Gate. Gegenprobe: derselbe Run
+   mit ausschließlich dirty `.adw/spec.md` → geheilt, `approve` läuft durch.
 
-Tests (assert the served client script text — wiring and stable names only, not
-presented as proof of runtime behavior):
-- The script contains the pinned mark and measure names for both interactions
-  (C2).
-- Both interactions are instrumented (start at the input event, end after the
-  fetched/rendered content) (C1).
-- The end mark is recorded in a task scheduled from a `requestAnimationFrame`
-  callback (the post-paint sequence), not directly in the rAF callback (C1).
+### B.2 — Fix Arbeitsbaum-Vorflug
 
-### 6. Write the measurement guide document (C3)
+- Eine neue Vorflug-Prüfung des **Haupt-Checkouts** vor dem eigentlichen
+  Phasenlauf, aufgerufen aus `adw run`, `adw resume` UND `adw approve`
+  (`adw/cli.py` — EIN gemeinsamer Helper, drei Aufrufstellen), NICHT im
+  Eskalations-Pfad: sie darf `escalate()`/`EscalationError` nie auslösen.
+  Aufrufort je Kommando: VOR jeder State-Mutation und vor jedem `state.save()`,
+  nicht bloß vor `_execute(ctx)`. Bei `adw approve` wird die Zusage
+  (`spec_approval_granted`/`approval_granted`) heute gesetzt und gespeichert,
+  BEVOR `_execute` läuft (`:240`–`:246`) — ein Vorflug danach würde die
+  Kontrakt-Zusage `run_state_unchanged: true` bei einer Verweigerung brechen.
+  Bei Verweigerung: klare Meldung + `typer.Exit`(Nichtnull), OHNE
+  `ctx.save()`, OHNE Phasenwechsel, OHNE `escalation.md`; bei `adw run`
+  entsteht durch die Verweigerung kein neuer persistenter Run — der Run-State
+  bleibt inhaltlich unverändert und resumierbar (B1).
+- Erst die VOLLSTÄNDIGE dirty Pfadmenge ermitteln, dann entscheiden — vor
+  einer Verweigerung wird nichts mutiert. Dirty-Ermittlung über
+  `git status --porcelain -z` im Haupt-Checkout (nicht über `_git`, das
+  selbst eskaliert — eigenes, escalation-freies Subprozess-Handling wie in
+  `adw/phases.py:1554`).
+- Selbstheilungs-Liste als feste Konstante (weder konfigurierbar noch
+  glob-basiert, E2/B3): exakt `.adw/issue.md`, `.adw/spec.md`,
+  `.adw/plan.md`, `.adw/contract.yaml`, `.adw/spec-summary.md`,
+  `.adw/plan-summary.md`.
+- Entscheidungslogik:
+  - keine dirty Pfade → weiter.
+  - ALLE dirty Pfade in der Liste → heilen: getrackte per
+    `git checkout -- <pfad>`, ungetrackte per Löschen; dann weiter (B2).
+  - sonst (mindestens ein Pfad außerhalb der Liste, inkl. Mischzustand) →
+    verweigern, nichts verwerfen (B4).
+- Die bestehende, HEUTE eskalierende getrackt-dirty-Prüfung im Authoring-Pfad
+  (`adw/phases.py:355`–`:371`) an das neue Verhalten anpassen: sie darf über
+  ein ADW-eigenes Artefakt keinen Lauf mehr eskalieren. Sie wird zur
+  VERWEIGERUNG reduziert, NICHT ersatzlos entfernt — sie bleibt die letzte
+  Instanz, falls der Checkout zwischen Vorflug und Phasenlauf dirty wird, und
+  ihr Wegfall würde einen Nutzer-Edit an `.adw/spec.md` wortlos von
+  `_archive_artifacts` (`:336`) zurücksetzen lassen. Schutzprüfungen gegen Manipulation während
+  einer bereits laufenden Phase (Guard-Ausnahmen für den gecheckpointeten
+  Plan-Loop, `:356`–`:363`) bleiben inhaltlich erhalten, soweit sie die
+  Startprüfung nicht duplizieren.
 
-- Add a short guide document in the repo describing the procedure so a person can
-  verify the ≤ 2 s promise in about a minute rather than inferring from a
-  screenshot timeout:
-  - how to start the existing GUI against a suitable run (the deterministic
-    fixture run or a comparable real run);
-  - which run and which node to pick — an `agent.run` node with a large payload
-    (the class of node that blocked for 30 s before);
-  - which measure name to read (`adw:select`, `adw:tab`) and how
-    (`performance.getEntriesByName(...)` / the Performance panel);
-  - the exact post-paint completion sequence from C1;
-  - the passing value: measure duration ≤ 2000 ms.
-- Include the **manual checklist** for the checks that browser automation is
-  excluded from (Definition of Done §1, documented-manual): the visual
-  active/waiting distinction (A3), bar-click navigation to the trace node (A5),
-  and the ≤ 2 s readings of `adw:select` and `adw:tab` against the named
-  fixtures (C).
+### B.3 — Doku (B5)
 
-Tests:
-- The guide document is present in the repo, names the same two measures, the
-  fixtures, the post-paint sequence and the passing value, and contains the
-  manual checklist (DoD §4).
+- Die ADW-eigen-Konvention für die sechs Artefakte am bestehenden Doku-Ort
+  ergänzen: die Dateien sind ADW-eigen; ausschließlich darauf beschränkte
+  uncommittete Reste werden automatisch zurückgesetzt, jede fremde oder
+  gemischte Änderung blockiert und wird nie automatisch verworfen. Ort
+  (README ODER Handbuch) ist Umsetzungsentscheidung; die Ergänzung MUSS in
+  BEIDEN Sprachfassungen des gewählten Dokuments erfolgen, inhaltlich
+  gleichwertig (Paar-Konvention des Repos): `README.md`+`README.de.md` ODER
+  `docs/handbuch/ADW-USER-HANDBUCH.md`+`.de.md`. Empfehlung: Handbuch, da es
+  die Recovery-Abläufe beschreibt.
 
-### 7. Verification and handoff
+**Abnahme B:** B.1-Tests grün; keine Eskalation in `run`/`resume`/`approve`;
+exakt die sechs Artefakte heilen sich, jede andere/gemischte Menge blockiert
+ohne Verwerfen; eine Verweigerung bei `approve` lässt die Zusage ungesetzt;
+Konvention in beiden Sprachfassungen dokumentiert.
 
-- Run `uv run ruff check .` and `uv run pytest -x -q` (E3).
-- Perform and document the reproducible **manual browser check** from the guide:
-  the ≤ 2 s readings of `adw:select` and `adw:tab` against the named fixtures,
-  the active/waiting distinction (A3), and bar-click navigation (A5).
-- Confirm the large-fixture proportionality (an unbounded render would grow
-  with input size), full-content reachability, the read-only property, and
-  that no forbidden file, dependency, third-party asset (charting/Markdown
-  library) or validation command changed.
-- Keep the new automated suite roughly within the guideline of **18–25 tests**
-  across A, B and C; add no tests unrelated to the acceptance criteria.
+## C — Partieller Synthese-Ausfall wird Schritt-Retry (F4)
 
-## Verification split (browser automation excluded)
+Erfüllt C1–C5. Genau EIN In-Session-Retry des Synthese-Schritts (E4).
 
-Verification is split explicitly, since browser automation is out of scope:
+### C.1 — RED-Tests zuerst (`tests/test_phases.py`)
 
-- **Automated** (server/static, via `pytest`): route behavior, the B4 name
-  mapping and B5 rejection cases, tab presence in the rendered view, bounded
-  serving/rendering for B7 (the proportionate large-input test), the pinned
-  mark/measure names and the post-paint completion sequence (C1) in the served
-  client script. Source-text assertions attest wiring and stable names only;
-  they are **not** presented as proof of runtime behavior.
-- **Documented manual checks** (the C3 guide's checklist): the visual
-  active/waiting distinction (A3), bar-click navigation to the trace node (A5),
-  and the ≤ 2 s readings of `adw:select` and `adw:tab` against the named
-  fixtures (C).
+1. **C5(a):** Mock-Agent, der beim ERSTEN Synthese-Aufruf nur eines von zwei
+   Pflicht-Artefakten schreibt (z. B. `plan.md` ja, `plan-summary.md`
+   leer/fehlend) und beim ZWEITEN Aufruf das fehlende nachliefert — über
+   DIESELBE Session (`resume` == die im ersten Aufruf gelieferte Session-ID)
+   — führt zu regulär abgeschlossenem Authoring; das bereits korrekte
+   Artefakt bleibt erhalten. Der Retry-Task benennt konkret, welches Artefakt
+   fehlt bzw. leer ist.
+2. Vollständigkeitsregel abdecken: fehlende Summary sowie ein nur aus
+   Whitespace bestehendes Artefakt zählen als fehlend/leer.
+3. **C5(b):** Mock-Agent, der das fehlende Artefakt ZWEIMAL nicht liefert →
+   Eskalation nach genau ZWEI Aufrufen (ein Retry, kein zweiter, E4).
+4. **C3-Nachweis:** Der Retry erhöht `authoring_rounds` NICHT und löst vor
+   erfolgreicher Vollständigkeit keinen Codex-Review aus
+   (Rundenzähler/Review-Loop-Policy unberührt).
 
-## Test-scope guardrail
+### C.2 — Fix Synthese-Retry
 
-Guideline (not a hard gate): roughly **18–25 new tests** across A, B and C.
-Coverage of the acceptance criteria is what matters, not the exact count;
-markedly more is a signal of scope drift.
+- Im Vollständigkeits-Check von `_reviewed_authoring_loop`
+  (`adw/phases.py:879`–`:888`): statt bei fehlendem/leerem Pflicht-Artefakt
+  sofort zu eskalieren, GENAU EINMAL denselben Synthese-Schritt über die
+  vorhandene Session wiederholen. Pflicht-Artefakte = `loop_artifacts`
+  (Artefakte + Summary, `:840`); „leer“ schließt Nur-Whitespace ein.
+- Reparatur-Task: derselbe Kontext plus expliziter Hinweis, welche Artefakte
+  fehlen bzw. leer sind; er fordert ausschließlich deren Vervollständigung
+  und lässt bereits korrekte Dateien bestehen. Aufruf via
+  `_agent_run(..., resume=session)` mit der bekannten Session-ID.
+- Der Retry ist Reparatur, kein Review-Zyklus (C3): er verbraucht KEINE
+  Authoring-Runde (`rounds`/`authoring_rounds` unverändert) und keine
+  Review-Runde; Severity-Schwelle, Circuit-Breaker und Rundendeckel bleiben
+  unberührt. Nach erfolgreicher Reparatur läuft der bestehende Review-Pfad
+  regulär weiter (C2).
+- Genau EIN Retry (E4): liefert auch der Reparaturaufruf das Artefakt nicht,
+  greift der bestehende Eskalations-Pfad (`escalate`, `:882`) wie heute —
+  kein zweiter Versuch, kein Backoff, kein persistenter Retry-Zähler.
+- Crash-Fenster: die Session ist bereits gecheckpointet
+  (`authoring_session`); ob ein In-Memory-Flag genügt (kein neuer
+  persistenter Zustand ohne dokumentiertes Schadensbild, siehe Deferred) ist
+  Umsetzungsentscheidung — Default: In-Session-Retry ohne neuen State.
+- Protokollierung (optional, C4): NUR über die bestehende Emitter-API; ein
+  neuer Event-Typ (z. B. `synthesis_retry`) ist zulässig
+  (vorwärtskompatibles Format), KEINE neuen Emitter-Fähigkeiten, keine
+  Änderung an `adw/events.py`.
 
-## Definition of Done
+**Abnahme C:** C.1-Tests grün; ein Retry repariert und läuft weiter, zwei
+Fehlversuche eskalieren nach genau zwei Aufrufen; keine Authoring-/
+Review-Runde verbraucht.
 
-1. All acceptance criteria A1–A8, B1–B7 and C1–C4 are met — C as descoped per
-   the Codex review: two instrumented interactions (node selection, tab
-   switch), no supersession protocol, no fixed fixture cardinality — verified
-   per the split above (automated vs. documented-manual).
-2. `Timeline` and `Artifacts` are reachable run-level tabs in the run detail
-   view; `Trace` stays the default and the existing `Trace`/`Raw` views are
-   unchanged in behavior.
-3. The artifact route serves only names resolvable through the B4 mapping;
-   unknown name, nested/encoded-separator, traversal and escaping-symlink
-   attempts return 404 and never read outside the run directory, verified against
-   the FastAPI `TestClient` with a fixture run directory (including the large B7
-   artifact, drafts and a `*.FAILED` marker).
-4. The performance instrumentation carries the documented names and the C1
-   post-paint completion semantics (end mark in a task scheduled from a
-   `requestAnimationFrame` callback, after the paint); tests assert the served
-   client script contains the pinned names and instruments both interactions;
-   the guide document is present, names the same measures, the fixtures, the
-   post-paint sequence and the passing value, and contains the manual
-   checklist.
-5. No new runtime dependency, no third-party frontend asset, no charting and no
-   Markdown library is added; the web stack stays the optional `adw[gui]` extra
-   (E5, E7, E10). The UI is uniformly English (E9).
-6. No change to `adw/events.py`, `adw/snapshots.py`, `adw/gui/reader.py`,
-   `adw/gui/model.py` or the orchestrator; the GUI remains read-only.
-7. Roughly 18–25 new tests across A, B and C (issue guideline).
-8. Real gates green (E3): `uv run ruff check .` and `uv run pytest -x -q`.
-   `flake8`, `isort` and `black` are not added to dependencies, configuration,
-   scripts or validation commands.
+## D — Session-ID sofort checkpointen (F5)
 
-## Deferred (deliberately not built)
+Erfüllt D1–D3. Nur der ZEITPUNKT der Persistierung ändert sich (E5).
 
-Ideas that are defensible but out of proportion or explicitly ceilinged for this
-run go here, not into acceptance criteria. A review finding that asks for one of
-these is rejected with this rationale documented, not implemented.
+### D.1 — RED-Tests zuerst (`tests/test_agents.py`, `tests/test_phases.py`, Resume-Testpfad)
 
-- **Real Markdown rendering** of artifacts (a Markdown library). Faithful
-  monospace text meets §7.2 for spec/plan/contract files this run; a library
-  would be a new dependency of low value here (E10).
-- **Retention / run management**: `adw runs list`, `adw runs prune`, gzip,
-  the `trace:` config key — next run (issue ceiling).
-- **i18n / language switch** — until the dedicated i18n step (E9).
-- **Automated browser timing** (Playwright/Selenium) or any in-app latency
-  budget/alerting. The proof is a documented manual read of a `performance`
-  measure; automation is explicitly out (issue non-goal).
-- **Surfacing draft-failure details** (e.g. rendering the content of
-  `*.FAILED` marker files). The Artifacts tab marks the draft as missing;
-  diagnosing the failure belongs to the trace, not the artifact view.
-- **Cross-run or A/B timeline comparison** and cost/latency trends — needs a
-  corpus first (GUI-SPEC §2 non-goals).
-- **Emitter/model changes** to make the tree self-describing or to carry patch
-  text for the timeline — the boundary and orphan handling stay as they are
-  (E1, E2).
+1. **D3(a):** Ein Runner, der die Session-ID im Stream bekannt gibt und DANN
+   VOR Abschluss abbricht (Exception nach der Session-ID-Meldung),
+   hinterlässt die ID im persistierten Run-State — für den Authoring-Lauf in
+   `RunState.authoring_session`, für einen Lane-Agent-Lauf in
+   `LaneState.session_id` (persistentes `state.json`).
+2. **D3(b):** Ein anschließendes `adw resume` übergibt genau diese
+   persistierte Session-ID als `resume` an den fortgesetzten Agent-Lauf —
+   nachgewiesen über die bestehende Resume-Semantik, ohne neue
+   Resume-Mechanik.
+
+### D.2 — Fix frühes Checkpointen
+
+- Ein Callback-Mechanismus vom Runner zum Orchestrator:
+  `SdkAgentRunner._collect` (`adw/agents.py:551`) ruft, SOBALD `session_id`
+  erstmals im Message-Stream erscheint, einen optional übergebenen Callback
+  (z. B. `on_session_id`) auf. `_agent_run` (`adw/phases.py:115`) reicht ihn
+  durch; der Callback persistiert die ID unter `ctx.state_lock` in das
+  passende State-Feld (`authoring_session` im Synthese-Loop,
+  `LaneState.session_id` in der Build-/Integrations-/Review-Lane) und ruft
+  `ctx.save()` (atomare State-Speicherung).
+- Wiederholte Meldungen derselben ID sind idempotent und ändern keine
+  Resume-Semantik. Die bestehenden Post-Run-Zuweisungen (`:871`, `:1347`,
+  `:1547`) bleiben als idempotenter Fallback bestehen
+  (`result.session_id or …`); `AgentResult` behält seine Session-ID, damit
+  erfolgreiche Läufe unverändert funktionieren — der Callback verschiebt nur
+  den frühesten Persistierungszeitpunkt nach vorn.
+- Der Abbruchpfad bleibt Abbruch, keine Eskalation: nach bekannt gewordener
+  und gespeicherter Session-ID endet ein transient abgebrochener Agent-Lauf
+  kontrolliert mit Nichtnull-Code in seiner aktuellen, resumierbaren Phase.
+- Der Mock-Runner (`adw/mock.py`) bedient den Callback ebenfalls, damit
+  Dry-Runs und Tests denselben Vertrag zeigen.
+- Resume-Semantik (`expected_head`, Orchestrator-only-Commits,
+  Gate-Wiederholung) bleibt unverändert (E5) — keine neuen State-Felder,
+  keine neue Resume-Verzweigung.
+
+**Abnahme D:** D.1-Tests grün; Abbruch nach Session-ID lässt die ID im State;
+`adw resume` knüpft an die persistierte Session an.
+
+---
+
+## Gates (Definition of Done)
+
+- `uv run ruff check .` grün.
+- `uv run pytest -x -q` grün.
+- `flake8`, `isort`, `black` tauchen nirgends als Dependency, Konfiguration
+  oder Kommando auf (E3).
+- Keine neuen Laufzeit-Dependencies.
+- `adw/events.py`, `adw/snapshots.py`, `adw/gui/**` unverändert (neue
+  Event-Typen nur über die bestehende Emitter-API).
+- Limits, Circuit-Breaker, Review-Loop-Policy, Phasenreihenfolge und
+  Resume-Logik unverändert; Codex-Review-Semantik unverändert.
+- Alle Akzeptanzkriterien A1–A5, B1–B6, C1–C5, D1–D3 durch Tests abgedeckt
+  (TDD: pro Fix ein RED-Test zuerst). Richtwert 16–24 Tests (nicht bindend).
+- Abschluss-Abgleich gegen `.adw/contract.yaml`: CLI-Ausgänge und
+  State-Wirkung der vier Fehlerpfade, `codex.timeout`, exakt begrenzte
+  Selbstheilung, einmaliger Synthese-Retry, frühe Session-Persistenz.
+
+## Deferred (bewusst nicht gebaut) — unverändert aus der Spec übernommen
+
+- Ein generelles Retry-Framework: Retry-Zähler in der Config, Backoff,
+  Timeout-Adaption, Telemetrie. Dieser Lauf baut genau die vier Fixes; der
+  Synthese-Retry ist genau einer (E4), der Codex-Autor bekommt keinen (E1).
+- Automatischer oder konfigurierbarer Retry des Codex-Autors: Ein Ausfall
+  kostet den Gegenentwurf, mehr nicht (E1).
+- Heilung weiterer Dateiklassen oder eine konfigurierbare/glob-basierte
+  Selbstheilungs-Liste (E2); fremde Dateien werden nie automatisch
+  zurückgesetzt, nur verweigert.
+- Änderung der Codex-REVIEW-Fehlerbehandlung (z. B. Degradation statt
+  Eskalation bei Review-Ausfall); `codex.timeout` berührt nur den geteilten
+  Subprozess-Timeout-Wert.
+- Verlagerung des Authorings in einen Scratch-Worktree und ein
+  Spec-Amendment-Schritt (Struktur-Paket, eigener späterer Lauf);
+  Off-limits-Enforcement; Skill-/Template-Änderungen.
+- Neue Emitter-Fähigkeiten oder GUI-/Snapshot-Änderungen zur Visualisierung
+  der neuen Ereignisse; zusätzliche persistente Retry-Zustände zur Absicherung
+  weiterer Crash-Fenster ohne dokumentiertes Schadensbild.
+
+Ein Review-Finding, das einen dieser Punkte oder einen vorentschiedenen Punkt
+(E1–E5) fordert, wird mit dieser Begründung abgewiesen und dokumentiert, nicht
+umgesetzt — das Ventil bindet auch den Codex-Review-Loop.
