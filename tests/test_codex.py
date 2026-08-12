@@ -146,6 +146,26 @@ def test_codex_call_has_timeout(captured_run, tmp_path):
     assert captured_run["timeout"] > 0
 
 
+def test_default_effective_timeout_is_900(captured_run, tmp_path):
+    """Ohne konfigurierten Wert bleibt das effektive Subprozess-Timeout 900s."""
+    CodexRunner().review("code", ["x"], cwd=tmp_path)
+    assert captured_run["timeout"] == 900
+
+
+def test_configured_timeout_reaches_the_review_subprocess(captured_run, tmp_path):
+    """A3/F2: der aus der Config gereichte Timeout-Wert kommt am gemeinsamen
+    `codex exec`-Subprozesspfad als effektives Zeitlimit an."""
+    CodexRunner(timeout=123).review("code", ["x"], cwd=tmp_path)
+    assert captured_run["timeout"] == 123
+
+
+def test_configured_timeout_is_shared_by_the_author_subprocess(captured_run, tmp_path):
+    """Autor UND Review teilen denselben Timeout-Wert am `codex exec`-Pfad."""
+    captured_run["stdout"] = _blocks(**{"spec.md": "# Ziel\n"})
+    CodexRunner(timeout=77).author("spec", "Issue", cwd=tmp_path)
+    assert captured_run["timeout"] == 77
+
+
 def test_codex_home_is_isolated_copy_with_auth_only(captured_run, tmp_path, monkeypatch):
     """Regression: config.toml (incl. MCP registrations) must not reach the review."""
     from adw.env import safe_env

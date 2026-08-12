@@ -270,11 +270,14 @@ def _extract_blocks(stdout: str, names: tuple[str, ...], marker_id: str) -> dict
 class CodexRunner:
     """Invokes the Codex CLI as a read-only subprocess and parses strictly."""
 
-    def __init__(self, emitter=None):
+    def __init__(self, emitter=None, timeout: int = CODEX_TIMEOUT):
         # Accepted for construction symmetry with SdkAgentRunner. The codex.review
         # span is owned by the phases.py call site (GUI-SPEC §6, E4), so the runner
         # no longer emits anything itself — it only fills the handle it is handed.
+        # ``timeout`` is the effective codex-exec subprocess limit (config-driven,
+        # default 900s); author and review share the value.
         self._emitter = emitter
+        self._timeout = timeout
 
     def effective_argv(
         self, kind: ReviewKind, content_refs: list[str], cwd: Path, context: str | None = None
@@ -398,8 +401,8 @@ class CodexRunner:
                     file=sys.stderr,
                 )
 
-    @staticmethod
-    def _execute(argv: list[str], env: dict[str, str]) -> str:
+    def _execute(self, argv: list[str], env: dict[str, str]) -> str:
+        timeout = self._timeout
         try:
             # Eigene Session: Bei Timeout/Interrupt stirbt die GANZE
             # Prozessgruppe (Codex spawnt Shell-Kommandos/MCP-Server).
@@ -424,9 +427,9 @@ class CodexRunner:
         for pump in pumps:
             pump.start()
         try:
-            returncode = proc.wait(timeout=CODEX_TIMEOUT)
+            returncode = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            raise CodexError(f"codex exec: Timeout nach {CODEX_TIMEOUT}s") from exc
+            raise CodexError(f"codex exec: Timeout nach {timeout}s") from exc
         finally:
             # IMMER die Prozessgruppe aufräumen — auch nach normalem Exit:
             # detachte Kinder mit umgeleiteten Streams könnten weiterlaufen.

@@ -324,3 +324,45 @@ def test_ci_provider_rejects_unknown_value(target_repo):
     )
     with pytest.raises(ConfigError, match="provider|bitbucket"):
         AdwConfig.load(target_repo)
+
+
+# --- Aufgabe A / F2: optionaler Config-Key codex.timeout ---------------------
+
+_BASE_CONFIG = """\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - {name: g, cmd: "true", timeout: 5}
+"""
+
+
+def test_codex_timeout_defaults_to_900_without_the_key(target_repo):
+    """A3: Fehlt der Key `codex` (oder `codex.timeout`), bleibt das effektive
+    Zeitlimit unverändert 900 Sekunden."""
+    write_config(target_repo, _BASE_CONFIG)
+    cfg = AdwConfig.load(target_repo)
+    assert cfg.codex.timeout == 900
+
+
+def test_codex_timeout_override_is_applied(target_repo):
+    """A3: ein gültiger Override setzt das effektive Timeout."""
+    write_config(target_repo, _BASE_CONFIG + "codex:\n  timeout: 120\n")
+    cfg = AdwConfig.load(target_repo)
+    assert cfg.codex.timeout == 120
+
+
+@pytest.mark.parametrize("value", ["0", "-5", "1.5", "true"])
+def test_codex_timeout_invalid_value_raises_before_run_start(target_repo, value):
+    """A4: ≤ 0, nicht-ganzzahlig oder Boolean wird über die bestehende
+    Config-Fehlerbehandlung (ConfigError) abgelehnt, bevor der Lauf startet."""
+    write_config(target_repo, _BASE_CONFIG + f"codex:\n  timeout: {value}\n")
+    with pytest.raises(ConfigError, match="timeout|codex"):
+        AdwConfig.load(target_repo)
+
+
+def test_codex_config_forbids_unknown_keys(target_repo):
+    """codex trägt wie die übrigen Modelle extra=forbid — ein Tippfehler kippt."""
+    write_config(target_repo, _BASE_CONFIG + "codex:\n  tiemout: 120\n")
+    with pytest.raises(ConfigError, match="tiemout|codex"):
+        AdwConfig.load(target_repo)

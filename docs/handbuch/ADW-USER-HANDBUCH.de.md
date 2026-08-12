@@ -286,6 +286,13 @@ ADW checkpointet jeden Phasenübergang **und** jedes offene Zwischenergebnis (Ga
 - Limits (Iterationen, Runden, Zyklen) überleben den Crash — ein Neustart verschafft dem Run keine zusätzlichen Versuche.
 - Dry-Run bleibt Dry-Run: der Modus steckt im State, ein Resume verdrahtet nie versehentlich echte Agenten.
 
+### Die Arbeitsbaum-Prüfung vor jedem Run/Resume/Approve
+
+Bevor `adw run`, `adw resume` und `adw approve` in die Phasen eintreten, prüft ADW den **Haupt-Checkout** auf uncommittete Änderungen. Diese Prüfung **eskaliert nie** einen Lauf — sie fährt fort, heilt selbst oder verweigert:
+
+- **Sechs ADW-eigene Artefakte** schreibt und archiviert ADW selbst; sie sind **nicht zum manuellen Editieren** gedacht: `.adw/issue.md`, `.adw/spec.md`, `.adw/plan.md`, `.adw/contract.yaml`, `.adw/spec-summary.md`, `.adw/plan-summary.md`. Betreffen die uncommitteten Änderungen *ausschließlich* genau diese Liste (z. B. Crash-Reste), setzt ADW sie selbst zurück (getrackt → `git checkout`, ungetrackt → löschen) und fährt fort.
+- **Jede andere uncommittete Änderung** — eine fremde Datei oder eine Mischung aus fremder Datei *und* ADW-Artefakt — lässt ADW die Ausführung mit klarer Meldung und Nichtnull-Exit **verweigern**. Nichts wird verworfen, der Run-State bleibt unverändert und resumierbar; committe oder stashe deine Änderungen und versuche es erneut. Fremde Dateien setzt ADW nie zurück.
+
 <div class="warnbox">
 
 Eskalierte Runs (`phase: escalated`) sind bewusst **nicht** fortsetzbar — erst Ursache klären (Report lesen), dann einen neuen Run starten.

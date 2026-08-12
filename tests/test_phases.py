@@ -1026,9 +1026,15 @@ lanes:
         run_build_phase(ctx)
     after_first_agent = [pending for calls, pending in saves if calls == 1]
     assert after_first_agent, "keine Checkpoints nach dem ersten Agent-Lauf"
-    # Erster Save = Session-Checkpoint (noch kein Gate gelaufen) — jeder
-    # weitere Save mit calls==1 MUSS das Gate-Feedback tragen.
-    assert all(pending is not None for pending in after_first_agent[1:])
+    # Vor dem ersten Gate-Fail gibt es reine Session-Checkpoints (pending_task
+    # None) — der frühe F5-Checkpoint UND der Post-Run-Checkpoint. Sobald aber
+    # das Gate-Feedback einmal da ist, MUSS es jeder weitere Save tragen (kein
+    # Checkpoint zwischen Gate-Fail und Feedback-Persistenz verliert es).
+    first_feedback = next(
+        (i for i, pending in enumerate(after_first_agent) if pending is not None), None
+    )
+    assert first_feedback is not None, "kein Gate-Feedback-Checkpoint aufgezeichnet"
+    assert all(pending is not None for pending in after_first_agent[first_feedback:])
 
 
 # --- 10d: RED-Gate im Initial-Build ---------------------------------------
@@ -3844,8 +3850,10 @@ def test_summary_is_no_codex_review_reference(ctx):
 
 
 def test_missing_summary_escalates_like_a_missing_artifact(ctx):
+    """Eine dauerhaft fehlende Summary eskaliert — jetzt erst, nachdem auch der
+    eine In-Session-Retry (C1) sie nicht nachliefert (zwei Aufrufe)."""
     ctx.agents.script_files("spec_synthesis", {".adw/spec.md": "# Spec (Synthese)\n"})
-    ctx.agents.script("spec_synthesis", "Spec")
+    ctx.agents.script("spec_synthesis", "Spec", "auch der Retry ohne Summary")
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(OK)
     with pytest.raises(EscalationError, match="spec-summary.md"):
@@ -3854,11 +3862,12 @@ def test_missing_summary_escalates_like_a_missing_artifact(ctx):
 
 def test_blank_summary_escalates_like_a_missing_one(ctx):
     """Eine leere Summary ist keine Entscheidungsgrundlage — und Codex reviewt
-    sie nicht, der Fehler fiele sonst erst dem Menschen am Gate auf."""
+    sie nicht, der Fehler fiele sonst erst dem Menschen am Gate auf. Bleibt sie
+    auch nach dem einen Retry (C1) leer, eskaliert der Lauf."""
     ctx.agents.script_files(
         "spec_synthesis", {".adw/spec.md": "# Spec (Synthese)\n", ".adw/spec-summary.md": "  \n"}
     )
-    ctx.agents.script("spec_synthesis", "Spec")
+    ctx.agents.script("spec_synthesis", "Spec", "Retry auch leer")
     ctx.codex.script(OK)
     with pytest.raises(EscalationError, match="spec-summary.md"):
         run_spec_and_plan(ctx)
@@ -3948,3 +3957,219 @@ def test_plan_synthesis_cannot_rewrite_the_spec_summary(ctx):
     assert (ctx.run_dir / "spec-summary.md").read_text() == (
         SPEC_SYNTHESIS_FILES[".adw/spec-summary.md"]
     )
+
+
+# =====================================================================
+# Aufgabe A / F1: Codex-AUTOR-Ausfall ist kontrollierte Degradation,
+# kein Absturz — über den vollen Authoring-Pfad (Draft-Stage → Loop).
+# =====================================================================
+
+
+def test_codex_author_failure_completes_phase_single_source_no_escalation(ctx):
+    """A1/A2/A5: Wirft der Codex-AUTOR (Spec UND Plan) einen CodexError inkl.
+    Timeout, bricht der Lauf NICHT ab: FAILED-Marker je Phase, Pflicht-Artefakte
+    + Summaries entstehen, die Phase schließt einquellig regulär ab (bis build),
+    kein Traceback, kein Eskalations-State. E1: kein automatischer Retry."""
+    ctx.codex = MockCodexRunner()  # ohne die Vorrats-Entwürfe der Fixture
+    ctx.codex.script_author_error("spec", CodexError("codex exec: Timeout nach 900s"))
+    ctx.codex.script_author_error("plan", CodexError("codex exec: Timeout nach 900s"))
+    ctx.codex.script(OK, OK)  # Spec-Review ok, Plan-Review ok
+    ctx.agents.script("spec_synthesis", "Spec einquellig")
+    ctx.agents.script("plan_synthesis", "Plan einquellig")
+    ctx.skip_approval = True
+    run_spec_and_plan(ctx)  # kein Traceback / keine Exception
+    assert ctx.state.phase == "build"
+    drafts = ctx.run_dir / "drafts"
+    assert (drafts / "spec.codex.FAILED").is_file()
+    assert (drafts / "plan.codex.FAILED").is_file()
+    for name in ("spec.md", "plan.md", "contract.yaml", "spec-summary.md", "plan-summary.md"):
+        assert (ctx.run_dir / name).is_file(), name
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.phase == "build"  # NICHT escalated
+    assert not (ctx.run_dir / "escalation.md").exists()
+    # E1: der Codex-Autor wird je Draft-Schritt genau EINMAL versucht.
+    assert [c.kind for c in ctx.codex.author_calls] == ["spec", "plan"]
+
+
+# =====================================================================
+# Aufgabe C / F4: partieller Synthese-Ausfall wird genau EIN
+# In-Session-Retry (E4).
+# =====================================================================
+
+
+def _stateful_spec_writes(sequence):
+    """file_writes-Callable, das je Synthese-Aufruf einen anderen Dateisatz liefert."""
+    calls = {"n": 0}
+
+    def writes(_cwd):
+        idx = min(calls["n"], len(sequence) - 1)
+        calls["n"] += 1
+        return dict(sequence[idx])
+
+    return writes
+
+
+def test_synthesis_retry_repairs_missing_summary_in_the_same_session(ctx):
+    """C1/C2/C3/C5(a): fehlt nach dem Synthese-Lauf die Summary, wird GENAU EINMAL
+    über die vorhandene Session nachgefordert. Der Retry benennt das fehlende
+    Artefakt, das bereits korrekte bleibt erhalten und verbraucht keine
+    Authoring-/Review-Runde (nur EIN Spec-Review nach Vollständigkeit)."""
+    ctx.spec_approval = True  # nach der Spec anhalten, Plan-Scripting sparen
+    ctx.agents.file_writes["spec_synthesis"] = _stateful_spec_writes(
+        [
+            {".adw/spec.md": "# Spec (Synthese)\nZiel: Demo\n"},  # Summary fehlt
+            {".adw/spec-summary.md": "# Zusammenfassung\nEinquellig: nein\n"},  # nachgeliefert
+        ]
+    )
+    ctx.agents.script("spec_synthesis", "unvollständig", "jetzt vollständig")
+    ctx.codex.script(OK)  # genau EIN Spec-Review, erst nach Vollständigkeit
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    spec_calls = [c for c in ctx.agents.calls if c.agent == "spec_synthesis"]
+    assert len(spec_calls) == 2  # initial + genau ein Retry
+    assert spec_calls[0].resume is None
+    # dieselbe Session wie der initiale Synthese-Lauf (der Claude-Draft-Autor
+    # verbraucht Session-1, die Synthese ist Session-2 — wie in den übrigen Tests).
+    assert spec_calls[1].resume == "mock-session-spec_synthesis-2"
+    assert "spec-summary.md" in spec_calls[1].task  # benennt das fehlende Artefakt
+    # C3: der Retry ist Reparatur, kein Review-Zyklus — genau EIN Spec-Review.
+    assert len([c for c in ctx.codex.calls if c.kind == "spec"]) == 1
+    # C2: das bereits korrekte Artefakt bleibt erhalten.
+    assert "# Spec (Synthese)" in (ctx.run_dir / "spec.md").read_text()
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase != "escalated"
+
+
+def test_synthesis_retry_treats_whitespace_artifact_as_empty(ctx):
+    """C1: ein nur aus Whitespace bestehendes Pflicht-Artefakt zählt als leer und
+    löst denselben einmaligen Retry aus."""
+    ctx.spec_approval = True
+    ctx.agents.file_writes["spec_synthesis"] = _stateful_spec_writes(
+        [
+            {".adw/spec.md": "# Spec\nZiel\n", ".adw/spec-summary.md": "   \n\n"},  # leer
+            {".adw/spec-summary.md": "# Echte Zusammenfassung\n"},
+        ]
+    )
+    ctx.agents.script("spec_synthesis", "leere Summary", "repariert")
+    ctx.codex.script(OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    spec_calls = [c for c in ctx.agents.calls if c.agent == "spec_synthesis"]
+    assert len(spec_calls) == 2
+
+
+def test_synthesis_retry_gives_up_after_exactly_one_retry(ctx):
+    """C2/C5(b)/E4: liefert auch der Reparaturaufruf das Artefakt nicht,
+    eskaliert der Lauf nach GENAU ZWEI Aufrufen — kein zweiter Retry."""
+    ctx.spec_approval = True
+    ctx.agents.file_writes["spec_synthesis"] = _stateful_spec_writes(
+        [{".adw/spec.md": "# Spec\nZiel\n"}]  # Summary NIE geliefert
+    )
+    ctx.agents.script("spec_synthesis", "eins", "zwei", "drei")
+    with pytest.raises(EscalationError, match="spec-summary.md"):
+        run_spec_and_plan(ctx)
+    spec_calls = [c for c in ctx.agents.calls if c.agent == "spec_synthesis"]
+    assert len(spec_calls) == 2  # initial + ein Retry, kein dritter Aufruf
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
+
+
+# =====================================================================
+# Aufgabe D / F5: Session-ID wird sofort persistiert (E5) — ein Abbruch
+# mitten im Agent-Lauf hinterlässt die begonnene Session im State.
+# =====================================================================
+
+
+class EarlyCheckpointAbortRunner(MockAgentRunner):
+    """Meldet für einen bestimmten Agenten die Session-ID früh über den
+    Checkpoint-Callback und bricht DANN vor Abschluss ab — bildet ein
+    Crash-Fenster mitten im Agent-Lauf nach."""
+
+    def __init__(self, abort_agent: str, early_session: str):
+        super().__init__()
+        self._abort_agent = abort_agent
+        self._early_session = early_session
+
+    def run(
+        self,
+        agent,
+        task,
+        cwd,
+        resume=None,
+        deny_read_paths=None,
+        emitter=None,
+        span=None,
+        on_session_id=None,
+    ):
+        if agent.name == self._abort_agent:
+            if on_session_id is not None:
+                on_session_id(self._early_session)
+            from adw.agents import AgentRunError
+
+            raise AgentRunError("mitten im Agent-Lauf abgebrochen")
+        return super().run(
+            agent, task, cwd, resume=resume, deny_read_paths=deny_read_paths,
+            emitter=emitter, span=span,
+        )
+
+
+def test_authoring_session_persisted_when_reported_then_abort(ctx):
+    """D1/D3(a): meldet der Synthese-Agent die Session-ID und bricht dann ab,
+    liegt die ID im persistierten Run-State (authoring_session) — der Abbruch
+    bleibt resumierbar, keine Eskalation."""
+    from adw.agents import AgentRunError
+
+    ctx.agents = EarlyCheckpointAbortRunner("spec_synthesis", "sess-authoring-frueh")
+    script_authoring_agents(ctx.agents)
+    ctx.agents.script("spec_synthesis", "wird abgebrochen")
+    ctx.state.save(ctx.repo)  # wie die CLI: Run VOR dem ersten Agent-Lauf persistiert
+    with pytest.raises(AgentRunError):
+        run_spec_and_plan(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.authoring_session == "sess-authoring-frueh"
+    assert saved.phase != "escalated"
+
+
+def test_resume_passes_the_early_persisted_authoring_session(ctx):
+    """D2/D3(b): ein anschließender Lauf setzt genau die persistierte Session-ID
+    als `resume` an den fortgesetzten Synthese-Agenten — über die bestehende
+    Resume-Semantik, ohne neue Resume-Mechanik."""
+    from adw.agents import AgentRunError
+
+    ctx.agents = EarlyCheckpointAbortRunner("spec_synthesis", "sess-authoring-frueh")
+    script_authoring_agents(ctx.agents)
+    ctx.agents.script("spec_synthesis", "wird abgebrochen")
+    ctx.state.save(ctx.repo)  # wie die CLI: Run VOR dem ersten Agent-Lauf persistiert
+    with pytest.raises(AgentRunError):
+        run_spec_and_plan(ctx)
+
+    # Fortsetzung wie ein echter Resume-Aufruf: State frisch von der Platte laden
+    # (die persistierte Session-ID muss den fortgesetzten Lauf treiben) und einen
+    # frischen, vollständigen Mock verdrahten.
+    ctx.state = RunState.load(ctx.repo, ctx.state.run_id)
+    resumed = MockAgentRunner()
+    script_authoring_agents(resumed)
+    resumed.script("spec_synthesis", "Spec fertig")
+    resumed.script("plan_synthesis", "Plan fertig")
+    ctx.agents = resumed
+    ctx.codex = MockCodexRunner()
+    script_draft_artifacts(ctx.codex)
+    ctx.codex.script(OK, OK)
+    with pytest.raises(AwaitingApproval):
+        run_spec_and_plan(ctx)
+    spec_calls = [c for c in resumed.calls if c.agent == "spec_synthesis"]
+    assert spec_calls, "Synthese-Agent lief im Resume gar nicht"
+    assert spec_calls[0].resume == "sess-authoring-frueh"
+
+
+def test_lane_session_persisted_when_reported_then_abort(ctx):
+    """D1/D3(a): bricht der Build-Agent nach der Session-Meldung ab, liegt die ID
+    im persistierten LaneState.session_id — der Lauf bleibt resumierbar."""
+    from adw.agents import AgentRunError
+
+    ctx.agents = EarlyCheckpointAbortRunner("build_agent", "sess-lane-frueh")
+    script_authoring_agents(ctx.agents)
+    prepare_approved(ctx)  # Spec/Plan/Approve → Phase build
+    with pytest.raises(AgentRunError):
+        run_build_phase(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.lanes["backend"].session_id == "sess-lane-frueh"
+    assert saved.phase != "escalated"

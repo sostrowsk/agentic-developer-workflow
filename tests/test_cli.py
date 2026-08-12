@@ -2,11 +2,12 @@
 
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from adw.cli import app
-from adw.state import RunState
-from tests.conftest import write_config
+from adw.state import RunState, StateNotFoundError
+from tests.conftest import git, write_config
 
 runner = CliRunner()
 
@@ -457,9 +458,14 @@ def test_config_base_branch_change_mid_run_does_not_move_existing_lanes(target_r
     assert state.lanes  # Lanes wurden bereits von staging geforkt
     assert state.pinned_base_branch == "staging"
     # Config wechselt mid-run auf develop — der laufende Run darf das ignorieren.
+    # Committen, damit der Arbeitsbaum-Vorflug (F3) nicht wegen der fremden,
+    # uncommitteten config.yaml verweigert — geprüft wird das Pinning, nicht
+    # die Toleranz eines dirty Checkouts.
     write_config(
         target_repo, PARALLEL_CLI_CONFIG.replace("base_branch: staging", "base_branch: develop")
     )
+    git(target_repo, "add", ".adw/config.yaml")
+    git(target_repo, "commit", "-m", "config wechselt auf develop")
     resumed = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
     assert resumed.exit_code == 0, resumed.output
     integration = target_repo / ".adw" / "runs" / state.run_id / "trees" / "integration"
@@ -685,3 +691,123 @@ def test_status_shows_spec_approval_phase(target_repo):
     result = runner.invoke(app, ["status", "--repo", str(target_repo)])
     assert result.exit_code == 0
     assert "awaiting_spec_approval" in result.output
+
+
+# =====================================================================
+# Aufgabe B / F3: Arbeitsbaum-Prüfung eskaliert NIE — sie verweigert
+# höchstens (Run-State unverändert, resumierbar) oder heilt genau die
+# sechs ADW-eigenen Authoring-Artefakte selbst.
+# =====================================================================
+
+
+def _paused_run(target_repo) -> RunState:
+    """Startet einen Dry-Run, der regulär am Plan-Approval-Gate pausiert."""
+    result = runner.invoke(app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run"])
+    assert result.exit_code == 2, result.output
+    return RunState.find_latest(target_repo)
+
+
+def test_resume_self_heals_dirty_tracked_adw_artifact(target_repo):
+    """B6(a): dirty getracktes .adw/spec.md + resume → Lauf läuft weiter, Datei
+    zurückgesetzt (Selbstheilung), keine Eskalation."""
+    state = _paused_run(target_repo)
+    spec = target_repo / ".adw" / "spec.md"
+    spec.write_text("# committete Spec\n")
+    git(target_repo, "add", ".adw/spec.md")
+    git(target_repo, "commit", "-m", "spec getrackt")
+    spec.write_text("# committete Spec\n\nDIRTY REST\n")  # getrackt + dirty
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 2, res.output  # weiterhin awaiting_approval, kein Absturz
+    assert spec.read_text() == "# committete Spec\n"  # per checkout zurückgesetzt
+    saved = RunState.load(target_repo, state.run_id)
+    assert saved.phase == "awaiting_approval"  # keine Eskalation
+    assert not (saved.run_dir(target_repo) / "escalation.md").exists()
+
+
+def test_resume_self_heals_untracked_adw_artifact(target_repo):
+    """B: eine ungetrackte ADW-Artefakt-Datei allein wird per Löschen geheilt."""
+    state = _paused_run(target_repo)
+    summary = target_repo / ".adw" / "spec-summary.md"
+    summary.write_text("# lose ADW-Datei\n")  # untracked ADW-Artefakt
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 2, res.output
+    assert not summary.exists()  # per Löschen geheilt
+    assert RunState.load(target_repo, state.run_id).phase == "awaiting_approval"
+
+
+def test_run_refuses_on_foreign_dirty_file_without_creating_a_run(target_repo):
+    """B1/B4: dirty fremde Datei + `adw run` → Ausführung verweigert, kein neuer
+    persistenter Run, fremde Datei bytegleich unangetastet."""
+    (target_repo / "fremd_foo.py").write_text("dreckig\n")  # untracked fremd
+    res = runner.invoke(
+        app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run"]
+    )
+    assert res.exit_code != 0  # verweigert
+    assert res.exit_code != 2  # keine reguläre Approval-Pause
+    with pytest.raises(StateNotFoundError):
+        RunState.find_latest(target_repo)  # kein Run angelegt
+    assert (target_repo / "fremd_foo.py").read_text() == "dreckig\n"  # nie verworfen
+
+
+def test_resume_refuses_on_foreign_dirty_file_and_stays_resumable(target_repo):
+    """B1/B4/B6(b): dirty fremde Datei + resume → verweigert, Run-State
+    unverändert, fremde Datei bytegleich, ein späterer Resume bleibt möglich."""
+    state = _paused_run(target_repo)
+    readme = target_repo / "README.md"
+    readme.write_text("# target\n\nFREMDER DIRTY EDIT\n")  # getrackt + dirty
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 1, res.output  # Verweigerung, keine Approval-Pause
+    assert readme.read_text() == "# target\n\nFREMDER DIRTY EDIT\n"  # unangetastet
+    saved = RunState.load(target_repo, state.run_id)
+    assert saved.phase == "awaiting_approval"  # inhaltlich unverändert
+    assert not (saved.run_dir(target_repo) / "escalation.md").exists()
+    # Nach manueller Bereinigung ist der Resume möglich:
+    readme.write_text("# target\n")
+    res2 = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res2.exit_code == 2, res2.output  # wieder am Gate
+
+
+def test_resume_refuses_mixed_dirty_set_without_discarding_anything(target_repo):
+    """B4/B6(c): mind. ein ADW-Artefakt UND eine fremde Datei dirty → verweigert,
+    NICHTS verworfen (keine Teilheilung), Run-State unverändert."""
+    state = _paused_run(target_repo)
+    spec = target_repo / ".adw" / "spec.md"
+    spec.write_text("# S\n")
+    git(target_repo, "add", ".adw/spec.md")
+    git(target_repo, "commit", "-m", "spec")
+    spec.write_text("# S\n\nADW DIRTY\n")  # ADW-Artefakt dirty
+    readme = target_repo / "README.md"
+    readme.write_text("# target\n\nFREMD DIRTY\n")  # fremd dirty
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 1, res.output
+    assert spec.read_text() == "# S\n\nADW DIRTY\n"  # NICHT geheilt
+    assert readme.read_text() == "# target\n\nFREMD DIRTY\n"  # NICHT verworfen
+    assert RunState.load(target_repo, state.run_id).phase == "awaiting_approval"
+
+
+def test_approve_refuses_on_foreign_dirty_file_without_granting(target_repo):
+    """B (approve-Pfad): dirty fremde Datei + `adw approve` → verweigert, fremde
+    Datei bytegleich, KEINE Eskalation, die Zusage bleibt UNGESETZT, der Run
+    steht unverändert am selben Gate."""
+    state = _paused_run(target_repo)
+    readme = target_repo / "README.md"
+    readme.write_text("# target\n\nFREMD\n")
+    res = runner.invoke(app, ["approve", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 1, res.output
+    saved = RunState.load(target_repo, state.run_id)
+    assert saved.phase == "awaiting_approval"  # unverändert am selben Gate
+    assert saved.approval_granted is False  # Zusage NICHT gesetzt
+    assert readme.read_text() == "# target\n\nFREMD\n"  # unangetastet
+    assert not (saved.run_dir(target_repo) / "escalation.md").exists()
+
+
+def test_approve_self_heals_adw_artifact_and_proceeds(target_repo):
+    """B (approve-Pfad, Gegenprobe): ausschließlich dirty ADW-Artefakt → geheilt,
+    `approve` läuft regulär durch."""
+    state = _paused_run(target_repo)
+    stray = target_repo / ".adw" / "spec.md"
+    stray.write_text("# lose ADW-Datei\n")  # untracked ADW-Artefakt
+    res = runner.invoke(app, ["approve", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 0, res.output
+    assert RunState.load(target_repo, state.run_id).phase == "done"
+    assert not stray.exists()  # geheilt

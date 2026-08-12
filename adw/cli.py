@@ -7,6 +7,7 @@ Exit codes: 0 = done, 2 = awaiting_approval (plan-approval pause),
 import contextlib
 import json
 import re
+import subprocess
 import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -19,6 +20,7 @@ from adw import ci, github
 from adw.agents import AgentRunError, RunTotals, SdkAgentRunner
 from adw.codex import CodexRunner
 from adw.config import AdwConfig, ConfigError
+from adw.env import safe_env
 from adw.events import EventEmitter
 from adw.findings import Finding, ReviewResult
 from adw.gui.registry import register_repo
@@ -50,6 +52,87 @@ _run_gh = github.run_gh
 def _fail(message: str) -> typer.Exit:
     typer.echo(f"Fehler: {message}", err=True)
     return typer.Exit(1)
+
+
+# Genau die sechs ADW-eigenen Authoring-Artefakte (Konvention, nicht
+# konfigurierbar, kein Glob — E2/B3): nur wenn AUSSCHLIESSLICH diese im
+# Haupt-Checkout dirty sind, heilt der Vorflug sie selbst.
+SELF_HEAL_ARTIFACTS = (
+    ".adw/issue.md",
+    ".adw/spec.md",
+    ".adw/plan.md",
+    ".adw/contract.yaml",
+    ".adw/spec-summary.md",
+    ".adw/plan-summary.md",
+)
+
+
+def _git_plain(repo: Path, *args: str) -> subprocess.CompletedProcess:
+    """Git in the main checkout WITHOUT the escalating orchestrator wrapper — the
+    worktree preflight must NEVER escalate a run (B1), only refuse or self-heal."""
+    return subprocess.run(
+        ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", *args],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=safe_env(),
+    )
+
+
+def _worktree_dirty_paths(repo: Path) -> list[str]:
+    """Full set of uncommitted paths in the main checkout (tracked + untracked).
+
+    Determined up front from ``git status --porcelain -z`` so a decision is made
+    over the COMPLETE set before anything is mutated."""
+    result = _git_plain(repo, "status", "--porcelain", "-z")
+    if result.returncode != 0:
+        return []  # kein Git-Repo o. Ä. — der Phasenlauf entscheidet
+    tokens = result.stdout.split("\0")
+    paths: list[str] = []
+    i = 0
+    while i < len(tokens):
+        entry = tokens[i]
+        if not entry:
+            i += 1
+            continue
+        status, path = entry[:2], entry[3:]
+        paths.append(path)
+        # Rename/Copy: "XY <neu>\0<orig>" — der Ursprungspfad ist ein eigenes Token.
+        if "R" in status or "C" in status:
+            i += 1
+            if i < len(tokens) and tokens[i]:
+                paths.append(tokens[i])
+        i += 1
+    return paths
+
+
+def _heal_adw_artifact(repo: Path, relpath: str) -> None:
+    """Reset ONE ADW-owned artifact: tracked → git checkout, untracked → delete."""
+    if _git_plain(repo, "ls-files", "--", relpath).stdout.strip():
+        _git_plain(repo, "checkout", "--", relpath)
+    else:
+        (repo / relpath).unlink(missing_ok=True)
+
+
+def _preflight_worktree(repo: Path) -> None:
+    """Guard the main checkout before run/resume/approve (B1–B4). It NEVER
+    escalates: a clean tree proceeds; a dirty set consisting EXCLUSIVELY of the
+    six ADW-owned authoring artifacts self-heals and proceeds; anything else
+    (foreign or mixed) refuses with a clear message, discarding nothing."""
+    dirty = _worktree_dirty_paths(repo)
+    if not dirty:
+        return
+    if all(path in SELF_HEAL_ARTIFACTS for path in dirty):
+        for path in dirty:
+            _heal_adw_artifact(repo, path)
+        return
+    listing = "\n  ".join(sorted(dirty))
+    raise _fail(
+        "Der Haupt-Checkout hat uncommittete Änderungen außerhalb der ADW-eigenen "
+        f"Authoring-Artefakte:\n  {listing}\n"
+        "Bitte committen oder stashen, dann den Lauf erneut starten bzw. fortsetzen "
+        "(der ADW verwirft fremde Änderungen nie)."
+    )
 
 
 def _adw_version() -> str:
@@ -155,6 +238,9 @@ def run(
     # Config ZUERST validieren (fail fast) — kein Forge-Netzaufruf für ein
     # Repo, das ohnehin keine gültige .adw/config.yaml hat.
     config = _load_config(repo, base_branch)
+    # Arbeitsbaum-Vorflug VOR jeder State-Mutation: eine Verweigerung legt keinen
+    # Run an und macht keinen Netzaufruf (B1/B4). Nie Eskalation.
+    _preflight_worktree(repo)
     if issue is not None:
         issue_text = issue
     elif gitlab_issue is not None:
@@ -201,6 +287,9 @@ def resume(
             f"lesen und einen neuen Run starten"
         )
     config, rebased = _config_for_continuation(repo, state, base_branch)
+    # Arbeitsbaum-Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save):
+    # eine Verweigerung lässt den Run-State unverändert und resumierbar (B1).
+    _preflight_worktree(repo)
     emitter = EventEmitter(repo, state.run_id)
     run_totals = RunTotals()
     with _run_span(emitter, state, config, repo, run_totals) as run_handle:
@@ -230,6 +319,9 @@ def approve(
     # A re-pinned base branch is only mutated in memory here; approve's own save
     # below (inside the run span) persists it together with the approval grant.
     config, _rebased = _config_for_continuation(repo, state, base_branch)
+    # Arbeitsbaum-Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung
+    # lässt die Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
+    _preflight_worktree(repo)
     gate = "spec" if state.phase == "awaiting_spec_approval" else "plan"
     emitter = EventEmitter(repo, state.run_id)
     run_totals = RunTotals()
@@ -494,7 +586,7 @@ def _build_context(
         config=config,
         state=state,
         agents=SdkAgentRunner(emitter=emitter, totals=run_totals),
-        codex=CodexRunner(emitter=emitter),
+        codex=CodexRunner(emitter=emitter, timeout=config.codex.timeout),
         emitter=emitter,
         skip_approval=skip_approval,
         spec_approval=spec_approval,

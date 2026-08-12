@@ -206,6 +206,7 @@ class AgentRunner(Protocol):
         deny_read_paths: list[str] | None = None,
         emitter=None,
         span=None,
+        on_session_id=None,
     ) -> AgentResult: ...
 
 
@@ -463,6 +464,7 @@ class SdkAgentRunner:
         deny_read_paths: list[str] | None = None,
         emitter=None,
         span=None,
+        on_session_id=None,
     ) -> AgentResult:
         _require_stored_login()
         emitter = emitter or self._emitter or NoOpEmitter()
@@ -509,10 +511,12 @@ class SdkAgentRunner:
         # without a handle (an uninstrumented caller) collects into a detached
         # handle and mirrors to a NoOp — no orphan span or stream events.
         if span is not None:
-            return self._collect_into(task, options, emitter, span)
-        return self._collect_into(task, options, NoOpEmitter(), SpanHandle("detached"))
+            return self._collect_into(task, options, emitter, span, on_session_id)
+        return self._collect_into(
+            task, options, NoOpEmitter(), SpanHandle("detached"), on_session_id
+        )
 
-    def _collect_into(self, task, options, emitter, handle) -> AgentResult:
+    def _collect_into(self, task, options, emitter, handle, on_session_id=None) -> AgentResult:
         # Deterministic end-payload BEFORE the run: an unexpected exception
         # unwinding the span still writes a complete end record.
         handle.end_payload = {
@@ -523,7 +527,7 @@ class SdkAgentRunner:
             "is_error": True,
         }
         try:
-            return anyio.run(self._collect, task, options, emitter, handle)
+            return anyio.run(self._collect, task, options, emitter, handle, on_session_id)
         finally:
             # Accumulate the run's cost/tokens even on AgentRunError — the
             # cost was incurred; handle.end_payload is set by _collect before
@@ -536,7 +540,9 @@ class SdkAgentRunner:
                 )
 
     @staticmethod
-    async def _collect(task: str, options: ClaudeAgentOptions, emitter, handle) -> AgentResult:
+    async def _collect(
+        task: str, options: ClaudeAgentOptions, emitter, handle, on_session_id=None
+    ) -> AgentResult:
         span_id = handle.id
         session_id: str | None = None
         assistant_texts: list[str] = []
@@ -549,6 +555,11 @@ class SdkAgentRunner:
             if found is None and isinstance(getattr(message, "data", None), dict):
                 found = message.data.get("session_id")
             if found:
+                # Checkpoint the session id the FIRST time it appears (idempotent):
+                # a mid-run abort must still leave it in the state so a resume can
+                # reconnect instead of restarting the agent run (F5).
+                if session_id is None and on_session_id is not None:
+                    on_session_id(found)
                 session_id = found
             msg_usage = getattr(message, "usage", None)
             if isinstance(msg_usage, dict):

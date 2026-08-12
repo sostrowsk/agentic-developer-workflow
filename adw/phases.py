@@ -14,6 +14,7 @@ manual git invocation by the user.
 import contextlib
 import functools
 import hashlib
+import inspect
 import logging
 import os
 import secrets
@@ -112,16 +113,33 @@ def _current_span_id(emitter) -> str | None:
         return None
 
 
-def _agent_run(ctx, agent, task, cwd, resume=None, deny_read_paths=None):
+def _agent_run(ctx, agent, task, cwd, resume=None, deny_read_paths=None, on_session_id=None):
     """Run an agent wrapped in its ``agent.run`` span at THIS call site (GUI-SPEC
     §6): the span lives here — mock and real runner alike — so a dry run produces
     it too. The runner fills the handle's contents (real: stream + usage/cost;
     mock: base result fields). Return value and exception semantics are unchanged
-    (the exception propagates through the span's end write, as before)."""
+    (the exception propagates through the span's end write, as before).
+
+    ``on_session_id`` (F5) is invoked by the runner as soon as the session id
+    first appears in the stream, so a mid-run abort still leaves it checkpointed
+    for a later resume."""
     with ctx.emitter.span("agent.run", agent_run_start_payload(agent, task, cwd, resume)) as handle:
-        return ctx.agents.run(
-            agent, task, cwd=cwd, resume=resume, deny_read_paths=deny_read_paths, span=handle
-        )
+        kwargs = {"cwd": cwd, "resume": resume, "deny_read_paths": deny_read_paths, "span": handle}
+        # Only hand the early-checkpoint callback to a runner that accepts it —
+        # a runner without ``on_session_id`` (a plain test double) still works,
+        # it just does not checkpoint early. Never retry the call (side effects).
+        if _runner_accepts_session_callback(ctx.agents):
+            kwargs["on_session_id"] = on_session_id
+        return ctx.agents.run(agent, task, **kwargs)
+
+
+def _runner_accepts_session_callback(runner) -> bool:
+    # Inspect the ACTUAL callable (tests may override ``run`` as an instance
+    # attribute), so a runner without the parameter is never handed the kwarg.
+    try:
+        return "on_session_id" in inspect.signature(runner.run).parameters
+    except (TypeError, ValueError):
+        return False
 
 
 def _codex_review(ctx, kind, content_refs, cwd, context=None):
@@ -816,6 +834,30 @@ def _reset_checkout_artifact(ctx: RunContext, name: str) -> None:
         shutil.rmtree(path)
 
 
+def _checkpoint_authoring_session(ctx: RunContext, session_id: str) -> None:
+    """Persist the authoring session id the moment the runner first reports it
+    (F5) — a mid-run abort then leaves it in the state for a later resume.
+    Idempotent: repeated reports of the same id write nothing."""
+    with ctx.state_lock:
+        if ctx.state.authoring_session != session_id:
+            ctx.state.authoring_session = session_id
+            ctx.save()
+
+
+def _checkpoint_lane_session(ctx: RunContext, lane_state: LaneState, session_id: str) -> None:
+    """Persist a lane agent's session id the moment the runner first reports it
+    (F5). Idempotent; uses the same whole-state save as the post-run assignment."""
+    with ctx.state_lock:
+        if lane_state.session_id != session_id:
+            lane_state.session_id = session_id
+            ctx.save()
+
+
+def _missing_loop_artifacts(ctx: RunContext, loop_artifacts: tuple[str, ...]) -> list[str]:
+    """Required artifacts that are absent or empty (whitespace counts as empty)."""
+    return [name for name in loop_artifacts if not (_artifact_bytes(ctx, name) or b"").strip()]
+
+
 def _reviewed_authoring_loop(
     ctx: RunContext,
     agent_name: str,
@@ -867,7 +909,10 @@ def _reviewed_authoring_loop(
             "round", {"loop": "authoring", "n": rounds + 1, "cap": AUTHORING_MAX_ROUNDS}
         ) as _round:
             _round.end_payload = {"outcome": "aborted"}
-            result = _agent_run(ctx, spec, task, cwd=ctx.repo, resume=session)
+            result = _agent_run(
+                ctx, spec, task, cwd=ctx.repo, resume=session,
+                on_session_id=lambda sid: _checkpoint_authoring_session(ctx, sid),
+            )
             session = result.session_id or session
             with ctx.state_lock:
                 ctx.state.authoring_session = session
@@ -875,10 +920,28 @@ def _reviewed_authoring_loop(
             if protected:
                 _restore_all(protected)
             # Leer zählt wie fehlend: Die Summary reviewt niemand, eine weiße
-            # Summary fiele sonst erst dem Menschen am Freigabe-Gate auf.
-            missing = [
-                name for name in loop_artifacts if not (_artifact_bytes(ctx, name) or b"").strip()
-            ]
+            # Summary fiele sonst erst dem Menschen am Freigabe-Gate auf. Fehlt ein
+            # Pflicht-Artefakt, wird GENAU EINMAL derselbe Schritt über die
+            # vorhandene Session repariert (kein Review-Zyklus, keine Runde, E4).
+            missing = _missing_loop_artifacts(ctx, loop_artifacts)
+            if missing:
+                repair_task = (
+                    f"The synthesis run did not produce the required artifact(s) "
+                    f"(missing or empty): {', '.join(f'.adw/{m}' for m in missing)}. "
+                    f"Write exactly these files now over the same session and leave "
+                    f"the already correct files unchanged."
+                )
+                result = _agent_run(
+                    ctx, spec, repair_task, cwd=ctx.repo, resume=session,
+                    on_session_id=lambda sid: _checkpoint_authoring_session(ctx, sid),
+                )
+                session = result.session_id or session
+                with ctx.state_lock:
+                    ctx.state.authoring_session = session
+                    ctx.save()
+                if protected:
+                    _restore_all(protected)
+                missing = _missing_loop_artifacts(ctx, loop_artifacts)
             if missing:
                 raise escalate(
                     ctx,
@@ -1338,7 +1401,8 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             # snapshot stays as the diff basis, GUI-SPEC §5, AC 10).
             snapshots.capture(ctx, worktree, "before_agent")
             result = _agent_run(
-                ctx, spec, task, cwd=worktree, resume=resume, deny_read_paths=deny
+                ctx, spec, task, cwd=worktree, resume=resume, deny_read_paths=deny,
+                on_session_id=lambda sid: _checkpoint_lane_session(ctx, lane_state, sid),
             )
             snapshots.capture(ctx, worktree, "after_agent")
             _require_no_agent_commit(ctx, lane, worktree, current_head)

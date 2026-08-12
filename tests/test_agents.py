@@ -77,6 +77,47 @@ def test_sdk_runner_extracts_session_id_from_stream(captured_query, tmp_path):
     assert result.session_id == "sess-final"
 
 
+# --- Aufgabe D / F5: Session-ID sofort über einen Callback melden -------------
+
+
+def test_session_id_reported_via_callback_before_a_mid_run_abort(monkeypatch, tmp_path):
+    """D1: erscheint die Session-ID im Stream und bricht der Lauf DANN vor
+    Abschluss ab, ist die ID bereits über den Callback gemeldet worden."""
+    seen: list[str] = []
+
+    def fake_query(*, prompt, options):
+        async def stream():
+            yield FakeInitMessage("sess-frueh")
+            raise RuntimeError("Verbindung abgebrochen")
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", fake_query)
+    with pytest.raises(RuntimeError):
+        SdkAgentRunner().run(
+            REGISTRY["spec_agent"], "task", cwd=tmp_path, on_session_id=seen.append
+        )
+    assert seen == ["sess-frueh"]
+
+
+def test_session_id_callback_fires_once_even_if_the_id_repeats(monkeypatch, tmp_path):
+    """D2: wiederholte Meldungen derselben ID sind idempotent — der Callback
+    feuert genau einmal, sobald die ID erstmals erscheint."""
+    seen: list[str] = []
+
+    def fake_query(*, prompt, options):
+        async def stream():
+            yield FakeInitMessage("sess-x")
+            yield FakeAssistantMessage("arbeite")  # ohne session_id
+            yield FakeResultMessage("fertig", "sess-x")  # gleiche id erneut
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", fake_query)
+    SdkAgentRunner().run(REGISTRY["spec_agent"], "task", cwd=tmp_path, on_session_id=seen.append)
+    assert seen == ["sess-x"]
+
+
 def test_sdk_runner_falls_back_to_assistant_text(monkeypatch, tmp_path):
     def fake_query(*, prompt, options):
         async def stream():

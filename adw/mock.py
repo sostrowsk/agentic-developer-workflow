@@ -49,6 +49,7 @@ class MockAgentRunner:
         deny_read_paths: list[str] | None = None,
         emitter=None,
         span=None,
+        on_session_id=None,
     ) -> AgentResult:
         # ``emitter`` is accepted for protocol parity (the orchestrator passes
         # the run's emitter through); the mock writes no event log itself. When
@@ -69,6 +70,15 @@ class MockAgentRunner:
             raise AssertionError(
                 f"Kein gescriptetes Ergebnis für Agent {agent.name!r} (Task: {task[:80]!r})"
             )
+        if resume:
+            session_id = resume  # Resume behält die Session — wie das echte SDK
+        else:
+            self._session_counter += 1
+            session_id = f"mock-session-{agent.name}-{self._session_counter}"
+        # Report the session id up front (as the real runner does from the stream)
+        # so dry runs and tests exercise the same early-checkpoint contract (F5).
+        if on_session_id is not None:
+            on_session_id(session_id)
         files = self.file_writes.get(agent.name, {})
         if callable(files):
             files = files(Path(cwd))
@@ -76,11 +86,6 @@ class MockAgentRunner:
             target = Path(cwd) / relpath
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
-        if resume:
-            session_id = resume  # Resume behält die Session — wie das echte SDK
-        else:
-            self._session_counter += 1
-            session_id = f"mock-session-{agent.name}-{self._session_counter}"
         result = AgentResult(text=queue.popleft(), session_id=session_id)
         if span is not None:
             span.end_payload = {

@@ -87,6 +87,14 @@ class CiConfig(BaseModel):
     provider: Literal["gitlab", "github"] | None = None
 
 
+class CodexConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Effektives Zeitlimit der codex-exec-Subprozesse (Autor UND Review teilen
+    # den Wert). Fehlt der Key, bleibt es beim bisherigen Default von 900s.
+    timeout: PositiveSeconds = 900
+
+
 class AdwConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -94,6 +102,7 @@ class AdwConfig(BaseModel):
     lanes: dict[LaneName, LaneConfig] = Field(min_length=1)
     e2e: E2eConfig | None = None
     ci: CiConfig = Field(default_factory=CiConfig)
+    codex: CodexConfig = Field(default_factory=CodexConfig)
 
     @property
     def is_parallel_capable(self) -> bool:
