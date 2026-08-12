@@ -1612,7 +1612,10 @@ def _run_test_only_pass(
     )
     # This is a build-lane agent run too — snapshot before and after it (§5).
     snapshots.capture(ctx, worktree, "before_agent")
-    result = _agent_run(ctx, spec, task, cwd=worktree, resume=None, deny_read_paths=deny)
+    result = _agent_run(
+        ctx, spec, task, cwd=worktree, resume=None, deny_read_paths=deny,
+        on_session_id=lambda sid: _checkpoint_lane_session(ctx, lane_state, sid),
+    )
     snapshots.capture(ctx, worktree, "after_agent")
     _require_no_agent_commit(ctx, lane, worktree, current_head)
     _require_lane_branch(ctx, worktree, lane_state)

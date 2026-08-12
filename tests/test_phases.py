@@ -1289,6 +1289,61 @@ def test_resume_after_red_confirmed_goes_straight_to_the_implementation(ctx, tar
     assert ctx.state.phase == "codex_review"
 
 
+def test_test_only_pass_abort_persists_session_and_resume_skips_the_test_run(ctx, target_repo):
+    """Finding (D1–D3): bricht der reine Test-Lauf NACH der Session-Meldung ab
+    (SDK hat die Session gestreamt, Tests liegen im Worktree, aber der Post-Run-
+    Checkpoint kam nicht mehr), muss die Session-ID persistiert sein. Der Resume
+    geht dann direkt in den RED-Check, statt den Test-Lauf in einer neuen Session
+    zu wiederholen."""
+    from pathlib import Path
+
+    from adw.agents import AgentRunError
+
+    prepare_tdd_lane(ctx, target_repo)
+
+    class TestPassAbortRunner(MockAgentRunner):
+        """Schreibt die Tests, meldet die Session früh über den Callback und
+        bricht dann VOR dem Post-Run-Checkpoint ab."""
+
+        def run(
+            self, agent, task, cwd, resume=None, deny_read_paths=None,
+            emitter=None, span=None, on_session_id=None,
+        ):
+            if agent.name == "build_agent":
+                for name, content in TEST_FILES.items():
+                    (Path(cwd) / name).write_text(content)
+                if on_session_id is not None:
+                    on_session_id("mock-session-build_agent-1")
+                raise AgentRunError("Prozess mitten im reinen Test-Lauf abgebrochen")
+            return super().run(
+                agent, task, cwd, resume=resume, deny_read_paths=deny_read_paths,
+                emitter=emitter, span=span, on_session_id=on_session_id,
+            )
+
+    ctx.agents = TestPassAbortRunner()
+    with pytest.raises(AgentRunError):
+        run_build_phase(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.lanes["backend"].session_id == "mock-session-build_agent-1"  # früh persistiert
+    assert saved.lanes["backend"].red_confirmed is False
+    assert saved.phase != "escalated"  # Abbruch = resumierbar, keine Eskalation
+
+    # Resume mit frischem, vollständigem Mock: KEIN zweiter Test-Lauf, direkt RED-Check.
+    ctx.state = saved
+    resumed = MockAgentRunner()
+    resumed.script_files("build_agent", dict(IMPL_FILES))
+    resumed.script("build_agent", "implementiert")
+    ctx.agents = resumed
+    run_build_phase(ctx)
+    calls = [c for c in resumed.calls if c.agent == "build_agent"]
+    assert len(calls) == 1  # nur die Implementierung — der Test-Lauf lief nicht erneut
+    assert "RED confirmed" in calls[0].task
+    assert "ONLY the tests" not in calls[0].task
+    assert calls[0].resume == "mock-session-build_agent-1"  # dieselbe, persistierte Session
+    assert ctx.state.lanes["backend"].red_confirmed is True
+    assert ctx.state.phase == "codex_review"
+
+
 def test_red_check_does_not_consume_a_gate_iteration(ctx, target_repo, monkeypatch):
     prepare_tdd_lane(ctx, target_repo)
     ctx.agents.file_writes["build_agent"] = files_per_build_call(ctx, TEST_FILES, IMPL_FILES)
