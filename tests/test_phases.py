@@ -15,6 +15,7 @@ from adw.phases import (
     AwaitingApproval,
     EscalationError,
     RunContext,
+    WorktreeRefusedError,
     _draft_stage,
     run_build_phase,
     run_ci_phase,
@@ -1586,8 +1587,9 @@ def test_completed_lane_with_tampered_tree_is_not_skipped(ctx):
 
 
 def test_uncommitted_edits_on_tracked_artifacts_fail_fast(ctx):
-    """Regression: unsaved user edits to tracked artifacts must not be
-    discarded by the archiving."""
+    """Regression: unsaved user edits to tracked artifacts must not be discarded
+    by the archiving. The in-phase guard is the LAST instance (checkout turned
+    dirty between CLI preflight and phase run): it REFUSES, never escalates (B1)."""
     from tests.conftest import git
 
     spec_path = ctx.repo / ".adw" / "spec.md"
@@ -1596,14 +1598,17 @@ def test_uncommitted_edits_on_tracked_artifacts_fail_fast(ctx):
     git(ctx.repo, "commit", "-m", "adw(alt): Spec")
     spec_path.write_text("# Gemergte Spec\n\nUNGESPEICHERTE NOTIZ DES NUTZERS\n")
     ctx.agents.script("spec_synthesis", "egal")
-    with pytest.raises(EscalationError, match="uncommittete|ungespeichert|Änderungen"):
+    with pytest.raises(WorktreeRefusedError, match="uncommittete|Änderungen"):
         run_spec_and_plan(ctx)
-    assert "UNGESPEICHERTE NOTIZ" in spec_path.read_text()
+    assert "UNGESPEICHERTE NOTIZ" in spec_path.read_text()  # nichts verworfen
+    assert ctx.state.phase != "escalated"  # Verweigerung ist keine Eskalation
+    assert not (ctx.run_dir / "escalation.md").exists()
 
 
 def test_uncommitted_edits_on_a_tracked_summary_fail_fast(ctx):
     """Die Summary wird wie ein Artefakt archiviert (git checkout --) — ein
-    getrackter Nutzer-Edit darf dabei nicht verloren gehen."""
+    getrackter Nutzer-Edit darf dabei nicht verloren gehen. Auch hier: der
+    In-Phasen-Guard VERWEIGERT (keine Eskalation, B1)."""
     from tests.conftest import git
 
     summary = ctx.repo / ".adw" / "spec-summary.md"
@@ -1612,9 +1617,11 @@ def test_uncommitted_edits_on_a_tracked_summary_fail_fast(ctx):
     git(ctx.repo, "commit", "-m", "adw(alt): Zusammenfassung")
     summary.write_text("# Zusammenfassung\n\nUNGESPEICHERTE NOTIZ DES NUTZERS\n")
     ctx.agents.script("spec_synthesis", "egal")
-    with pytest.raises(EscalationError, match="spec-summary.md"):
+    with pytest.raises(WorktreeRefusedError, match="spec-summary.md"):
         run_spec_and_plan(ctx)
     assert "UNGESPEICHERTE NOTIZ" in summary.read_text()
+    assert ctx.state.phase != "escalated"
+    assert not (ctx.run_dir / "escalation.md").exists()
 
 
 def test_directory_shaped_injected_config_is_removed_safely(tmp_path):
@@ -1688,7 +1695,9 @@ def test_archived_spec_takes_precedence_on_plan_resume(ctx):
 
 
 def test_uncommitted_edits_guard_also_runs_on_plan_resume(ctx):
-    """Regression: the data-loss guard must also apply on a resume in 'plan'."""
+    """Regression (Finding 1): a dirty tracked artifact injected between the CLI
+    preflight and the phase run must REFUSE without escalating — the persisted
+    run state stays unchanged and resumable, nothing is discarded."""
     from tests.conftest import git
 
     plan_path = ctx.repo / ".adw" / "plan.md"
@@ -1701,9 +1710,13 @@ def test_uncommitted_edits_guard_also_runs_on_plan_resume(ctx):
     ctx.run_dir.mkdir(parents=True, exist_ok=True)
     (ctx.run_dir / "spec.md").write_text("# Spec\n")
     ctx.agents.script("plan_synthesis", "egal")
-    with pytest.raises(EscalationError, match="uncommittete|Änderungen"):
+    with pytest.raises(WorktreeRefusedError, match="uncommittete|Änderungen"):
         run_spec_and_plan(ctx)
-    assert "UNGESPEICHERTE NOTIZ" in plan_path.read_text()
+    assert "UNGESPEICHERTE NOTIZ" in plan_path.read_text()  # nichts verworfen
+    # Der persistierte Run-State bleibt unverändert und resumierbar:
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert saved.phase == "plan"  # NICHT escalated
+    assert not (ctx.run_dir / "escalation.md").exists()
 
 
 def test_config_restore_uses_pinned_fork_point_not_moving_base(ctx):

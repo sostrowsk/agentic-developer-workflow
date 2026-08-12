@@ -29,6 +29,7 @@ from adw.phases import (
     AwaitingApproval,
     EscalationError,
     RunContext,
+    WorktreeRefusedError,
     _current_span_id,
     run_build_phase,
     run_ci_phase,
@@ -83,10 +84,22 @@ def _worktree_dirty_paths(repo: Path) -> list[str]:
     """Full set of uncommitted paths in the main checkout (tracked + untracked).
 
     Determined up front from ``git status --porcelain -z`` so a decision is made
-    over the COMPLETE set before anything is mutated."""
-    result = _git_plain(repo, "status", "--porcelain", "-z")
+    over the COMPLETE set before anything is mutated. A failing ``git status``
+    (nonzero exit, timeout, or launch failure) is NEVER treated as a clean tree —
+    the preflight cannot then establish cleanliness, so it REFUSES (non-escalating)
+    rather than silently proceeding to mutate state."""
+    try:
+        result = _git_plain(repo, "status", "--porcelain", "-z")
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise _fail(
+            "Arbeitsbaum-Prüfung fehlgeschlagen: `git status` im Haupt-Checkout "
+            f"nicht ausführbar — {exc}"
+        ) from exc
     if result.returncode != 0:
-        return []  # kein Git-Repo o. Ä. — der Phasenlauf entscheidet
+        raise _fail(
+            "Arbeitsbaum-Prüfung fehlgeschlagen: `git status` im Haupt-Checkout "
+            f"endete mit Exit {result.returncode} — {result.stderr.strip()[:500]}"
+        )
     tokens = result.stdout.split("\0")
     paths: list[str] = []
     i = 0
@@ -107,24 +120,58 @@ def _worktree_dirty_paths(repo: Path) -> list[str]:
 
 
 def _heal_adw_artifact(repo: Path, relpath: str) -> None:
-    """Reset ONE ADW-owned artifact: tracked → git checkout, untracked → delete."""
-    if _git_plain(repo, "ls-files", "--", relpath).stdout.strip():
-        _git_plain(repo, "checkout", "--", relpath)
+    """Reset ONE ADW-owned artifact: tracked → git checkout, untracked → delete.
+
+    A failing heal REFUSES (non-escalating) instead of running on with a
+    half-healed tree — the caller must not proceed to mutate state."""
+    try:
+        tracked = _git_plain(repo, "ls-files", "--", relpath)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise _fail(f"Selbstheilung von {relpath} fehlgeschlagen: git ls-files — {exc}") from exc
+    if tracked.returncode != 0:
+        raise _fail(
+            f"Selbstheilung von {relpath} fehlgeschlagen: git ls-files Exit "
+            f"{tracked.returncode} — {tracked.stderr.strip()[:300]}"
+        )
+    if tracked.stdout.strip():
+        try:
+            result = _git_plain(repo, "checkout", "--", relpath)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise _fail(
+                f"Selbstheilung von {relpath} fehlgeschlagen: git checkout — {exc}"
+            ) from exc
+        if result.returncode != 0:
+            raise _fail(
+                f"Selbstheilung von {relpath} fehlgeschlagen: git checkout Exit "
+                f"{result.returncode} — {result.stderr.strip()[:300]}"
+            )
     else:
-        (repo / relpath).unlink(missing_ok=True)
+        try:
+            (repo / relpath).unlink(missing_ok=True)
+        except OSError as exc:
+            raise _fail(f"Selbstheilung von {relpath} fehlgeschlagen: {exc}") from exc
 
 
 def _preflight_worktree(repo: Path) -> None:
     """Guard the main checkout before run/resume/approve (B1–B4). It NEVER
     escalates: a clean tree proceeds; a dirty set consisting EXCLUSIVELY of the
     six ADW-owned authoring artifacts self-heals and proceeds; anything else
-    (foreign or mixed) refuses with a clear message, discarding nothing."""
+    (foreign or mixed) refuses with a clear message, discarding nothing. A git
+    failure (status/heal) is also a refusal, never a silent proceed."""
     dirty = _worktree_dirty_paths(repo)
     if not dirty:
         return
     if all(path in SELF_HEAL_ARTIFACTS for path in dirty):
         for path in dirty:
             _heal_adw_artifact(repo, path)
+        # Re-Check: die Heilung MUSS den Checkout sauber hinterlassen haben —
+        # sonst liefe der Lauf mit einem halb geheilten Baum weiter.
+        remaining = _worktree_dirty_paths(repo)
+        if remaining:
+            raise _fail(
+                "Selbstheilung ließ den Haupt-Checkout nicht sauber:\n  "
+                + "\n  ".join(sorted(remaining))
+            )
         return
     listing = "\n  ".join(sorted(dirty))
     raise _fail(
@@ -459,6 +506,17 @@ def _execute(ctx: RunContext) -> None:
                 f"dann `adw approve {ctx.state.run_id}`"
             )
         raise typer.Exit(EXIT_AWAITING_APPROVAL) from None
+    except WorktreeRefusedError as exc:
+        # Verweigerung, KEINE Eskalation: der In-Phasen-Guard fing einen dirty
+        # Haupt-Checkout ab (Race zwischen Vorflug und Phasenlauf). Kein Save,
+        # kein escalation.md — der Run bleibt unverändert und resumierbar (B1).
+        typer.echo(
+            f"Ausführung verweigert: {exc}\n"
+            f"Der Run {ctx.state.run_id} bleibt unverändert in Phase '{ctx.state.phase}' — "
+            f"nach dem Aufräumen fortsetzen mit: adw resume {ctx.state.run_id}",
+            err=True,
+        )
+        raise typer.Exit(1) from None
     except EscalationError as exc:
         typer.echo(
             f"Eskalation: {exc}\nReport: .adw/runs/{ctx.state.run_id}/escalation.md",

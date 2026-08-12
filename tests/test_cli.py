@@ -1,6 +1,7 @@
 """CLI tests (typer CliRunner) — dry-run mode, 0 tokens, real git."""
 
 import json
+import subprocess
 
 import pytest
 from typer.testing import CliRunner
@@ -811,3 +812,91 @@ def test_approve_self_heals_adw_artifact_and_proceeds(target_repo):
     assert res.exit_code == 0, res.output
     assert RunState.load(target_repo, state.run_id).phase == "done"
     assert not stray.exists()  # geheilt
+
+
+# --- Finding 1: der In-Phasen-Guard verweigert (keine Eskalation) -------------
+
+
+def test_in_phase_worktree_refusal_maps_to_nonzero_exit_without_escalation(
+    target_repo, monkeypatch
+):
+    """Finding 1: eine WorktreeRefusedError aus dem In-Phasen-Guard (Race: der
+    Checkout wird nach dem Vorflug dirty) wird an der CLI-Grenze zu einem klaren
+    Nichtnull-Exit — OHNE State-Save, OHNE escalation.md; der Run bleibt
+    unverändert und resumierbar (B1)."""
+    import adw.cli as cli_mod
+    from adw.phases import WorktreeRefusedError
+
+    state = _paused_run(target_repo)
+
+    def refuse(ctx):
+        raise WorktreeRefusedError(".adw/spec.md ist getrackt und hat uncommittete Änderungen")
+
+    # Vorflug sah einen sauberen Baum; erst danach wird er dirty → der Guard greift.
+    monkeypatch.setattr(cli_mod, "_preflight_worktree", lambda repo: None)
+    monkeypatch.setattr(cli_mod, "run_spec_and_plan", refuse)
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 1
+    assert res.exit_code != 2  # keine Approval-Pause
+    saved = RunState.load(target_repo, state.run_id)
+    assert saved.phase == "awaiting_approval"  # unverändert, NICHT escalated
+    assert not (saved.run_dir(target_repo) / "escalation.md").exists()
+
+
+# --- Finding 2: fehlgeschlagenes git status / Heilung → Verweigerung ----------
+
+
+def _git_plain_with_failure(monkeypatch, failing_subcommand: str):
+    """Ersetzt cli._git_plain so, dass genau ein Git-Subkommando fehlschlägt."""
+    import adw.cli as cli_mod
+
+    real = cli_mod._git_plain
+
+    def wrapper(repo, *args):
+        if args[:1] == (failing_subcommand,):
+            return subprocess.CompletedProcess(
+                ["git", *args], 128, "", f"fatal: {failing_subcommand} kaputt"
+            )
+        return real(repo, *args)
+
+    monkeypatch.setattr(cli_mod, "_git_plain", wrapper)
+
+
+def test_run_refuses_when_git_status_fails_without_creating_a_run(target_repo, monkeypatch):
+    """Finding 2: ein fehlschlagendes `git status` gilt NICHT als sauberer Baum —
+    der Vorflug verweigert, es wird kein Run angelegt."""
+    _git_plain_with_failure(monkeypatch, "status")
+    res = runner.invoke(app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run"])
+    assert res.exit_code != 0
+    assert res.exit_code != 2
+    with pytest.raises(StateNotFoundError):
+        RunState.find_latest(target_repo)  # keine State-Mutation
+
+
+def test_resume_refuses_when_git_status_fails_without_mutating_state(target_repo, monkeypatch):
+    """Finding 2: fehlschlagendes `git status` beim Resume → Verweigerung, der
+    Run-State bleibt unverändert und resumierbar."""
+    state = _paused_run(target_repo)
+    _git_plain_with_failure(monkeypatch, "status")
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code != 0
+    assert res.exit_code != 2
+    assert RunState.load(target_repo, state.run_id).phase == "awaiting_approval"
+
+
+def test_resume_refuses_when_self_heal_checkout_fails_without_discarding(target_repo, monkeypatch):
+    """Finding 2: schlägt eine Heilungs-Operation (git checkout) fehl, verweigert
+    der Vorflug, statt mit halb geheiltem Baum weiterzulaufen — nichts wird
+    verworfen, der State bleibt unverändert."""
+    state = _paused_run(target_repo)
+    spec = target_repo / ".adw" / "spec.md"
+    spec.write_text("# committete Spec\n")
+    git(target_repo, "add", ".adw/spec.md")
+    git(target_repo, "commit", "-m", "spec getrackt")
+    spec.write_text("# committete Spec\n\nDIRTY REST\n")  # getracktes ADW-Artefakt, dirty
+    _git_plain_with_failure(monkeypatch, "checkout")
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code != 0
+    assert res.exit_code != 2
+    assert spec.read_text() == "# committete Spec\n\nDIRTY REST\n"  # nicht verworfen
+    assert RunState.load(target_repo, state.run_id).phase == "awaiting_approval"

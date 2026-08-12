@@ -187,6 +187,14 @@ class AwaitingApproval(Exception):
     """Plan-approval Gate: run paused, continuation via `adw approve`."""
 
 
+class WorktreeRefusedError(Exception):
+    """The main checkout carries uncommitted changes ADW must not touch — the
+    run is REFUSED, never escalated (B1): no escalation report, no phase change,
+    the run state stays unchanged and resumable. This is the last-instance guard
+    that fires if the checkout turns dirty between the CLI preflight and the
+    phase run; the CLI maps it to a clear non-zero exit."""
+
+
 @dataclass
 class RunContext:
     repo: Path
@@ -382,10 +390,13 @@ def run_spec_and_plan(ctx: RunContext) -> None:
             if not _git(ctx, ctx.repo, "ls-files", "--", f".adw/{name}").strip():
                 continue
             if _git(ctx, ctx.repo, "status", "--porcelain", "--", f".adw/{name}").strip():
-                raise escalate(
-                    ctx,
+                # Letzte Instanz, falls der Checkout zwischen CLI-Vorflug und
+                # Phasenlauf dirty wird: VERWEIGERN statt eskalieren (B1) — der
+                # Run bleibt unverändert und resumierbar, nichts wird verworfen.
+                raise WorktreeRefusedError(
                     f".adw/{name} ist getrackt und hat uncommittete Änderungen — "
-                    f"bitte committen oder stashen, der ADW würde sie verwerfen",
+                    f"bitte committen oder stashen (ADW verwirft sie nicht und "
+                    f"eskaliert nicht)"
                 )
         # Issue-Text als reviewbares Artefakt (B3) — idempotent, damit ein
         # Resume in der Spec- ODER Plan-Phase es wieder herstellt; protected,
