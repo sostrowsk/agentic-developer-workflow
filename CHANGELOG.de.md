@@ -13,6 +13,77 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.5.0] — 2026-08-12
+
+Nachhol-Release: Die GUI-Arbeit (Läufe 1–5b) ist über mehrere Pushes nach
+`main` gelangt, ohne eigene Versions-Bumps. Dieser Eintrag deckt alles seit
+0.4.0 ab.
+
+### Hinzugefügt
+- **ADW Run Inspector (`adw gui`)** — eine read-only Web-Ansicht eines Laufs.
+  Bindet ausschließlich an Loopback, sofern nicht `--i-know` gesetzt ist;
+  `--repo` macht Repos über die Registry hinaus verfügbar, `--port`
+  (Default 8765) und `--open` steuern die lokale Adresse. Der Web-Stack ist ein
+  optionales Extra (`pip install adw[gui]`) und bleibt aus den Kern-
+  Dependencies heraus: eine reine `adw run`-Installation importiert ihn nie.
+  - Run-Liste und Run-Detail mit den Reitern **Trace**, **Timeline**,
+    **Artifacts** und **Raw**; das Detail-Pane zeigt Prompt, Answer, Tools und
+    Diff zum ausgewählten Knoten.
+  - Diff-Endpunkt mit expliziter Ref-Allowlist.
+  - Live-Tail über Server-Sent Events, solange ein Lauf läuft.
+- **Ereignis-Log** (`adw/events.py`): Der Orchestrator hängt seine
+  Lauf-Ereignisse als JSON Lines an `.adw/runs/<id>/events.jsonl`. Der Emitter
+  ist **fail-open** — kein emitter-interner Fehler (Platte voll, Rechte, nicht
+  serialisierbare Payload) erreicht je den Aufrufer oder bricht einen Lauf ab;
+  `state.json` bleibt die Resume-Autorität.
+- **Git-Snapshots** (`adw/snapshots.py`): Der Baum vor und nach jedem
+  Agent-Lauf wird unter `refs/adw/<run>/<seq>` festgehalten — erst das macht
+  den Diff pro Knoten in der GUI möglich, ohne Arbeitskopien vorzuhalten.
+- **Orchestrator-Instrumentierung**: Spans an den Aufrufstellen für Run,
+  Phase, Runde, Agent-Lauf, Tool-Nutzung, Gate und Codex-Schritte — für Mock
+  und echten Runner gleichermaßen, sodass auch ein Dry-Run dieselbe
+  Trace-Form erzeugt.
+- **`codex.timeout`** als optionaler Key in `.adw/config.yaml` (ganzzahlige
+  Sekunden, > 0, Default 900). Er gilt für die `codex exec`-Subprozesse; ohne
+  den Key bleibt das effektive Limit unverändert. Ungültige Werte werden als
+  `ConfigError` abgelehnt, bevor der Lauf startet.
+- **Arbeitsbaum-Prüfung vor `adw run`, `adw resume` und `adw approve`**:
+  Betreffen die uncommitteten Änderungen ausschließlich ADWs eigene sechs
+  Authoring-Artefakte (`.adw/issue.md`, `spec.md`, `plan.md`,
+  `contract.yaml`, `spec-summary.md`, `plan-summary.md`), setzt ADW sie selbst
+  zurück und fährt fort. Jede fremde Datei — oder eine Mischung aus fremder
+  Datei und ADW-Artefakt — lässt das Kommando stattdessen verweigern, ohne
+  irgendetwas zu verwerfen. Im User-Handbuch dokumentiert (EN + DE).
+- Spezifikations- und Messdokumente: `docs/GUI-SPEC.md` (+ `.de.md`) und
+  `docs/gui-response-time.md`.
+
+### Behoben
+- Ein fehlschlagender **Codex-Autor** im Dual-Authoring bricht den Lauf nicht
+  mehr ab. Der `FAILED`-Marker wird wie bisher geschrieben, und die Phase läuft
+  einquellig mit dem verbliebenen Claude-Entwurf weiter — kein Traceback, kein
+  Exit 1, keine manuelle Recovery. Ein Codex-Timeout hat den Orchestrator
+  zuvor zum Absturz gebracht und ein manuelles Säubern des Arbeitsbaums
+  erzwungen.
+- Die Arbeitsbaum-Prüfung **eskaliert keinen Lauf mehr** — weder bei `run`
+  noch bei `resume`. Sie verweigert höchstens; der Run-State bleibt unverändert
+  und resumierbar. Zuvor eskalierte eine von ADWs eigenem Crash
+  hinterlassene dirty `.adw/spec.md` den Lauf beim Resume dauerhaft und
+  machte ihn unwiederbringlich verloren.
+- Ein **partieller Synthese-Ausfall** (ein Pflicht-Artefakt fehlt oder ist
+  leer) wird jetzt durch genau einen Retry desselben Schritts über die
+  bestehende Session repariert, unter Nennung des fehlenden Artefakts. Erst
+  wenn auch der Retry scheitert, eskaliert der Lauf. Zuvor tötete eine
+  geschriebene `spec.md` plus fehlende `spec-summary.md` die ganze Phase.
+- Die **Agent-Session-ID wird persistiert, sobald sie im Message-Stream
+  erscheint**, statt erst nach Abschluss des Laufs. Ein Abbruch mitten im Lauf
+  hinterlässt sie damit im State, und `adw resume` knüpft an die begonnene
+  Session an, statt sie neu zu starten und die bereits verbrauchten Tokens zu
+  verlieren.
+- `test_measurement_guide_document_is_present_and_complete` prüfte nur den
+  ersten Kandidaten, sodass jede unbeteiligte Markdown-Datei, die die beiden
+  Messnamen nennt, den Test kippen konnte; jetzt muss *irgendein* Dokument
+  vollständig sein.
+
 ## [0.4.0] — 2026-08-07
 
 ### Added
@@ -160,6 +231,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.5.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.2.0...v0.2.1

@@ -12,6 +12,70 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.5.0] — 2026-08-12
+
+Catch-up release: the GUI work (runs 1–5b) reached `main` over several pushes
+without its own version bumps. This entry covers everything since 0.4.0.
+
+### Added
+- **ADW Run Inspector (`adw gui`)** — a read-only web view of a run. Binds to
+  loopback only unless `--i-know` is passed; `--repo` adds repos beyond the
+  registry, `--port` (default 8765) and `--open` control the local address.
+  The web stack is an optional extra (`pip install adw[gui]`) and stays out of
+  the core dependencies: a plain `adw run` install never imports it.
+  - Run list and run detail with the tabs **Trace**, **Timeline**,
+    **Artifacts** and **Raw**; the detail pane shows Prompt, Answer, Tools and
+    Diff for the selected node.
+  - Diff endpoint backed by an explicit ref allowlist.
+  - Live tail over Server-Sent Events while a run is in progress.
+- **Event log** (`adw/events.py`): the orchestrator appends its run events as
+  JSON Lines to `.adw/runs/<id>/events.jsonl`. The emitter is **fail-open** —
+  no emitter-internal error (disk full, permissions, unserializable payload)
+  ever reaches the caller or aborts a run; `state.json` remains the resume
+  authority.
+- **Git snapshots** (`adw/snapshots.py`): the tree before and after every agent
+  run is captured under `refs/adw/<run>/<seq>`, which is what makes the GUI's
+  per-node diff possible without keeping working copies around.
+- **Orchestrator instrumentation**: spans at the call sites for run, phase,
+  round, agent run, tool use, gate and codex steps — mock and real runner
+  alike, so a dry run produces the same trace shape.
+- **`codex.timeout`** as an optional key in `.adw/config.yaml` (integer
+  seconds, > 0, default 900). It applies to the `codex exec` subprocesses;
+  without the key the effective limit is unchanged. Invalid values are
+  rejected as a `ConfigError` before the run starts.
+- **Working-tree check before `adw run`, `adw resume` and `adw approve`**: if
+  the only uncommitted changes are ADW's own six authoring artifacts
+  (`.adw/issue.md`, `spec.md`, `plan.md`, `contract.yaml`, `spec-summary.md`,
+  `plan-summary.md`), ADW resets them itself and continues. Any foreign file —
+  or a mix of foreign file and ADW artifact — refuses the command instead,
+  discarding nothing. Documented in the user handbook (EN + DE).
+- Specification and measurement docs: `docs/GUI-SPEC.md` (+ `.de.md`) and
+  `docs/gui-response-time.md`.
+
+### Fixed
+- A failing **Codex author** in dual authoring no longer aborts the run. The
+  `FAILED` marker is written as before and the phase continues single-source
+  with the remaining Claude draft — no traceback, no exit 1, no manual
+  recovery. A Codex timeout previously crashed the orchestrator and required
+  cleaning the working tree by hand.
+- The working-tree check **never escalates a run** any more — neither on `run`
+  nor on `resume`. It refuses at most, leaving the run state unchanged and
+  resumable. Previously a dirty `.adw/spec.md` left behind by ADW's own crash
+  escalated the run permanently on resume and lost it.
+- A **partial synthesis failure** (one required artifact missing or empty) is
+  now repaired by exactly one retry of the same step over the existing
+  session, naming the missing artifact. Only if the retry fails as well does
+  the run escalate. Previously a written `spec.md` plus a missing
+  `spec-summary.md` killed the whole phase.
+- The **agent session id is persisted as soon as it appears** in the message
+  stream instead of after the run completes, so an abort mid-run leaves it in
+  the state and `adw resume` reconnects to the started session instead of
+  restarting it and losing the tokens already spent.
+- `test_measurement_guide_document_is_present_and_complete` checked only the
+  first candidate document, so any unrelated Markdown file mentioning the two
+  measure names could fail it; it now requires that *some* document is
+  complete.
+
 ## [0.4.0] — 2026-08-07
 
 ### Added
@@ -153,6 +217,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.5.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.2.0...v0.2.1
