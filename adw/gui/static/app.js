@@ -48,8 +48,12 @@
   // mark is scheduled only after it SETTLES — so a loading placeholder is never
   // mistaken for completion (C1). An interaction with no fetch passes no promise
   // and completes immediately (after the next paint).
-  function perfEndAfterContent(startMark, endMark, measure, loadPromise) {
-    var finish = function () { perfEndAfterPaint(startMark, endMark, measure); };
+  function perfEndAfterContent(startMark, endMark, measure, loadPromise, isCurrent) {
+    // Aufgabe B: a superseded interaction (isCurrent() false) records no measure.
+    var finish = function () {
+      if (isCurrent && !isCurrent()) return;
+      perfEndAfterPaint(startMark, endMark, measure);
+    };
     if (loadPromise && typeof loadPromise.then === "function") {
       loadPromise.then(finish, finish);  // settle (fulfilled OR rejected), then paint
     } else {
@@ -70,7 +74,14 @@
   // pure data-seq match. The choice is preserved across the live region swap.
   var selectedSeq = null;
 
-  function applySelection() {
+  // Aufgabe B (latest-interaction-wins): a monotonically increasing generation
+  // token captured when a selection starts. A selection's asynchronous work — the
+  // tool-body fetch write and the post-paint end mark — is applied ONLY while its
+  // generation is still the current one, so a superseded selection's late fetch
+  // never writes the wrong node into the pane and never produces a measure.
+  var selectionGen = 0;
+
+  function applySelection(gen) {
     var haveSelected =
       selectedSeq && document.querySelector('.pane[data-seq="' + selectedSeq + '"]');
     if (!haveSelected) {
@@ -91,7 +102,7 @@
     if (selectedSeq) {
       var selectedPane = document.querySelector('.pane[data-seq="' + selectedSeq + '"]');
       var pre = selectedPane && selectedPane.querySelector(".tool-detail pre[data-load-seq]");
-      if (pre) return loadToolBody(pre);
+      if (pre) return loadToolBody(pre, gen);
     }
     return Promise.resolve();
   }
@@ -107,6 +118,10 @@
     var bar = target.closest(".tl-bar[data-seq]");
     var node = target.closest(".node[data-seq]");
     if (!bar && !node) return;
+    // Latest-interaction-wins (Aufgabe B): capture this selection's generation; its
+    // async work applies only while it stays current.
+    var gen = ++selectionGen;
+    var isCurrent = function () { return gen === selectionGen; };
     perfMark("adw:select:start");
     if (bar) {
       selectedSeq = bar.getAttribute("data-seq");
@@ -116,8 +131,9 @@
     }
     // Complete the measure only after the (possibly fetched) detail pane content is
     // rendered — applySelection returns the tool-body load promise when the
-    // selected node lazy-loads its payload (C1).
-    perfEndAfterContent("adw:select:start", "adw:select:end", "adw:select", applySelection());
+    // selected node lazy-loads its payload (C1) — and only if this selection is
+    // still the current one (B2).
+    perfEndAfterContent("adw:select:start", "adw:select:end", "adw:select", applySelection(gen), isCurrent);
   });
 
   // --- switchable tabs (Aufgabe D + the run-level Raw / node-level Diff tabs):
@@ -211,7 +227,7 @@
   // carries only its data-load-seq; the full payload is fetched from the read-only
   // events route on first expand, so selecting an agent.run node never blocks on
   // rendering megabytes at once, yet every full payload stays reachable.
-  function loadToolBody(pre) {
+  function loadToolBody(pre, gen) {
     if (pre.getAttribute("data-loaded")) return Promise.resolve();
     var seq = pre.getAttribute("data-load-seq");
     if (!seq) return Promise.resolve();
@@ -224,6 +240,10 @@
     return fetch(base + "/events?from_seq=" + encodeURIComponent(seq) + "&to_seq=" + encodeURIComponent(seq))
       .then(function (response) { return response.json(); })
       .then(function (records) {
+        // Aufgabe B: a superseded selection's late fetch must NOT write into the
+        // DOM while a newer node is selected — a debug tool must never show the
+        // data of the wrong node.
+        if (gen !== undefined && gen !== selectionGen) return;
         var found = null;
         for (var i = 0; i < records.length; i++) {
           if (String(records[i].seq) === String(seq)) { found = records[i]; break; }
@@ -234,6 +254,7 @@
       })
       .catch(function () {
         pre.removeAttribute("data-loaded"); // allow a retry on the next expand
+        if (gen !== undefined && gen !== selectionGen) return;
         pre.textContent = "(failed to load — expand again to retry)";
       });
   }
@@ -263,15 +284,18 @@
   }
 
   function loadArtifact(summary) {
-    if (summary.getAttribute("data-loaded")) return;
+    if (summary.getAttribute("data-loaded")) return Promise.resolve();
     var name = summary.getAttribute("data-artifact");
     var wrap = summary.closest(".artifact-wrap");
     var pre = wrap ? wrap.querySelector("[data-artifact-body]") : null;
     var more = wrap ? wrap.querySelector("[data-artifact-more]") : null;
-    if (!name || !pre) return;
+    if (!name || !pre) return Promise.resolve();
     summary.setAttribute("data-loaded", "1");
     pre.textContent = "Loading…";
-    fetch(base + "/artifacts/" + encodeURIComponent(name))
+    // The returned promise resolves once the bounded initial slice is inserted, so
+    // the adw:artifact measure (Aufgabe C) completes only after the fetched content
+    // is rendered — a loading indicator is not completion (C1).
+    return fetch(base + "/artifacts/" + encodeURIComponent(name))
       .then(function (response) {
         if (!response.ok) throw new Error("artifact " + response.status);
         return response.text();
@@ -304,7 +328,14 @@
     var pre = details.querySelector ? details.querySelector("pre[data-load-seq]") : null;
     if (pre) loadToolBody(pre);
     var summary = details.querySelector ? details.querySelector("summary[data-artifact]") : null;
-    if (summary) loadArtifact(summary);
+    // Aufgabe C: opening an artifact is the third instrumented interaction. Same
+    // construction as adw:select / adw:tab — start mark at the opening event, end
+    // mark + measure only after the fetched content is painted (rAF -> task after
+    // paint), the async load promise gating completion (C1).
+    if (summary) {
+      perfMark("adw:artifact:start");
+      perfEndAfterContent("adw:artifact:start", "adw:artifact:end", "adw:artifact", loadArtifact(summary));
+    }
   }, true);
 
   // --- Raw tab (Aufgabe C): filter the server-rendered rows by type and by free

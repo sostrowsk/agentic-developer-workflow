@@ -56,6 +56,12 @@ main.detail { display: block; }
 /* Aufgabe A: the windowed-tree overflow pointer to the paging affordance. */
 .node-more { color: var(--muted); font-style: italic; list-style: none; }
 .trace ul { list-style: none; padding-left: 1rem; }
+/* Aufgabe A: the trace tree is a bounded, MOVING window rendered as one flat list;
+   depth is shown by indentation (--depth) so the hierarchy still reads, and a
+   ?offset paging control (.window-nav) reaches the previous / next bounded slice. */
+.trace-list { list-style: none; padding-left: 0; margin: 0; }
+.trace-list .node { padding-left: calc(var(--depth, 0) * 0.9rem); }
+.window-nav { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; display: flex; gap: 0.6rem; }
 .node .dur { color: var(--muted); margin-left: 0.4rem; font-size: 0.8rem; }
 .node .round { color: var(--accent); margin-left: 0.3rem; }
 

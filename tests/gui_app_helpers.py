@@ -896,3 +896,143 @@ def build_diff_run(repo: Path, run_id="aaaa1111", *, large=False):
         "unlisted": unlisted, "foreign": foreign, "head_sha": head_sha,
         "agent_label": "build_agent",
     }
+
+
+# --- Run 7fe9d702 fixtures: bounded entry-node DOM (A), supersession (B), the
+# adw:artifact measure (C).
+#
+# .adw/plan.md §1 (correct fixture SHAPE): the A1/A2/A3 fixtures reference the NODE
+# COUNT, not the byte size — the twice-repeated pitfall. They stay generated
+# in-memory (never checked in) and, for the trace tree, carry DEEPLY NESTED
+# branches (not one flat sibling list) and MULTIPLE tool-bearing nodes, so a
+# per-sibling-group or per-pane slice cannot pass while the complete document stays
+# unbounded. Every entry carries a unique token so a test can distinguish a bounded
+# display from a loss of content at the beginning / just past the bound / the
+# middle / the very end of each collection.
+
+
+NESTED_LEAF_PREFIX = "nestleaf"
+
+
+def nested_leaf_token(i: int) -> str:
+    """The unique per-leaf token of :func:`nested_tree_lines` (leaf ``i``, in the
+    tree's document order)."""
+    return f"{NESTED_LEAF_PREFIX}-{i:06d}"
+
+
+def nested_tree_lines(total_entries, *, branch=5, leaves=8, max_depth=6,
+                      issue="Nested trace tree"):
+    """A run whose trace tree holds AT LEAST ``total_entries`` leaf entries arranged
+    in DEEPLY NESTED branches — a ``branch``-way tree of intermediate ``group``
+    spans, each also carrying ``leaves`` leaf entries. No single sibling group
+    exceeds ``branch + leaves`` (well under the 200 cap), so per-sibling-group
+    slicing (``children[:limit]`` applied recursively) would materialise the WHOLE
+    tree, multiplying the budget at every level; only ONE GLOBAL budget over the
+    complete document keeps the rendered entry markers bounded (AC-A1). Leaves are
+    ``agent.tool.call`` points so their unique ``nestleaf-<i>`` token shows in the
+    tree label; they are created in breadth-first document order, so ``nestleaf``
+    tokens near 0 sit at the top of the tree and high indices deep inside it."""
+    lines = [rec(1, "run", "start", "R", None, ts=ts_at(1),
+                 payload=run_start_payload(issue))]
+    seq = 2
+    n_span = 0
+    n_leaf = 0
+    queue = [("R", 0)]
+    while queue and n_leaf < total_entries:
+        parent, depth = queue.pop(0)
+        for _ in range(leaves):
+            if n_leaf >= total_entries:
+                break
+            lines.append(rec(seq, "agent.tool.call", "point", parent, ts=ts_at(seq),
+                             payload={"tool": "Bash",
+                                      "input": {"command": nested_leaf_token(n_leaf)}}))
+            seq += 1
+            n_leaf += 1
+        if depth < max_depth:
+            for _ in range(branch):
+                n_span += 1
+                sid = f"S{n_span}"
+                lines.append(rec(seq, "group", "start", sid, parent, ts=ts_at(seq),
+                                 payload={"name": sid}))
+                seq += 1
+                queue.append((sid, depth + 1))
+    lines.append(rec(seq, "run", "end", "R", None, ts=ts_at(seq),
+                     payload=run_end_payload("done")))
+    return lines
+
+
+def tool_node_token(node: int, i: int) -> str:
+    """The unique per-call token of :func:`many_tool_nodes_lines` (node ``node``,
+    call ``i``)."""
+    return f"toolnode-{node:02d}-{i:05d}"
+
+
+def many_tool_nodes_lines(total_pairs, *, nodes=8, issue="Many tool nodes"):
+    """Several ``agent.run`` spans that TOGETHER hold at least ``total_pairs`` tool
+    call/result pairs (2 entries each), spread evenly across ``nodes`` panes. The
+    Tools entries therefore live across MULTIPLE detail panes: rendering up to
+    ``limit`` tools in each of several panes (including the hidden, non-active ones
+    the server materialises) would defeat a per-pane cap, so the GLOBAL tool-entry
+    budget must stay <= 200 across ALL panes (AC-A1). Every call carries a unique
+    ``toolnode-<node>-<i>`` token."""
+    per = (total_pairs + nodes - 1) // nodes
+    lines = [rec(1, "run", "start", "R", None, ts=ts_at(1),
+                 payload=run_start_payload(issue))]
+    seq = 2
+    for k in range(nodes):
+        aid = f"A{k}"
+        lines.append(rec(seq, "agent.run", "start", aid, "R", ts=ts_at(seq),
+                         payload={"agent": f"agent_{k}", "prompt": "p", "system_append": ""}))
+        seq += 1
+        for i in range(per):
+            lines.append(rec(seq, "agent.tool.call", "point", aid, ts=ts_at(seq), payload={
+                "tool": "Bash", "tool_use_id": f"n{k}t{i}",
+                "input": {"command": tool_node_token(k, i)}}))
+            seq += 1
+            lines.append(rec(seq, "agent.tool.result", "point", aid, ts=ts_at(seq), payload={
+                "tool_use_id": f"n{k}t{i}", "is_error": False,
+                "content": f"outnode-{k:02d}-{i:05d}"}))
+            seq += 1
+        lines.append(rec(seq, "agent.run", "end", aid, "R", ts=ts_at(seq),
+                         payload={"result_text": "done", "is_error": False}))
+        seq += 1
+    lines.append(rec(seq, "run", "end", "R", None, ts=ts_at(seq),
+                     payload=run_end_payload("done")))
+    return lines
+
+
+def heavy_tool_run_lines(pairs=1100, *, issue="Heavy tool run"):
+    """The manual A4 reference: one ``agent.run`` whose tool-call/-result points are
+    at least 2000 TOOL NODES (``pairs`` >= 1000 -> 2*pairs points) — the
+    ``spec_agent``-class node that blocked for 40 s. A fixture alone is not accepted
+    as A4 evidence (the guide records the read-off browser measure), but its SHAPE
+    is guarded automatically so the twice-repeated wrong-size pitfall cannot
+    recur."""
+    return many_tool_entries_lines(pairs, issue=issue)
+
+
+# Sentinels bracketing the >= 2 MB artifact of the manual C2 reference, so a test
+# proves the route serves the FULL content (head + tail) while the initial render
+# stays bounded.
+HUGE_ARTIFACT_HEAD = LARGE_ARTIFACT_HEAD
+HUGE_ARTIFACT_TAIL = LARGE_ARTIFACT_TAIL
+
+
+def huge_artifact_body(min_bytes=2 * 1024 * 1024):
+    """A >= 2 MB artifact body bracketed by the head/tail sentinels — the manual C2
+    reference (``adw:artifact`` <= 2000 ms on an artifact of at least 2 MB). Built
+    in-memory so no multi-megabyte binary is checked in; big enough that an
+    unbounded initial render would demonstrably grow with the input while the
+    bounded slice stays small and the full content stays reachable through the
+    artifacts route (E8/E10)."""
+    unit = "huge artifact content line {:06d} filler filler filler filler\n"
+    parts = [LARGE_ARTIFACT_HEAD + "\n"]
+    total = len(parts[0])
+    i = 0
+    while total < min_bytes:
+        s = unit.format(i)
+        parts.append(s)
+        total += len(s)
+        i += 1
+    parts.append(LARGE_ARTIFACT_TAIL + "\n")
+    return "".join(parts)

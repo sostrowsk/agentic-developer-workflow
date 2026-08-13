@@ -59,6 +59,122 @@ def _parse_limit(raw) -> int:
     return max(1, min(value, _LIMIT_MAX))
 
 
+# Hard cap on the number of ENTRY NODES materialised in the DOM per collection
+# (Aufgabe A): the trace tree and the Tools entries each stay at most this many,
+# independent of the total number of entries. The ``?offset`` moving window slides
+# this bounded slice so every entry stays reachable without ever growing a prefix.
+# The per-entry markers ``data-tree-entry`` / ``data-tool-entry`` are the selectors
+# the automated tests count and the guide documents.
+_ENTRY_CAP = 200
+
+
+def _parse_offset(raw) -> int:
+    """The ``?offset`` moving-window start (>= 0); a missing/invalid value is 0."""
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(value, 100_000_000))
+
+
+def _entry_window(limit) -> int:
+    """The per-collection entry-node budget: at most ``_ENTRY_CAP``, and never more
+    than the requested ``?limit`` — so the DOM entry count stays bounded even when a
+    large ``?limit`` is requested (the bound holds throughout navigation)."""
+    return max(1, min(limit, _ENTRY_CAP))
+
+
+def _clamp_window(total, offset, size):
+    """A moving window ``[lo, hi)`` of ``size`` entries into ``total``: ``lo`` is
+    clamped so a large offset lands on the LAST window (the tail stays reachable),
+    never past the end."""
+    lo = max(0, min(offset, max(0, total - size)))
+    return lo, min(lo + size, total)
+
+
+def _flatten_tree(tree):
+    """The trace tree as a flat list of ``(node, depth)`` in document (pre-order)
+    order — the single global sequence the entry budget is measured over (so nesting
+    can never multiply the budget per sibling group)."""
+    flat = []
+
+    def walk(nodes, depth):
+        for n in nodes:
+            flat.append((n, depth))
+            walk(n.get("children") or [], depth + 1)
+
+    walk(tree, 0)
+    return flat
+
+
+def _tree_window(tree, offset, size):
+    """The bounded, MOVING slice of the trace tree: one global budget of ``size``
+    entries across ALL nesting levels together. Returns the flat rows to render
+    (each marked as exactly one trace entry) and the window bounds."""
+    flat = _flatten_tree(tree)
+    lo, hi = _clamp_window(len(flat), offset, size)
+    return {
+        "rows": [{"node": n, "depth": d} for n, d in flat[lo:hi]],
+        "offset": lo, "shown": hi - lo, "total": len(flat),
+    }
+
+
+def _tool_entries(tree):
+    entries = []
+
+    def walk(nodes):
+        for n in nodes:
+            if n.get("type") == "agent.run":
+                for c in n.get("children") or []:
+                    if c.get("type") in ("agent.tool.call", "agent.tool.result"):
+                        entries.append((n.get("seq"), c))
+            walk(n.get("children") or [])
+
+    walk(tree)
+    return entries
+
+
+def _tool_window(tree, offset, size):
+    """One GLOBAL budget over every tool entry of every agent.run pane in document
+    order — hidden, non-active panes included — so the tool-entry DOM count stays
+    bounded across ALL panes, not per pane. Returns ``{agent_run_seq: [tool nodes]}``
+    for the current window plus the window bounds for the navigation hint."""
+    entries = _tool_entries(tree)
+    lo, hi = _clamp_window(len(entries), offset, size)
+    per = {}
+    for seq, c in entries[lo:hi]:
+        per.setdefault(seq, []).append(c)
+    return {"per": per, "offset": lo, "shown": hi - lo, "total": len(entries)}
+
+
+def _pane_nodes(tree, tree_rows):
+    """The nodes whose detail panes are materialised: every node in the current
+    trace-tree window (so a visible entry is selectable) plus every agent.run (there
+    are few) so its Tools tab — the tool-entry window — is available regardless of
+    where the tree window currently sits. Intermediate hidden panes are NOT eagerly
+    materialised, so the pane DOM stays bounded too."""
+    seen = set()
+    order = []
+
+    def add(n):
+        if id(n) in seen:
+            return
+        seen.add(id(n))
+        order.append(n)
+
+    for row in tree_rows:
+        add(row["node"])
+
+    def walk(nodes):
+        for n in nodes:
+            if n.get("type") == "agent.run":
+                add(n)
+            walk(n.get("children") or [])
+
+    walk(tree)
+    return order
+
+
 # --- presentation formatting (Aufgabe E): applied in the HTML templates only; the
 # JSON API keeps its raw numeric values. Missing values render empty, never 0/null.
 
@@ -1211,6 +1327,11 @@ def create_app(repos=None) -> FastAPI:
         # server materialises (a bounded DOM by default). "Load more" is a plain
         # server-rendered link that raises it — no divergent client-side rendering.
         limit = _parse_limit(request.query_params.get("limit"))
+        # Aufgabe A: `?offset` slides a bounded, moving window over the trace tree and
+        # the tool entries, so the DOM entry count stays capped (independent of the
+        # total) while every entry stays reachable — reaching a late entry never
+        # re-materialises the preceding ones.
+        offset = _parse_offset(request.query_params.get("offset"))
         # Raw-tab filters (Aufgabe C): applied server-side over the full payload so
         # a match beyond the rendered preview is still found; empty -> no filter.
         raw_q = request.query_params.get("raw_q") or None
@@ -1218,12 +1339,20 @@ def create_app(repos=None) -> FastAPI:
         detail = _run_detail(
             ref, run_id, run_dir, runs_root, limit=limit, raw_q=raw_q, raw_type=raw_type
         )
+        # Bound the materialised entry nodes by COUNT (Aufgabe A): one global budget
+        # per collection, held across nesting levels and across navigation.
+        window = _entry_window(limit)
+        tree_window = _tree_window(detail["tree"], offset, window)
+        tool_window = _tool_window(detail["tree"], offset, window)
+        pane_nodes = _pane_nodes(detail["tree"], tree_window["rows"])
         # The Timeline derives from the same events Trace uses; the Artifacts tab
         # lists the whitelisted files of the run. Both are page-render concerns and
         # stay out of the JSON detail contract.
         events, _problems = _read_events(run_dir, runs_root)
         html = _TEMPLATES.get_template("run_detail.html").render({
-            "detail": detail, "limit": limit, "raw_q": raw_q or "", "raw_type": raw_type or "",
+            "detail": detail, "limit": limit, "offset": offset,
+            "raw_q": raw_q or "", "raw_type": raw_type or "",
+            "tree_window": tree_window, "tool_window": tool_window, "pane_nodes": pane_nodes,
             "timeline": _timeline(events),
             "artifacts": _artifacts_listing(run_dir),
         })

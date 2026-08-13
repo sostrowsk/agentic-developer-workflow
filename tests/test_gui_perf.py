@@ -13,8 +13,10 @@ readable via ``performance.getEntriesByName(...)``. Pinned names:
   node selection: adw:select:start / adw:select:end, measure adw:select
   tab switch:     adw:tab:start / adw:tab:end,       measure adw:tab
 
-Per the Codex-round-1 descope carried in .adw/plan.md §5, exactly these two
-interactions are instrumented — no third measure and no supersession protocol.
+adw:select and adw:tab are the two long-standing measures asserted here; run
+7fe9d702 additionally RE-INTRODUCES the third measure adw:artifact and the
+supersession guard that a prior review had descoped (their own pinned names and
+behaviour live in test_gui_artifact_measure.py and test_gui_supersession.py).
 
 Derived from .adw/spec.md (C1–C4, as descoped), .adw/contract.yaml
 (x-adw-performance, x-adw-guide) and .adw/plan.md §5/§6. The tests assert the
@@ -36,7 +38,7 @@ def _client_script():
 
 def test_client_script_contains_the_pinned_mark_and_measure_names(home):  # noqa: F811
     """C2: the served client script carries the pinned mark and measure names for
-    both instrumented interactions, and no third measure name is introduced."""
+    the node-selection and tab-switch interactions."""
     js = _client_script()
 
     for name in (
@@ -44,9 +46,8 @@ def test_client_script_contains_the_pinned_mark_and_measure_names(home):  # noqa
         "adw:tab:start", "adw:tab:end", "adw:tab",
     ):
         assert name in js, name
-    # Review descope: no third measure (artifact opening) and no generation
-    # protocol are built.
-    assert "adw:artifact" not in js
+    # The third measure adw:artifact is re-introduced this run; its pinned names and
+    # shared construction are asserted in test_gui_artifact_measure.py.
 
 
 def test_both_interactions_use_the_performance_api(home):  # noqa: F811

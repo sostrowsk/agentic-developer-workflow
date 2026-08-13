@@ -1,0 +1,330 @@
+// Minimal, dependency-free JS harness for the behavioural GUI tests
+// (.adw/plan.md §1, Aufgaben B and C). It executes the SERVED `app.js` in a plain
+// `node` process inside hand-written stubs — DOM, fetch, performance (marks and
+// measures), requestAnimationFrame and task scheduling — whose deferred responses
+// and rAF/task queue the test drives deterministically. This is a development /
+// test-time tool only (never a runtime dependency); it is NOT a browser and pulls
+// in no npm package or browser-automation tool (no Playwright, no Selenium).
+//
+//   usage:  node gui_js_harness.js <app.js path> <scenario> [order]
+//
+// It prints exactly one JSON object on stdout with the observables the pytest
+// side asserts, and nothing else; a failure prints to stderr and exits non-zero.
+"use strict";
+
+const fs = require("fs");
+
+// ---------------------------------------------------------------------------
+// A tiny DOM supporting only the operations app.js performs on the nodes the
+// B/C scenarios build (querySelector/All with class/attr/descendant selectors,
+// closest, classList.toggle, getAttribute/setAttribute, textContent, hidden).
+// ---------------------------------------------------------------------------
+class El {
+  constructor(tag) {
+    this.tag = String(tag).toUpperCase();
+    this.tagName = this.tag;
+    this.classes = new Set();
+    this.attrs = {};
+    this.children = [];
+    this.parent = null;
+    this._text = "";
+    this.hidden = false;
+    this.open = false;
+    const self = this;
+    this.classList = {
+      toggle(c, on) {
+        if (on === undefined) on = !self.classes.has(c);
+        if (on) self.classes.add(c); else self.classes.delete(c);
+        return on;
+      },
+      add(c) { self.classes.add(c); },
+      remove(c) { self.classes.delete(c); },
+      contains(c) { return self.classes.has(c); },
+    };
+  }
+  get className() { return [...this.classes].join(" "); }
+  setAttribute(k, v) {
+    if (k === "class") this.classes = new Set(String(v).split(/\s+/).filter(Boolean));
+    else this.attrs[k] = String(v);
+  }
+  getAttribute(k) {
+    if (k === "class") return this.className;
+    return (k in this.attrs) ? this.attrs[k] : null;
+  }
+  removeAttribute(k) { delete this.attrs[k]; }
+  hasAttribute(k) { return k in this.attrs; }
+  get textContent() { return this._text; }
+  set textContent(v) { this._text = String(v); this.children = []; }
+  appendChild(c) { c.parent = this; this.children.push(c); return c; }
+  append(...cs) { cs.forEach((c) => this.appendChild(c)); }
+  querySelector(sel) { return qsa(this, sel)[0] || null; }
+  querySelectorAll(sel) { return qsa(this, sel); }
+  closest(sel) {
+    let n = this;
+    while (n) { if (matchesCompound(n, sel)) return n; n = n.parent; }
+    return null;
+  }
+  addEventListener() { /* elements need no listeners in these scenarios */ }
+}
+
+function el(tag, opts = {}) {
+  const e = new El(tag);
+  (opts.classes || []).forEach((c) => e.classes.add(c));
+  Object.entries(opts.attrs || {}).forEach(([k, v]) => { e.attrs[k] = String(v); });
+  if (opts.open) e.open = true;
+  (opts.children || []).forEach((c) => e.appendChild(c));
+  return e;
+}
+
+function parseSimple(part) {
+  const s = { tag: null, classes: [], attrs: [] };
+  const tagm = part.match(/^[a-zA-Z][\w-]*/);
+  if (tagm) s.tag = tagm[0].toUpperCase();
+  let m;
+  const cre = /\.([\w-]+)/g;
+  while ((m = cre.exec(part))) s.classes.push(m[1]);
+  const are = /\[([\w-]+)(?:=["']?([^"'\]]*)["']?)?\]/g;
+  while ((m = are.exec(part))) s.attrs.push({ name: m[1], value: m[2] === undefined ? null : m[2] });
+  return s;
+}
+function matchesSimple(e, s) {
+  if (!e || !(e instanceof El)) return false;
+  if (s.tag && e.tag !== s.tag) return false;
+  for (const c of s.classes) if (!e.classes.has(c)) return false;
+  for (const a of s.attrs) {
+    const v = e.getAttribute(a.name);
+    if (v === null) return false;
+    if (a.value !== null && v !== a.value) return false;
+  }
+  return true;
+}
+// Descendant combinator, right-to-left; sufficient for the <=2-part selectors used.
+function matchesChain(e, parts) {
+  const last = parts[parts.length - 1];
+  if (!matchesSimple(e, last)) return false;
+  let idx = parts.length - 2;
+  let n = e.parent;
+  while (idx >= 0) {
+    let found = false;
+    while (n) { if (matchesSimple(n, parts[idx])) { found = true; n = n.parent; break; } n = n.parent; }
+    if (!found) return false;
+    idx--;
+  }
+  return true;
+}
+function matchesCompound(e, sel) {
+  return matchesChain(e, sel.trim().split(/\s+/).map(parseSimple));
+}
+function qsa(root, sel) {
+  const parts = sel.trim().split(/\s+/).map(parseSimple);
+  const res = [];
+  (function walk(node) {
+    for (const ch of node.children) {
+      if (matchesChain(ch, parts)) res.push(ch);
+      walk(ch);
+    }
+  })(root);
+  return res;
+}
+
+// ---------------------------------------------------------------------------
+// Controllable environment stubs.
+// ---------------------------------------------------------------------------
+const marks = [];
+const measures = [];
+let rafQ = [];
+let timerQ = [];
+const deferred = [];       // pending fetch() promises: {url, resolve, reject}
+const listeners = {};      // document event listeners by type
+
+function installGlobals(rootDoc, body) {
+  global.performance = {
+    mark(name) { marks.push(name); },
+    measure(name, start, end) { measures.push({ name, start, end }); },
+    getEntriesByName(name) {
+      return measures.filter((m) => m.name === name).map((m) => ({ name, duration: 1 }));
+    },
+    now() { return 0; },
+  };
+  global.requestAnimationFrame = (cb) => { rafQ.push(cb); return rafQ.length; };
+  global.setTimeout = (cb) => { timerQ.push(cb); return timerQ.length; };
+  global.fetch = (url) => new Promise((resolve, reject) => {
+    deferred.push({ url: String(url), resolve, reject });
+  });
+  global.EventSource = function EventSource() {
+    this.onmessage = null;
+    this.addEventListener = function () {};
+    this.close = function () {};
+  };
+  global.DOMParser = function DOMParser() {
+    this.parseFromString = function () {
+      return { querySelector: () => null, querySelectorAll: () => [] };
+    };
+  };
+  global.document = {
+    body,
+    querySelector: (sel) => qsa(rootDoc, sel)[0] || null,
+    querySelectorAll: (sel) => qsa(rootDoc, sel),
+    addEventListener: (type, handler) => {
+      (listeners[type] = listeners[type] || []).push(handler);
+    },
+    createElement: (tag) => new El(tag),
+  };
+}
+
+// deterministic drivers ------------------------------------------------------
+const tick = () => new Promise((r) => process.nextTick(r));
+async function drain() { for (let i = 0; i < 4; i++) await tick(); }
+function flushRaf() { const q = rafQ; rafQ = []; q.forEach((cb) => cb()); }
+function flushTimers() { const q = timerQ; timerQ = []; q.forEach((cb) => cb()); }
+async function settle() {
+  // Run several rounds so a promise-gated post-paint sequence (fetch settle ->
+  // rAF -> task) — and any late/superseded work — fully drains.
+  for (let i = 0; i < 4; i++) { await drain(); flushRaf(); await drain(); flushTimers(); await drain(); }
+}
+function resolveFetch(match, response) {
+  const idx = deferred.findIndex((d) => d.url.indexOf(match) !== -1);
+  if (idx === -1) throw new Error("no pending fetch matching " + match);
+  const d = deferred.splice(idx, 1)[0];
+  d.resolve(response);
+}
+function eventsResponse(records) {
+  return { ok: true, status: 200, json: () => Promise.resolve(records) };
+}
+function textResponse(text) {
+  return { ok: true, status: 200, text: () => Promise.resolve(text) };
+}
+function dispatch(type, event) { (listeners[type] || []).forEach((h) => h(event)); }
+function countMeasure(name) { return measures.filter((m) => m.name === name).length; }
+function countMark(name) { return marks.filter((m) => m === name).length; }
+
+function loadAppJs(path) {
+  // The served IIFE runs on evaluation: it reads document.body and wires the
+  // delegated listeners we then dispatch to. Bare `document`, `performance`,
+  // `fetch`, ... resolve to the globals installed above.
+  // eslint-disable-next-line no-eval
+  (0, eval)(fs.readFileSync(path, "utf8"));
+}
+
+// ---------------------------------------------------------------------------
+// Scenario DOMs and steps.
+// ---------------------------------------------------------------------------
+function selectionDom() {
+  // A dummy first node whose pane has NO lazy tool body, so the IIFE's initial
+  // applySelection() selects it WITHOUT dispatching a fetch — then the scenario
+  // drives the two real tool-node selections A (seq 10) and B (seq 20).
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  const tree = el("div", { classes: ["trace"] });
+  const panes = el("div", { classes: ["panes"] });
+  const nodeDummy = el("div", { classes: ["node"], attrs: { "data-seq": "1" } });
+  const nodeA = el("div", { classes: ["node"], attrs: { "data-seq": "10" } });
+  const nodeB = el("div", { classes: ["node"], attrs: { "data-seq": "20" } });
+  tree.append(nodeDummy, nodeA, nodeB);
+  const paneDummy = el("div", { classes: ["pane"], attrs: { "data-seq": "1" } });
+  const preA = el("pre", { attrs: { "data-load-seq": "10" } });
+  const preB = el("pre", { attrs: { "data-load-seq": "20" } });
+  const paneA = el("div", { classes: ["pane"], attrs: { "data-seq": "10" },
+    children: [el("div", { classes: ["tool-detail"], children: [preA] })] });
+  const paneB = el("div", { classes: ["pane"], attrs: { "data-seq": "20" },
+    children: [el("div", { classes: ["tool-detail"], children: [preB] })] });
+  panes.append(paneDummy, paneA, paneB);
+  body.append(tree, panes);
+  return { body, nodeA, nodeB, paneA, paneB, preA, preB };
+}
+
+async function runSupersession(order) {
+  const dom = selectionDom();
+  const rootDoc = el("html", { children: [dom.body] });
+  installGlobals(rootDoc, dom.body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: dom.nodeA }); await drain();  // select A, fetch(10)
+  dispatch("click", { target: dom.nodeB }); await drain();  // select B, fetch(20)
+
+  const [firstSeq, secondSeq] = order === "AB" ? ["10", "20"] : ["20", "10"];
+  const payload = (seq) => [{ seq: Number(seq), payload: { marker: "CONTENT-" + seq } }];
+  resolveFetch("from_seq=" + firstSeq + "&", eventsResponse(payload(firstSeq)));
+  await settle();
+  resolveFetch("from_seq=" + secondSeq + "&", eventsResponse(payload(secondSeq)));
+  await settle();
+
+  return {
+    ok: true,
+    order,
+    measures_select: countMeasure("adw:select"),
+    start_marks: countMark("adw:select:start"),
+    end_marks: countMark("adw:select:end"),
+    paneA_text: dom.preA.textContent,
+    paneB_text: dom.preB.textContent,
+    paneA_selected: dom.paneA.classes.has("selected"),
+    paneB_selected: dom.paneB.classes.has("selected"),
+  };
+}
+
+function artifactDom() {
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  // A dummy node so the IIFE's initial applySelection() has something to select
+  // and dispatches no fetch of its own.
+  const tree = el("div", { classes: ["trace"],
+    children: [el("div", { classes: ["node"], attrs: { "data-seq": "1" } })] });
+  const panes = el("div", { classes: ["panes"],
+    children: [el("div", { classes: ["pane"], attrs: { "data-seq": "1" } })] });
+  const pre = el("pre", { attrs: { "data-artifact-body": "" } });
+  const more = el("a", { attrs: { "data-artifact-more": "", href: "#" } });
+  more.hidden = true;
+  const summary = el("summary", { classes: ["artifact-open"], attrs: { "data-artifact": "plan.md" } });
+  const details = el("details", { classes: ["artifact-wrap"], children: [summary, pre, more] });
+  body.append(tree, panes, details);
+  return { body, details, summary, pre, more };
+}
+
+async function runArtifact() {
+  const dom = artifactDom();
+  const rootDoc = el("html", { children: [dom.body] });
+  installGlobals(rootDoc, dom.body);
+  loadAppJs(APP);
+
+  const HEAD = "HUGEARTIFACTHEAD";
+  const TAIL = "HUGEARTIFACTTAIL";
+  const bigText = HEAD + "\n" + "x".repeat(200000) + "\n" + TAIL;
+
+  dom.details.open = true;
+  dispatch("toggle", { target: dom.details }); await drain();
+  const afterDispatch = {
+    measure: countMeasure("adw:artifact"),
+    start: countMark("adw:artifact:start"),
+    pre_text_len: dom.pre.textContent.length,
+  };
+
+  resolveFetch("/artifacts/", textResponse(bigText)); await drain();
+  const afterResponse = {
+    measure: countMeasure("adw:artifact"),
+    has_head: dom.pre.textContent.indexOf(HEAD) !== -1,
+    has_tail: dom.pre.textContent.indexOf(TAIL) !== -1,
+    pre_text_len: dom.pre.textContent.length,
+  };
+
+  flushRaf(); await drain();
+  const afterRaf = { measure: countMeasure("adw:artifact") };
+
+  flushTimers(); await drain();
+  const afterTimer = { measure: countMeasure("adw:artifact"), end: countMark("adw:artifact:end") };
+
+  return { ok: true, afterDispatch, afterResponse, afterRaf, afterTimer };
+}
+
+// ---------------------------------------------------------------------------
+const APP = process.argv[2];
+const SCENARIO = process.argv[3];
+const ARG = process.argv[4];
+
+(async () => {
+  let result;
+  if (SCENARIO === "supersession") result = await runSupersession(ARG || "BA");
+  else if (SCENARIO === "artifact") result = await runArtifact();
+  else throw new Error("unknown scenario: " + SCENARIO);
+  process.stdout.write(JSON.stringify(result));
+})().catch((err) => {
+  process.stderr.write(String(err && err.stack ? err.stack : err));
+  process.exit(1);
+});

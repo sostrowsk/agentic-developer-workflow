@@ -12,35 +12,26 @@
     {% if node.duration is not none %}<span class="dur">{{ node.duration | fmt_duration }}</span>{% endif %}
     {% if node.type == "round" and node.n is defined %}<span class="round">{{ node.n }}/{{ node.cap }}</span>{% endif %}
 {% endmacro %}
-{% macro load_more(hidden, limit) %}
-  <a class="load-more" href="?limit={{ limit * 4 }}">Load more ({{ hidden }} hidden — bounded by DOM node count)</a>
-{% endmacro %}
-{# The trace tree is windowed by node COUNT (Aufgabe A): only the first `limit`
-   children of any node are materialised; a node with more shows a server-rendered
-   "Load more" link that raises the window. The DOM stays bounded while every entry
-   remains reachable (E8). #}
-{% macro tree_item(node, limit) %}
-  <li class="node node-{{ node.status }}" data-seq="{{ node.seq }}">
-    {% if node.children %}
-    <details open>
-      <summary>{{ tree_row(node) }}</summary>
-      <ul>
-        {% for child in node.children[:limit] %}{{ tree_item(child, limit) }}{% endfor %}
-        {% if node.children|length > limit %}
-        <li class="node-more">{{ load_more(node.children|length - limit, limit) }}</li>
-        {% endif %}
-      </ul>
-    </details>
-    {% else %}
-    {{ tree_row(node) }}
-    {% endif %}
-  </li>
+{# A bounded MOVING window over an entry collection (Aufgabe A): a plain
+   server-rendered ?offset link reaches the previous / next bounded slice, so every
+   entry is reachable without ever growing the DOM past the cap (a growing ?limit
+   prefix is insufficient). One global budget per collection, held across nesting
+   levels and across navigation. #}
+{% macro window_nav(win) %}
+  {% if win.total > win.shown %}
+  <div class="window-nav">
+    {% if win.offset > 0 %}<a class="win-prev" href="?offset={{ [win.offset - win.shown, 0] | max }}">&larr; previous</a>{% endif %}
+    <span class="win-status">{{ win.offset + 1 }}&ndash;{{ win.offset + win.shown }} of {{ win.total }}</span>
+    {% if win.offset + win.shown < win.total %}<a class="win-next load-more" href="?offset={{ win.offset + win.shown }}">more &rarr;</a>{% endif %}
+  </div>
+  {% endif %}
 {% endmacro %}
 {# A tool call/result entry: its readable label (Aufgabe C) and, collapsed, the
    full payload — loaded on demand from the events route so the initial page never
-   inlines megabytes of tool output (Aufgabe B). #}
+   inlines megabytes of tool output (Aufgabe B). The ``data-tool-entry`` marker is
+   the one machine-readable marker per Tools entry (Aufgabe A counting definition). #}
 {% macro tool_entry(c) %}
-  <li class="tool-{{ c.type | replace('.', '-') }}">
+  <li class="tool-{{ c.type | replace('.', '-') }}" data-tool-entry>
     <details>
       <summary>{{ c.label }}</summary>
       <pre class="tool-body" data-load-seq="{{ c.seq }}"></pre>
@@ -57,7 +48,7 @@
 {% endmacro %}
 {# The type-specific body of a node (no Diff tab — that is added uniformly by the
    pane wrapper for any bracketed node). #}
-{% macro node_body(node, limit) %}
+{% macro node_body(node) %}
     {% if node.type in ["agent.tool.call", "agent.tool.result"] %}
       <div class="tool-detail">
         <pre class="tool-body" data-load-seq="{{ node.seq }}"></pre>
@@ -89,7 +80,7 @@
       <pre class="raw">{{ node.payload | tojson }}</pre>
     {% endif %}
 {% endmacro %}
-{% macro pane(node, limit) %}
+{% macro pane(node, tool_window) %}
   <div class="pane pane-{{ node.type | replace('.', '-') }}" data-seq="{{ node.seq }}">
     <h3>{{ node.label }} <small class="type">{{ node.type }}</small></h3>
     {% set bracketed = node.diff_from and node.diff_to %}
@@ -111,14 +102,14 @@
           <pre class="assistant">{{ c.payload.text if c.payload else "" }}</pre>
           {% endfor %}
         </section>
+        {# Tools entries come from ONE global budget across all panes (Aufgabe A):
+           this pane renders only its slice of the current tool-entry window; the
+           rest stay reachable via the ?offset moving window. #}
         <section class="tab tab-tools" data-tab-panel="tools">
-          {% set tools = node.children | selectattr("type", "in", ["agent.tool.call", "agent.tool.result"]) | list %}
           <ul class="tool-list">
-          {% for c in tools[:limit] %}{{ tool_entry(c) }}{% endfor %}
+          {% for c in tool_window.per.get(node.seq, []) %}{{ tool_entry(c) }}{% endfor %}
           </ul>
-          {% if tools|length > limit %}
-          {{ load_more(tools|length - limit, limit) }}
-          {% endif %}
+          {{ window_nav(tool_window) }}
         </section>
         {% if bracketed %}{{ diff_panel(node) }}{% endif %}
       </div>
@@ -131,18 +122,14 @@
           <button type="button" class="tab-btn" data-tab="diff">Diff</button>
         </div>
         <section class="tab tab-details active" data-tab-panel="details">
-          {{ node_body(node, limit) }}
+          {{ node_body(node) }}
         </section>
         {{ diff_panel(node) }}
       </div>
     {% else %}
-      {{ node_body(node, limit) }}
+      {{ node_body(node) }}
     {% endif %}
   </div>
-{% endmacro %}
-{% macro all_panes(node, limit) %}
-  {{ pane(node, limit) }}
-  {% for child in node.children[:limit] %}{{ all_panes(child, limit) }}{% endfor %}
 {% endmacro %}
 {# Run-level Raw tab (Aufgabe C): the event log as a filterable list — the
    fallback that works even for event types the GUI does not model. The first
@@ -220,11 +207,22 @@
             {% if not detail.run.has_trace %}
             <p class="no-trace-hint">no trace &mdash; no event log for this run</p>
             {% endif %}
-            <ul>{% for node in detail.tree %}{{ tree_item(node, limit) }}{% endfor %}</ul>
+            {# The trace tree is a BOUNDED, MOVING window over the pre-order entry
+               list (Aufgabe A): one global budget of at most 200 entries, each
+               carrying exactly one ``data-tree-entry`` marker, indented by depth.
+               ?offset slides the window so every entry stays reachable. #}
+            <ul class="trace-list">
+              {% for row in tree_window.rows %}
+              <li class="node node-{{ row.node.status }}" data-seq="{{ row.node.seq }}" data-tree-entry style="--depth:{{ row.depth }}">
+                {{ tree_row(row.node) }}
+              </li>
+              {% endfor %}
+            </ul>
+            {{ window_nav(tree_window) }}
           </section>
 
           <section class="panes">
-            {% for node in detail.tree %}{{ all_panes(node, limit) }}{% endfor %}
+            {% for node in pane_nodes %}{{ pane(node, tool_window) }}{% endfor %}
           </section>
         </div>
 
