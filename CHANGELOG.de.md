@@ -13,7 +13,17 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [0.5.0] — 2026-08-12
+## [0.5.1] — 2026-08-14
+
+### Behoben
+- `ONBOARDING.md` wird von git ignoriert. Die Datei ist das Sitzungs-Handover
+  des `offboarding`-Skills und war nie committet; seit die Arbeitsbaum-Prüfung
+  aus 0.5.0 scharf ist, zählte sie als fremde uncommittete Datei und
+  verweigerte jedes `adw run`, `adw resume` und `adw approve`.
+- Release-Datum von 0.5.0 in dieser Datei korrigiert (Release war am
+  2026-08-14, nicht am 2026-08-12).
+
+## [0.5.0] — 2026-08-14
 
 Nachhol-Release: Die GUI-Arbeit (Läufe 1–5b) ist über mehrere Pushes nach
 `main` gelangt, ohne eigene Versions-Bumps. Dieser Eintrag deckt alles seit
@@ -231,6 +241,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.5.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.2.1...v0.3.0

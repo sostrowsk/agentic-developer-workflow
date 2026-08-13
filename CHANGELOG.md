@@ -12,7 +12,17 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [0.5.0] — 2026-08-12
+## [0.5.1] — 2026-08-14
+
+### Fixed
+- `ONBOARDING.md` is git-ignored. The file is the per-session handover written
+  by the `offboarding` skill and has never been committed; since the working-tree
+  check from 0.5.0 went live it counted as a foreign uncommitted file and
+  refused every `adw run`, `adw resume` and `adw approve`.
+- Corrected the release date of 0.5.0 in this file (it was released on
+  2026-08-14, not 2026-08-12).
+
+## [0.5.0] — 2026-08-14
 
 Catch-up release: the GUI work (runs 1–5b) reached `main` over several pushes
 without its own version bumps. This entry covers everything since 0.4.0.
@@ -217,6 +227,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.5.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.2.1...v0.3.0
