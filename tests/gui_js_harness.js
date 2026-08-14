@@ -286,6 +286,39 @@ async function runSupersession(order) {
   };
 }
 
+async function runReselectInflight() {
+  // Double-click / A->B->A while A's FIRST tool-body fetch is still in flight. The
+  // re-selection of A must (1) NOT complete the adw:select measure on the "Loading…"
+  // placeholder, and (2) still render A's payload when the in-flight response
+  // arrives — A is the last-chosen node, so its pane must never be cleared.
+  const dom = selectionDom();
+  const rootDoc = el("html", { children: [dom.body] });
+  installGlobals(rootDoc, dom.body);
+  loadAppJs(APP);
+
+  const payload = (seq) => [{ seq: Number(seq), payload: { marker: "CONTENT-" + seq } }];
+
+  dispatch("click", { target: dom.nodeA }); await drain();   // A, fetch A#1 (in flight)
+  dispatch("click", { target: dom.nodeB }); await drain();   // B, fetch B (in flight)
+  dispatch("click", { target: dom.nodeA }); await settle();  // re-select A: reuse in-flight A#1
+
+  // A#1 has not returned yet: the measure must NOT have completed on "Loading…".
+  const measure_before_resolve = countMeasure("adw:select");
+  const paneA_before = dom.preA.textContent;
+
+  resolveFetch("from_seq=20&", eventsResponse(payload("20"))); await settle();  // B superseded
+  resolveFetch("from_seq=10&", eventsResponse(payload("10"))); await settle();  // A#1 -> render A
+
+  return {
+    ok: true,
+    measure_before_resolve,
+    paneA_before,
+    measures_select: countMeasure("adw:select"),
+    paneA_text: dom.preA.textContent,
+    paneA_selected: dom.paneA.classes.has("selected"),
+  };
+}
+
 async function runSupersessionDeferredClick() {
   // The P1 race: A settles and SCHEDULES its post-paint rAF/task WHILE it is still
   // current; only THEN is B selected; only THEN do the queued rAF/task callbacks
@@ -513,6 +546,7 @@ const ARG = process.argv[4];
 (async () => {
   let result;
   if (SCENARIO === "supersession") result = await runSupersession(ARG || "BA");
+  else if (SCENARIO === "reselect-inflight") result = await runReselectInflight();
   else if (SCENARIO === "supersession-reselect") result = await runSupersessionReselect();
   else if (SCENARIO === "supersession-deferred") result = await runSupersessionDeferredClick();
   else if (SCENARIO === "refresh-supersession") result = await runRefreshSupersession();

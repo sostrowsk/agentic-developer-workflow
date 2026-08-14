@@ -89,7 +89,7 @@
   // never writes the wrong node into the pane and never produces a measure.
   var selectionGen = 0;
 
-  function applySelection(gen) {
+  function applySelection() {
     var haveSelected =
       selectedSeq && document.querySelector('.pane[data-seq="' + selectedSeq + '"]');
     if (!haveSelected) {
@@ -110,7 +110,7 @@
     if (selectedSeq) {
       var selectedPane = document.querySelector('.pane[data-seq="' + selectedSeq + '"]');
       var pre = selectedPane && selectedPane.querySelector(".tool-detail pre[data-load-seq]");
-      if (pre) return loadToolBody(pre, gen);
+      if (pre) return loadToolBody(pre, true);  // selection-triggered -> guarded
     }
     return Promise.resolve();
   }
@@ -152,7 +152,7 @@
     // rendered — applySelection returns the tool-body load promise when the
     // selected node lazy-loads its payload (C1) — and only if this selection is
     // still the current one (B2).
-    perfEndAfterContent("adw:select:start", "adw:select:end", "adw:select", applySelection(gen), isCurrent);
+    perfEndAfterContent("adw:select:start", "adw:select:end", "adw:select", applySelection(), isCurrent);
   });
 
   // --- switchable tabs (Aufgabe D + the run-level Raw / node-level Diff tabs):
@@ -246,25 +246,32 @@
   // carries only its data-load-seq; the full payload is fetched from the read-only
   // events route on first expand, so selecting an agent.run node never blocks on
   // rendering megabytes at once, yet every full payload stays reachable.
-  function loadToolBody(pre, gen) {
-    if (pre.getAttribute("data-loaded")) return Promise.resolve();
+  // ``guarded`` marks a SELECTION-triggered load (its payload is written only while
+  // its node is still the selected one); an expand-triggered load (the <details>
+  // toggle) is unguarded and always renders its own entry.
+  function loadToolBody(pre, guarded) {
     var seq = pre.getAttribute("data-load-seq");
     if (!seq) return Promise.resolve();
+    // A fetch for this pre is already in flight: reuse its promise so a caller (the
+    // adw:select measure) completes only when the content actually RENDERS — never
+    // on the "Loading…" placeholder, even when the same node is re-selected while
+    // its first fetch is still pending (double-click / A->B->A) (P2, C1).
+    if (pre._loadPromise) return pre._loadPromise;
+    if (pre.getAttribute("data-loaded")) return Promise.resolve();  // already rendered
     pre.setAttribute("data-loaded", "1");
     pre.textContent = "Loading…";
     // Fetch ONLY this record (from_seq == to_seq), not the whole tail from seq to
-    // the log end — expanding an early entry must not transfer the entire log. The
-    // returned promise resolves once the payload has been inserted into the pane,
-    // so a caller can time the interaction to that render (C1).
-    return fetch(base + "/events?from_seq=" + encodeURIComponent(seq) + "&to_seq=" + encodeURIComponent(seq))
+    // the log end — expanding an early entry must not transfer the entire log.
+    var promise = fetch(base + "/events?from_seq=" + encodeURIComponent(seq) + "&to_seq=" + encodeURIComponent(seq))
       .then(function (response) { return response.json(); })
       .then(function (records) {
-        // Aufgabe B: a superseded selection's late fetch must NOT write into the
-        // DOM while a newer node is selected — a debug tool must never show the
-        // data of the wrong node. Discard the (successful) stale response but
-        // RESTORE the unloaded state so re-selecting this node re-fetches instead
-        // of staying stuck at "Loading…" forever (P2).
-        if (gen !== undefined && gen !== selectionGen) {
+        pre._loadPromise = null;
+        // Aufgabe B: a GUARDED load renders only if ITS node is STILL the selected
+        // one — so a superseded selection (a NEWER node chosen) writes nothing and
+        // restores the unloaded state, yet a re-selection of the SAME node still
+        // renders and never clears the last-chosen node's pane (P2). Keyed on node
+        // identity, not generation, so re-selecting the same node is not "stale".
+        if (guarded && String(seq) !== String(selectedSeq)) {
           pre.removeAttribute("data-loaded");
           pre.textContent = "";
           return;
@@ -278,10 +285,13 @@
           : "(payload not found)";
       })
       .catch(function () {
+        pre._loadPromise = null;
         pre.removeAttribute("data-loaded"); // allow a retry on the next expand
-        if (gen !== undefined && gen !== selectionGen) return;
+        if (guarded && String(seq) !== String(selectedSeq)) return;
         pre.textContent = "(failed to load — expand again to retry)";
       });
+    pre._loadPromise = promise;
+    return promise;
   }
 
   // --- Aufgabe B: the Artifacts tab loads a whitelisted artifact's content on
@@ -430,14 +440,16 @@
       var current = document.querySelector(selector);
       if (next && current) current.replaceWith(next);
     });
-    // Re-apply the current selection to the fresh markup under a FRESH generation
-    // (Aufgabe B / P1): the swap can start a tool-body fetch, and tying it to a
-    // generation lets a newer selection supersede it — otherwise its obsolete
-    // payload would be written into the refreshed DOM after the newer selection.
-    applySelection(++selectionGen);
+    // Bump the generation so any pending selection's measure is superseded by the
+    // refresh, then re-apply the current selection to the fresh markup. Obsolete
+    // tool-body writes are prevented by the node-identity guard in loadToolBody
+    // (Aufgabe B / P1): a fetch whose node is no longer selected writes nothing.
+    ++selectionGen;
+    applySelection();
   }
 
-  applySelection(++selectionGen); // initial: select the root node's pane (generation-tied)
+  ++selectionGen;
+  applySelection(); // initial: select the root node's pane
 
   function refresh() {
     if (inFlight) { repeat = true; return; }

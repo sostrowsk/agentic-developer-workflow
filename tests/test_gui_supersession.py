@@ -81,6 +81,28 @@ def test_refresh_triggered_fetch_cannot_write_the_wrong_node(tmp_path):
     assert "CONTENT-10" not in r["freshPaneA_text"]   # the refresh-triggered write was dropped
 
 
+def test_reselecting_a_node_while_its_fetch_is_in_flight(tmp_path):
+    """P2: re-selecting a node (double-click / A->B->A) BEFORE its first tool-body
+    fetch returns must not break the two pinned surfaces:
+    (1) the adw:select measure must NOT complete on the "Loading…" placeholder — a
+        request in flight is not completion; and
+    (2) when the in-flight response arrives it belongs to the STILL-selected node, so
+        its payload is rendered (the pane reflects the last-chosen node), never
+        cleared to empty.
+    """
+    r = run_scenario(tmp_path, "reselect-inflight")
+
+    # (1) no measure while the pane still shows the loading placeholder
+    assert r["paneA_before"] == "Loading…"
+    assert r["measure_before_resolve"] == 0
+
+    # (2) the last-chosen node ends up showing its real payload, measured exactly once
+    assert "CONTENT-10" in r["paneA_text"]
+    assert "Loading" not in r["paneA_text"] and r["paneA_text"] != ""
+    assert r["paneA_selected"] is True
+    assert r["measures_select"] == 1
+
+
 def test_deferred_click_suppresses_the_superseded_measure_in_the_post_paint_task(tmp_path):
     """B2 race (P1): selection A settles and SCHEDULES its post-paint rAF/task while
     it is still current; only THEN is B selected; only THEN do the queued callbacks
