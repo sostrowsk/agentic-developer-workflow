@@ -1018,6 +1018,54 @@ HUGE_ARTIFACT_HEAD = LARGE_ARTIFACT_HEAD
 HUGE_ARTIFACT_TAIL = LARGE_ARTIFACT_TAIL
 
 
+def late_timeline_strand_lines(pairs=300, *, issue="Late timeline strand"):
+    """A run whose Timeline has a strand — a ``ci.wait`` span — sitting AFTER a large
+    ``agent.run`` subtree, so the strand's node lands far BEYOND the initial 200-entry
+    trace window. Its timeline bar still exists; clicking it must reveal the node
+    (tree entry + detail pane), the P2 out-of-window navigation case. ``pairs`` tool
+    call/result pairs (>= ~250) push the ``ci.wait`` node past the window."""
+    lines = [
+        rec(1, "run", "start", "R", None, ts=ts_at(1), payload=run_start_payload(issue)),
+        rec(2, "phase", "start", "PB", "R", ts=ts_at(2),
+            payload={"name": "build", "from_phase": "build"}),
+        rec(3, "lane", "start", "L", "PB", ts=ts_at(3), lane="backend", payload={
+            "name": "backend", "branch": "adw/backend", "worktree": "wt",
+            "base_sha": None, "ports": {}}),
+        rec(4, "agent.run", "start", "A", "L", ts=ts_at(4), lane="backend",
+            payload={"agent": "build_agent", "prompt": "p", "system_append": ""}),
+    ]
+    seq = 5
+    for i in range(pairs):
+        lines.append(rec(seq, "agent.tool.call", "point", "A", ts=ts_at(seq), lane="backend",
+                         payload={"tool": "Bash", "tool_use_id": f"t{i}",
+                                  "input": {"command": f"toolstep-{i:05d}"}}))
+        seq += 1
+        lines.append(rec(seq, "agent.tool.result", "point", "A", ts=ts_at(seq), lane="backend",
+                         payload={"tool_use_id": f"t{i}", "is_error": False,
+                                  "content": f"out-{i:05d}"}))
+        seq += 1
+    lines.append(rec(seq, "agent.run", "end", "A", "L", ts=ts_at(seq), lane="backend",
+                     payload={"result_text": "done", "is_error": False}))
+    seq += 1
+    lines.append(rec(seq, "lane", "end", "L", "PB", ts=ts_at(seq), lane="backend",
+                     payload={"completed": True, "gate_iterations": 1, "fix_cycles": 0}))
+    seq += 1
+    lines.append(rec(seq, "phase", "end", "PB", "R", ts=ts_at(seq),
+                     payload={"name": "build", "to_phase": "done"}))
+    seq += 1
+    lines.append(rec(seq, "ci.wait", "start", "CI", "R", ts=ts_at(seq),
+                     payload={"provider": "gitlab", "pipeline_ref": "adw/backend"}))
+    seq += 1
+    lines.append(rec(seq, "ci.poll", "point", "CI", ts=ts_at(seq),
+                     payload={"provider": "gitlab", "status": "success", "job": None}))
+    seq += 1
+    lines.append(rec(seq, "ci.wait", "end", "CI", "R", ts=ts_at(seq),
+                     payload={"status": "success", "polls": 1, "duration": 5}))
+    seq += 1
+    lines.append(rec(seq, "run", "end", "R", None, ts=ts_at(seq), payload=run_end_payload("done")))
+    return lines
+
+
 def huge_artifact_body(min_bytes=2 * 1024 * 1024):
     """A >= 2 MB artifact body bracketed by the head/tail sentinels — the manual C2
     reference (``adw:artifact`` <= 2000 ms on an artifact of at least 2 MB). Built

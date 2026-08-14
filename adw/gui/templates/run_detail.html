@@ -183,7 +183,7 @@
     {% endif %}
   </div>
 {% endmacro %}
-<body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}">
+<body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}"{% if focus_seq is not none %} data-focus="{{ focus_seq }}"{% endif %}>
   <header class="run-header">
     <h1>Run {{ detail.run.run_id }}{% if detail.run.status is not none %} &mdash; {{ detail.run.status }}{% endif %}</h1>
     <div class="phase-bar">

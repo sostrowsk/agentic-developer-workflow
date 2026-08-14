@@ -147,6 +147,16 @@ def _tool_window(tree, offset, size):
     return {"per": per, "offset": lo, "shown": hi - lo, "total": len(entries)}
 
 
+def _focus_index(tree, seq):
+    """The pre-order index of the node with ``seq``, or None. Used by ``?focus`` to
+    position the bounded window on a node that a Timeline bar targets even when it
+    lies outside the current window (P2), so its tree entry and pane materialise."""
+    for i, (n, _) in enumerate(_flatten_tree(tree)):
+        if n.get("seq") == seq:
+            return i
+    return None
+
+
 def _pane_nodes(tree, tree_rows):
     """The nodes whose detail panes are materialised: every node in the current
     trace-tree window (so a visible entry is selectable) plus every agent.run (there
@@ -1342,6 +1352,19 @@ def create_app(repos=None) -> FastAPI:
         # Bound the materialised entry nodes by COUNT (Aufgabe A): one global budget
         # per collection, held across nesting levels and across navigation.
         window = _entry_window(limit)
+        # P2: `?focus=<seq>` navigates the bounded window to a node that a Timeline
+        # bar targets even when it lies outside the current window, so its tree entry
+        # AND its pane materialise and it opens selected — never a silent fall back
+        # to the wrong (first visible) node.
+        focus_seq = None
+        try:
+            focus_seq = int(request.query_params.get("focus"))
+        except (TypeError, ValueError):
+            focus_seq = None
+        if focus_seq is not None:
+            focus_at = _focus_index(detail["tree"], focus_seq)
+            if focus_at is not None:
+                offset = focus_at
         tree_window = _tree_window(detail["tree"], offset, window)
         tool_window = _tool_window(detail["tree"], offset, window)
         pane_nodes = _pane_nodes(detail["tree"], tree_window["rows"])
@@ -1350,7 +1373,7 @@ def create_app(repos=None) -> FastAPI:
         # stay out of the JSON detail contract.
         events, _problems = _read_events(run_dir, runs_root)
         html = _TEMPLATES.get_template("run_detail.html").render({
-            "detail": detail, "limit": limit, "offset": offset,
+            "detail": detail, "limit": limit, "offset": offset, "focus_seq": focus_seq,
             "raw_q": raw_q or "", "raw_type": raw_type or "",
             "tree_window": tree_window, "tool_window": tool_window, "pane_nodes": pane_nodes,
             "timeline": _timeline(events),

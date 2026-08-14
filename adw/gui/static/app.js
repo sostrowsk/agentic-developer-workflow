@@ -32,9 +32,14 @@
   function perfMark(name) {
     try { performance.mark(name); } catch (e) { /* performance API unavailable */ }
   }
-  function perfEndAfterPaint(startMark, endMark, measure) {
+  function perfEndAfterPaint(startMark, endMark, measure, isCurrent) {
     requestAnimationFrame(function () {
       setTimeout(function () {
+        // Aufgabe B (P1): re-check currentness INSIDE the post-paint task — a
+        // selection that was current when it scheduled this task may have been
+        // superseded before the task runs; a superseded interaction records no end
+        // mark and no measure.
+        if (isCurrent && !isCurrent()) return;
         try {
           performance.mark(endMark);
           performance.measure(measure, startMark, endMark);
@@ -52,7 +57,7 @@
     // Aufgabe B: a superseded interaction (isCurrent() false) records no measure.
     var finish = function () {
       if (isCurrent && !isCurrent()) return;
-      perfEndAfterPaint(startMark, endMark, measure);
+      perfEndAfterPaint(startMark, endMark, measure, isCurrent);
     };
     if (loadPromise && typeof loadPromise.then === "function") {
       loadPromise.then(finish, finish);  // settle (fulfilled OR rejected), then paint
@@ -72,7 +77,10 @@
   // --- node-dependent detail pane (AC 14): clicking a tree node shows only that
   // node's pane. The node <li> and its pane share a data-seq, so selection is a
   // pure data-seq match. The choice is preserved across the live region swap.
-  var selectedSeq = null;
+  // A server ?focus=<seq> navigation (P2) positions the bounded window on a node
+  // that was outside it (e.g. a Timeline bar target) and renders both its tree
+  // entry and its pane; the client then opens on exactly that node.
+  var selectedSeq = body.getAttribute("data-focus") || null;
 
   // Aufgabe B (latest-interaction-wins): a monotonically increasing generation
   // token captured when a selection starts. A selection's asynchronous work — the
@@ -118,6 +126,17 @@
     var bar = target.closest(".tl-bar[data-seq]");
     var node = target.closest(".node[data-seq]");
     if (!bar && !node) return;
+    // P2: a Timeline bar may target a node outside the current bounded window, so it
+    // has no pane here. Selecting it in place would silently fall back to the first
+    // visible node (the WRONG node). Instead navigate the server window to it via
+    // ?focus, which materialises both its tree entry and its pane on load.
+    if (bar) {
+      var barSeq = bar.getAttribute("data-seq");
+      if (!document.querySelector('.pane[data-seq="' + barSeq + '"]')) {
+        window.location.assign(detailUrl + "?focus=" + encodeURIComponent(barSeq));
+        return;
+      }
+    }
     // Latest-interaction-wins (Aufgabe B): capture this selection's generation; its
     // async work applies only while it stays current.
     var gen = ++selectionGen;

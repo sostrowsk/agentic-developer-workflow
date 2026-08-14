@@ -53,3 +53,18 @@ def test_superseded_interaction_produces_no_measure(tmp_path, order):
     assert r["start_marks"] == 2                     # both selections started
     assert r["end_marks"] == 1                       # only the winner ended
     assert r["measures_select"] == 1                 # exactly one measure (B's)
+
+
+def test_deferred_click_suppresses_the_superseded_measure_in_the_post_paint_task(tmp_path):
+    """B2 race (P1): selection A settles and SCHEDULES its post-paint rAF/task while
+    it is still current; only THEN is B selected; only THEN do the queued callbacks
+    run. A's end mark and measure must STILL be suppressed — the currentness check
+    happens inside the scheduled task, not merely before scheduling — so A never
+    records an end mark and only B is measured."""
+    r = run_scenario(tmp_path, "supersession-deferred")
+
+    assert r["start_marks"] == 2
+    assert r["end_marks"] == 1                       # A's task did not record an end mark
+    assert r["measures_select"] == 1                 # only B produced a measure
+    assert "CONTENT-20" in r["paneB_text"]
+    assert r["paneB_selected"] is True

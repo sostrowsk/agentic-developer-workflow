@@ -136,8 +136,12 @@ let rafQ = [];
 let timerQ = [];
 const deferred = [];       // pending fetch() promises: {url, resolve, reject}
 const listeners = {};      // document event listeners by type
+const navigations = [];    // URLs passed to window.location.assign
 
 function installGlobals(rootDoc, body) {
+  global.window = {
+    location: { assign: function (url) { navigations.push(String(url)); } },
+  };
   global.performance = {
     mark(name) { marks.push(name); },
     measure(name, start, end) { measures.push({ name, start, end }); },
@@ -261,6 +265,70 @@ async function runSupersession(order) {
   };
 }
 
+async function runSupersessionDeferredClick() {
+  // The P1 race: A settles and SCHEDULES its post-paint rAF/task WHILE it is still
+  // current; only THEN is B selected; only THEN do the queued rAF/task callbacks
+  // run. A's end mark + measure must still be suppressed (checked inside the task,
+  // not just before scheduling), so only B is measured (B2).
+  const dom = selectionDom();
+  const rootDoc = el("html", { children: [dom.body] });
+  installGlobals(rootDoc, dom.body);
+  loadAppJs(APP);
+
+  const payload = (seq) => [{ seq: Number(seq), payload: { marker: "CONTENT-" + seq } }];
+
+  dispatch("click", { target: dom.nodeA }); await drain();       // select A, fetch(10)
+  resolveFetch("from_seq=10&", eventsResponse(payload("10")));
+  await drain();                                             // A settles -> rAF SCHEDULED (not run)
+  dispatch("click", { target: dom.nodeB }); await drain();       // select B AFTER A scheduled its task
+  resolveFetch("from_seq=20&", eventsResponse(payload("20")));
+  await settle();                                            // now run every queued rAF/task
+
+  return {
+    ok: true,
+    measures_select: countMeasure("adw:select"),
+    start_marks: countMark("adw:select:start"),
+    end_marks: countMark("adw:select:end"),
+    paneB_text: dom.preB.textContent,
+    paneB_selected: dom.paneB.classes.has("selected"),
+  };
+}
+
+function timelineDom() {
+  // A dummy in-window node/pane (so the initial applySelection selects it without a
+  // fetch), an IN-window bar whose node HAS a pane (seq 10), and an OUT-of-window
+  // bar whose node has NO pane (seq 99).
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  const tree = el("div", { classes: ["trace"],
+    children: [el("div", { classes: ["node"], attrs: { "data-seq": "1" } })] });
+  const barIn = el("span", { classes: ["tl-bar"], attrs: { "data-seq": "10" } });
+  const barOut = el("span", { classes: ["tl-bar"], attrs: { "data-seq": "99" } });
+  const lanes = el("div", { classes: ["timeline-lanes"], children: [barIn, barOut] });
+  const paneDummy = el("div", { classes: ["pane"], attrs: { "data-seq": "1" } });
+  const pane10 = el("div", { classes: ["pane"], attrs: { "data-seq": "10" } });
+  const panes = el("div", { classes: ["panes"], children: [paneDummy, pane10] });
+  body.append(tree, lanes, panes);
+  return { body, barIn, barOut, pane10 };
+}
+
+async function runTimelineFocus() {
+  const dom = timelineDom();
+  const rootDoc = el("html", { children: [dom.body] });
+  installGlobals(rootDoc, dom.body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: dom.barOut }); await drain();   // out-of-window: must navigate
+  const navsAfterOut = navigations.slice();
+
+  dispatch("click", { target: dom.barIn }); await settle();   // in-window: select in place
+  return {
+    ok: true,
+    nav_out: navsAfterOut,
+    nav_all: navigations.slice(),
+    pane10_selected: dom.pane10.classes.has("selected"),
+  };
+}
+
 function artifactDom() {
   const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
   // A dummy node so the IIFE's initial applySelection() has something to select
@@ -321,6 +389,8 @@ const ARG = process.argv[4];
 (async () => {
   let result;
   if (SCENARIO === "supersession") result = await runSupersession(ARG || "BA");
+  else if (SCENARIO === "supersession-deferred") result = await runSupersessionDeferredClick();
+  else if (SCENARIO === "timeline-focus") result = await runTimelineFocus();
   else if (SCENARIO === "artifact") result = await runArtifact();
   else throw new Error("unknown scenario: " + SCENARIO);
   process.stdout.write(JSON.stringify(result));
