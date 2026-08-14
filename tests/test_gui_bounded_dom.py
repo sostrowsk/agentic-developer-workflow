@@ -56,9 +56,12 @@ CAP = 200
 TREE_ENTRY_MARKER = "data-tree-entry"
 TOOL_ENTRY_MARKER = "data-tool-entry"
 
-# The moving-window navigation parameter (A2): a superset of ``?limit`` sizing, it
-# positions a bounded window so a late entry is reachable WITHOUT growing a prefix.
+# The moving-window navigation parameters (A2): INDEPENDENT for the trace tree
+# (``?offset``) and the Tools window (``?tools_offset``), so paging one does not
+# move the other. Each positions a bounded window so a late entry is reachable
+# WITHOUT growing a prefix.
 OFFSET = "offset"
+TOOLS_OFFSET = "tools_offset"
 
 
 def _slug_for(repo):
@@ -89,18 +92,20 @@ def _trace_section(html: str) -> str:
 
 def _tools_sections(html: str) -> str:
     """Every ``Tools`` tab panel concatenated (there may be one per agent.run pane),
-    so a token check is scoped to the Tools collection, not the trace tree."""
+    each scoped to its own closing ``</section>`` — so a token check sees only the
+    Tools entries and their window nav, never a token echoed in a later pane's
+    heading or the trace tree."""
     key = 'data-tab-panel="tools"'
+    close = "</section>"
     out = []
     start = 0
     while True:
         i = html.find(key, start)
         if i == -1:
             break
-        rest = html[i + len(key):]
-        nxt = rest.find("data-tab-panel=")
-        out.append(rest if nxt == -1 else rest[:nxt])
-        start = i + len(key)
+        end = html.find(close, i)
+        out.append(html[i:end] if end != -1 else html[i:])
+        start = (end + len(close)) if end != -1 else (i + len(key))
     return "".join(out)
 
 
@@ -213,14 +218,49 @@ def test_tools_moving_window_reaches_every_entry(home, tmp_path):  # noqa: F811
     assert head in initial
     assert tail not in initial
 
-    at_tail = _detail_html(client, slug, **{OFFSET: 100000})
+    # The Tools window is navigated by its OWN offset (independent of the tree).
+    at_tail = _detail_html(client, slug, **{TOOLS_OFFSET: 100000})
     assert tail in _tools_sections(at_tail)
     assert head not in _tools_sections(at_tail)
     assert 1 <= at_tail.count(TOOL_ENTRY_MARKER) <= CAP
 
-    at_mid = _detail_html(client, slug, **{OFFSET: 550})
+    at_mid = _detail_html(client, slug, **{TOOLS_OFFSET: 550})
     assert mid in _tools_sections(at_mid)
     assert 1 <= at_mid.count(TOOL_ENTRY_MARKER) <= CAP
+
+
+def test_tools_window_navigation_keeps_owning_agent_selected(home, tmp_path):  # noqa: F811
+    """A2 (P1 finding): paging the Tools window must keep the OWNING agent selected
+    and its trace entry visible while advancing a SEPARATE tool offset — otherwise
+    the agent loses its tree entry on reload and its later tool entries become
+    unreachable through the UI. The Tools 'more' link carries the agent (``focus``)
+    and an independent ``tools_offset``; clicking through the windows reaches the
+    tail while the agent stays selected, and the tree offset is not moved by it."""
+    pairs = 600
+    client, slug = _client(tmp_path, many_tool_entries_lines(pairs))
+    agent_seq = 2  # run == seq 1, the single agent.run == seq 2
+
+    tools = _tools_sections(_detail_html(client, slug))
+    assert "tools_offset=" in tools               # an independent tool offset ...
+    assert f"focus={agent_seq}" in tools          # ... carrying the owning agent
+
+    # Walk several Tools windows (as clicking 'more' repeatedly would), each time
+    # keeping the agent focused; the tail entry must become visible and the agent
+    # must stay selected with its tree entry present.
+    seen_tail = False
+    for step in range(0, pairs * 2 + 200, 190):
+        html = _detail_html(client, slug, focus=agent_seq, tools_offset=step)
+        assert f'data-focus="{agent_seq}"' in html                 # agent stays selected
+        assert f'data-seq="{agent_seq}"' in _trace_section(html)   # its tree entry stays visible
+        assert html.count(TOOL_ENTRY_MARKER) <= CAP                # bound held throughout
+        if tool_entry_command(pairs - 1) in _tools_sections(html):
+            seen_tail = True
+    assert seen_tail, "the tail tool entry never became visible while paging the Tools window"
+
+    # Independence: moving the TOOLS offset does not move the trace-tree window.
+    tree_base = _trace_section(_detail_html(client, slug))
+    tree_after_tools = _trace_section(_detail_html(client, slug, **{TOOLS_OFFSET: 100000}))
+    assert tree_base == tree_after_tools
 
 
 # --- A3: presentation fidelity (order, identity, full payload reachable) ---------

@@ -1342,6 +1342,10 @@ def create_app(repos=None) -> FastAPI:
         # total) while every entry stays reachable — reaching a late entry never
         # re-materialises the preceding ones.
         offset = _parse_offset(request.query_params.get("offset"))
+        # The Tools window is paged INDEPENDENTLY of the trace tree (its own offset),
+        # so advancing tool entries never moves the tree window or drops the selected
+        # agent (P1 finding). tree offset <-> `?offset`/`?focus`, tools <-> `?tools_offset`.
+        tools_offset = _parse_offset(request.query_params.get("tools_offset"))
         # Raw-tab filters (Aufgabe C): applied server-side over the full payload so
         # a match beyond the rendered preview is still found; empty -> no filter.
         raw_q = request.query_params.get("raw_q") or None
@@ -1366,7 +1370,7 @@ def create_app(repos=None) -> FastAPI:
             if focus_at is not None:
                 offset = focus_at
         tree_window = _tree_window(detail["tree"], offset, window)
-        tool_window = _tool_window(detail["tree"], offset, window)
+        tool_window = _tool_window(detail["tree"], tools_offset, window)
         pane_nodes = _pane_nodes(detail["tree"], tree_window["rows"])
         # The Timeline derives from the same events Trace uses; the Artifacts tab
         # lists the whitelisted files of the run. Both are page-render concerns and

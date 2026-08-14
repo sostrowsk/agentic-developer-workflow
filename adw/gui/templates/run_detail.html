@@ -17,12 +17,12 @@
    entry is reachable without ever growing the DOM past the cap (a growing ?limit
    prefix is insufficient). One global budget per collection, held across nesting
    levels and across navigation. #}
-{% macro window_nav(win) %}
+{% macro window_nav(win, param, focus_seq=none) %}
   {% if win.total > win.shown %}
   <div class="window-nav">
-    {% if win.offset > 0 %}<a class="win-prev" href="?offset={{ [win.offset - win.shown, 0] | max }}">&larr; previous</a>{% endif %}
+    {% if win.offset > 0 %}<a class="win-prev" href="?{{ param }}={{ [win.offset - win.shown, 0] | max }}{% if focus_seq is not none %}&amp;focus={{ focus_seq }}{% endif %}">&larr; previous</a>{% endif %}
     <span class="win-status">{{ win.offset + 1 }}&ndash;{{ win.offset + win.shown }} of {{ win.total }}</span>
-    {% if win.offset + win.shown < win.total %}<a class="win-next load-more" href="?offset={{ win.offset + win.shown }}">more &rarr;</a>{% endif %}
+    {% if win.offset + win.shown < win.total %}<a class="win-next load-more" href="?{{ param }}={{ win.offset + win.shown }}{% if focus_seq is not none %}&amp;focus={{ focus_seq }}{% endif %}">more &rarr;</a>{% endif %}
   </div>
   {% endif %}
 {% endmacro %}
@@ -109,7 +109,10 @@
           <ul class="tool-list">
           {% for c in tool_window.per.get(node.seq, []) %}{{ tool_entry(c) }}{% endfor %}
           </ul>
-          {{ window_nav(tool_window) }}
+          {# The Tools 'more'/'previous' links carry this pane's owning agent
+             (?focus) so paging keeps it selected and its tree entry visible, and use
+             an INDEPENDENT ?tools_offset so the tree window is not moved (P1). #}
+          {{ window_nav(tool_window, "tools_offset", node.seq) }}
         </section>
         {% if bracketed %}{{ diff_panel(node) }}{% endif %}
       </div>
@@ -218,7 +221,7 @@
               </li>
               {% endfor %}
             </ul>
-            {{ window_nav(tree_window) }}
+            {{ window_nav(tree_window, "offset") }}
           </section>
 
           <section class="panes">
