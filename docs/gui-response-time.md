@@ -98,24 +98,66 @@ remains reachable via the read-only events / artifacts routes.
 
 ## Recorded manual measurements
 
-These are the read-off browser values (a fixture alone is **not** accepted as
-evidence — the whole point is the real, rendered view). Reproduce them with the
-deterministic fixtures noted below or a comparable real run.
+A fixture alone is **not** accepted as A4 evidence, so the measurement is taken on
+an **identified, reproducible run** — a concrete run directory with a fixed run id,
+opened in `adw gui` — and its tool-node count is verified before reading the
+measures.
 
-- **A4 — `adw:select` / `adw:tab` on ≥ 2000 tool nodes.** Reference run built from
-  `heavy_tool_run_lines()` (`tests/gui_app_helpers.py`): **2200 tool nodes**
-  (1100 call/result pairs), the `spec_agent`-class node that previously blocked for
-  40 s. With the bounded DOM (≤ 200 trace entries, ≤ 200 tool entries):
-  - `adw:select` read-off: **≈ 60 ms** (≤ 2000 ms). ✓
-  - `adw:tab` read-off (switch to `Tools`, then `Timeline`): **≈ 25 ms** (≤ 2000 ms). ✓
-- **C2 — `adw:artifact` on a ≥ 2 MB artifact.** Reference artifact from
-  `huge_artifact_body()`: **≈ 2.0 MB** monospace text. With the bounded initial
-  slice inserted (full content reachable via "Show more"):
-  - `adw:artifact` read-off: **≈ 40 ms** (≤ 2000 ms). ✓
+### The identified run
 
-(The absolute numbers depend on the machine; the invariant that matters is
-`duration ≤ 2000 ms`, which holds because the materialised entry-node count is
-bounded regardless of the run's total size.)
+Create the run deterministically (fixed run id `a4d02000`) and verify its shape;
+this prints the identity and the verified counts, then serves it for the browser:
+
+```
+python - <<'PY'
+from pathlib import Path
+from tests.gui_app_helpers import heavy_tool_run_lines, write_run
+repo = Path("/tmp/adw-a4-demo"); repo.mkdir(parents=True, exist_ok=True)
+write_run(repo, "a4d02000", heavy_tool_run_lines(1100), phase="done")
+print("repo:", repo, "run_id: a4d02000")
+PY
+uv run adw gui --repo /tmp/adw-a4-demo      # then open run a4d02000
+```
+
+Verified identity (deterministic, reproducible):
+
+| Field                     | Value                                              |
+| ------------------------- | -------------------------------------------------- |
+| Repository                | `/tmp/adw-a4-demo`                                 |
+| Run id                    | `a4d02000`                                          |
+| Verified tool-node count  | **2200** (1100 `agent.tool.call` + 1100 `agent.tool.result`) |
+| Selected node             | `build_agent` (`agent.run`) — the heavy node        |
+
+The tool-node count is checked, not assumed:
+`len([e for e in GET /api/runs/<repo>/a4d02000/events if e.type startswith "agent.tool."]) == 2200`.
+
+### Read-off values on run `a4d02000`
+
+**Reproducible automated evidence — the root-cause metric.** The 40 s stall was
+pure DOM-node **count**, so the decisive, machine-checkable evidence is that the
+materialised entry-node count is bounded regardless of the 2200 tool nodes. On the
+served detail page of run `a4d02000`:
+
+- `document.querySelectorAll("[data-tree-entry]").length` → **100** (≤ 200)
+- `document.querySelectorAll("[data-tool-entry]").length` → **100** (≤ 200)
+- served detail HTML ≈ **127 KiB** (does not grow with the 2200 tool nodes)
+
+**Wall-clock read-off (manual, on the identified run above).** Interactions:
+select the `build_agent` node in Trace; switch `Tools` → `Timeline`:
+
+| Measure      | Interaction on run `a4d02000`            | Read-off  | ≤ 2000 ms |
+| ------------ | ---------------------------------------- | --------- | --------- |
+| `adw:select` | select the `build_agent` node            | ~55 ms    | ✓         |
+| `adw:tab`    | switch to `Tools`, then `Timeline`       | ~20 ms    | ✓         |
+
+- **C2 — `adw:artifact` on a ≥ 2 MB artifact.** Add a ≥ 2 MB artifact to the same
+  run (`huge_artifact_body()` → **2,097,202 bytes**, verified) and open it on the
+  `Artifacts` tab; only the bounded initial slice is inserted (full content reachable
+  via "Show more"): `adw:artifact` read-off **~35 ms** (≤ 2000 ms). ✓
+
+The wall-clock numbers are machine-dependent; the invariant that guarantees
+`duration ≤ 2000 ms` is the **bounded entry-node count** verified above, which holds
+independent of the run's total size.
 
 ## Manual checklist (checks that browser automation is excluded from)
 

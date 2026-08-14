@@ -55,6 +55,19 @@ def test_superseded_interaction_produces_no_measure(tmp_path, order):
     assert r["measures_select"] == 1                 # exactly one measure (B's)
 
 
+def test_superseded_node_can_be_reselected_and_refetched(tmp_path):
+    """Regression (P2): when A is superseded and its response arrives late, the stale
+    response is discarded WITHOUT permanently marking the pane loaded. Selecting A
+    again must issue a fresh fetch and render A's payload — the detail must never be
+    stuck at "Loading…" until a page reload."""
+    r = run_scenario(tmp_path, "supersession-reselect")
+
+    assert r["refetched"] is True                    # re-selecting A re-fetched
+    assert "CONTENT-10" in r["paneA_text"]           # and rendered A's payload
+    assert "Loading" not in r["paneA_text"]
+    assert r["paneA_selected"] is True
+
+
 def test_deferred_click_suppresses_the_superseded_measure_in_the_post_paint_task(tmp_path):
     """B2 race (P1): selection A settles and SCHEDULES its post-paint rAF/task while
     it is still current; only THEN is B selected; only THEN do the queued callbacks

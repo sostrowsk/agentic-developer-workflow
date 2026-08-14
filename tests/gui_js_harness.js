@@ -192,6 +192,9 @@ function resolveFetch(match, response) {
   const d = deferred.splice(idx, 1)[0];
   d.resolve(response);
 }
+function pendingFetchCount(match) {
+  return deferred.filter((d) => d.url.indexOf(match) !== -1).length;
+}
 function eventsResponse(records) {
   return { ok: true, status: 200, json: () => Promise.resolve(records) };
 }
@@ -294,6 +297,36 @@ async function runSupersessionDeferredClick() {
   };
 }
 
+async function runSupersessionReselect() {
+  // Regression (P2): after A is superseded and A's response arrives late, the stale
+  // response is discarded — but the pane must be RESTORED to an unloaded state so
+  // re-selecting A re-fetches and renders A's payload (not stuck at "Loading…"
+  // forever until a page reload).
+  const dom = selectionDom();
+  const rootDoc = el("html", { children: [dom.body] });
+  installGlobals(rootDoc, dom.body);
+  loadAppJs(APP);
+
+  const payload = (seq) => [{ seq: Number(seq), payload: { marker: "CONTENT-" + seq } }];
+
+  dispatch("click", { target: dom.nodeA }); await drain();   // A, fetch(10) #1
+  dispatch("click", { target: dom.nodeB }); await drain();   // B supersedes A, fetch(20)
+  resolveFetch("from_seq=20&", eventsResponse(payload("20"))); await settle();  // B renders
+  resolveFetch("from_seq=10&", eventsResponse(payload("10"))); await settle();  // A stale -> discarded
+
+  // Re-select A: it must issue a NEW fetch (its loaded state was restored).
+  dispatch("click", { target: dom.nodeA }); await drain();
+  const refetched = pendingFetchCount("from_seq=10&") > 0;
+  if (refetched) { resolveFetch("from_seq=10&", eventsResponse(payload("10"))); await settle(); }
+
+  return {
+    ok: true,
+    refetched,
+    paneA_text: dom.preA.textContent,
+    paneA_selected: dom.paneA.classes.has("selected"),
+  };
+}
+
 function timelineDom() {
   // A dummy in-window node/pane (so the initial applySelection selects it without a
   // fetch), an IN-window bar whose node HAS a pane (seq 10), and an OUT-of-window
@@ -389,6 +422,7 @@ const ARG = process.argv[4];
 (async () => {
   let result;
   if (SCENARIO === "supersession") result = await runSupersession(ARG || "BA");
+  else if (SCENARIO === "supersession-reselect") result = await runSupersessionReselect();
   else if (SCENARIO === "supersession-deferred") result = await runSupersessionDeferredClick();
   else if (SCENARIO === "timeline-focus") result = await runTimelineFocus();
   else if (SCENARIO === "artifact") result = await runArtifact();

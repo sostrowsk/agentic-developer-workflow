@@ -261,8 +261,14 @@
       .then(function (records) {
         // Aufgabe B: a superseded selection's late fetch must NOT write into the
         // DOM while a newer node is selected — a debug tool must never show the
-        // data of the wrong node.
-        if (gen !== undefined && gen !== selectionGen) return;
+        // data of the wrong node. Discard the (successful) stale response but
+        // RESTORE the unloaded state so re-selecting this node re-fetches instead
+        // of staying stuck at "Loading…" forever (P2).
+        if (gen !== undefined && gen !== selectionGen) {
+          pre.removeAttribute("data-loaded");
+          pre.textContent = "";
+          return;
+        }
         var found = null;
         for (var i = 0; i < records.length; i++) {
           if (String(records[i].seq) === String(seq)) { found = records[i]; break; }
