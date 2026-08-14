@@ -68,6 +68,19 @@ def test_superseded_node_can_be_reselected_and_refetched(tmp_path):
     assert r["paneA_selected"] is True
 
 
+def test_refresh_triggered_fetch_cannot_write_the_wrong_node(tmp_path):
+    """P1: the live-refresh region swap reapplies the selection and may start a
+    tool-body fetch. That fetch must be tied to the current selection generation, so
+    if a newer node is selected before it returns, its obsolete payload is NOT
+    written into the refreshed DOM — obsolete selection work has no observable DOM
+    effect."""
+    r = run_scenario(tmp_path, "refresh-supersession")
+
+    assert r["freshPaneB_selected"] is True
+    assert "CONTENT-20" in r["freshPaneB_text"]       # the current node is shown
+    assert "CONTENT-10" not in r["freshPaneA_text"]   # the refresh-triggered write was dropped
+
+
 def test_deferred_click_suppresses_the_superseded_measure_in_the_post_paint_task(tmp_path):
     """B2 race (P1): selection A settles and SCHEDULES its post-paint rAF/task while
     it is still current; only THEN is B selected; only THEN do the queued callbacks

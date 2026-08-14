@@ -57,6 +57,12 @@ class El {
   set textContent(v) { this._text = String(v); this.children = []; }
   appendChild(c) { c.parent = this; this.children.push(c); return c; }
   append(...cs) { cs.forEach((c) => this.appendChild(c)); }
+  replaceWith(next) {
+    const p = this.parent;
+    if (!p) return;
+    const i = p.children.indexOf(this);
+    if (i !== -1) { p.children[i] = next; next.parent = p; this.parent = null; }
+  }
   querySelector(sel) { return qsa(this, sel)[0] || null; }
   querySelectorAll(sel) { return qsa(this, sel); }
   closest(sel) {
@@ -137,6 +143,8 @@ let timerQ = [];
 const deferred = [];       // pending fetch() promises: {url, resolve, reject}
 const listeners = {};      // document event listeners by type
 const navigations = [];    // URLs passed to window.location.assign
+let eventSource = null;    // the EventSource the client opens (to drive live refresh)
+let nextParsedDoc = null;  // what DOMParser.parseFromString returns (the "fresh" swap DOM)
 
 function installGlobals(rootDoc, body) {
   global.window = {
@@ -159,10 +167,11 @@ function installGlobals(rootDoc, body) {
     this.onmessage = null;
     this.addEventListener = function () {};
     this.close = function () {};
+    eventSource = this;
   };
   global.DOMParser = function DOMParser() {
     this.parseFromString = function () {
-      return { querySelector: () => null, querySelectorAll: () => [] };
+      return nextParsedDoc || { querySelector: () => null, querySelectorAll: () => [] };
     };
   };
   global.document = {
@@ -194,6 +203,15 @@ function resolveFetch(match, response) {
 }
 function pendingFetchCount(match) {
   return deferred.filter((d) => d.url.indexOf(match) !== -1).length;
+}
+function resolveDetailFetch(html) {
+  // The live-refresh GET of the detail page (path "/runs/...", not the "/api/..."
+  // events route).
+  const idx = deferred.findIndex(
+    (d) => d.url.indexOf("/runs/") !== -1 && d.url.indexOf("/api/") === -1);
+  if (idx === -1) throw new Error("no pending detail-page fetch");
+  const d = deferred.splice(idx, 1)[0];
+  d.resolve(textResponse(html));
 }
 function eventsResponse(records) {
   return { ok: true, status: 200, json: () => Promise.resolve(records) };
@@ -327,6 +345,79 @@ async function runSupersessionReselect() {
   };
 }
 
+function detailRegion() {
+  // A `main.detail` region with a dummy first node (so the initial/refresh
+  // applySelection selects it without a fetch) and two tool nodes A (seq 10) and
+  // B (seq 20) whose panes carry an UNLOADED lazy tool body.
+  const nodeDummy = el("div", { classes: ["node"], attrs: { "data-seq": "1" } });
+  const nodeA = el("div", { classes: ["node"], attrs: { "data-seq": "10" } });
+  const nodeB = el("div", { classes: ["node"], attrs: { "data-seq": "20" } });
+  const trace = el("div", { classes: ["trace"], children: [nodeDummy, nodeA, nodeB] });
+  const preA = el("pre", { attrs: { "data-load-seq": "10" } });
+  const preB = el("pre", { attrs: { "data-load-seq": "20" } });
+  const paneDummy = el("div", { classes: ["pane"], attrs: { "data-seq": "1" } });
+  const paneA = el("div", { classes: ["pane"], attrs: { "data-seq": "10" },
+    children: [el("div", { classes: ["tool-detail"], children: [preA] })] });
+  const paneB = el("div", { classes: ["pane"], attrs: { "data-seq": "20" },
+    children: [el("div", { classes: ["tool-detail"], children: [preB] })] });
+  const panes = el("div", { classes: ["panes"], children: [paneDummy, paneA, paneB] });
+  const main = el("main", { classes: ["detail"], children: [trace, panes] });
+  return { main, nodeA, nodeB, paneA, paneB, preA, preB };
+}
+
+function refreshDom() {
+  // Current document: header + detail region. The "fresh" region (returned by the
+  // stubbed DOMParser on refresh) has UNLOADED panes, so the swap's applySelection
+  // re-fetches the selected node's tool body — exactly the refresh-triggered fetch.
+  const cur = detailRegion();
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" },
+    children: [el("header", { classes: ["run-header"] }), cur.main] });
+
+  const fresh = detailRegion();
+  const freshRoot = el("html", { children: [el("body", {
+    children: [el("header", { classes: ["run-header"] }), fresh.main] })] });
+
+  return { body, nodeA: cur.nodeA, fresh: freshRoot, freshNodeB: fresh.nodeB,
+    freshPreA: fresh.preA, freshPreB: fresh.preB, freshPaneB: fresh.paneB };
+}
+
+async function runRefreshSupersession() {
+  // P1: the live-refresh swap reapplies the selection and can start a tool-body
+  // fetch. If that fetch is not tied to the current generation, a newer selection
+  // cannot supersede it and its obsolete payload is written into the refreshed DOM.
+  const dom = refreshDom();
+  const rootDoc = el("html", { children: [dom.body] });
+  installGlobals(rootDoc, dom.body);
+  loadAppJs(APP);
+
+  const payload = (seq) => [{ seq: Number(seq), payload: { marker: "CONTENT-" + seq } }];
+
+  // Select A and load it, so A is the current selection when the refresh happens.
+  dispatch("click", { target: dom.nodeA }); await drain();
+  resolveFetch("from_seq=10&", eventsResponse(payload("10"))); await settle();
+
+  // A live refresh: swapRegions replaces the region with the fresh (unloaded) DOM,
+  // and its applySelection re-fetches A's tool body.
+  nextParsedDoc = dom.fresh;
+  eventSource.onmessage({ data: JSON.stringify({ type: "phase", kind: "point" }) });
+  await drain(); flushTimers(); await drain();          // scheduleRefresh -> refresh() -> GET detail
+  resolveDetailFetch("<html></html>"); await drain();   // -> swapRegions -> applySelection -> fetch A#2
+
+  // A newer selection supersedes the refresh-triggered fetch.
+  dispatch("click", { target: dom.freshNodeB }); await drain();
+  resolveFetch("from_seq=20&", eventsResponse(payload("20"))); await settle();  // B renders
+
+  // The refresh-triggered fetch for A resolves LAST — it must write nothing.
+  resolveFetch("from_seq=10&", eventsResponse(payload("10"))); await settle();
+
+  return {
+    ok: true,
+    freshPaneA_text: dom.freshPreA.textContent,
+    freshPaneB_text: dom.freshPreB.textContent,
+    freshPaneB_selected: dom.freshPaneB.classes.has("selected"),
+  };
+}
+
 function timelineDom() {
   // A dummy in-window node/pane (so the initial applySelection selects it without a
   // fetch), an IN-window bar whose node HAS a pane (seq 10), and an OUT-of-window
@@ -424,6 +515,7 @@ const ARG = process.argv[4];
   if (SCENARIO === "supersession") result = await runSupersession(ARG || "BA");
   else if (SCENARIO === "supersession-reselect") result = await runSupersessionReselect();
   else if (SCENARIO === "supersession-deferred") result = await runSupersessionDeferredClick();
+  else if (SCENARIO === "refresh-supersession") result = await runRefreshSupersession();
   else if (SCENARIO === "timeline-focus") result = await runTimelineFocus();
   else if (SCENARIO === "artifact") result = await runArtifact();
   else throw new Error("unknown scenario: " + SCENARIO);

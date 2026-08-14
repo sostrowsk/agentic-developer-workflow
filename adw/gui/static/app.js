@@ -430,10 +430,14 @@
       var current = document.querySelector(selector);
       if (next && current) current.replaceWith(next);
     });
-    applySelection(); // re-apply the current selection to the fresh markup
+    // Re-apply the current selection to the fresh markup under a FRESH generation
+    // (Aufgabe B / P1): the swap can start a tool-body fetch, and tying it to a
+    // generation lets a newer selection supersede it — otherwise its obsolete
+    // payload would be written into the refreshed DOM after the newer selection.
+    applySelection(++selectionGen);
   }
 
-  applySelection(); // initial: select the root node's pane
+  applySelection(++selectionGen); // initial: select the root node's pane (generation-tied)
 
   function refresh() {
     if (inFlight) { repeat = true; return; }
