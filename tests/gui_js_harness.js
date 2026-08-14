@@ -451,6 +451,45 @@ async function runRefreshSupersession() {
   };
 }
 
+function openStateRegion() {
+  // A `main.detail` region holding an expandable Tools entry (<details> with a lazy
+  // pre[data-load-seq]) plus a dummy node/pane so applySelection has a target.
+  const pre = el("pre", { attrs: { "data-load-seq": "5" } });
+  const details = el("details", { children: [el("summary"), pre] });  // closed by default
+  const ul = el("ul", { classes: ["tool-list"],
+    children: [el("li", { classes: ["tool-agent-tool-call"], children: [details] })] });
+  const trace = el("div", { classes: ["trace"],
+    children: [el("div", { classes: ["node"], attrs: { "data-seq": "1" } })] });
+  const panes = el("div", { classes: ["panes"],
+    children: [el("div", { classes: ["pane"], attrs: { "data-seq": "1" } })] });
+  const main = el("main", { classes: ["detail"], children: [trace, ul, panes] });
+  return { main, details };
+}
+
+async function runOpenStateSwap() {
+  // The live region swap must preserve the user's expand choice for the <details>
+  // that still exist (Tools entries / Raw rows / artifact wraps) — the flat trace
+  // tree is not collapsible, so the old tree-scoped capture was a dead no-op.
+  const cur = openStateRegion();
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" },
+    children: [el("header", { classes: ["run-header"] }), cur.main] });
+  installGlobals(el("html", { children: [body] }), body);
+  loadAppJs(APP);
+
+  cur.details.open = true;  // the user expands the Tools entry
+
+  const fresh = openStateRegion();  // the fresh swap DOM renders it CLOSED (server default)
+  const freshRoot = el("html", { children: [el("body", {
+    children: [el("header", { classes: ["run-header"] }), fresh.main] })] });
+  nextParsedDoc = freshRoot;
+
+  eventSource.onmessage({ data: JSON.stringify({ type: "phase", kind: "point" }) });
+  await drain(); flushTimers(); await drain();
+  resolveDetailFetch("<html></html>"); await drain();
+
+  return { ok: true, fresh_details_open: fresh.details.open };
+}
+
 function timelineDom() {
   // A dummy in-window node/pane (so the initial applySelection selects it without a
   // fetch), an IN-window bar whose node HAS a pane (seq 10), and an OUT-of-window
@@ -550,6 +589,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "supersession-reselect") result = await runSupersessionReselect();
   else if (SCENARIO === "supersession-deferred") result = await runSupersessionDeferredClick();
   else if (SCENARIO === "refresh-supersession") result = await runRefreshSupersession();
+  else if (SCENARIO === "openstate-swap") result = await runOpenStateSwap();
   else if (SCENARIO === "timeline-focus") result = await runTimelineFocus();
   else if (SCENARIO === "artifact") result = await runArtifact();
   else throw new Error("unknown scenario: " + SCENARIO);

@@ -408,25 +408,37 @@
     if (sel && sel.form) sel.form.submit();  // exhaustive server-side type filter
   });
 
-  // Record every node's <details> open/closed state, keyed by data-seq, so the
-  // wholesale region swap does not reset the user's expand/collapse choices
-  // (the server always renders <details open>). Nodes unseen before keep the
-  // server default (GUI-SPEC §7.3 / AC 13: the tree stays collapsible while live).
+  // Record the open/closed state of the expandable <details> in the swapped region
+  // — the Tools entries, the Raw rows and the artifact wraps (the flat, windowed
+  // trace tree itself is not collapsible) — so the wholesale live region swap does
+  // not reset the user's expand choices (GUI-SPEC §7.3). Each is keyed by a stable
+  // identifier of its own content (its lazy-load seq or its artifact name), so an
+  // entry unseen before keeps the server default. No DOM is built here: state only.
+  function detailsKey(details) {
+    var art = details.querySelector("summary[data-artifact]");
+    if (art) return "art:" + art.getAttribute("data-artifact");
+    var pre = details.querySelector("pre[data-load-seq]");
+    if (pre) {
+      var kind = details.classList && details.classList.contains("raw-full-wrap") ? "raw" : "tool";
+      return kind + ":" + pre.getAttribute("data-load-seq");
+    }
+    return null;
+  }
+
   function captureOpenState() {
     var state = {};
-    document.querySelectorAll(".node[data-seq]").forEach(function (node) {
-      var details = node.querySelector(":scope > details");
-      if (details) state[node.getAttribute("data-seq")] = details.open;
+    document.querySelectorAll("details").forEach(function (details) {
+      var key = detailsKey(details);
+      if (key) state[key] = details.open;
     });
     return state;
   }
 
   function reapplyOpenState(doc, state) {
-    doc.querySelectorAll(".node[data-seq]").forEach(function (node) {
-      var seq = node.getAttribute("data-seq");
-      var details = node.querySelector(":scope > details");
-      if (details && Object.prototype.hasOwnProperty.call(state, seq)) {
-        details.open = state[seq];
+    doc.querySelectorAll("details").forEach(function (details) {
+      var key = detailsKey(details);
+      if (key && Object.prototype.hasOwnProperty.call(state, key)) {
+        details.open = state[key];
       }
     });
   }
