@@ -146,9 +146,14 @@ const navigations = [];    // URLs passed to window.location.assign
 let eventSource = null;    // the EventSource the client opens (to drive live refresh)
 let nextParsedDoc = null;  // what DOMParser.parseFromString returns (the "fresh" swap DOM)
 
-function installGlobals(rootDoc, body) {
+function installGlobals(rootDoc, body, search) {
   global.window = {
-    location: { assign: function (url) { navigations.push(String(url)); } },
+    location: {
+      assign: function (url) { navigations.push(String(url)); },
+      // The query string in effect for the page — it carries the paged window
+      // (`offset`, `tools_offset`, `focus`). Empty unless a scenario sets one.
+      search: search || "",
+    },
   };
   global.performance = {
     mark(name) { marks.push(name); },
@@ -490,6 +495,29 @@ async function runOpenStateSwap() {
   return { ok: true, fresh_details_open: fresh.details.open };
 }
 
+async function runRefreshWindow(search) {
+  // The live-refresh GET must carry the query string in effect, so the swapped-in
+  // markup is the SAME window the user is looking at. Without it the server renders
+  // its default (first) window and the wholesale swap silently discards the user's
+  // paged position — the moving window is what makes the bounded DOM reachable.
+  const cur = openStateRegion();
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" },
+    children: [el("header", { classes: ["run-header"] }), cur.main] });
+  installGlobals(el("html", { children: [body] }), body, search);
+  loadAppJs(APP);
+
+  eventSource.onmessage({ data: JSON.stringify({ type: "phase", kind: "point" }) });
+  await drain(); flushTimers(); await drain();
+
+  // Capture the pending detail-page GET without resolving it.
+  const pending = deferred.filter(
+    (d) => d.url.indexOf("/runs/") !== -1 && d.url.indexOf("/api/") === -1);
+  const url = pending.length ? pending[0].url : null;
+  resolveDetailFetch("<html></html>"); await drain();
+
+  return { ok: true, refresh_url: url, refresh_fetch_count: pending.length };
+}
+
 function timelineDom() {
   // A dummy in-window node/pane (so the initial applySelection selects it without a
   // fetch), an IN-window bar whose node HAS a pane (seq 10), and an OUT-of-window
@@ -590,6 +618,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "supersession-deferred") result = await runSupersessionDeferredClick();
   else if (SCENARIO === "refresh-supersession") result = await runRefreshSupersession();
   else if (SCENARIO === "openstate-swap") result = await runOpenStateSwap();
+  else if (SCENARIO === "refresh-window") result = await runRefreshWindow(ARG || "");
   else if (SCENARIO === "timeline-focus") result = await runTimelineFocus();
   else if (SCENARIO === "artifact") result = await runArtifact();
   else throw new Error("unknown scenario: " + SCENARIO);

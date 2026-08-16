@@ -466,7 +466,15 @@
   function refresh() {
     if (inFlight) { repeat = true; return; }
     inFlight = true;
-    fetch(detailUrl, { headers: { "X-Requested-With": "fetch" } })
+    // Re-fetch the window the user is ACTUALLY looking at: the paged position
+    // lives in the query string (`offset`, `tools_offset`, `focus`). Dropping it
+    // would make the server render its default first window, and the wholesale
+    // region swap would discard the user's position — the moving window is what
+    // makes the bounded entry-node budget reachable. Read per refresh, since the
+    // window links are ordinary navigations that re-enter this script.
+    fetch(detailUrl + (window.location.search || ""), {
+      headers: { "X-Requested-With": "fetch" },
+    })
       .then(function (response) { return response.text(); })
       .then(swapRegions)
       .catch(function () { /* transient read error: keep the last good view */ })
