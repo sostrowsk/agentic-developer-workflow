@@ -55,6 +55,61 @@ def _fail(message: str) -> typer.Exit:
     return typer.Exit(1)
 
 
+# Der sprechende `--gates`-Schalter über die bestehende 4-Wege-Gate-Matrix.
+# Jeder Modus bildet auf genau die beiden Booleans ab, die die Mechanik heute
+# schon konsumiert (phases.py: skip_approval / spec_approval) — Bestandsschutz
+# (AC7) bleibt damit automatisch gewahrt.
+_GATES_VALUES = ("none", "spec", "plan", "both")
+_GATES_TO_BOOLS = {
+    # mode: (skip_approval, spec_approval)
+    "none": (True, False),
+    "spec": (True, True),
+    "plan": (False, False),
+    "both": (False, True),
+}
+# Die vollständige Altflag-Kombination löst zu genau einem Modus auf; keine
+# Kombination löst zu `plan` auf — `plan` ist nur ohne Flags/über --gates plan
+# erreichbar.
+_ALTFLAGS_TO_GATES = {
+    (True, False): "none",
+    (False, True): "both",
+    (True, True): "spec",
+}
+
+
+def _resolve_gate_mode(
+    gates: str | None, no_approval: bool, spec_approval: bool
+) -> tuple[str, bool, bool]:
+    """Resolve the effective gate mode from `--gates` and the two legacy flags.
+
+    Returns ``(mode, skip_approval, spec_approval)``. Raises (via ``_fail``) on an
+    invalid ``--gates`` value (AC6) or a contradiction between ``--gates`` and a
+    legacy flag (AC5) — order-independent, no precedence, before any run is
+    created. ``--gates`` without any legacy flag is always contradiction-free;
+    a redundant but consistent combination is accepted."""
+    if gates is not None and gates not in _GATES_TO_BOOLS:
+        raise _fail(
+            f"--gates {gates!r} ist ungültig — zulässig sind genau: "
+            f"{', '.join(_GATES_VALUES)}"
+        )
+    if gates is not None and (no_approval or spec_approval):
+        altflag_mode = _ALTFLAGS_TO_GATES[(no_approval, spec_approval)]
+        if altflag_mode != gates:
+            raise _fail(
+                f"--gates {gates} widerspricht den Altflags: --no-approval/"
+                f"--spec-approval ergeben '{altflag_mode}'. Entweder nur --gates "
+                f"oder die dazu passenden Altflags angeben."
+            )
+    if gates is not None:
+        mode = gates
+    elif no_approval or spec_approval:
+        mode = _ALTFLAGS_TO_GATES[(no_approval, spec_approval)]
+    else:
+        mode = "plan"
+    skip, spec = _GATES_TO_BOOLS[mode]
+    return mode, skip, spec
+
+
 # Genau die sechs ADW-eigenen Authoring-Artefakte (Konvention, nicht
 # konfigurierbar, kein Glob — E2/B3): nur wenn AUSSCHLIESSLICH diese im
 # Haupt-Checkout dirty sind, heilt der Vorflug sie selbst.
@@ -259,12 +314,34 @@ def run(
         bool, typer.Option("--dry-run", help="Mocks statt Agents, 0 Tokens")
     ] = False,
     no_approval: Annotated[
-        bool, typer.Option("--no-approval", help="Plan-Approval überspringen")
+        bool,
+        typer.Option(
+            "--no-approval",
+            help="Altflag, weiterhin gültig: kein Gate, läuft autonom bis done (== --gates none)",
+        ),
     ] = False,
     spec_approval: Annotated[
         bool,
-        typer.Option("--spec-approval", help="Zusätzlicher Stopp NACH der Spec, VOR dem Plan"),
+        typer.Option(
+            "--spec-approval",
+            help="Altflag, weiterhin gültig: zusätzlicher Stopp NACH der Spec (== --gates both)",
+        ),
     ] = False,
+    gates: Annotated[
+        str | None,
+        typer.Option(
+            "--gates",
+            help=(
+                "Freigabe-Gates none|spec|plan|both (Default: plan). "
+                "none = kein Halt (nur eine Eskalation stoppt); "
+                "spec = Halt am Spec-Gate nach der Spec, vor dem Plan; "
+                "plan = Halt am Plan-Gate vor dem Build (heutiges Verhalten ohne Flags); "
+                "both = Halt an beiden Gates. Die Altflags bleiben äquivalent: "
+                "--no-approval == none, --spec-approval == both, "
+                "--no-approval --spec-approval == spec."
+            ),
+        ),
+    ] = None,
     base_branch: Annotated[
         str | None,
         typer.Option("--base-branch", help="Base-Branch-Override gegenüber .adw/config.yaml"),
@@ -274,6 +351,10 @@ def run(
     sources = [s for s in (issue, gitlab_issue, github_issue) if s is not None]
     if len(sources) != 1:
         raise _fail("genau EINE Issue-Quelle angeben: --issue, --gitlab-issue ODER --github-issue")
+    # --gates VOR jeder State-/Netz-Mutation auflösen: ein ungültiger Wert (AC6)
+    # oder ein Widerspruch zu den Altflags (AC5) wird hier abgelehnt, bevor ein
+    # Run angelegt oder ein Forge-Aufruf gemacht wird.
+    gate_mode, skip_approval, spec_approval = _resolve_gate_mode(gates, no_approval, spec_approval)
     repo = repo.resolve()
     # Register the resolved target repo for the later GUI (GUI-SPEC §7.4).
     # Fail-open: the registry only feeds a display, so a registry error (e.g. a
@@ -296,8 +377,8 @@ def run(
         issue_text = _fetch_github_issue(repo, github_issue)
     state = RunState.new(issue=issue_text, parallel=parallel)
     state.dry_run = dry_run
-    # --spec-approval beim Run-Start pinnen (wie --no-approval): der Resume-/
-    # Approve-Aufruf kennt das CLI-Flag nicht mehr.
+    # Wirksamen Spec-Gate-Entscheid aus dem Gate-Modus beim Run-Start pinnen:
+    # der Resume-/Approve-Aufruf kennt weder --gates noch die Altflags mehr.
     state.spec_approval = spec_approval
     # Effektiven Base-Branch pinnen (Config ODER Override): Fortsetzungen
     # bauen exakt gegen diese Basis, auch wenn die config.yaml sich ändert.
@@ -312,10 +393,10 @@ def run(
     with _run_span(emitter, state, config, repo, run_totals) as run_handle:
         state.save(repo, emitter=emitter, span_id=run_handle.id)
         ctx = _build_context(
-            repo, config, state, skip_approval=no_approval, spec_approval=spec_approval,
+            repo, config, state, skip_approval=skip_approval, spec_approval=spec_approval,
             emitter=emitter, run_totals=run_totals,
         )
-        typer.echo(f"Run {state.run_id} gestartet (Phase: {state.phase})")
+        typer.echo(f"Run {state.run_id} gestartet (Phase: {state.phase}, Gates: {gate_mode})")
         _execute(ctx)
 
 
