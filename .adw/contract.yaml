@@ -1,25 +1,30 @@
 openapi: 3.1.0
 info:
-  title: ADW Read-only GUI — response time (bounded DOM, supersession, adw:artifact)
-  version: 8.0.0
+  title: ADW CLI — der `--gates`-Schalter für die Freigabe-Gates
+  version: 1.0.0
   description: |
-    Minimal external contract for the single backend workstream of this run.
-    Per the issue's contract note, exactly three externally observable surfaces
-    are pinned:
-      (1) the bound on materialised entry nodes and the reachability of every
-          entry (A1/A2/A3);
-      (2) the supersession behaviour of node selection (B1/B2);
-      (3) the names and observable completion semantics of the three
-          performance measures adw:select, adw:tab, adw:artifact.
-    Nothing else is pinned. In particular, verification and documentation
-    policy — fixture sizes and shapes, counting selectors and marker strategy,
-    what the guide documents, which tests exist and what they navigate to —
-    lives exclusively in the spec and plan, as do implementation technique,
-    tooling, dependency and packaging constraints, and the unchanged
-    pre-existing routes. This run adds no new HTTP route.
+    Minimaler externer Vertrag für den einzelnen Workstream backend.
+    Dies ist ein CLI-Feature: es gibt KEINE HTTP-Oberfläche, `paths` ist
+    leer; die gepinnte Fläche liegt in den `x-adw-*`-Erweiterungen.
 
-servers:
-  - url: http://127.0.0.1:8765
+    Gemäß Contract-Hinweis des Issues werden genau diese extern
+    beobachtbaren Flächen gepinnt:
+      (1) die vier zulässigen `--gates`-Werte und ihre Haltepunkte;
+      (2) der Default `plan`;
+      (3) die drei Altflag-Alias-Äquivalenzen;
+      (4) die Ablehnung von Widerspruch und ungültigem Wert —
+          Nichtnull-Exit, kein persistenter Run;
+      (5) die Zusage, dass bestehende Run-States unverändert resumier-
+          und approvebar bleiben.
+
+    Nicht gepinnt sind insbesondere: der Meldungswortlaut (jenseits von
+    "klare Meldung vorhanden; beim ungültigen Wert nennt sie die vier
+    zulässigen Werte"), die interne State-Abbildung (bestehende Felder
+    wiederverwenden vs. eigenes Feld), Helper-Signaturen, der genaue
+    Wortlaut der Start-Ausgabe sowie Testanzahl und Fixtures. Dieses
+    Vorhaben fügt keine HTTP-Route, kein Event und keinen Config-Key hinzu.
+
+servers: []
 
 paths: {}
 
@@ -27,93 +32,157 @@ x-adw-scope:
   workstreams:
     - backend
   surfaces:
-    - template_behavior
-    - dom_state
-    - performance_user_timing
+    - cli_option
+    - cli_exit_code
+    - cli_stdout
+    - run_state_compat
+  added_http_routes: []
+  added_events: []
 
-# --- (1) Bounded entry-node DOM and reachability --------------------------------
-x-adw-bounded-rendering:
-  scope: run detail view
-  pinned:
-    entry_node_bound:
-      rule: "The number of entry nodes materialised in the DOM is bounded by a
-        hard cap of AT MOST 200 per collection, independent of the total number
-        of entries in the collection. The cap is global per collection over the
-        complete document — not per subtree, per sibling group or per pane —
-        and for tool entries it covers every tool entry present anywhere in the
-        detail-pane DOM, including hidden/non-active panes."
-      cap_max: 200
-      holds: "On initial render AND throughout navigation (after paging,
-        scrolling, expansion or jumping); the bound is not an
-        initial-render-only property."
-    reachability:
-      rule: "Every trace-tree entry and every tool entry remains reachable
-        through the existing views, including entries outside the currently
-        materialised subset. Reaching an entry brings it into the DOM and it
-        renders correctly; reaching any entry does not require materialising
-        all preceding entries; no entry is dropped or made permanently
-        unreachable."
-    presentation_fidelity:
-      rule: "Bounded rendering changes presentation only: displayed entries
-        appear in the underlying order, displayed content is not truncated or
-        reordered relative to the data served — tool entries keep their
-        call/result identity — and the complete payload of every entry stays
-        reachable."
-  not_pinned:
-    - "The choice of windowing vs. paging vs. expand-on-demand and every other
-       mechanism or markup detail."
-    - "How the bound is counted or evidenced (markers, selectors, fixture sizes,
-       navigation test scenarios, guide documentation) — verification policy in
-       the spec and plan."
+x-adw-cli:
+  command: adw run
+  options:
+    gates:
+      spelling: "--gates <modus>"
+      allowed_values:
+        - none
+        - spec
+        - plan
+        - both
+      implicit_default: plan
+    legacy:
+      no_approval:
+        spelling: "--no-approval"
+        status: supported
+        deprecated: false
+      spec_approval:
+        spelling: "--spec-approval"
+        status: supported
+        deprecated: false
 
-# --- (2) Latest-interaction-wins / supersession ---------------------------------
-x-adw-supersession:
-  scope: node selection and its asynchronously loaded detail content
-  pinned:
-    correct_final_content:
-      rule: "Given a quick succession of two node selections (A then B), the detail
-        pane ends showing node B's content. A superseded selection's late-returning
-        fetch does NOT write its content into the DOM while a newer node is
-        selected (B1). This holds whether the supersession happens before or
-        after the earlier selection's fetch was dispatched."
-    no_measure_for_superseded:
-      rule: "A superseded interaction records no end mark and produces NO measure;
-        only the winning (latest) interaction is measured. Start and end marks from
-        different selections are never paired into one measure (B2)."
-  not_pinned:
-    - "The internal cancellation/generation strategy; cancellation is not a
-       separately exposed product state or interface. The only observable
-       requirement is that obsolete results have no observable effect."
+  modes:
+    none:
+      spec_gate: false
+      plan_gate: false
+      successful_run:
+        final_state: done
+        exit_code: 0
+      escalation_exit_code: 1
+      note: "Läuft durch bis done; das Einzige, was ihn anhält, ist eine
+        Eskalation."
+    spec:
+      spec_gate: true
+      plan_gate: false
+      note: "Stopp nach der Spec, vor dem Plan; nach der Spec-Freigabe KEIN
+        Halt am Plan-Gate."
+    plan:
+      spec_gate: false
+      plan_gate: true
+      note: "Stopp nur vor dem Build. Default — beobachtbar identisch zum
+        heutigen `adw run` ohne Flags."
+    both:
+      spec_gate: true
+      plan_gate: true
+      note: "Stopp zuerst nach der Spec und nach deren Freigabe erneut vor
+        dem Build."
 
-# --- (3) The three performance measure names and completion outcomes -------------
-x-adw-measures:
-  completion_semantics:
-    rule: "Each measure's end mark is recorded only once the interaction is
-      observably complete: the resulting content is in the DOM AND the browser
-      has painted it."
-    async_content_counts: "Asynchronously fetched content counts toward the
-      measure: a loading indicator, request dispatch or response arrival is not
-      completion."
-  measures:
-    node_selection:
-      start_mark: "adw:select:start"
-      end_mark: "adw:select:end"
-      measure: "adw:select"
-      completes_when: "The detail pane for the selected node is painted."
-    tab_switch:
-      start_mark: "adw:tab:start"
-      end_mark: "adw:tab:end"
-      measure: "adw:tab"
-      completes_when: "The target tab's content is painted."
-    artifact_open:
-      start_mark: "adw:artifact:start"
-      end_mark: "adw:artifact:end"
-      measure: "adw:artifact"
-      completes_when: "The opened artifact's content is painted."
-      note: "New in this run. If the artifact display is bounded, the complete
-        artifact content stays reachable."
-  not_pinned:
-    - "The internal completion technique (e.g. the rAF -> task construction) —
-       an implementation requirement stated in the plan, not contract surface."
-    - "Thresholds, measurement procedure and evidence recording — verification
-       policy in the spec, plan and guide."
+  legacy_resolution:
+    rule: |
+      Sobald mindestens ein Altflag angegeben ist, wird die vollständige
+      Kombination beider Altflags ausgewertet; ein nicht angegebenes
+      Altflag zählt als nicht gesetzt. Keine Altflag-Kombination löst zu
+      `plan` auf — `plan` ist nur über `--gates plan` oder gar kein Flag
+      erreichbar.
+    map:
+      neither: plan
+      "--no-approval": none
+      "--spec-approval": both
+      "--no-approval --spec-approval": spec
+    alias_equivalence: |
+      Jeder Altflag-Aufruf ist beobachtbar äquivalent zu dem `--gates`-
+      Modus, auf den er abbildet: erreichte Gate-Zustände und weiterer
+      Laufverlauf stimmen überein. Für bestehende Altflag-Aufrufe ändert
+      sich nichts.
+
+  mixed_option_validation:
+    rule: |
+      Ist `--gates` zusammen mit mindestens einem Altflag angegeben, ist
+      der Aufruf genau dann gültig, wenn der explizite Wert dem durch die
+      vollständige Altflag-Kombination aufgelösten Modus entspricht.
+      Andernfalls Ablehnung mit Nichtnull-Exit und klarer Meldung, BEVOR
+      ein Run angelegt oder persistenter Run-State geschrieben wird —
+      reihenfolgeunabhängig, keine Vorrangregel, kein "das letzte gewinnt".
+      `--gates` ohne Altflags ist immer widerspruchsfrei.
+    accepted_examples:
+      - "--gates none --no-approval"
+      - "--gates spec --no-approval --spec-approval"
+      - "--gates both --spec-approval"
+    rejected_examples:
+      - "--gates spec --spec-approval"   # Altflags lösen zu both auf
+      - "--gates none --spec-approval"
+      - "--gates both --no-approval"
+      - "--gates plan --no-approval"     # nichts löst zu plan auf
+      - "--gates plan --spec-approval"
+    conflicting_combination:
+      accepted: false
+      exit: nonzero
+      error: clear_conflict_message
+      persistent_run_created: false
+      persistent_run_state_written: false
+
+  invalid_mode:
+    accepted: false
+    exit: nonzero
+    error_must_name_allowed_values:
+      - none
+      - spec
+      - plan
+      - both
+    persistent_run_created: false
+    persistent_run_state_written: false
+
+  valid_run_output:
+    rule: |
+      Beim Start jedes gültigen neuen Runs wird der wirksame Gate-Modus
+      als genau einer der Werte `none`, `spec`, `plan` oder `both`
+      ausgegeben. Dies gilt für explizite `--gates`-Werte, reine
+      Altflag-Aufrufe, zulässige Mischformen und den impliziten Default.
+      Der genaue Wortlaut ist nicht gepinnt.
+
+  help:
+    command: adw run --help
+    must_describe:
+      - "die vier Werte none, spec, plan und both"
+      - "plan als Default"
+      - "den Spec- und Plan-Haltepunkt jedes Modus"
+      - "die weiterhin gültige Bedeutung von --no-approval"
+      - "die weiterhin gültige Bedeutung von --spec-approval"
+
+x-adw-existing-state-compatibility:
+  persisted_fields:
+    - skip_approval
+    - spec_approval
+  rule: |
+    Ein Run-State im bisherigen Format wird ohne Migration oder manuelle
+    Änderung geladen. `adw resume` und `adw approve` setzen ihn fort; sein
+    Gate-Verhalten richtet sich weiterhin nach den gespeicherten
+    Boolean-Werten.
+  not_pinned: |
+    Ob ein neues State-Feld hinzukommt, ist Umsetzungsentscheidung; falls
+    ja, muss es bei Abwesenheit auf die gespeicherten Booleans
+    zurückfallen.
+
+x-adw-unchanged:
+  gate_mechanics:
+    - phase_order
+    - approval_states
+    - approve_command
+    - resume_command
+    - resume_semantics
+  exit_codes:
+    done: 0
+    awaiting_approval: 2
+    escalation_or_error: 1
+  rule: |
+    Die Gate-Mechanik bleibt unangetastet: dieser Lauf baut die
+    Eingabefläche, nicht das Verhalten.
