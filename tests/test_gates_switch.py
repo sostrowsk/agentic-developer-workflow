@@ -359,7 +359,11 @@ def test_effective_gate_mode_is_printed_at_start(target_repo):
 
 
 def test_run_help_describes_the_gates_matrix(target_repo):
-    result = runner.invoke(app, ["run", "--help"])
+    # Feste, breite Terminalbreite erzwingen: Rich/Typer rendert den Hilfe-Panel
+    # sonst breitenabhängig und bricht/kürzt Optionsnamen (`--gate…`, `--gates`
+    # über zwei Zeilen) bei schmalen CI-Terminals — der Hilfeinhalt (AC9) hängt
+    # nicht von der Terminalbreite ab, die Prüfung darf es also auch nicht.
+    result = runner.invoke(app, ["run", "--help"], env={"COLUMNS": "200"})
     assert result.exit_code == 0, result.output
     text = " ".join(result.output.split())
     assert "--gates" in text
