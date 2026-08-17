@@ -19,6 +19,7 @@ All assertions go through the CLI (typer CliRunner), dry-run mode, real git.
 """
 
 import json
+import re
 
 import pytest
 from typer.testing import CliRunner
@@ -28,6 +29,17 @@ from adw.state import RunState, StateNotFoundError
 from tests.conftest import git, write_config
 
 runner = CliRunner()
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(text: str) -> str:
+    """Drop SGR escapes so assertions see the literal help text.
+
+    Rich colours option names and splits them across style segments, so a raw
+    ``--gates`` does not survive as a substring once colouring is on.
+    """
+    return _ANSI_RE.sub("", text)
 
 # Ein rotes Gate erzwingt eine Eskalation (AC2): der einzige Halt im none-Modus.
 RED_GATE_CONFIG = """\
@@ -359,13 +371,19 @@ def test_effective_gate_mode_is_printed_at_start(target_repo):
 
 
 def test_run_help_describes_the_gates_matrix(target_repo):
-    # Feste, breite Terminalbreite erzwingen: Rich/Typer rendert den Hilfe-Panel
-    # sonst breitenabhängig und bricht/kürzt Optionsnamen (`--gate…`, `--gates`
-    # über zwei Zeilen) bei schmalen CI-Terminals — der Hilfeinhalt (AC9) hängt
-    # nicht von der Terminalbreite ab, die Prüfung darf es also auch nicht.
+    # Der Hilfeinhalt (AC9) haengt nicht von der Terminalumgebung ab, die Pruefung
+    # darf es also auch nicht. Zwei Umgebungseinfluesse muessen dafuer raus:
+    #   * BREITE — `COLUMNS` fest, sonst bricht/kuerzt Rich Optionsnamen.
+    #   * FARBE  — Rich faerbt Optionsnamen und zerlegt sie dabei in mehrere
+    #     Style-Segmente, wobei das erste `-` ein eigenes Segment wird:
+    #     `\x1b[1;36m-\x1b[0m\x1b[1;36m-gates\x1b[0m`. Das Literal `--gates`
+    #     existiert dann nicht mehr im Rohtext. Ob gefaerbt wird, entscheidet
+    #     Rich anhand der Umgebung — unter GITHUB_ACTIONS ja, bei einer nicht
+    #     terminalgebundenen Ausgabe lokal nein. Deshalb Escapes strippen statt
+    #     auf eine bestimmte Umgebung zu hoffen.
     result = runner.invoke(app, ["run", "--help"], env={"COLUMNS": "200"})
     assert result.exit_code == 0, result.output
-    text = " ".join(result.output.split())
+    text = " ".join(_strip_ansi(result.output).split())
     assert "--gates" in text
     for value in ("none", "spec", "plan", "both"):
         assert value in text

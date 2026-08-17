@@ -11,6 +11,15 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Rich/Typer entscheiden anhand der Umgebung, ob sie CLI-Ausgaben faerben,
+    # und zerlegen dabei Optionsnamen in Style-Segmente ("--gates" ueberlebt
+    # nicht als Literal). Unter GITHUB_ACTIONS faerbt Rich, lokal bei nicht
+    # terminalgebundener Ausgabe nicht — genau diese Differenz hat einen sonst
+    # gruenen Lauf hier rot werden lassen. NO_COLOR macht die Ausgabe
+    # deterministisch; Tests, die auf Hilfetexte pruefen, strippen zusaetzlich
+    # selbst.
+    env:
+      NO_COLOR: "1"
     steps:
       - uses: actions/checkout@v7.0.1
 
