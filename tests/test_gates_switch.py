@@ -369,3 +369,59 @@ def test_run_help_describes_the_gates_matrix(target_repo):
     # Die weiterhin gültigen Altflags bleiben im Hilfetext beschrieben:
     assert "--no-approval" in text
     assert "--spec-approval" in text
+
+
+# =====================================================================
+# Review-Finding (P2): der wirksame skip_approval-Entscheid muss beim
+# Run-Start gepinnt werden — nicht erst lazy in run_spec_and_plan. Sonst
+# lässt ein Crash zwischen dem ersten state.save und dem lazy-Pin einen
+# resumierbaren State mit skip_approval=false zurück, der den Modus beim
+# Resume ohne CLI-Flags still verschiebt (none→plan, spec→both).
+# =====================================================================
+
+
+def _crash_before_first_phase(monkeypatch):
+    """Ersetzt run_spec_and_plan durch einen sauberen, resumierbaren Abbruch
+    NACH dem ersten state.save (AgentRunError → Exit 1, Phase unverändert)."""
+    import adw.cli as cli_mod
+    from adw.agents import AgentRunError
+
+    def crash(ctx):
+        raise AgentRunError("Crash vor dem Pinnen des Gate-Modus")
+
+    monkeypatch.setattr(cli_mod, "run_spec_and_plan", crash)
+
+
+def test_gates_none_pins_skip_approval_before_first_save(target_repo, monkeypatch):
+    """`--gates none`: der beim Start persistierte State trägt bereits
+    skip_approval=True; ein Resume ohne Flags bewahrt den Modus none (läuft bis
+    done, KEIN untergeschobenes Plan-Gate)."""
+    with monkeypatch.context() as m:
+        _crash_before_first_phase(m)
+        crashed = _run(target_repo, "--gates", "none")
+        assert crashed.exit_code == 1, crashed.output
+    state = RunState.find_latest(target_repo)
+    assert state.skip_approval is True  # bereits beim ersten Save gepinnt
+    assert state.spec_approval is False
+    resumed = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert resumed.exit_code == 0, resumed.output  # none bleibt none, kein Plan-Halt
+    assert RunState.load(target_repo, state.run_id).phase == "done"
+
+
+def test_gates_spec_pins_skip_approval_before_first_save(target_repo, monkeypatch):
+    """`--gates spec`: der beim Start persistierte State trägt skip_approval=True
+    UND spec_approval=True; ein Resume ohne Flags bewahrt den Modus spec (Halt
+    nach der Spec, danach KEIN Plan-Gate)."""
+    with monkeypatch.context() as m:
+        _crash_before_first_phase(m)
+        crashed = _run(target_repo, "--gates", "spec")
+        assert crashed.exit_code == 1, crashed.output
+    state = RunState.find_latest(target_repo)
+    assert state.skip_approval is True  # bereits beim ersten Save gepinnt
+    assert state.spec_approval is True
+    resumed = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert resumed.exit_code == 2, resumed.output
+    assert RunState.load(target_repo, state.run_id).phase == "awaiting_spec_approval"
+    approved = _approve(target_repo, state.run_id)
+    assert approved.exit_code == 0, approved.output  # kein Plan-Gate → direkt done
+    assert RunState.load(target_repo, state.run_id).phase == "done"

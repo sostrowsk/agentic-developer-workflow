@@ -377,8 +377,13 @@ def run(
         issue_text = _fetch_github_issue(repo, github_issue)
     state = RunState.new(issue=issue_text, parallel=parallel)
     state.dry_run = dry_run
-    # Wirksamen Spec-Gate-Entscheid aus dem Gate-Modus beim Run-Start pinnen:
+    # BEIDE wirksamen Gate-Entscheide aus dem Gate-Modus beim Run-Start pinnen:
     # der Resume-/Approve-Aufruf kennt weder --gates noch die Altflags mehr.
+    # skip_approval MUSS hier (vor dem ersten state.save) gesetzt werden — sonst
+    # ließe ein Crash vor dem lazy-Pin in run_spec_and_plan einen resumierbaren
+    # State mit skip_approval=false zurück, der den Modus still verschöbe
+    # (none→plan, spec→both) und ein unbeabsichtigtes Plan-Gate einführte.
+    state.skip_approval = skip_approval
     state.spec_approval = spec_approval
     # Effektiven Base-Branch pinnen (Config ODER Override): Fortsetzungen
     # bauen exakt gegen diese Basis, auch wenn die config.yaml sich ändert.
