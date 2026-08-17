@@ -12,6 +12,38 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.7.0] — 2026-08-17
+
+### Added
+- **`adw run --gates none|spec|plan|both`** — one speaking switch over the
+  approval gates. `none` runs fully autonomously: nothing halts the run except
+  an escalation. `spec` halts after the spec, before the plan; `plan` halts
+  before the build; `both` halts at both gates. The effective mode is printed at
+  start, so an unattended run is never a guess.
+  - The 4-way matrix was already reachable through the two legacy booleans, but
+    not discoverable: `--no-approval` reads like "needs no approval" rather than
+    "runs autonomously", and "halt only at the spec gate" required the
+    counter-intuitive pair `--no-approval --spec-approval`, which nobody had ever
+    used in 19 runs.
+  - The legacy flags stay valid and equivalent — `--no-approval` == `--gates
+    none`, `--spec-approval` == `--gates both`, both together == `--gates spec` —
+    so existing scripts and habits keep working unchanged.
+  - A contradiction between `--gates` and a legacy flag is rejected before the
+    run is created, order-independently and with no silent precedence; a
+    redundant but consistent combination is accepted. An invalid value is
+    rejected naming the four permitted ones.
+  - The default is unchanged: `adw run` without flags still halts at the plan
+    gate only. Each mode maps onto the two state fields the mechanism already
+    consumes, so run states written by earlier versions stay resumable.
+
+### Fixed
+- CI is deterministic about coloured output (`NO_COLOR`), and the help-text test
+  strips ANSI escapes before asserting. Rich colours option names and splits
+  them across style segments — the first `-` becomes its own segment — so a raw
+  `--gates` does not survive as a substring once colouring is on. Rich colours
+  under `GITHUB_ACTIONS` but not for non-terminal output locally, which made a
+  test pass locally and fail in CI.
+
 ## [0.6.0] — 2026-08-17
 
 ### Added
@@ -263,6 +295,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.7.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.4.0...v0.5.0

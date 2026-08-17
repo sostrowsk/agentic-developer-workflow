@@ -13,6 +13,39 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.7.0] — 2026-08-17
+
+### Hinzugefügt
+- **`adw run --gates none|spec|plan|both`** — ein sprechender Schalter über die
+  Freigabe-Gates. `none` läuft voll autonom: nichts hält den Lauf an außer einer
+  Eskalation. `spec` hält nach der Spec, vor dem Plan; `plan` hält vor dem Build;
+  `both` hält an beiden Gates. Der wirksame Modus wird beim Start ausgegeben,
+  damit ein unbeaufsichtigter Lauf keine Ratesache ist.
+  - Die 4-Wege-Matrix war über die zwei alten Booleans schon erreichbar, aber
+    nicht auffindbar: `--no-approval` liest sich wie „braucht keine Freigabe"
+    statt „läuft autonom durch", und „nur am Spec-Gate halten" verlangte die
+    widersinnige Kombination `--no-approval --spec-approval`, die in 19 Läufen
+    nie jemand benutzt hat.
+  - Die Altflags bleiben gültig und äquivalent — `--no-approval` == `--gates
+    none`, `--spec-approval` == `--gates both`, beide zusammen == `--gates spec`
+    —, bestehende Skripte und Gewohnheiten laufen unverändert weiter.
+  - Ein Widerspruch zwischen `--gates` und einem Altflag wird abgelehnt, bevor
+    der Lauf angelegt wird: reihenfolgeunabhängig und ohne stille Vorrangregel.
+    Eine redundante, aber widerspruchsfreie Angabe ist zulässig. Ein ungültiger
+    Wert wird unter Nennung der vier erlaubten abgelehnt.
+  - Der Default ist unverändert: `adw run` ohne Flags hält weiterhin nur am
+    Plan-Gate. Jeder Modus bildet auf die beiden State-Felder ab, die die
+    Mechanik schon konsumiert — von älteren Versionen geschriebene Run-States
+    bleiben damit resumierbar.
+
+### Behoben
+- CI ist bezüglich gefärbter Ausgaben deterministisch (`NO_COLOR`), und der
+  Hilfetext-Test entfernt ANSI-Escapes vor der Prüfung. Rich färbt Optionsnamen
+  und zerlegt sie in Style-Segmente — das erste `-` wird ein eigenes Segment —,
+  sodass ein rohes `--gates` bei aktiver Färbung nicht als Teilstring überlebt.
+  Rich färbt unter `GITHUB_ACTIONS`, lokal bei nicht terminalgebundener Ausgabe
+  nicht; genau deshalb war ein Test lokal grün und in CI rot.
+
 ## [0.6.0] — 2026-08-17
 
 ### Hinzugefügt
@@ -282,6 +315,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.7.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.4.0...v0.5.0
