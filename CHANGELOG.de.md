@@ -13,6 +13,47 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.6.0] — 2026-08-17
+
+### Hinzugefügt
+- **Gedeckelte Eintragsknoten im Run Inspector.** Der gemessene Engpass hinter
+  der „Reaktion ≤ 2 s"-Zusage war die *Anzahl* der DOM-Eintragsknoten, nicht
+  deren Inhalt (Lauf `bf831719` blockierte über 40 s hinaus). Beide Sammlungen —
+  Trace-Baum und Tools-Reiter — rendern jetzt über ein globales Budget von
+  höchstens **200 Einträgen pro Sammlung**, unabhängig von der Gesamtgröße des
+  Laufs, und der Deckel hält über die Navigation hinweg, nicht nur beim ersten
+  Rendern. Jeder gerenderte Eintrag trägt einen maschinenlesbaren Marker
+  (`data-tree-entry`, `data-tool-entry`), damit die Zahl geprüft statt geschätzt
+  werden kann.
+- **Ein gleitendes Fenster hält jeden Eintrag erreichbar.** Die Query-Parameter
+  `offset` (Baum) und `tools_offset` + `focus` (Tools) verschieben den
+  gedeckelten Ausschnitt über `← previous` / `more →`, sodass ein später
+  Eintrag erreichbar ist, ohne die vorangehenden erneut zu materialisieren.
+  Beide Fenster blättern unabhängig voneinander, und der wirksame Ausschnitt
+  überlebt den Live-Region-Swap — der Refresh lädt die Seite nach, die der
+  Nutzer tatsächlich ansieht, nicht das Default-Fenster des Servers.
+- **Letzte Interaktion gewinnt (Supersession).** Eine überholte Interaktion
+  schreibt nichts ins DOM, setzt keinen End-Mark und erzeugt kein Measure;
+  Marks verschiedener Auswahlen werden nie gepaart. Zwei schnelle Klicks lassen
+  das Detail-Pane auf dem zuletzt geklickten Knoten stehen.
+- **Drittes Reaktionszeit-Measure `adw:artifact`**, gebaut wie `adw:select` und
+  `adw:tab` (Start-Mark am auslösenden Eingabe-Ereignis, End-Mark in einem Task,
+  der aus einem `requestAnimationFrame`-Callback heraus geplant wird und damit
+  nach dem Paint läuft). Beim Öffnen eines großen Artefakts wird nur ein
+  gedeckelter Anfangsausschnitt eingefügt; der vollständige Inhalt bleibt über
+  die Artefakt-Route erreichbar.
+- **Navigation per Timeline-Balken**: Ein Klick auf einen Balken wechselt in den
+  Trace-Reiter und wählt den zugehörigen Knoten aus, dessen `data-seq` der
+  Balken trägt.
+- **Ein abhängigkeitsfreier JS-Testharness** (`tests/gui_js_harness.js` / `.py`),
+  der das *ausgelieferte* `app.js` in einem einfachen `node`-Prozess mit
+  gestubbtem DOM, `fetch`, `performance` und Task-Scheduling fährt. Er ist reines
+  Testwerkzeug, nie eine Laufzeit-Abhängigkeit, und kein Browser — kein
+  Playwright, kein Selenium. Fehlt die `node`-Laufzeit, schlagen die Tests fehl,
+  statt zu skippen.
+- `docs/gui-response-time.md` dokumentiert die Marker-Selektoren, das gleitende
+  Fenster und das manuelle Messverfahren.
+
 ## [0.5.1] — 2026-08-14
 
 ### Behoben
@@ -241,6 +282,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.6.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.3.0...v0.4.0

@@ -12,6 +12,42 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.6.0] — 2026-08-17
+
+### Added
+- **Bounded entry-node budget in the run inspector.** The measured bottleneck
+  behind the "reaction ≤ 2 s" promise was the *number* of DOM entry nodes, not
+  their contents (run `bf831719` stalled past 40 s). Both entry collections —
+  the Trace tree and the Tools tab — now render through a global budget of at
+  most **200 entries per collection**, independent of the run's total size, and
+  the bound holds throughout navigation rather than only on the initial render.
+  Each rendered entry carries a machine-readable marker (`data-tree-entry`,
+  `data-tool-entry`) so the count can be asserted rather than eyeballed.
+- **A moving window keeps every entry reachable.** The `offset` (tree) and
+  `tools_offset` + `focus` (tools) query parameters slide the bounded slice via
+  `← previous` / `more →`, so reaching a late entry never re-materialises the
+  ones before it. The two windows page independently, and the window in effect
+  survives the live region swap — the refresh re-fetches the page the user is
+  actually looking at, not the server's default first window.
+- **Latest-interaction-wins (supersession).** A superseded interaction writes
+  nothing into the DOM, records no end mark and creates no measure; marks
+  belonging to different selections are never paired. Two fast clicks leave the
+  detail pane on the node clicked last.
+- **Third response-time measure `adw:artifact`**, built the same way as
+  `adw:select` and `adw:tab` (start mark at the opening input event, end mark
+  in a task scheduled from within a `requestAnimationFrame` callback so it runs
+  after the paint). Opening a large artifact inserts only a bounded initial
+  slice; the full content stays reachable through the artifacts route.
+- **Timeline bar-click navigation**: clicking a bar switches to the Trace tab
+  and selects the corresponding node, which carries that node's `data-seq`.
+- **A dependency-free JS test harness** (`tests/gui_js_harness.js` / `.py`) that
+  drives the *served* `app.js` in a plain `node` process with stubbed DOM,
+  `fetch`, `performance` and task scheduling. It is a test-time tool only, never
+  a runtime dependency, and it is not a browser — no Playwright, no Selenium. A
+  missing `node` runtime fails the tests rather than skipping them.
+- `docs/gui-response-time.md` documents the marker selectors, the moving window
+  and the manual measurement procedure.
+
 ## [0.5.1] — 2026-08-14
 
 ### Fixed
@@ -227,6 +263,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.6.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.3.0...v0.4.0
