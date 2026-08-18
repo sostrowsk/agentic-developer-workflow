@@ -489,3 +489,27 @@ def test_prune_reports_completed_and_failed_on_partial_failure(target_repo):
     assert bad in result.output  # the failing run's achieved state is reported
     assert (run_dir(target_repo, ok) / "events.jsonl.gz").is_file()  # really compressed
     assert (rd_bad / "events.jsonl").is_file()  # authoritative log kept
+
+
+# --- P1: a planted temp-file symlink must not let --gzip write outside the repo ---
+
+
+def test_gzip_temp_file_symlink_cannot_touch_external_target(target_repo, tmp_path):
+    """The compression temp file is created with an unpredictable, O_EXCL/O_NOFOLLOW
+    name — a symlink planted at the OLD predictable temp path can no longer redirect
+    the gzip write onto an external file (which the old code would truncate)."""
+    rid = "aaaaffff"
+    rd = make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+    original_plain = (rd / "events.jsonl").read_bytes()
+    external = tmp_path / "victim.txt"
+    external.write_bytes(b"precious external data\n")
+    victim_original = external.read_bytes()
+    # The prune runs in-process, so os.getpid() matches the formerly predictable name.
+    planted = rd / f".events.jsonl.{os.getpid()}.gz.tmp"
+    os.symlink(external, planted)
+
+    result = prune(target_repo, "--keep", "0", "--gzip")
+    assert result.exit_code == 0, result.output
+    assert external.read_bytes() == victim_original  # never opened for writing
+    gz = rd / "events.jsonl.gz"
+    assert gz.is_file() and gzip.decompress(gz.read_bytes()) == original_plain

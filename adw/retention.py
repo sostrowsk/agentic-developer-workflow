@@ -15,6 +15,7 @@ import json
 import os
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -376,9 +377,15 @@ def _compress_run(rec: RunRecord, runs_root: Path) -> PruneResult:
         if plain.is_symlink() or _contained(plain, runs_root) is None:
             raise RetentionError(f"{rec.run_id}: events.jsonl verweist aus den Runs heraus")
         data = plain.read_bytes()
-        tmp = rec.run_dir / f".events.jsonl.{os.getpid()}.gz.tmp"
+        # Create the temp file with an UNPREDICTABLE name via O_CREAT|O_EXCL
+        # (tempfile also adds O_NOFOLLOW where available) and gzip through the
+        # secured fd — a pre-planted symlink at a predictable path can no longer
+        # redirect the write onto an external file (P1). Same-directory placement
+        # keeps the replacement atomic.
+        fd, tmp_name = tempfile.mkstemp(dir=rec.run_dir, prefix=".events.", suffix=".gz.tmp")
+        tmp = Path(tmp_name)
         try:
-            with gzip.open(tmp, "wb") as fh:
+            with os.fdopen(fd, "wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb") as fh:
                 fh.write(data)
             with gzip.open(tmp, "rb") as fh:  # validate before it becomes the result
                 if fh.read() != data:
