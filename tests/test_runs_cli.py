@@ -11,6 +11,8 @@ RED until the ``runs`` group exists (today ``adw --help`` knows only run/resume/
 approve/status/gui).
 """
 
+import re
+
 from typer.testing import CliRunner
 
 from adw.cli import app
@@ -26,6 +28,19 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
 
 cli = CliRunner()
 
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _help_text(*args):
+    """The ``--help`` output as a stable, normalized string. Typer/Rich colours and
+    WIDTH-WRAPS (even truncating long option names with an ellipsis) at the ambient
+    terminal width, which differs between a local TTY and a non-TTY CI shell. Pinning
+    a wide COLUMNS for the invocation and stripping ANSI + collapsing wrap-whitespace
+    makes the rendered surface deterministic across environments."""
+    result = cli.invoke(app, [*args, "--help"], env={"COLUMNS": "200"})
+    text = " ".join(_ANSI.sub("", result.output).split())
+    return result, text
+
 
 def _done_lines(issue="Issue text", ts="2026-08-05T14:00:00.000Z"):
     return [
@@ -40,17 +55,17 @@ def _done_lines(issue="Issue text", ts="2026-08-05T14:00:00.000Z"):
 def test_runs_group_is_registered_with_list_and_prune(home):  # noqa: F811
     """B1: ``adw runs --help`` succeeds (the group exists) and advertises both
     subcommands. This is the observable proof the ``runs`` group is registered."""
-    result = cli.invoke(app, ["runs", "--help"])
+    result, text = _help_text("runs")
     assert result.exit_code == 0, result.output
-    assert "list" in result.output and "prune" in result.output
+    assert "list" in text and "prune" in text
 
 
 def test_prune_help_advertises_exactly_the_pinned_flags(home):  # noqa: F811
     """C1/E5: prune's surface is exactly --repo/--keep/--older-than/--gzip."""
-    result = cli.invoke(app, ["runs", "prune", "--help"])
+    result, text = _help_text("runs", "prune")
     assert result.exit_code == 0, result.output
     for flag in ("--repo", "--keep", "--older-than", "--gzip"):
-        assert flag in result.output, flag
+        assert flag in text, flag
 
 
 # --- B3: list exit codes --------------------------------------------------------
