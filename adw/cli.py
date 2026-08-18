@@ -16,7 +16,7 @@ from typing import Annotated
 import typer
 from pydantic import ValidationError
 
-from adw import ci, github
+from adw import ci, github, retention
 from adw.agents import AgentRunError, RunTotals, SdkAgentRunner
 from adw.codex import CodexRunner
 from adw.config import AdwConfig, ConfigError
@@ -393,7 +393,9 @@ def run(
     ensure_runs_gitignored(repo)
     # E1: der eine Emitter dieses Runs wird NACH RunState.new und VOR dem ersten
     # state.save erzeugt — das erste state.saved-Event liegt damit im run-Span.
-    emitter = EventEmitter(repo, state.run_id)
+    # trace.enabled=false schaltet das Ereignis-Log ab (D2/E6), ohne Lauf/State zu
+    # berühren.
+    emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
     run_totals = RunTotals()
     with _run_span(emitter, state, config, repo, run_totals) as run_handle:
         state.save(repo, emitter=emitter, span_id=run_handle.id)
@@ -403,6 +405,10 @@ def run(
         )
         typer.echo(f"Run {state.run_id} gestartet (Phase: {state.phase}, Gates: {gate_mode})")
         _execute(ctx)
+    # Nach erfolgreichem Abschluss (done): automatisches Pruning (D3). Eine
+    # Eskalation/Approval-Pause hätte oben eine typer.Exit geworfen und käme hier
+    # nicht an.
+    _maybe_auto_prune(repo, config, state)
 
 
 @app.command()
@@ -423,7 +429,7 @@ def resume(
     # Arbeitsbaum-Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save):
     # eine Verweigerung lässt den Run-State unverändert und resumierbar (B1).
     _preflight_worktree(repo)
-    emitter = EventEmitter(repo, state.run_id)
+    emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
     run_totals = RunTotals()
     with _run_span(emitter, state, config, repo, run_totals) as run_handle:
         if rebased:
@@ -456,7 +462,7 @@ def approve(
     # lässt die Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
     _preflight_worktree(repo)
     gate = "spec" if state.phase == "awaiting_spec_approval" else "plan"
-    emitter = EventEmitter(repo, state.run_id)
+    emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
     run_totals = RunTotals()
     with _run_span(emitter, state, config, repo, run_totals) as run_handle:
         if state.phase == "awaiting_spec_approval":
@@ -557,6 +563,92 @@ def gui(
 
         webbrowser.open(f"http://{host}:{port}/")
     uvicorn.run(application, host=host, port=port)
+
+
+# --- `adw runs`: Retention (list / prune) -------------------------------------
+
+runs_app = typer.Typer(add_completion=False, help="Run-Verzeichnisse verwalten (list, prune)")
+app.add_typer(runs_app, name="runs")
+
+
+def _require_repo_dir(repo: Path) -> Path:
+    repo = repo.resolve()
+    if not repo.is_dir():
+        raise _fail(f"--repo {repo} existiert nicht oder ist kein verwendbares Verzeichnis")
+    return repo
+
+
+@runs_app.command("list")
+def runs_list(
+    repo: Annotated[Path, typer.Option("--repo", help="Pfad zum Ziel-Repo")] = Path("."),
+) -> None:
+    """Show every run with the facts that reveal when pruning is due (B1–B4)."""
+    repo = _require_repo_dir(repo)
+    records = retention.scan_runs(repo)
+    if not records:
+        typer.echo(f"Keine Runs unter {repo / RUNS_RELPATH}")
+        return
+
+    def show(value) -> str:
+        return "?" if value is None else str(value)
+
+    # Newest first — the runs closest to being pruned are the least urgent to see.
+    for rec in sorted(records, key=lambda r: (r.date, r.run_id), reverse=True):
+        date = rec.date.strftime("%Y-%m-%d %H:%M:%S")
+        typer.echo(
+            f"{rec.run_id}  {show(rec.phase):<22}  {date}  "
+            f"events={show(rec.event_count)}  log={show(rec.log_size)}"
+        )
+
+
+@runs_app.command("prune")
+def runs_prune(
+    repo: Annotated[Path, typer.Option("--repo", help="Pfad zum Ziel-Repo")] = Path("."),
+    keep: Annotated[int, typer.Option("--keep", help="Neueste N Läufe schützen")] = 20,
+    older_than: Annotated[
+        int | None, typer.Option("--older-than", help="Nur Läufe ab DAYS Tagen bearbeiten")
+    ] = None,
+    gzip: Annotated[
+        bool,
+        typer.Option("--gzip", help="events.jsonl komprimieren statt löschen (behält den Lauf)"),
+    ] = False,
+) -> None:
+    """Delete old runs (dir + refs + worktrees) or, with --gzip, compress their
+    event logs while keeping the run whole (§4.5, C1–C8)."""
+    # Invalid N/DAYS: the usual CLI error (exit 2), BEFORE any run data changes.
+    if keep < 0 or (older_than is not None and older_than < 0):
+        raise typer.Exit(2)
+    repo = _require_repo_dir(repo)
+    try:
+        results = retention.prune(repo, keep=keep, older_than=older_than, gzip_mode=gzip)
+    except retention.RetentionError as exc:
+        raise _fail(f"Pruning nicht sicher abgeschlossen: {exc}") from exc
+    if not results:
+        typer.echo("Nichts zu prunen.")
+        return
+    for result in results:
+        line = f"{result.run_id}: {result.action}"
+        if result.reason:
+            line += f" ({result.reason})"
+        typer.echo(line)
+
+
+def _maybe_auto_prune(repo: Path, config: AdwConfig, state: RunState) -> None:
+    """Automatic deleting-prune after a successful run (D3). Same rules as manual
+    deleting pruning; disabled when keep_runs == 0. Fail-open: an error never
+    changes the just-finished run's done phase or success exit code — it is only
+    reported."""
+    if state.phase != "done" or config.trace.keep_runs <= 0:
+        return
+    try:
+        results = retention.prune(repo, keep=config.trace.keep_runs, older_than=None)
+    except Exception as exc:  # noqa: BLE001 — fail-open by design (D3)
+        typer.echo(f"Auto-Pruning fehlgeschlagen (Lauf bleibt done): {exc}", err=True)
+        return
+    removed = [r.run_id for r in results if r.action == "deleted"]
+    if removed:
+        joined = ", ".join(removed)
+        typer.echo(f"Auto-Pruning entfernte {len(removed)} alte(n) Lauf/Läufe: {joined}")
 
 
 # --- interne Verdrahtung ------------------------------------------------------

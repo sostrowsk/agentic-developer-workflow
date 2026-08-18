@@ -17,6 +17,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
@@ -24,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from adw.env import safe_env
+from adw.gui import i18n
 from adw.gui.model import build_tree
 from adw.gui.reader import EventReader
 from adw.gui.registry import _slug, _unique_slug, load_registry
@@ -307,9 +309,23 @@ def _contained(path: Path, root: Path) -> Path | None:
     return resolved if resolved.is_relative_to(root) else None
 
 
+def _events_source(run_dir: Path, runs_root: Path):
+    """The contained event-log file to read: ``events.jsonl`` if present, else the
+    gzipped ``events.jsonl.gz`` (a pruned but kept run). When both exist the plain
+    file is authoritative (consistent with --gzip, C5/C6). Returns None when neither
+    is a readable contained file."""
+    plain = _contained(run_dir / "events.jsonl", runs_root)
+    if plain is not None and plain.is_file():
+        return plain
+    gz = _contained(run_dir / "events.jsonl.gz", runs_root)
+    if gz is not None and gz.is_file():
+        return gz
+    return None
+
+
 def _read_events(run_dir: Path, runs_root: Path):
-    events_file = _contained(run_dir / "events.jsonl", runs_root)
-    if events_file is None or not events_file.is_file():
+    events_file = _events_source(run_dir, runs_root)
+    if events_file is None:
         return [], []
     result = EventReader(events_file).read()
     return result.events, result.problems
@@ -1141,8 +1157,8 @@ def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
                 run_dir = _contained(child, runs_root)  # skip symlinks escaping the tree
                 if run_dir is None or not run_dir.is_dir():
                     continue
-                events_file = _contained(run_dir / "events.jsonl", runs_root)
-                if events_file is not None and events_file.is_file():
+                events_file = _events_source(run_dir, runs_root)
+                if events_file is not None:
                     events = EventReader(events_file).read().events
                 else:
                     events = []  # Aufgabe G: a run may predate instrumentation
@@ -1237,9 +1253,8 @@ def create_app(repos=None) -> FastAPI:
         run_dir = _contained(runs_root / run_id, runs_root)
         if run_dir is None:  # the run directory is a symlink escaping the tree
             raise HTTPException(status_code=404, detail=f"No run {run_id}")
-        events_file = _contained(run_dir / "events.jsonl", runs_root)
         state_file = _contained(run_dir / "state.json", runs_root)
-        has_events = events_file is not None and events_file.is_file()
+        has_events = _events_source(run_dir, runs_root) is not None
         has_state = state_file is not None and state_file.is_file()
         if not has_events and not has_state:  # absent, or only escaping symlinks
             raise HTTPException(status_code=404, detail=f"No run {run_id}")
@@ -1319,20 +1334,24 @@ def create_app(repos=None) -> FastAPI:
     @app.get("/api/runs/{repo}/{run_id}/stream")
     def api_run_stream(repo: str, run_id: str, request: Request):
         _, run_dir, runs_root = require_run(repo, run_id)
-        events_file = _contained(run_dir / "events.jsonl", runs_root)
+        events_file = _events_source(run_dir, runs_root)
         last_id = _parse_last_event_id(request.headers.get("last-event-id"))
         return StreamingResponse(
             _stream(events_file, last_id), media_type="text/event-stream"
         )
 
     @app.get("/", response_class=HTMLResponse)
-    def run_list_page():
-        html = _TEMPLATES.get_template("run_list.html").render({"entries": _list_runs(refs)})
-        return HTMLResponse(html)
+    def run_list_page(request: Request):
+        lang, t, switch_qs = _lang_context(request)
+        html = _TEMPLATES.get_template("run_list.html").render({
+            "entries": _list_runs(refs), "t": t, "lang": lang, "switch_qs": switch_qs,
+        })
+        return _apply_lang_cookie(request, HTMLResponse(html))
 
     @app.get("/runs/{repo}/{run_id}", response_class=HTMLResponse)
     def run_detail_page(repo: str, run_id: str, request: Request):
         ref, run_dir, runs_root = require_run(repo, run_id)
+        lang, t, switch_qs = _lang_context(request)
         # Aufgabe A/C: `?limit` is how much of each long list / the raw log the
         # server materialises (a bounded DOM by default). "Load more" is a plain
         # server-rendered link that raises it — no divergent client-side rendering.
@@ -1382,7 +1401,31 @@ def create_app(repos=None) -> FastAPI:
             "tree_window": tree_window, "tool_window": tool_window, "pane_nodes": pane_nodes,
             "timeline": _timeline(events),
             "artifacts": _artifacts_listing(run_dir),
+            "t": t, "lang": lang, "switch_qs": switch_qs,
         })
-        return HTMLResponse(html)
+        return _apply_lang_cookie(request, HTMLResponse(html))
 
     return app
+
+
+# --- i18n request plumbing (Aufgabe A) -----------------------------------------
+
+
+def _lang_context(request: Request):
+    """The (language code, chrome catalog, switch-link query string) for a request.
+    The switch query preserves every current query parameter and only flips
+    ``lang`` — so the language link keeps the windowed slice (offset/tools_offset/
+    focus) and node selection (A5)."""
+    lang = i18n.select_language(request)
+    params = dict(request.query_params)
+    params["lang"] = i18n.other_language(lang)
+    return lang, i18n.CATALOG[lang], urlencode(params)
+
+
+def _apply_lang_cookie(request: Request, response: HTMLResponse) -> HTMLResponse:
+    """Set the language cookie ONLY on an explicit, valid ``?lang=`` selection (A3);
+    an invalid or absent value sets nothing."""
+    explicit = i18n.query_language(request)
+    if explicit is not None:
+        response.set_cookie(i18n.LANG_COOKIE, explicit)
+    return response

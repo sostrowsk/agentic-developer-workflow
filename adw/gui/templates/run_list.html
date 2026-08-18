@@ -1,17 +1,22 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang }}">
 <head>
   <meta charset="utf-8">
-  <title>ADW Runs</title>
+  <title>{{ t.runs_title }}</title>
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <h1>ADW Runs</h1>
+  <header class="app-header">
+    <h1>{{ t.runs_title }}</h1>
+    <a class="lang-switch" href="?{{ switch_qs }}">{{ t.lang_switch }}</a>
+  </header>
   <table class="run-list">
     <thead>
       <tr>
-        <th>Run</th><th>Repo</th><th>Issue</th><th>Phase</th><th>Status</th>
-        <th>Start</th><th>Duration</th><th>Cost</th><th>Events</th>
+        <th>{{ t.col_run }}</th><th>{{ t.col_repo }}</th><th>{{ t.col_issue }}</th>
+        <th>{{ t.col_phase }}</th><th>{{ t.col_status }}</th>
+        <th>{{ t.col_start }}</th><th>{{ t.col_duration }}</th><th>{{ t.col_cost }}</th>
+        <th>{{ t.col_events }}</th>
       </tr>
     </thead>
     <tbody>
@@ -26,13 +31,13 @@
         <td class="ts">{{ e.start | fmt_ts }}</td>
         <td class="dur">{{ e.duration | fmt_duration }}</td>
         <td class="cost">{{ e.cost | fmt_cost }}</td>
-        <td class="events">{% if e.has_trace %}{{ e.event_count }}{% else %}<span class="no-trace-hint" title="no event log for this run">no trace</span>{% endif %}</td>
+        <td class="events">{% if e.has_trace %}{{ e.event_count }}{% else %}<span class="no-trace-hint" title="{{ t.no_trace_title }}">{{ t.no_trace }}</span>{% endif %}</td>
       </tr>
       {% else %}
       <tr class="run-row missing-repo">
         <td>&mdash;</td>
         <td>{{ e.repo }}</td>
-        <td colspan="7">Repository unavailable: {{ e.hint }}</td>
+        <td colspan="7">{{ t.repo_unavailable }} {{ e.hint }}</td>
       </tr>
       {% endif %}
     {% endfor %}

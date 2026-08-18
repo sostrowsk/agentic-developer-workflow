@@ -140,6 +140,22 @@ def remove_lane_worktree(repo: Path, run_id: str, lane: str) -> None:
             _git_effect(repo, "branch", "-D", lane_branch(run_id, lane))
 
 
+def remove_registered_worktree(repo: Path, path: Path) -> None:
+    """Remove a registered worktree via the git worktree management, WITHOUT
+    deleting its lane branch — used by retention pruning, which must keep the
+    branch (C3). Idempotent: an already-removed worktree is not an error, and any
+    stale registration is pruned so no orphan remains. Serialized like the other
+    worktree mutations (shared .git/worktrees metadata)."""
+    repo = repo.resolve()
+    with _WORKTREE_MUTATION_LOCK:
+        _ready_marker(path).unlink(missing_ok=True)
+        if _worktree_registered(repo, path):
+            _git_effect(repo, "worktree", "remove", "--force", str(path))
+        # Clear any leftover registration (e.g. a resumed prune whose dir is gone),
+        # so ``git worktree prune --dry-run`` reports no orphan for the run.
+        _git_effect(repo, "worktree", "prune")
+
+
 def _branch_exists(repo: Path, branch: str) -> bool:
     try:
         result = subprocess.run(

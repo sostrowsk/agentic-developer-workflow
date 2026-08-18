@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang }}">
 <head>
   <meta charset="utf-8">
   <title>Run {{ detail.run.run_id }}</title>
@@ -20,9 +20,9 @@
 {% macro window_nav(win, param, focus_seq=none) %}
   {% if win.total > win.shown %}
   <div class="window-nav">
-    {% if win.offset > 0 %}<a class="win-prev" href="?{{ param }}={{ [win.offset - win.shown, 0] | max }}{% if focus_seq is not none %}&amp;focus={{ focus_seq }}{% endif %}">&larr; previous</a>{% endif %}
-    <span class="win-status">{{ win.offset + 1 }}&ndash;{{ win.offset + win.shown }} of {{ win.total }}</span>
-    {% if win.offset + win.shown < win.total %}<a class="win-next load-more" href="?{{ param }}={{ win.offset + win.shown }}{% if focus_seq is not none %}&amp;focus={{ focus_seq }}{% endif %}">more &rarr;</a>{% endif %}
+    {% if win.offset > 0 %}<a class="win-prev" href="?{{ param }}={{ [win.offset - win.shown, 0] | max }}{% if focus_seq is not none %}&amp;focus={{ focus_seq }}{% endif %}">&larr; {{ t.nav_previous }}</a>{% endif %}
+    <span class="win-status">{{ win.offset + 1 }}&ndash;{{ win.offset + win.shown }} {{ t.nav_of }} {{ win.total }}</span>
+    {% if win.offset + win.shown < win.total %}<a class="win-next load-more" href="?{{ param }}={{ win.offset + win.shown }}{% if focus_seq is not none %}&amp;focus={{ focus_seq }}{% endif %}">{{ t.nav_more }} &rarr;</a>{% endif %}
   </div>
   {% endif %}
 {% endmacro %}
@@ -43,7 +43,7 @@
    agent runs, gate iterations, the RED stage). The patch is fetched on demand. #}
 {% macro diff_panel(node) %}
   <section class="tab tab-diff" data-tab-panel="diff" data-diff-from="{{ node.diff_from }}" data-diff-to="{{ node.diff_to }}">
-    <pre class="diff-body">Open the Diff tab to load the changes for this step.</pre>
+    <pre class="diff-body">{{ t.diff_hint }}</pre>
   </section>
 {% endmacro %}
 {# The type-specific body of a node (no Diff tab — that is added uniformly by the
@@ -55,13 +55,13 @@
       </div>
     {% elif node.type == "gate" %}
       <div class="gate">
-        <div class="command">command: <code>{{ node.payload.cmd if node.payload else "" }}</code></div>
-        <div class="exit">exit_code: {{ node.end_payload.exit_code if node.end_payload else "" }}</div>
+        <div class="command">{{ t.gate_command }} <code>{{ node.payload.cmd if node.payload else "" }}</code></div>
+        <div class="exit">{{ t.gate_exit }} {{ node.end_payload.exit_code if node.end_payload else "" }}</div>
         <pre class="output">{{ node.end_payload.output if node.end_payload else "" }}</pre>
       </div>
     {% elif node.type == "codex.review" %}
       <table class="findings">
-        <thead><tr><th>severity</th><th>key</th><th>file</th><th>message</th></tr></thead>
+        <thead><tr><th>{{ t.find_severity }}</th><th>{{ t.find_key }}</th><th>{{ t.find_file }}</th><th>{{ t.find_message }}</th></tr></thead>
         <tbody>
         {% for f in (node.end_payload.findings if node.end_payload else []) %}
           <tr><td>{{ f.severity }}</td><td class="key">{{ f.file }}|{{ f.issue }}</td><td>{{ f.file }}</td><td>{{ f.issue }}</td></tr>
@@ -71,10 +71,10 @@
       <pre class="stdout">{{ node.end_payload.raw_stdout if node.end_payload else "" }}</pre>
     {% elif node.type in ["phase", "lane", "round"] %}
       <div class="aggregate">
-        <div class="agg-duration">duration: {{ node.duration | fmt_duration }}</div>
-        <div class="agg-cost">cost: {{ node.cost | fmt_cost }}</div>
-        {% if node.type == "round" %}<div class="agg-round">round: {{ node.n }}/{{ node.cap }}</div>{% endif %}
-        <div class="agg-outcome">outcome: {{ node.outcome if node.outcome is not none else "" }}</div>
+        <div class="agg-duration">{{ t.agg_duration }} {{ node.duration | fmt_duration }}</div>
+        <div class="agg-cost">{{ t.agg_cost }} {{ node.cost | fmt_cost }}</div>
+        {% if node.type == "round" %}<div class="agg-round">{{ t.agg_round }} {{ node.n }}/{{ node.cap }}</div>{% endif %}
+        <div class="agg-outcome">{{ t.agg_outcome }} {{ node.outcome if node.outcome is not none else "" }}</div>
       </div>
     {% else %}
       <pre class="raw">{{ node.payload | tojson }}</pre>
@@ -87,10 +87,10 @@
     {% if node.type == "agent.run" %}
       <div class="tabs" data-tabs>
         <div class="tab-buttons" role="tablist">
-          <button type="button" class="tab-btn active" data-tab="prompt">Prompt</button>
-          <button type="button" class="tab-btn" data-tab="answer">Answer</button>
-          <button type="button" class="tab-btn" data-tab="tools">Tools</button>
-          {% if bracketed %}<button type="button" class="tab-btn" data-tab="diff">Diff</button>{% endif %}
+          <button type="button" class="tab-btn active" data-tab="prompt">{{ t.tab_prompt }}</button>
+          <button type="button" class="tab-btn" data-tab="answer">{{ t.tab_answer }}</button>
+          <button type="button" class="tab-btn" data-tab="tools">{{ t.tab_tools }}</button>
+          {% if bracketed %}<button type="button" class="tab-btn" data-tab="diff">{{ t.tab_diff }}</button>{% endif %}
         </div>
         <section class="tab tab-prompt active" data-tab-panel="prompt">
           <pre>{{ node.payload.prompt if node.payload else "" }}
@@ -121,8 +121,8 @@
          under a Details tab plus its own derived Diff tab (AC-B5/B8). #}
       <div class="tabs" data-tabs>
         <div class="tab-buttons" role="tablist">
-          <button type="button" class="tab-btn active" data-tab="details">Details</button>
-          <button type="button" class="tab-btn" data-tab="diff">Diff</button>
+          <button type="button" class="tab-btn active" data-tab="details">{{ t.tab_details }}</button>
+          <button type="button" class="tab-btn" data-tab="diff">{{ t.tab_diff }}</button>
         </div>
         <section class="tab tab-details active" data-tab-panel="details">
           {{ node_body(node) }}
@@ -145,14 +145,14 @@
        rows instantly as you type; pressing Enter runs the exhaustive search. #}
     <form class="raw-controls" method="get">
       <input type="hidden" name="limit" value="{{ limit }}">
-      <label class="raw-type-label">type
+      <label class="raw-type-label">{{ t.raw_type }}
         <select class="raw-type-filter" name="raw_type">
-          <option value="">(all types)</option>
-          {% for t in detail.raw.types %}<option value="{{ t }}"{% if t == raw_type %} selected{% endif %}>{{ t }}</option>{% endfor %}
+          <option value="">{{ t.raw_all_types }}</option>
+          {% for rt in detail.raw.types %}<option value="{{ rt }}"{% if rt == raw_type %} selected{% endif %}>{{ rt }}</option>{% endfor %}
         </select>
       </label>
-      <input type="search" class="raw-search" name="raw_q" value="{{ raw_q }}" placeholder="filter payload text…" aria-label="filter payload text">
-      <button type="submit" class="raw-search-all">Search all</button>
+      <input type="search" class="raw-search" name="raw_q" value="{{ raw_q }}" placeholder="{{ t.raw_filter_placeholder }}" aria-label="{{ t.raw_filter_placeholder }}">
+      <button type="submit" class="raw-search-all">{{ t.raw_search_all }}</button>
     </form>
     {% if detail.problems %}
     <ul class="raw-problem-list">
@@ -161,7 +161,7 @@
     {% endfor %}
     </ul>
     {% else %}
-    <p class="raw-no-problems">No problems reported.</p>
+    <p class="raw-no-problems">{{ t.no_problems }}</p>
     {% endif %}
     <ol class="raw-list" data-raw-shown="{{ detail.raw.window|length }}" data-raw-total="{{ detail.raw.total }}">
     {% for e in detail.raw.window %}
@@ -178,16 +178,17 @@
     {% endfor %}
     </ol>
     {% if not detail.raw.window %}
-    <p class="raw-empty-server">No matching events.</p>
+    <p class="raw-empty-server">{{ t.raw_no_matches }}</p>
     {% endif %}
-    <p class="raw-empty" hidden>No matching events.</p>
+    <p class="raw-empty" hidden>{{ t.raw_no_matches }}</p>
     {% if detail.raw.total > detail.raw.window|length %}
-    <a class="load-more" href="?limit={{ limit * 4 }}{% if raw_q %}&amp;raw_q={{ raw_q|urlencode }}{% endif %}{% if raw_type %}&amp;raw_type={{ raw_type|urlencode }}{% endif %}">Load more ({{ detail.raw.total - detail.raw.window|length }} hidden)</a>
+    <a class="load-more" href="?limit={{ limit * 4 }}{% if raw_q %}&amp;raw_q={{ raw_q|urlencode }}{% endif %}{% if raw_type %}&amp;raw_type={{ raw_type|urlencode }}{% endif %}">{{ t.raw_load_more }} ({{ detail.raw.total - detail.raw.window|length }} {{ t.raw_hidden }})</a>
     {% endif %}
   </div>
 {% endmacro %}
 <body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}"{% if focus_seq is not none %} data-focus="{{ focus_seq }}"{% endif %}>
   <header class="run-header">
+    <a class="lang-switch" href="?{{ switch_qs }}">{{ t.lang_switch }}</a>
     <h1>Run {{ detail.run.run_id }}{% if detail.run.status is not none %} &mdash; {{ detail.run.status }}{% endif %}</h1>
     <div class="phase-bar">
       {% for ph in detail.phases %}
@@ -199,16 +200,16 @@
   <main class="detail">
     <div class="tabs run-tabs" data-tabs>
       <div class="tab-buttons" role="tablist">
-        <button type="button" class="tab-btn active" data-tab="trace">Trace</button>
-        <button type="button" class="tab-btn" data-tab="timeline">Timeline</button>
-        <button type="button" class="tab-btn" data-tab="artifacts">Artifacts</button>
-        <button type="button" class="tab-btn" data-tab="raw">Raw</button>
+        <button type="button" class="tab-btn active" data-tab="trace">{{ t.tab_trace }}</button>
+        <button type="button" class="tab-btn" data-tab="timeline">{{ t.tab_timeline }}</button>
+        <button type="button" class="tab-btn" data-tab="artifacts">{{ t.tab_artifacts }}</button>
+        <button type="button" class="tab-btn" data-tab="raw">{{ t.tab_raw }}</button>
       </div>
       <section class="tab tab-trace active" data-tab-panel="trace">
         <div class="trace-layout">
           <section class="trace">
             {% if not detail.run.has_trace %}
-            <p class="no-trace-hint">no trace &mdash; no event log for this run</p>
+            <p class="no-trace-hint">{{ t.no_trace_line }}</p>
             {% endif %}
             {# The trace tree is a BOUNDED, MOVING window over the pre-order entry
                list (Aufgabe A): one global budget of at most 200 entries, each
@@ -230,7 +231,7 @@
         </div>
 
         <section class="problems">
-          <h2>Reader problems</h2>
+          <h2>{{ t.reader_problems }}</h2>
           {% if detail.problems %}
           <ul class="problem-list">
           {% for p in detail.problems %}
@@ -238,7 +239,7 @@
           {% endfor %}
           </ul>
           {% else %}
-          <p class="no-problems">No problems reported.</p>
+          <p class="no-problems">{{ t.no_problems }}</p>
           {% endif %}
         </section>
       </section>
@@ -250,12 +251,12 @@
          node's data-seq so a click selects it in Trace. #}
       <section class="tab tab-timeline" data-tab-panel="timeline">
         {% if not timeline.has_trace %}
-        <p class="no-trace-hint">no trace &mdash; no event log for this run</p>
+        <p class="no-trace-hint">{{ t.no_trace_line }}</p>
         {% else %}
         <div class="timeline-header">
-          <span class="tl-duration">duration {{ timeline.duration | fmt_duration }}</span>
-          {% if timeline.cost is not none %}<span class="tl-cost">cost {{ timeline.cost | fmt_cost }}</span>{% endif %}
-          {% for m in timeline.models %}<span class="tl-model">{{ m.model }} {{ m.tokens }} tokens</span>{% endfor %}
+          <span class="tl-duration">{{ t.tl_duration }} {{ timeline.duration | fmt_duration }}</span>
+          {% if timeline.cost is not none %}<span class="tl-cost">{{ t.tl_cost }} {{ timeline.cost | fmt_cost }}</span>{% endif %}
+          {% for m in timeline.models %}<span class="tl-model">{{ m.model }} {{ m.tokens }} {{ t.tl_tokens }}</span>{% endfor %}
         </div>
         <div class="timeline-lanes">
           {% for lane in timeline.lanes %}
@@ -285,12 +286,12 @@
               <span class="artifact-name">{{ a.name }}</span>
               {% if a.present %}
               <details class="artifact-wrap">
-                <summary class="artifact-open" data-artifact="{{ a.name }}">open</summary>
+                <summary class="artifact-open" data-artifact="{{ a.name }}">{{ t.artifact_open }}</summary>
                 <pre class="artifact-body" data-artifact-body></pre>
-                <a class="artifact-more" href="#" data-artifact-more hidden>Show more</a>
+                <a class="artifact-more" href="#" data-artifact-more hidden>{{ t.artifact_show_more }}</a>
               </details>
               {% else %}
-              <span class="artifact-missing">missing</span>
+              <span class="artifact-missing">{{ t.artifact_missing }}</span>
               {% endif %}
             </div>
             {% if a.drafts %}
@@ -300,12 +301,12 @@
                 <span class="draft-name">{{ d.name }}</span>
                 {% if d.present %}
                 <details class="artifact-wrap">
-                  <summary class="artifact-open" data-artifact="{{ d.name }}">open draft</summary>
+                  <summary class="artifact-open" data-artifact="{{ d.name }}">{{ t.artifact_open_draft }}</summary>
                   <pre class="artifact-body" data-artifact-body></pre>
-                  <a class="artifact-more" href="#" data-artifact-more hidden>Show more</a>
+                  <a class="artifact-more" href="#" data-artifact-more hidden>{{ t.artifact_show_more }}</a>
                 </details>
                 {% else %}
-                <span class="artifact-missing">missing</span>
+                <span class="artifact-missing">{{ t.artifact_missing }}</span>
                 {% endif %}
               </li>
             {% endfor %}

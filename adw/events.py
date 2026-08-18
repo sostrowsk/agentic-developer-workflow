@@ -85,8 +85,13 @@ class SpanHandle:
 class EventEmitter:
     """Active emitter bound to a target repo and a run."""
 
-    def __init__(self, repo: Path, run_id: str):
+    def __init__(self, repo: Path, run_id: str, enabled: bool = True):
         self._run_id = run_id
+        # Config-gesteuerter Abschalter (trace.enabled, D2/E6): bei False schreibt
+        # der Emitter nie ein events.jsonl. Das ist die EINE bewusste Ausnahme —
+        # KEINE Disabled-Markierung, KEINE Warnung, kein Eintrag in _disabled_runs;
+        # Fail-open, Locking, Schema und seq bleiben unangetastet.
+        self._enabled = enabled
         self._local = threading.local()
         # A single fail-open boundary around ALL path/key initialization: any
         # failure (including an unconvertible repo) permanently disables this
@@ -120,7 +125,9 @@ class EventEmitter:
     # -- fail-open registry --------------------------------------------------
 
     def _is_disabled(self) -> bool:
-        if self._broken:
+        if self._broken or not self._enabled:
+            # ``not self._enabled`` is the config switch: no file, no marker, no
+            # warning — indistinguishable from a run that simply never logs.
             return True
         with _registry_lock:
             return self._key in _disabled_runs

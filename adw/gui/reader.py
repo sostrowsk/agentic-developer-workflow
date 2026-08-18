@@ -11,6 +11,7 @@ unreadable. ``snapshot`` events and records of unknown type pass through
 unchanged — the reader computes no diffs.
 """
 
+import gzip
 import json
 import os
 from dataclasses import dataclass, field
@@ -58,9 +59,22 @@ class EventReader:
         result = ReadResult()
         if not os.path.exists(self._path):
             return result
-        with open(self._path, "rb") as fh:
-            fh.seek(self.offset)
-            data = fh.read()
+        if self._path.endswith(".gz"):
+            # A gzipped (pruned, finished) log has no live tail: read the whole
+            # decompressed content and window it by the same byte offset, so the
+            # parsed events, order, count and problem handling are identical to the
+            # plain form. A corrupt .gz yields no events (fail-soft) — the caller
+            # prefers events.jsonl whenever both are present.
+            try:
+                with gzip.open(self._path, "rb") as fh:
+                    full = fh.read()
+            except (OSError, EOFError):
+                return result
+            data = full[self.offset:]
+        else:
+            with open(self._path, "rb") as fh:
+                fh.seek(self.offset)
+                data = fh.read()
 
         read_start = self.offset
         consumed = 0

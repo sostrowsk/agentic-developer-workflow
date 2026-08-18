@@ -9,6 +9,8 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, Validation
 NonBlankStr = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 # strict=True: YAML-Booleans (true/false) sind keine gültigen Sekundenwerte.
 PositiveSeconds = Annotated[int, Field(gt=0, strict=True)]
+# strict=True: ein YAML-Boolean zählt NICHT als Ganzzahl (D1).
+NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
 
 
 class _StrictLoader(yaml.SafeLoader):
@@ -95,6 +97,16 @@ class CodexConfig(BaseModel):
     timeout: PositiveSeconds = 900
 
 
+class TraceConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Ereignis-Logging (§4.5). Default true; false = gar kein Ereignis-Log.
+    # strict=True: nur ein echter Boolean, kein 1/"yes".
+    enabled: bool = Field(default=True, strict=True)
+    # Automatisches Pruning: geschützte neueste Läufe. 0 = nie automatisch prunen.
+    keep_runs: NonNegativeInt = 20
+
+
 class AdwConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -103,6 +115,7 @@ class AdwConfig(BaseModel):
     e2e: E2eConfig | None = None
     ci: CiConfig = Field(default_factory=CiConfig)
     codex: CodexConfig = Field(default_factory=CodexConfig)
+    trace: TraceConfig = Field(default_factory=TraceConfig)
 
     @property
     def is_parallel_capable(self) -> bool:
