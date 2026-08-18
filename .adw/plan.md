@@ -1,267 +1,279 @@
-# Plan — Ein sprechender Schalter `--gates` für die Freigabe-Gates
+# Implementierungsplan — ADW Run Inspector: i18n (de/en) + `adw runs list`/`prune` + `trace:`-Config
 
-Dieser Plan implementiert `.adw/spec.md` und baut strikt gegen
-`.adw/contract.yaml`. Bei Konflikten gilt die Spec, insbesondere die
-Scope-Tabelle (vier Modi ↔ vier Altflag-Kombinationen) und AC1–AC9; die
-vorentschiedenen Punkte **E1–E6** und die Scope-Deckel des Issues stechen
-jede ältere Gewohnheit.
+Baut die letzten beiden offenen Schritte der GUI-SPEC (Schritt 12: i18n §7.5;
+Schritt 13: Retention §4.5). Beide sind in `.adw/spec.md` ausformuliert; dieser
+Lauf implementiert sie, er entwirft sie nicht neu. Bei Konflikten gilt die Spec.
+Reale Gates: `uv run ruff check .` und `uv run pytest -x -q` (E4 —
+GUI-SPEC-Abnahmepunkt 10 mit „flake8 + isort" ist veraltet und wird NICHT
+befolgt).
 
-**Single-Lane.** Es gibt genau einen Workstream, **backend** — die CLI-/
-Orchestrator-Schicht. Eine Frontend-Lane existiert nicht. Der gesamte Lauf
-ist eine **sprechende Bedienoberfläche über bereits funktionierender
-Mechanik**: `adw run` bekommt einen Schalter `--gates none|spec|plan|both`,
-der auf die bestehende 4-Wege-Gate-Matrix abbildet (heute aufgespannt durch
-die beiden unabhängigen Booleans `--no-approval` und `--spec-approval`).
-Die Gate-Mechanik selbst — Phasenreihenfolge, Exit-Codes, `adw approve`,
-`adw resume`, Wiederaufnahme-Semantik — **ändert sich nicht** (E3).
+Der Kontrakt `.adw/contract.yaml` pinnt die extern beobachtbare Fläche (CLI,
+Exit-Codes, Config-Keys, Sprachauswahl, Worktree-/Gzip-Zusagen). Der Build baut
+strikt dagegen. Interne Helper-Signaturen, Dictionary-Schlüssel und Markup sind
+frei.
 
-## Die Abbildung (aus der Spec, die eine Quelle der Wahrheit)
+## Ausgangspunkt
 
-| `--gates` | Spec-Gate | Plan-Gate | äquivalenter Altflag-Aufruf        |
-|-----------|-----------|-----------|-------------------------------------|
-| `none`    | nein      | nein      | `--no-approval`                     |
-| `spec`    | STOPP     | nein      | `--no-approval --spec-approval`     |
-| `plan`    | nein      | STOPP     | (keine Flags — **Default**)         |
-| `both`    | STOPP     | STOPP     | `--spec-approval`                   |
-
-Altflag-Auflösung für die Widerspruchsregel (AC5): die **vollständige**
-Altflag-Kombination löst zu genau einem Modus auf — `--no-approval` →
-`none`, `--spec-approval` → `both`, beide → `spec`, keins → `plan`. Keine
-Altflag-Kombination löst zu `plan` auf; `plan` ist nur über `--gates plan`
-oder gar kein Flag erreichbar.
-
-## Guardrails
-
-- **Nur CLI/Orchestrator.** Änderungen betreffen die Optionsfläche von
-  `adw run` und den Vorprüf-/Ausgabepfad vor der Run-Anlage (`adw/cli.py`,
-  `run`-Kommando um `cli.py:247`–`:319`) sowie — nur falls die gewählte
-  Abbildung es erfordert — die Gate-Auflösung in `adw/phases.py:337`–`:344`.
-  Die Gate-**Mechanik** — Phasenreihenfolge, Exit-Codes (0 = done,
-  2 = awaiting_approval, 1 = Eskalation/Fehler), `adw approve`, `adw resume`,
-  Wiederaufnahme-Semantik — bleibt exakt wie sie ist (E3). **Tabu und
-  unverändert** (Scope-Deckel): `adw/events.py`, `adw/snapshots.py`,
-  `adw/gui/**`. Ein dort gefundener Bug ist ein **Finding im Report, kein
-  Diff.**
-- **Altflags bleiben gültig und äquivalent** (E2). `--no-approval` und
-  `--spec-approval` werden weder entfernt noch als deprecated markiert,
-  solange sie widerspruchsfrei benutzt werden; bestehende Skripte und
-  Gewohnheiten laufen unverändert. Die drei Alias-Äquivalenzen (AC4) und
-  die heute beobachtbaren Verhaltensweisen bleiben erhalten.
-- **Default bleibt `plan`** (E1). `adw run` ohne Flags stoppt weiterhin vor
-  dem Build und NICHT nach der Spec — beobachtbar identisch zu
-  `--gates plan` und zu heute (AC3).
-- **Bestandsschutz ist harte Bedingung** (AC7/E4). Run-States im heutigen
-  Format (`skip_approval`-/`spec_approval`-Booleans) laden ohne Migration
-  oder manuelle Änderung und bleiben mit `adw resume` / `adw approve`
-  fortsetzbar; ihr Gate-Verhalten folgt weiterhin den gespeicherten
-  Booleans. Das bindet jede gewählte interne Abbildung.
-- **Ablehnung vor jeder Persistenz.** Ein ungültiger `--gates`-Wert (AC6)
-  und ein Widerspruch `--gates`↔Altflag (AC5) werden mit **Nichtnull-Exit**
-  und **klarer Meldung** abgelehnt, **bevor** `RunState.new`,
-  Run-Verzeichnis, Event-Log oder anderer persistenter Run-State entstehen —
-  reihenfolgeunabhängig, keine Vorrangregel, kein „das letzte gewinnt".
-- **Keine neue Laufzeit-Dependency** (E6); keine neue Konfigurationsfläche —
-  insbesondere **kein `gates`-Key in `.adw/config.yaml`** (Scope-Deckel /
-  Deferred). Keine interaktive Rückfrage, keine Bestätigungsabfrage. Kein
-  Gate-Wechsel mitten im Lauf (kein `adw resume --gates`). Keine Änderung an
-  Limits, Circuit-Breaker oder Review-Loop-Policy.
-- Reale Gates (E5): `uv run ruff check .` und `uv run pytest -x -q`.
-  `flake8`, `isort`, `black` tauchen nirgends auf — nicht als Dependency,
-  Konfiguration, Skript oder Kommando.
-
-## Ausgangspunkt (im Code verifiziert)
-
-- **Die Matrix existiert bereits.** `adw run` (`cli.py:247`) stellt die
-  beiden Booleans `--no-approval` (`no_approval`, `cli.py:261`) und
-  `--spec-approval` (`spec_approval`, `cli.py:264`) bereit. Beim Start
-  werden sie in den State gepinnt: `state.spec_approval = spec_approval`
-  (`cli.py:301`), durchgereicht via
-  `_build_context(..., skip_approval=no_approval, spec_approval=spec_approval)`
-  (`cli.py:314`). `run_spec_and_plan` löst die wirksamen Gates als
-  `skip = ctx.skip_approval or ctx.state.skip_approval` und
-  `spec_approval = ctx.spec_approval or ctx.state.spec_approval` auf
-  (`phases.py:343`–`:344`) und pinnt sie beim ersten Kontakt in den State
-  (`phases.py:337`–`:342`). Diese Mechanik treibt der Schalter an; sie wird
-  nicht neu entworfen.
-- **Die Start-Ausgabe existiert bereits.** `run` druckt
-  `Run {run_id} gestartet (Phase: {phase})` (`cli.py:318`); AC8 verlangt den
-  **wirksamen Gate-Modus** (`none`/`spec`/`plan`/`both`) beim Start jedes
-  gültigen neuen Runs — das ist der natürliche Ort dafür.
-- **Die Vorprüf-Reihenfolge ist etabliert.** `run` validiert bereits „genau
-  eine Issue-Quelle", lädt/validiert die Config und führt
-  `_preflight_worktree` aus, **bevor** `RunState.new` und das erste
-  `state.save` laufen (`cli.py:274`–`:313`). Wertprüfung und
-  Widerspruchsprüfung für `--gates` gehören in genau dieses Fenster vor
-  `RunState.new`, sodass eine Ablehnung keinen persistenten Run hinterlässt
-  (AC5/AC6) — im Stil des bestehenden `_fail(...)`-Pfads.
-- **19 Alt-Run-States liegen in `.adw/runs/`.** Sie tragen
-  `skip_approval`/`spec_approval`-Booleans und sind das
-  AC7-Regressionsziel; eine State-Fixture im heutigen Format muss
-  unverändert resumier- und approvebar bleiben.
+- Die GUI wird in `adw/gui/app.py` über serverseitige Jinja-Templates
+  (`run_list.html`, `run_detail.html`) ausgeliefert; die Detailansicht trägt
+  zustandsrelevante Query-Parameter (`limit`, `offset`, `tools_offset`,
+  `focus`, `raw_q`, `raw_type`).
+- Alle GUI-Lesewege verwenden heute `events.jsonl`; `adw/gui/reader.py` ist
+  inkrementell und byte-offset-basiert. Es gibt keinerlei Gzip-Behandlung.
+- Die CLI basiert auf Typer in `adw/cli.py`; eine `runs`-Gruppe existiert nicht.
+- Run-State liegt unter `.adw/runs/<run_id>/`, Worktrees unter
+  `.adw/runs/<run_id>/trees/<lane>`, Snapshot-Refs unter `refs/adw/<run_id>/*`,
+  Lane-Branches unter `adw/<run_id>/*`. Config wird in `adw/config.py` strikt
+  validiert (bestehender `ConfigError`-Pfad).
 
 ## Workstream: backend
 
-### 1. `--gates`-Option ergänzen und vor jeder Run-Anlage auflösen
+Single-Lane-Projekt (keine `frontend`-Lane); GUI-Handler und Templates gehören
+zum Backend-Workstream. Empfohlene Reihenfolge: erst A (i18n, in sich
+geschlossen), dann der Retention-Unterbau (Gzip-Reader → Datum → Prune-Kern)
+und darauf die CLI und Config.
 
-- Ergänze `adw run` um `--gates <modus>` mit den exakt vier zulässigen
-  Werten `none | spec | plan | both`, **Default `plan`** (E1/AC3). Die
-  Option steht neben den weiterhin vorhandenen `--no-approval` /
-  `--spec-approval` (E2).
-- Löse im Fenster vor `RunState.new` (neben der bestehenden Issue-Quellen-/
-  Config-/Worktree-Vorprüfung, `cli.py:274`–`:296`) den **wirksamen Modus**
-  aus `--gates` und den beiden Altflags auf:
-  - **AC6 — ungültiger Wert.** Jeder andere `--gates`-Wert als die vier
-    zulässigen wird mit Nichtnull-Exit und einer **klaren Meldung, die alle
-    vier zulässigen Werte nennt**, abgelehnt, bevor ein Run angelegt oder
-    persistenter State geschrieben wird. Bestehenden `_fail(...)`-Pfad
-    wiederverwenden.
-  - **AC5 — Widerspruch.** Ist `--gates` zusammen mit **mindestens einem**
-    Altflag angegeben, löse die **vollständige** Altflag-Kombination zu
-    einem Modus auf (`--no-approval` → `none`, `--spec-approval` → `both`,
-    beide → `spec`; nicht gesetzte Altflags zählen als nicht gesetzt).
-    Akzeptiere **nur**, wenn dieser aufgelöste Modus dem expliziten
-    `--gates`-Wert entspricht; sonst Ablehnung mit Nichtnull-Exit und
-    klarer Meldung, **bevor** Run/State geschrieben wird —
-    reihenfolgeunabhängig, ohne Vorrang, ohne „das letzte gewinnt".
-    Explizit akzeptiert: `--gates none --no-approval`,
-    `--gates spec --no-approval --spec-approval`,
-    `--gates both --spec-approval`. Explizit abgelehnt (repräsentativ):
-    `--gates spec --spec-approval` (Altflags lösen zu `both` auf),
-    `--gates none --spec-approval`, `--gates both --no-approval` sowie
-    `--gates plan` mit **jedem** Altflag (keine Altflag-Kombination löst zu
-    `plan` auf). `--gates` **ohne** Altflags ist immer widerspruchsfrei.
-  - Der aufgelöste wirksame Modus ist genau ein Wert aus
-    `{none, spec, plan, both}` und wird sowohl für die Start-Ausgabe
-    (Schritt 3) als auch zum Treiben der Gates (Schritt 2) verwendet.
-- **Weder `--gates` noch Altflag → wirksamer Modus `plan`** (E1/AC3),
-  beobachtbar identisch zu heute.
+### A — i18n de/en (§7.5, AC A1–A6)
 
-### 2. Die beiden bestehenden Gate-Entscheidungen aus dem Modus treiben (E4, gebunden durch AC7)
+1. **Sprachkatalog `adw/gui/i18n.py` (A1).** Neues Modul mit einem
+   `dict[str, dict[str, str]]` (`CATALOG`) für genau `de` und `en`, identische
+   Schlüsselmengen, kein Wert unübersetzt (ausgenommen sprachneutrale Begriffe
+   und technische Bezeichner: Run-IDs, Event-Typen, CLI-Namen). Schlüssel decken
+   die gesamte übersetzbare UI-Chrome aus `run_list.html` und `run_detail.html`
+   ab (Reiternamen, Spaltenköpfe, Labels, Navigations- und Hinweistexte —
+   inklusive der heutigen englischen Strings „Answer", „Prompt", „Tools",
+   „previous"/„more", „no trace", der Findings-Tabellenköpfe usw.).
 
-- Bilde den wirksamen Modus auf die beiden Gate-Entscheidungen ab, die die
-  Mechanik bereits konsumiert, sodass jeder Modus exakt seine Matrix-Zeile
-  erzeugt (AC1). In der Semantik der bestehenden Booleans:
+2. **Sprachauswahl (A2/A3).** Funktion in `i18n.py`, die pro GUI-Request die
+   Sprache in exakt dieser Reihenfolge bestimmt: `?lang=de|en` → Sprach-Cookie →
+   erste unterstützte Sprache aus `Accept-Language` (gemäß Header-Reihenfolge) →
+   `en`. Nicht unterstützte oder fehlende Werte einer Stufe fallen zur nächsten
+   Stufe durch; letzter Fallback immer `en`. NUR eine explizite GÜLTIGE
+   `?lang=`-Auswahl signalisiert dem Handler, das Sprach-Cookie auf diese
+   Sprache zu setzen (A3); ungültige Query-Werte setzen kein Cookie.
 
-  | wirksamer Modus | Spec-Gate | Plan-Gate | bestehende Boolean-Bedeutung |
-  |-----------------|-----------|-----------|------------------------------|
-  | `none`          | nein      | nein      | `skip_approval=true`, `spec_approval=false` |
-  | `spec`          | ja        | nein      | `skip_approval=true`, `spec_approval=true`  |
-  | `plan`          | nein      | ja        | `skip_approval=false`, `spec_approval=false` |
-  | `both`          | ja        | ja        | `skip_approval=false`, `spec_approval=true`  |
+3. **Handler-Integration `adw/gui/app.py` (A4).** In `run_list_page` und
+   `run_detail_page` die Sprache aus dem `Request` bestimmen, das passende
+   Katalog-Dict (plus aktuellen Sprachcode) in den Template-Context reichen und
+   bei expliziter gültiger `?lang=`-Auswahl das Cookie auf der `HTMLResponse`
+   setzen. Nur UI-Chrome kommt aus dem Katalog; Inhalte (`node.label`, Payloads,
+   Artefakt-Bodies, Gate-Output, `_raw_view`-Text) bleiben unberührt und rendern
+   sprachunabhängig byteidentisch. Der `?lang=`-Parameter darf die bestehende
+   Fenster-/Fokus-Logik (`offset`, `tools_offset`, `focus`, `limit`, `raw_*`)
+   nicht verändern. Die JSON-API bleibt fachlich unverändert; i18n betrifft die
+   gerenderte HTML-Chrome.
 
-- **Ob** dafür die beiden bestehenden State-Felder wiederverwendet werden
-  oder ein eigenes Feld hinzukommt, ist Umsetzungsentscheidung (E4). Die
-  **harte Bedingung** ist AC7: bestehende `state.json`-Dateien im heutigen
-  Format laden und verhalten sich unverändert. Die einfachste Abbildung —
-  dieselben zwei Booleans ableiten, die die Auflösung heute schon pinnt
-  (`phases.py:337`–`:344`) — hält AC7 automatisch ein; ein neues Feld muss
-  bei Abwesenheit auf die gespeicherten Booleans zurückfallen. Pinne den
-  wirksamen Modus beim Run-Start so, wie `--spec-approval` heute gepinnt
-  wird (`cli.py:301`), damit ein späteres `adw resume` / `adw approve` —
-  das die CLI-Flags nie sieht — dieselben Gates rekonstruiert.
-- Die Gate-**Mechanik** (Phasenreihenfolge, Exit-Codes, Approval-Zustände,
-  `adw approve`, `adw resume`) bleibt unangetastet (E3): nur die beiden
-  Boolean-Eingänge werden jetzt aus dem Modus gespeist. `adw resume` und
-  `adw approve` bekommen weder neue Optionen noch geänderte Hilfetexte;
-  dort wird kein `--gates` eingeführt.
+4. **Templates konsumieren den Katalog (A4/A5).** `run_list.html` und
+   `run_detail.html` ersetzen die fest verdrahteten Chrome-Strings durch
+   Katalog-Zugriffe (über den in den Context gereichten Dict). `<html lang>`
+   spiegelt die gewählte Sprache. Im Header ein **Sprachwechsel-Link** (A5): er
+   zeigt auf dieselbe Ansicht mit umgeschaltetem `?lang=`, erhält ALLE für die
+   Ansicht relevanten Query-Parameter (insb. `offset`, `tools_offset`, `focus`,
+   `limit`, `raw_q`, `raw_type`) und die Knotenauswahl und ändert nur die
+   Sprache. Kein Umschalter darüber hinaus (Deferred).
 
-### 3. Wirksamen Gate-Modus beim Start ausgeben (AC8)
+5. **Regressionstests A (`tests/test_gui_language.py` bleibt unverändert grün,
+   E3).** Neue Tests (eigene Datei, z. B. `tests/test_i18n.py`):
+   - **Paritäts-Test (A6):** läuft `CATALOG["de"]` gegen `CATALOG["en"]` —
+     keine Schlüssel-Differenz, kein Wert unübersetzt im Sinne von A1.
+   - **Auswahlreihenfolge (A2):** `?lang` schlägt Cookie, Cookie schlägt
+     `Accept-Language`, `Accept-Language` schlägt Default; unbekannte Werte
+     fallen durch; ein Request ganz ohne Sprachangabe rendert vollständig
+     englisch.
+   - **Cookie (A3):** `?lang=de` setzt das Cookie; ein Folge-Request ohne `lang`
+     rendert deutsch; ein ungültiger `?lang=`-Wert setzt kein Cookie.
+   - **Umfang (A4):** deutscher Request übersetzt die Chrome, lässt aber
+     Inhalte (Prompt-/Agent-/Findings-/Gate-/Payload-Text) byteidentisch.
+   - **Zustandserhalt (A5):** der Header-Wechsel-Link trägt `offset`,
+     `tools_offset`, `focus` und die Knotenauswahl unverändert weiter, ändert
+     nur `lang`.
 
-- Gib beim Start jedes gültigen neuen Runs den wirksamen Modus als einen
-  der Werte `none`/`spec`/`plan`/`both` aus — bei `--gates`-Aufrufen, bei
-  reinen Altflag-Aufrufen, bei zulässigen Mischformen und beim impliziten
-  Default — als Erweiterung oder Begleitung der bestehenden Ausgabe
-  `Run {run_id} gestartet (Phase: {phase})` (`cli.py:318`). Der genaue
-  Wortlaut ist nicht gepinnt; der Kontrakt verlangt nur, dass der wirksame
-  Modus beim Start beobachtbar ist.
+### B — Retention-Unterbau
 
-### 4. `adw run --help` aktualisieren (AC9)
+6. **Transparenter Gzip-Reader (C6).** `adw/gui/reader.py` (bzw. die davon
+   abhängigen Lesewege) liest `events.jsonl` UND `events.jsonl.gz` mit derselben
+   fachlichen Ausgabe: dieselben Events in derselben Reihenfolge, dieselbe
+   Ereigniszahl, dieselbe `bad_line`-/`seq_gap`-Behandlung, dieselben abgeleiteten
+   Ansichten. Gzip ausschließlich über die Standardbibliothek (E7). Liegen beide
+   Dateien vor, ist `events.jsonl` maßgeblich (konsistent zu C5). Der Byte-Offset-
+   Tail von `EventReader` bleibt für den unkomprimierten Fall wie heute; für den
+   `.gz`-Fall darf der vollständige dekomprimierte Inhalt gelesen werden — ohne
+   das bestehende `events.jsonl`-Verhalten (inkl. Live-Tail-Semantik) zu ändern.
+   Alle GUI-Lesewege, die heute `run_dir / "events.jsonl"` auflösen
+   (`_read_events`, `_list_runs`, der SSE-Tail, die Diff-/Events-Routen),
+   erkennen die `.gz`-Alternative über dieselbe `_contained`-Absicherung.
+   Run-Erkennung und -Auflösung bleiben auch für Läufe intakt, die nur State
+   oder nur eines der beiden Logformate haben; ein komprimierter Lauf liefert
+   weiterhin seine Snapshot-Events und damit die Diff-Ansichten über die
+   erhaltenen Refs.
 
-- Ersetze die zwei unkommentierten Booleans im Hilfetext durch eine
-  Beschreibung der Matrix: die vier `--gates`-Werte, **`plan` als Default**,
-  die Haltepunkte je Modus (Spec-Gate / Plan-Gate) und die weiterhin
-  gültige Bedeutung der beiden Altflags. Keine Verhaltensänderung — nur
-  Hilfetext.
+7. **Kanonisches Lauf-Datum (B4).** Ein Modul der Retention-Logik (z. B.
+   `adw/retention.py`) ermittelt pro Lauf ein deterministisches UTC-Datum:
+   primär der Zeitstempel des Start-Ereignisses aus dem Event-Log (`.jsonl` oder
+   `.gz`), Fallback die mtime des persistierten State im Laufordner, ersatzweise
+   die des Laufordners — ein Datum ist damit immer bestimmbar. Offset-Zeitstempel
+   werden umgerechnet, naive als UTC interpretiert; Datei-mtimes sind
+   Epoch-basiert. Tie-Breaker bei Gleichstand: Run-ID lexikografisch. Dasselbe
+   Datum dient Anzeige, `--keep`-Sortierung und `--older-than`-Prüfung; dieselbe
+   Lauf-Aufzählung (Run-ID, Phase, Datum, Ereigniszahl, Log-Größe/-Format)
+   verwenden `runs list`, manuelles und automatisches Pruning identisch.
 
-### 5. Tests über die CLI (AC1–AC9; ca. 12–18 neue Tests)
+8. **Prune-Kern (C1–C5, C7).** In `adw/retention.py`:
+   - **Aufzählung + Auswahl (C1):** Läufe des Repos auflisten, nach kanonischem
+     Datum sortieren, die neuesten `N` schützen, die übrigen vom ältesten zum
+     neuesten als Kandidaten; `--older-than` filtert über
+     `run_time <= now_utc - DAYS*24h` mit einmal pro Aufruf ermitteltem
+     `now_utc`, Gleichheit an der Grenze zählt als alt genug.
+   - **Prune-Fähigkeit (C2):** nur State in `done`/`escalated`; jeder andere
+     Kandidat wird mit Run-ID + Phase als übersprungen berichtet, vollständig
+     erhalten.
+   - **Schutz uncommitteter Worktrees (C4):** vor der ersten Mutation ALLE
+     registrierten Worktrees unterhalb des Kandidaten-Laufordners
+     inventarisieren (alle Lanes, nicht eine einzelne bekannte) und deren Status
+     prüfen. Hat IRGENDEIN Worktree uncommittete Änderungen, wird der gesamte
+     Lauf übersprungen (Run-ID + Grund); kein Worktree gewaltsam entfernt, kein
+     Bestandteil gelöscht; andere sichere Kandidaten laufen weiter.
+   - **Löschendes Pruning (C3, C7):** pro prune-fähigem Lauf in fester
+     Reihenfolge — erst alle Worktree-Registrierungen über die Git-Worktree-
+     Verwaltung (nutzt/erweitert `adw/worktrees.py`, KEIN rmtree der Trees),
+     dann die Snapshot-Refs `refs/adw/<run_id>/*`, zuletzt der Laufordner. Der
+     Laufordner wird nie entfernt, solange nicht alle Worktree-Registrierungen
+     sauber behandelt sind. Lane-Branches `adw/<run_id>/*` bleiben erhalten. Ein
+     Teilfehler lässt Erreichtes bestehen und benennt den erreichten Zustand
+     (welche Schritte fehlten); erneuter `prune` setzt sicher fort — jeder
+     Schritt ist idempotent, bereits entfernte Worktrees/Refs sind kein Fehler,
+     ein teilweise bearbeiteter Lauf bleibt über sein Laufverzeichnis Kandidat.
+   - **`--gzip` (C5):** pro prune-fähigem Kandidaten ausschließlich
+     `events.jsonl` → `events.jsonl.gz`, atomar (Tempdatei im selben Verzeichnis
+     → Validierung → `os.replace`), Quelle erst danach entfernt. „Bereits
+     komprimiert" NUR wenn `.gz` existiert UND `.jsonl` fehlt; liegen beide vor,
+     ist `.jsonl` maßgeblich und wird neu komprimiert, die alte `.gz` ersetzt.
+     Eine korrupte `.gz` gilt nie als Ergebnis. Erhalten: Laufordner, State,
+     Worktrees samt Registrierung, alle Snapshot-Refs, Lane-Branches (E10).
 
-Alle Acceptance Criteria werden durch automatisierte Tests **über die CLI**
-belegt (Aufruf von `run`/`resume`/`approve` wie in den bestehenden
-CLI-Tests) mit Assertions darauf, wo ein Lauf stoppt, welchen Exit-Code er
-hat und ob ein persistenter Run entstanden ist. Keine Tests jenseits der
-Acceptance Criteria.
+### C — CLI und Config
 
-- **AC1 — die vier Zeilen.** Je ein Test pro `--gates`-Wert über die CLI,
-  der prüft, wo der Lauf anhält: `none` hält an keinem Gate; `spec` hält
-  nach der Spec und vor dem Plan im bestehenden Spec-Approval-Zustand und
-  hält nach der Spec-Freigabe **nicht** am Plan-Gate; `plan` hält ohne
-  Spec-Halt vor dem Build; `both` hält zuerst nach der Spec und nach deren
-  Freigabe erneut vor dem Build.
-- **AC2 — `--gates none` erreicht `done`.** Ein fehlerfreier Lauf erreicht
-  `done` (Exit 0), ohne an einem Gate zu stoppen; eine Eskalation hält ihn
-  weiterhin an (Exit 1) — der einzige Halt in diesem Modus.
-- **AC3 — Default == `plan`.** `adw run` ohne jedes Flag ist beobachtbar
-  identisch zu `--gates plan`: kein Spec-Halt, ein Plan-Halt vor dem Build.
-- **AC4 — die drei Alias-Äquivalenzen**, je ein Test: `--no-approval` ==
-  `--gates none`, `--spec-approval` == `--gates both`,
-  `--no-approval --spec-approval` == `--gates spec`. Erreichte
-  Gate-Zustände und weiterer Laufverlauf stimmen mit dem jeweiligen
-  `--gates`-Modus überein; Altflag-Aufrufe verhalten sich unverändert.
-- **AC5 — Widerspruch.** Repräsentative abgelehnte Kombinationen
-  (`--gates spec --spec-approval`, `--gates none --spec-approval`,
-  `--gates both --no-approval` sowie `--gates plan` mit jedem Altflag)
-  enden mit Nichtnull-Exit und klarer Meldung und erzeugen **keinen**
-  persistenten Run-State; die akzeptierten redundanten Kombinationen
-  (`--gates none --no-approval`, `--gates spec --no-approval
-  --spec-approval`, `--gates both --spec-approval`) laufen an.
-  Reihenfolgeunabhängigkeit für mindestens ein Paar belegen.
-- **AC6 — ungültiger Wert.** Ein `--gates`-Wert außerhalb der vier wird mit
-  Nichtnull-Exit abgelehnt; die Meldung nennt alle vier zulässigen Werte;
-  es entsteht kein Run und kein persistenter State.
-- **AC7 — Bestandsschutz (Regression).** Eine Run-State-Fixture im heutigen
-  Format (`skip_approval`, `spec_approval`) lädt ohne Migration und bleibt
-  mit `adw resume` resumierbar und mit `adw approve` approvebar; ihr
-  Gate-Verhalten folgt weiterhin den gespeicherten Booleans.
-- **AC8 — Modus-Ausgabe beim Start.** Für einen `--gates`-Aufruf, einen
-  Altflag-Aufruf und den impliziten Default wird der wirksame Modus
-  (`none`/`spec`/`plan`/`both`) beim Run-Start ausgegeben.
-- **AC9 — `--help`.** Die Ausgabe von `adw run --help` beschreibt `--gates`
-  mit seinen vier Werten, `plan` als Default, die Haltepunkte je Modus und
-  die weiterhin gültige Bedeutung der beiden Altflags.
+9. **CLI-Gruppe `runs` (`adw/cli.py`, B1–B3, C1, C7).** Neue Typer-Gruppe
+   `runs` mit genau den Unterkommandos `list` und `prune`:
+   - `adw runs list [--repo PATH]` — zeigt pro erkanntem Lauf mindestens Run-ID,
+     Phase, Datum, Ereigniszahl, Log-Größe (zählt `.jsonl` wie `.gz`); Legacy-
+     Läufe mit nicht ermittelbaren Werten sichtbar als unbekannt. Exit `0` auch
+     ohne Läufe; nicht vorhandenes/nicht verwendbares `--repo` → klare Meldung,
+     Exit `1`. Ohne `--repo` gilt wie bei den bestehenden Kommandos das
+     aktuelle Verzeichnis.
+   - `adw runs prune [--repo PATH] [--keep N] [--older-than DAYS] [--gzip]` —
+     ruft den Prune-Kern (Task 8), gibt pro Kandidaten Run-ID + Ergebnis
+     (gelöscht / komprimiert / bereits komprimiert / übersprungen mit Grund).
+     Exit `0` bei vollständigem Lauf (Sicherheits-Skips sind kein Fehler); Exit
+     `1` bei ungültigem Repo oder unsicher abgebrochener Löschung/Kompression;
+     Exit `2` bei ungültigem `N`/`DAYS` (nichtnegative Ganzzahl) OHNE jede
+     Änderung an Run-Daten. Genau diese Flächen — keine zusätzlichen Flags,
+     keine interaktive Rückfrage, kein Default, der mehr löscht als `--keep 20`
+     (E5).
 
-### 6. Verifikation und Übergabe
+10. **`trace:`-Config (`adw/config.py`, D1).** Neues optionales `TraceConfig`
+    (`enabled: bool` strict, Default `true`; `keep_runs` nichtnegative Ganzzahl
+    strict, Booleans zählen nicht, Default `20`) am `AdwConfig`. Fehlender Block/
+    fehlende Keys → Defaults. Ungültige Werte über den bestehenden `ConfigError`-
+    Pfad mit klarer Meldung, bevor ein Lauf startet.
 
-- Führe `uv run ruff check .` und `uv run pytest -x -q` aus (E5); die
-  bestehende Suite bleibt ohne Regression grün.
-- Prüfe den Diff: `adw/events.py`, `adw/snapshots.py`, `adw/gui/**`
-  unverändert; Gate-Mechanik (Phasenreihenfolge, Exit-Codes,
-  `adw approve`/`adw resume`) unverändert; Altflags weiterhin gültig und
-  äquivalent; kein `gates`-Key in `.adw/config.yaml`; keine neue
-  Laufzeit-Dependency; `flake8`/`isort`/`black` nirgends vorhanden.
+11. **Konfigurierbares Ereignis-Logging (`adw/events.py`, D2, E6).** Die EINE
+    bewusste Ausnahme: der Emitter respektiert `trace.enabled`. Bei `false` wird
+    kein `events.jsonl` angelegt/erweitert; Lauf, State, Phasen und Resume
+    bleiben unberührt. KEINE Disabled-Markierung, KEINE Emitter-Warnung dafür.
+    Fail-open bei echten internen Fehlern, `_disabled_runs`-Mechanismus, Locking,
+    Schema und `seq`-Vergabe bleiben unverändert; `adw/snapshots.py` eingefroren.
+    Verdrahtung an der Emitter-Konstruktion in `adw/cli.py` (der Config-Wert ist
+    dort verfügbar), konsistent auf allen Pfaden, die einen Emitter bauen —
+    neuer Lauf, `resume` und `approve` — ohne die `EventEmitter`-Fail-open-
+    Grenze zu verletzen.
+
+12. **Automatisches Pruning (`adw/cli.py` + `adw/retention.py`, D3).** Nach einem
+    erfolgreich in Phase `done` abgeschlossenen Lauf (der normale Rückkehrpfad
+    von `_execute`) wird löschend gepruned, sofern `trace.keep_runs > 0`; der
+    Wert ist die Zahl der geschützten neuesten Läufe, ohne Altersgrenze. Gleiche
+    Inventarisierung, Kandidatenauswahl, Terminalitätsprüfung, Dirty-Worktree-
+    Sicherung und Löschreihenfolge wie manuelles löschendes Pruning (C2–C4, C8).
+    `keep_runs: 0` deaktiviert es; eskalierte/unterbrochene/auf Freigabe
+    wartende Läufe lösen keines aus. Fail-open: ein Fehler ändert weder die
+    persistierte Phase `done` noch den Erfolgs-Exit-Code des Laufs, wird aber
+    sichtbar in der Kommando-Ausgabe gemeldet; die schrittweise Fehler-
+    Invariante aus C7 gilt, ein späterer Aufruf setzt sicher fort.
+
+### Regressionstests B/C (mind. das Genannte, DoD)
+
+13. Tests auf der beobachtbaren Oberfläche (CLI, Config, Dateisystem, Git, HTTP)
+    in echten Temp-Repos:
+    - exaktes Behalten von `N` Läufen (C8); Schutz nicht-terminaler Läufe
+      (übersprungen + benannt, C2);
+    - Entfernen eines Laufs MIT registriertem Worktree — danach kein Eintrag in
+      `git worktree list`, keine Waise laut `git worktree prune --dry-run`,
+      Lane-Branch erhalten (C3);
+    - ein Lauf mit MINDESTENS ZWEI Lane-Worktrees, darunter ein Dirty-Worktree
+      in der nicht zuerst gefundenen Lane → gesamter Lauf übersprungen; im
+      sauberen Fall alle Worktrees waisenfrei entfernt (C4);
+    - vollständiges Überspringen bei uncommitteten Änderungen (C4);
+    - deterministische Auswahl bei Datums-Gleichstand und bei Legacy-Läufen ohne
+      Start-Ereignis (B4);
+    - `--older-than` an der exakten Tagesgrenze (Gleichheit = alt genug) und bei
+      Zeitstempeln mit unterschiedlichen UTC-Offsets (C1/B4);
+    - Fortsetzen eines teilweise fehlgeschlagenen löschenden Prunings durch
+      erneuten Aufruf (C7);
+    - Erhalt von Refs UND Worktree bei `--gzip` (C5/E10); Gzip-Roundtrip durch
+      Reader und GUI (C6);
+    - unterbrochener Kompressionszustand (`.jsonl` und `.gz` gleichzeitig bzw.
+      korrupte `.gz`) — Quelle maßgeblich, erneutes `--gzip` repariert (C5);
+    - Defaults und Validierung von `trace.enabled`/`trace.keep_runs` (D1);
+      ausbleibendes Logging bei `enabled: false` (D2);
+    - automatisches Pruning nur nach erfolgreichem Lauf; `keep_runs: 0`
+      deaktiviert es; ein scheiterndes Auto-Pruning lässt den Lauf konsistent
+      auf `done` + Erfolgs-Exit-Code (D3);
+    - `list`: Exit `0` ohne Läufe, Exit `1` bei kaputtem `--repo`, sichtbare
+      Unbekannt-Werte für Legacy-Läufe (B2/B3).
+
+    Keine Tests außerhalb der Acceptance Criteria und der Definition of Done.
+    Richtwert: rund 22–30 neue Tests für A und B zusammen.
+
+### Verifikation und Scope-Kontrolle
+
+14. Gates ausführen (`uv run ruff check .`, `uv run pytest -x -q`) und den
+    finalen Diff auf die Invarianten prüfen:
+    - `adw/snapshots.py` unverändert; `adw/events.py` nur um den
+      config-gesteuerten Abschalter verändert;
+    - keine Übersetzung dynamischer Inhalte, keine dritte Sprache, keine neue
+      Laufzeit-Dependency, keine GUI-Seite für `runs list`;
+    - keine zusätzlichen Prune-Flags, keine Löschung von Lane-Branches;
+    - Fensterung, DOM-Deckel, Performance-Measures, Limits, Circuit-Breaker,
+      Review-Loop-Policy und Phasenreihenfolge unverändert;
+    - kein `flake8`, `isort` oder `black` (E4).
 
 ## Definition of Done
 
-1. AC1–AC9 sind durch automatisierte Tests **über die CLI** abgedeckt,
-   einschließlich des AC7-Bestandsschutz-Regressionstests — ungefähr
-   **12–18 neue Tests**.
-2. Die bestehende Testsuite bleibt ohne Regression grün.
-3. `uv run ruff check .` und `uv run pytest -x -q` sind grün.
-4. `flake8`, `isort`, `black` tauchen weder als Dependency noch als
-   Konfiguration, Kommando oder Prüfschritt auf (E5).
-5. Keine neue Laufzeit-Dependency und keine Änderung außerhalb des Scopes —
-   insbesondere `adw/events.py`, `adw/snapshots.py`, `adw/gui/**`
-   unverändert (E6 / Scope-Deckel).
+- Alle Acceptance Criteria A1–A6, B1–B4, C1–C8, D1–D3 gelten und sind durch
+  Regressionstests auf der beobachtbaren Oberfläche belegt.
+- Die i18n-Regression deckt Dictionary-Parität, Auswahl per Query/Cookie/
+  `Accept-Language`, englischen Default, unangetastete Inhalte und Zustandserhalt
+  ab; `tests/test_gui_language.py` bleibt unverändert grün.
+- Die Retention-Regression deckt mindestens die in Task 13 gelisteten Fälle ab.
+- Keine neuen Laufzeit-Dependencies; `adw/snapshots.py`, Fensterung, DOM-Deckel,
+  Performance-Measures, Limits, Circuit-Breaker, Review-Loop-Policy und
+  Phasenreihenfolge ohne Verhaltensänderung.
+- Gates grün: `uv run ruff check .` und `uv run pytest -x -q`.
 
-## Deferred (bewusst nicht gebaut)
+## Deferred (deliberately not built)
 
-Diese Punkte sind defensibel, aber in diesem Lauf außerhalb des Scopes. Ein
-Review-Finding, das einen davon oder einen vorentschiedenen Punkt (E1–E6)
-fordert, wird mit Begründung abgewiesen, nicht umgesetzt.
+Bindet auch den Review-Loop: Ein Finding, das einen dieser Punkte oder
+einen vorentschiedenen Punkt (E1–E10) fordert, wird abgewiesen und mit
+Begruendung dokumentiert, nicht umgesetzt.
 
-- Ein Default für `--gates` in `.adw/config.yaml` (pro Repo
-  vorkonfigurierbar).
-- Entfernen oder Deprecaten der Altflags.
-- Weitere Haltepunkte (Stopp vor dem Push, vor dem Merge, nach der
-  Integration) oder ein frei konfigurierbarer Gate-Satz.
-- Ein Gate-Wechsel mitten im Lauf, etwa über `adw resume --gates ...`.
-- Benachrichtigung beim Erreichen eines Gates.
+- Retention nach Groesse statt nach Anzahl/Alter; Kompression von etwas
+  anderem als `events.jsonl`.
+- Ein Sprachumschalter jenseits des Header-Links (Nutzerprofil,
+  persistente Einstellung ueber das Cookie hinaus); Uebersetzung von
+  Inhalten; eine dritte Sprache.
+- `runs list` als GUI-Seite; Suche, Sortierung oder Filter darin.
+- Ein Prune-Vorschaumodus (`--dry-run`) oder eine Undo-Funktion.
+- Loeschen von Lane-Branches (`adw/<run_id>/*`) und Aufraeumen von
+  Worktrees BEHALTENER Laeufe — eigener Vorgang. NICHT deferred ist der
+  Worktree des Laufs, den `prune` ohnehin loescht: er liegt im Laufordner
+  und ist davon nicht trennbar (C3, E9).

@@ -1,28 +1,38 @@
 openapi: 3.1.0
 info:
-  title: ADW CLI — der `--gates`-Schalter für die Freigabe-Gates
+  title: ADW Run Inspector — i18n (de/en) + `adw runs list`/`prune` + `trace:`-Config
   version: 1.0.0
   description: |
-    Minimaler externer Vertrag für den einzelnen Workstream backend.
-    Dies ist ein CLI-Feature: es gibt KEINE HTTP-Oberfläche, `paths` ist
-    leer; die gepinnte Fläche liegt in den `x-adw-*`-Erweiterungen.
+    Minimaler externer Vertrag für den einzelnen Workstream `backend`
+    (Single-Lane-Projekt — es gibt keine `frontend`-Lane). Gepinnt wird nur
+    die extern beobachtbare Fläche gemäß Contract-Hinweis des Issues:
 
-    Gemäß Contract-Hinweis des Issues werden genau diese extern
-    beobachtbaren Flächen gepinnt:
-      (1) die vier zulässigen `--gates`-Werte und ihre Haltepunkte;
-      (2) der Default `plan`;
-      (3) die drei Altflag-Alias-Äquivalenzen;
-      (4) die Ablehnung von Widerspruch und ungültigem Wert —
-          Nichtnull-Exit, kein persistenter Run;
-      (5) die Zusage, dass bestehende Run-States unverändert resumier-
-          und approvebar bleiben.
+      (1) die CLI von `adw runs list` und `adw runs prune` — Flags, Exit-Codes,
+          was entfernt bzw. komprimiert wird, die Nie-Pruning-Zusage für
+          nicht-terminale Läufe;
+      (2) die Config-Keys `trace.enabled` und `trace.keep_runs` samt Defaults
+          und Validierung;
+      (3) die Sprachauswahl-Reihenfolge samt englischem Default (das eine
+          beobachtbare Template-Verhalten);
+      (4) die Worktree-Zusagen des löschenden Prunings und der `--gzip`-Form;
+      (5) der transparente Gzip-Reader (dieselbe fachliche Ausgabe aus
+          `events.jsonl` wie aus `events.jsonl.gz`).
 
-    Nicht gepinnt sind insbesondere: der Meldungswortlaut (jenseits von
-    "klare Meldung vorhanden; beim ungültigen Wert nennt sie die vier
-    zulässigen Werte"), die interne State-Abbildung (bestehende Felder
-    wiederverwenden vs. eigenes Feld), Helper-Signaturen, der genaue
-    Wortlaut der Start-Ausgabe sowie Testanzahl und Fixtures. Dieses
-    Vorhaben fügt keine HTTP-Route, kein Event und keinen Config-Key hinzu.
+    NICHT gepinnt: interne Helper-Signaturen, Modul-/Dateizuschnitt,
+    Dictionary-Schlüssel und deren Wortlaut, Markup/CSS, der genaue
+    Meldungswortlaut (jenseits der genannten Muss-Inhalte), die
+    Ausgabespalten-Reihenfolge von `runs list`, Testanzahl/Fixtures, die
+    interne Repräsentation des kanonischen Lauf-Datums sowie
+    Implementierungsmechanik (Kompressions-/Löschalgorithmus, Schrittfolgen,
+    Bibliothekswahl) — gepinnt sind stattdessen deren beobachtbare Zusagen.
+
+    Dieser Lauf fügt KEINE HTTP-Route, KEIN Event und KEINE neue Laufzeit-
+    Dependency hinzu und entfernt keine Route. Beobachtbar ändern sich: die
+    beiden HTML-Routen (Sprachverhalten nach x-adw-template-behavior) und
+    ALLE Event-Log-lesenden Routen (Antwortverhalten für `events.jsonl.gz`
+    bzw. gz-only-Läufe nach x-adw-reader-behavior) — enumeriert in
+    x-adw-scope.changed_http_routes. Der Config-Schalter `trace.enabled` ist
+    ausschließlich über sein beobachtbares Verhalten gepinnt (x-adw-config).
 
 servers: []
 
@@ -35,154 +45,282 @@ x-adw-scope:
     - cli_option
     - cli_exit_code
     - cli_stdout
-    - run_state_compat
+    - config_key
+    - filesystem_effect
+    - git_effect
+    - template_behavior
+    - reader_behavior
   added_http_routes: []
+  removed_http_routes: []
+  changed_http_routes:
+    # Sprachverhalten (x-adw-template-behavior) UND Gzip-Lesen (x-adw-reader-behavior):
+    - "GET /"
+    - "GET /runs/{repo}/{run_id}"
+    # nur Gzip-Lesen (x-adw-reader-behavior) — Antwortverhalten für gz-/gz-only-Läufe:
+    - "GET /api/runs"
+    - "GET /api/runs/{repo}/{run_id}"
+    - "GET /api/runs/{repo}/{run_id}/events"
+    - "GET /api/runs/{repo}/{run_id}/diff"
+    - "GET /api/runs/{repo}/{run_id}/stream"   # SSE
+  unchanged_http_routes:              # lesen kein Event-Log; Antwortverhalten unverändert
+    - "GET /api/runs/{repo}/{run_id}/artifacts/{name}"
+    - "GET /static/*"
   added_events: []
+  new_runtime_dependencies: []
+
+# --- (1) CLI: die neue Gruppe `runs` mit `list` und `prune` -------------------
 
 x-adw-cli:
-  command: adw run
-  options:
-    gates:
-      spelling: "--gates <modus>"
-      allowed_values:
-        - none
-        - spec
-        - plan
-        - both
-      implicit_default: plan
-    legacy:
-      no_approval:
-        spelling: "--no-approval"
-        status: supported
-        deprecated: false
-      spec_approval:
-        spelling: "--spec-approval"
-        status: supported
-        deprecated: false
+  group:
+    command: adw runs
+    help_lists_group: true          # `adw --help` führt eine `runs`-Gruppe auf (B1)
+    subcommands:
+      - list
+      - prune
 
-  modes:
-    none:
-      spec_gate: false
-      plan_gate: false
-      successful_run:
-        final_state: done
-        exit_code: 0
-      escalation_exit_code: 1
-      note: "Läuft durch bis done; das Einzige, was ihn anhält, ist eine
-        Eskalation."
-    spec:
-      spec_gate: true
-      plan_gate: false
-      note: "Stopp nach der Spec, vor dem Plan; nach der Spec-Freigabe KEIN
-        Halt am Plan-Gate."
-    plan:
-      spec_gate: false
-      plan_gate: true
-      note: "Stopp nur vor dem Build. Default — beobachtbar identisch zum
-        heutigen `adw run` ohne Flags."
-    both:
-      spec_gate: true
-      plan_gate: true
-      note: "Stopp zuerst nach der Spec und nach deren Freigabe erneut vor
-        dem Build."
+  list:
+    command: adw runs list
+    options:
+      repo:
+        spelling: "--repo <path>"
+        default: current_working_directory   # wie die bestehenden Kommandos
+    shows_per_run_at_least:                   # B2 — Spaltenauswahl/Reihenfolge nicht gepinnt
+      - run_id
+      - phase
+      - date            # kanonisches Lauf-Datum nach x-adw-run-date
+      - event_count     # zählt events.jsonl UND events.jsonl.gz
+      - log_size        # Größe von events.jsonl bzw. events.jsonl.gz
+    unknown_value_rendering: |
+      Ein bei einem Legacy-Lauf nicht ermittelbarer Wert (z. B. die
+      Ereigniszahl ohne Log) wird sichtbar als unbekannt dargestellt, statt den
+      Aufruf scheitern zu lassen (B2). Die konkrete Darstellung ist nicht gepinnt.
+    exit_codes:
+      success: 0                    # auch ohne Läufe (B3)
+      repo_missing_or_unusable: 1   # verständliche Meldung (B3)
 
-  legacy_resolution:
-    rule: |
-      Sobald mindestens ein Altflag angegeben ist, wird die vollständige
-      Kombination beider Altflags ausgewertet; ein nicht angegebenes
-      Altflag zählt als nicht gesetzt. Keine Altflag-Kombination löst zu
-      `plan` auf — `plan` ist nur über `--gates plan` oder gar kein Flag
-      erreichbar.
-    map:
-      neither: plan
-      "--no-approval": none
-      "--spec-approval": both
-      "--no-approval --spec-approval": spec
-    alias_equivalence: |
-      Jeder Altflag-Aufruf ist beobachtbar äquivalent zu dem `--gates`-
-      Modus, auf den er abbildet: erreichte Gate-Zustände und weiterer
-      Laufverlauf stimmen überein. Für bestehende Altflag-Aufrufe ändert
-      sich nichts.
+  prune:
+    command: adw runs prune
+    options:
+      repo:
+        spelling: "--repo <path>"
+        default: current_working_directory
+      keep:
+        spelling: "--keep <N>"
+        default: 20                 # C1 — kein Default löscht mehr als --keep 20 (E5)
+        accepts: nonnegative_integer
+      older_than:
+        spelling: "--older-than <DAYS>"
+        default: none               # kein Altersfilter → alle nicht geschützten Kandidaten
+        accepts: nonnegative_integer
+      gzip:
+        spelling: "--gzip"
+        default: false
+    no_additional_flags: true       # E5 — genau diese Fläche, keine weiteren Flags
+    no_interactive_prompt: true     # E5
+    no_dry_run: true                # Deferred: kein --dry-run
+    candidate_selection:
+      rule: |
+        `--keep N` schützt die neuesten N Läufe des Repos; die übrigen werden
+        vom ältesten zum neuesten bearbeitet. Ist `--older-than DAYS` gesetzt,
+        werden unter den nicht geschützten nur Läufe bearbeitet, deren
+        kanonisches Datum mindestens DAYS Tage zurückliegt. Neu/alt, Reihen-
+        folge und Alter bemessen sich ausschließlich am kanonischen Lauf-Datum
+        samt Tie-Breaker (siehe x-adw-run-date). (C1)
+      age_predicate: "run_time <= now_utc - DAYS * 24h"   # Gleichheit an der Grenze = alt genug
+      now_utc_evaluated: once_per_invocation
+    per_candidate_result:            # C7 — pro bearbeitetem Kandidat: Run-ID + Ergebnis
+      - deleted
+      - compressed
+      - already_compressed
+      - skipped_with_reason
+    exit_codes:
+      success: 0                     # vollständig ausgeführt; Sicherheits-Skips sind KEIN Fehler (C7)
+      repo_invalid_or_unsafe_completion: 1
+      invalid_flag_value: 2          # ungültiges N/DAYS → üblicher CLI-Fehler, KEINE Run-Daten-Änderung (C1)
 
-  mixed_option_validation:
-    rule: |
-      Ist `--gates` zusammen mit mindestens einem Altflag angegeben, ist
-      der Aufruf genau dann gültig, wenn der explizite Wert dem durch die
-      vollständige Altflag-Kombination aufgelösten Modus entspricht.
-      Andernfalls Ablehnung mit Nichtnull-Exit und klarer Meldung, BEVOR
-      ein Run angelegt oder persistenter Run-State geschrieben wird —
-      reihenfolgeunabhängig, keine Vorrangregel, kein "das letzte gewinnt".
-      `--gates` ohne Altflags ist immer widerspruchsfrei.
-    accepted_examples:
-      - "--gates none --no-approval"
-      - "--gates spec --no-approval --spec-approval"
-      - "--gates both --spec-approval"
-    rejected_examples:
-      - "--gates spec --spec-approval"   # Altflags lösen zu both auf
-      - "--gates none --spec-approval"
-      - "--gates both --no-approval"
-      - "--gates plan --no-approval"     # nichts löst zu plan auf
-      - "--gates plan --spec-approval"
-    conflicting_combination:
-      accepted: false
-      exit: nonzero
-      error: clear_conflict_message
-      persistent_run_created: false
-      persistent_run_state_written: false
+# --- (1b) Nie-Pruning-Zusage für nicht-terminale Läufe ------------------------
 
-  invalid_mode:
-    accepted: false
-    exit: nonzero
-    error_must_name_allowed_values:
-      - none
-      - spec
-      - plan
-      - both
-    persistent_run_created: false
-    persistent_run_state_written: false
+x-adw-prune-safety:
+  prunable_states:                   # C2 — nur diese Phasen sind prune-fähig
+    - done
+    - escalated
+  non_terminal_run:
+    action: skipped
+    reported_with: [run_id, phase]   # übersprungen UND benannt, nie stillschweigend
+    fully_preserved: true            # gilt für löschendes Pruning, --gzip und Auto-Pruning
+  uncommitted_worktree:              # C4 — Schutz uncommitteter Arbeit
+    trigger: any_worktree_of_the_candidate_has_uncommitted_changes
+    action: skip_entire_run
+    forcibly_removed: none           # auch kein sauberer Worktree desselben Laufs
+    other_components_preserved:
+      - run_dir
+      - state
+      - event_log
+      - snapshot_refs
+      - lane_branches
+    reported_with: [run_id, reason]
+    other_safe_candidates: still_processed
+    promise: "prune verwirft niemals fremde Arbeit"
 
-  valid_run_output:
-    rule: |
-      Beim Start jedes gültigen neuen Runs wird der wirksame Gate-Modus
-      als genau einer der Werte `none`, `spec`, `plan` oder `both`
-      ausgegeben. Dies gilt für explizite `--gates`-Werte, reine
-      Altflag-Aufrufe, zulässige Mischformen und den impliziten Default.
-      Der genaue Wortlaut ist nicht gepinnt.
+# --- (1c) Löschendes Pruning: Dateisystem-/Git-Effekt und Fehler-Invariante ---
 
-  help:
-    command: adw run --help
-    must_describe:
-      - "die vier Werte none, spec, plan und both"
-      - "plan als Default"
-      - "den Spec- und Plan-Haltepunkt jedes Modus"
-      - "die weiterhin gültige Bedeutung von --no-approval"
-      - "die weiterhin gültige Bedeutung von --spec-approval"
+x-adw-prune-delete:
+  removes_per_prunable_run:          # C3
+    - "run directory .adw/runs/<run_id>/"
+    - "snapshot refs refs/adw/<run_id>/*"
+    - "ALL registered git worktrees under .adw/runs/<run_id>/trees/<lane>"
+  # Der Entfernungsmechanismus (Git-Worktree-Verwaltung statt rmtree) ist
+  # Plan-Guardrail (Task 8); gepinnt sind hier nur die post_conditions.
+  preserved:
+    - "lane branches adw/<run_id>/*"   # C3/C8 — Branches bleiben erhalten
+  post_conditions:                     # C3/C8 — beobachtbar über git
+    - "git worktree list lists no worktree of the run"
+    - "git worktree prune --dry-run reports no orphan for the run"
+    - "for every deleted run: no snapshot ref and no orphaned worktree registration remain"
+  partial_failure_guarantees:          # C7 — beobachtbare Zusagen; die Schrittfolge selbst
+    #                                    ist Implementierung und steht im Plan
+    - "zu KEINEM Zeitpunkt existiert eine verwaiste Worktree-Registrierung für einen bereits entfernten Laufordner (der Laufordner verschwindet nie vor der sauberen Behandlung aller seiner Registrierungen)"
+    - "bereits erfolgreich entfernte Bestandteile bleiben entfernt; ein Teilfehler macht nichts rückgängig"
+    - "die Ausgabe benennt für den betroffenen Lauf den erreichten Zustand (welche Bestandteile fehlen)"
+    - "ein erneuter prune-Aufruf setzt sicher fort: der teilweise bearbeitete Lauf ist weiterhin Kandidat, bereits entfernte Worktrees/Refs sind kein Fehler, die verbleibenden Bestandteile werden nachgeholt"
+  exact_retention:                     # C8
+    condition: "alle Läufe terminal, sicher löschbar und alt genug"
+    result: "prune --keep N lässt exakt die neuesten N Laufordner zurück"
 
-x-adw-existing-state-compatibility:
-  persisted_fields:
-    - skip_approval
-    - spec_approval
-  rule: |
-    Ein Run-State im bisherigen Format wird ohne Migration oder manuelle
-    Änderung geladen. `adw resume` und `adw approve` setzen ihn fort; sein
-    Gate-Verhalten richtet sich weiterhin nach den gespeicherten
-    Boolean-Werten.
-  not_pinned: |
-    Ob ein neues State-Feld hinzukommt, ist Umsetzungsentscheidung; falls
-    ja, muss es bei Abwesenheit auf die gespeicherten Booleans
-    zurückfallen.
+# --- (1d) `--gzip` als behaltende Form ---------------------------------------
 
-x-adw-unchanged:
-  gate_mechanics:
-    - phase_order
-    - approval_states
-    - approve_command
-    - resume_command
-    - resume_semantics
-  exit_codes:
-    done: 0
-    awaiting_approval: 2
-    escalation_or_error: 1
-  rule: |
-    Die Gate-Mechanik bleibt unangetastet: dieser Lauf baut die
-    Eingabefläche, nicht das Verhalten.
+x-adw-prune-gzip:
+  compresses: "events.jsonl -> events.jsonl.gz"   # ausschließlich (C5)
+  guarantees:                         # beobachtbar; der Schreibmechanismus steht im Plan
+    - "events.jsonl wird erst entfernt, wenn eine vollständige, gültige events.jsonl.gz vorliegt — ein Abbruch verliert nie die maßgebliche Quelle"
+    - "eine korrupte/unvollständige .gz gilt nie als Ergebnis; solange events.jsonl existiert, ist sie maßgeblich"
+    - "erneutes --gzip repariert einen unterbrochenen Zustand (ersetzt die alte .gz)"
+  already_compressed_iff: "events.jsonl.gz exists AND events.jsonl is absent"
+  both_present_means: "interrupted earlier attempt -> events.jsonl is authoritative, recompress"
+  preserved:                          # C5/E10 — die behaltende Form
+    - run_dir
+    - state
+    - worktrees_with_registration
+    - "all snapshot refs refs/adw/<run_id>/*"
+    - lane_branches
+  note: "ohne Refs verlöre genau dieser behaltene Lauf seinen Diff-Reiter (E10)"
+
+# --- (1e) kanonisches Lauf-Datum (B4) ----------------------------------------
+
+x-adw-run-date:
+  used_for: [list_display, keep_ordering, older_than_age_check]
+  primary: "timestamp of the run's start event (events.jsonl or events.jsonl.gz)"
+  fallbacks_in_order:
+    - "mtime of the persisted state in the run directory"
+    - "mtime of the run directory itself"
+  always_determinable: true
+  normalization: |
+    Alle Zeitstempel auf UTC normalisiert: Offset-behaftete werden umgerechnet,
+    naive (offsetlose) als UTC interpretiert; Datei-Zeitstempel sind Epoch-
+    basiert und damit bereits UTC.
+  tie_breaker: "run_id lexicographically"   # deterministisch bei Gleichstand
+
+# --- (2) Config: der `trace:`-Block ------------------------------------------
+
+x-adw-config:
+  file: .adw/config.yaml
+  block: trace
+  optional: true                     # fehlender Block/Keys → genannte Defaults (D1)
+  keys:
+    enabled:
+      type: strict_boolean           # nur echter Boolean akzeptiert (D1)
+      default: true
+      false_effect: "kein events.jsonl angelegt/erweitert; kein Disabled-Marker, keine Emitter-Warnung; Lauf, State, Phasen und Resume unberührt (D2)"
+    keep_runs:
+      type: nonnegative_integer      # Booleans zählen NICHT als Integer (D1)
+      default: 20
+      zero_effect: "kein automatisches Pruning (D3)"
+  invalid_value: "über den bestehenden Config-Fehlerpfad mit klarer Meldung abgewiesen, BEVOR ein Lauf startet (D1)"
+  auto_prune:                        # D3
+    trigger: "run finished in phase done AND trace.keep_runs > 0"
+    behaves_like: manual_deleting_prune   # gleiche Regeln/Zusagen C2–C4, C8
+    protected_newest: keep_runs
+    older_than_filter: none
+    never_triggered_by: [escalated, interrupted, awaiting_approval]
+    fail_open:
+      run_phase_unchanged: done
+      run_exit_code_unchanged: true
+      error_reporting: "sichtbar in der Kommando-Ausgabe des Laufs, nicht verschluckt"
+      step_invariant: same_as_x-adw-prune-delete.partial_failure_guarantees
+
+# --- (3) Sprachauswahl + englischer Default (das beobachtbare Template-Verhalten)
+
+x-adw-template-behavior:
+  language:
+    supported:
+      - en
+      - de
+    default: en                      # A2 — letzter Fallback ist immer en
+    selection_order:                 # A2 — pro GUI-Request, genau diese Reihenfolge
+      - "query parameter ?lang=de|en"
+      - "language cookie"
+      - "first supported language from Accept-Language"
+      - en
+    fallthrough: "nicht unterstützte/fehlende Werte einer Stufe fallen zur nächsten Stufe durch"
+    request_without_any_language: renders_fully_english
+    cookie:
+      set_by: "explicit VALID ?lang=de|en selection"     # A3
+      invalid_query_sets_cookie: false
+      used_by: "subsequent requests without ?lang (per selection_order)"
+    translated: ui_chrome_only       # A4 — Labels, Reiternamen, Spaltenköpfe, Navigations-/Hinweistexte
+    never_translated:                # A4/E2 — Inhalte rendern sprachunabhängig byteidentisch
+      - prompts
+      - agent_output
+      - findings
+      - artifact_bodies
+      - gate_output
+      - tool_inputs_and_outputs
+      - raw_event_payloads
+    switch_link:
+      location: header               # A5 — ein Link, kein Umschalter darüber hinaus (Deferred)
+      preserves_query_params: [offset, tools_offset, focus, limit, raw_q, raw_type, and_all_view_relevant_params]
+      preserves_node_selection: true
+      changes_only: language
+    regression_guard: |
+      tests/test_gui_language.py bleibt OHNE Änderung grün, einschließlich
+      `"Antwort" not in html` und `"kein Event-Log" not in html` am
+      Default-Request (E3).
+
+# --- (4/5) transparenter Gzip-Reader (C6) ------------------------------------
+
+x-adw-reader-behavior:
+  transparent_gzip:
+    applies_to_routes:               # C6 — alle Event-Log-lesenden Routen (s. x-adw-scope)
+      - "GET /"
+      - "GET /runs/{repo}/{run_id}"
+      - "GET /api/runs"
+      - "GET /api/runs/{repo}/{run_id}"
+      - "GET /api/runs/{repo}/{run_id}/events"
+      - "GET /api/runs/{repo}/{run_id}/diff"
+      - "GET /api/runs/{repo}/{run_id}/stream"
+    reads: [events.jsonl, events.jsonl.gz]
+    both_present_prefers: events.jsonl   # konsistent zu --gzip (C5/C6)
+    identical_output:                # dieselbe fachliche Ausgabe aus beiden Formen
+      - same_events_same_order
+      - same_event_count
+      - same_bad_line_handling
+      - same_seq_gap_handling
+      - same_derived_views
+    run_discoverable_with_gz_only: true   # ein komprimierter Lauf bleibt auffindbar
+    gzipped_run_in_gui: "vollständig lesbar inkl. Diff-Ansichten über die erhaltenen Refs"
+
+# --- Unverändertes beobachtbares Verhalten ------------------------------------
+# (Datei-Einfrierungen — adw/snapshots.py, events.py-Änderungsgrenze — sind
+# Plan-Guardrails, kein Vertragsbestandteil; siehe Plan Tasks 11 und 14.)
+
+x-adw-unchanged-observable:
+  event_log:
+    schema_and_seq: unchanged        # Format/Schema von events.jsonl inkl. seq-Vergabe
+    fail_open: "ein Logging-Fehler lässt nie einen Lauf scheitern (wie bisher)"
+  http:
+    routes_not_listed_as_changed: unchanged   # s. x-adw-scope.unchanged_http_routes
+  gui:
+    windowing_dom_cap_performance_measures: unchanged
+  cli:
+    limits_circuit_breaker_review_loop_policy_phase_order: unchanged
+  gui_exit_state_compat: "bestehende Run-States bleiben unverändert resumier-/approvebar"
