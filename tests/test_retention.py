@@ -413,3 +413,79 @@ def test_prune_continues_with_stale_worktree_registration(target_repo):
     assert prune_dry(target_repo).strip() == ""  # no orphaned registration
     assert refs_of(target_repo, rid) == []
     assert branch_exists(target_repo, lane_branch(rid, "backend"))
+
+
+# --- P1: a symlinked .adw/runs must never make pruning reach outside the repo -----
+
+
+def test_prune_rejects_runs_root_symlinked_outside_repo(target_repo, tmp_path):
+    """If ``.adw/runs`` itself is a symlink to an external directory, pruning must
+    refuse (exit 1) instead of treating the external children as runs — a parent
+    symlink must not recreate the out-of-scope data-loss path."""
+    external = tmp_path / "external"
+    ext_run = external / "aaaa1111"
+    ext_run.mkdir(parents=True)
+    log = ext_run / "events.jsonl"
+    log.write_text('{"seq": 1, "type": "run", "kind": "start", "payload": {}}\n')
+    original = log.read_bytes()
+    adw = target_repo / ".adw"
+    adw.mkdir(exist_ok=True)
+    os.symlink(external, adw / "runs")
+
+    gz = prune(target_repo, "--keep", "0", "--gzip")
+    assert gz.exit_code == 1, gz.output
+    assert log.read_bytes() == original and not (ext_run / "events.jsonl.gz").exists()
+
+    deletion = prune(target_repo, "--keep", "0")
+    assert deletion.exit_code == 1, deletion.output
+    assert ext_run.is_dir() and log.exists()  # external files untouched
+
+
+# --- P1: a worktree dirtied AFTER the inventory check is never force-discarded -----
+
+
+def test_prune_never_force_removes_worktree_dirtied_after_inventory(target_repo, monkeypatch):
+    """A change arriving between the cleanliness inventory and removal (a race) must
+    not be silently discarded: git's own removal-time check refuses, and prune turns
+    that into a safety skip that preserves the worktree and the whole run."""
+    import adw.retention as retention_mod
+    from adw.worktrees import create_lane_worktree
+
+    rid = "aaaaeeee"
+    make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+    add_ref(target_repo, rid, 1)
+    wt = create_lane_worktree(target_repo, rid, "backend", "staging")
+    (wt / "late_change.txt").write_text("uncommitted work\n")
+    # The inventory sees clean; the worktree is really dirty at removal time.
+    monkeypatch.setattr(retention_mod, "_worktree_dirty", lambda p: False)
+
+    result = prune(target_repo, "--keep", "0")
+    assert result.exit_code == 0, result.output  # a safety skip, not a crash
+    assert rid in result.output
+    assert (wt / "late_change.txt").exists()  # never force-discarded
+    assert run_dir(target_repo, rid).is_dir()
+    assert refs_of(target_repo, rid) != []
+    assert rid in worktree_list(target_repo)
+
+
+# --- P2: a partial multi-candidate failure reports the achieved state -------------
+
+
+def test_prune_reports_completed_and_failed_on_partial_failure(target_repo):
+    """When a later candidate fails after an earlier one was already processed, the
+    CLI reports BOTH the completed candidate and the failing run's state, and exits
+    1 — earlier mutations remain applied and are named (C7)."""
+    ok = "aaaa0001"
+    bad = "aaaa0002"
+    make_run(target_repo, ok, _iso(datetime(2026, 8, 1)))  # older → processed first
+    rd_bad = make_run(target_repo, bad, _iso(datetime(2026, 8, 2)))
+    gzdir = rd_bad / "events.jsonl.gz"  # a non-empty dir makes os.replace fail
+    gzdir.mkdir()
+    (gzdir / "x").write_text("x\n")
+
+    result = prune(target_repo, "--keep", "0", "--gzip")
+    assert result.exit_code == 1, result.output
+    assert ok in result.output  # the completed candidate is reported
+    assert bad in result.output  # the failing run's achieved state is reported
+    assert (run_dir(target_repo, ok) / "events.jsonl.gz").is_file()  # really compressed
+    assert (rd_bad / "events.jsonl").is_file()  # authoritative log kept

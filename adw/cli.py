@@ -639,18 +639,29 @@ def runs_prune(
     if keep < 0 or (older_than is not None and older_than < 0):
         raise typer.Exit(2)
     repo = _require_repo(repo)
+
+    def echo_result(result: retention.PruneResult) -> None:
+        line = f"{result.run_id}: {result.action}"
+        if result.reason:
+            line += f" ({result.reason})"
+        typer.echo(line)
+
     try:
         results = retention.prune(repo, keep=keep, older_than=older_than, gzip_mode=gzip)
     except retention.RetentionError as exc:
+        # Report the achieved state before failing (C7): the candidates fully
+        # processed before the error, and the partial state of the failing run —
+        # earlier mutations remain applied and are named, then exit 1.
+        for result in exc.results:
+            echo_result(result)
+        if exc.failed is not None:
+            echo_result(exc.failed)
         raise _fail(f"Pruning nicht sicher abgeschlossen: {exc}") from exc
     if not results:
         typer.echo("Nichts zu prunen.")
         return
     for result in results:
-        line = f"{result.run_id}: {result.action}"
-        if result.reason:
-            line += f" ({result.reason})"
-        typer.echo(line)
+        echo_result(result)
 
 
 def _maybe_auto_prune(repo: Path, config: AdwConfig, state: RunState) -> None:

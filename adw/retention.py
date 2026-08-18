@@ -21,7 +21,7 @@ from pathlib import Path
 
 from adw.env import safe_env
 from adw.state import RUN_ID_RE, RUNS_RELPATH, RunState, StateNotFoundError
-from adw.worktrees import remove_registered_worktree
+from adw.worktrees import WorktreeError, remove_registered_worktree
 
 _GIT_TIMEOUT = 60
 # The phases whose runs may be pruned — a run's state is its resume basis, so a
@@ -52,7 +52,16 @@ class PruneResult:
 
 
 class RetentionError(Exception):
-    """A prune step could not be completed safely."""
+    """A prune step could not be completed safely.
+
+    Carries the per-candidate progress made BEFORE the failure so the CLI can report
+    the achieved state (which runs were fully processed, and the partial state of the
+    failing one) instead of discarding it (C7)."""
+
+    def __init__(self, message: str, *, results=None, failed=None):
+        super().__init__(message)
+        self.results: list[PruneResult] = results or []
+        self.failed: PruneResult | None = failed
 
 
 # --- git helpers ---------------------------------------------------------------
@@ -71,8 +80,17 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
 # --- containment: never read/replace/delete anything outside the runs tree ------
 
 
-def _runs_root(repo: Path) -> Path:
-    return (repo.resolve() / RUNS_RELPATH).resolve()
+def _runs_root(repo: Path) -> Path | None:
+    """The resolved ``.adw/runs`` directory — but ONLY if it stays within the
+    resolved repository (mirrors adw/gui/app.py::_runs_root). A ``.adw/runs`` that is
+    itself a symlink to somewhere OUTSIDE the repo would otherwise become the
+    containment root and expose arbitrary external directories to deletion/gzip.
+    Returns None when it escapes or collapses onto the repo root."""
+    repo_root = repo.resolve()
+    runs_root = (repo_root / RUNS_RELPATH).resolve()
+    if runs_root == repo_root or not runs_root.is_relative_to(repo_root):
+        return None
+    return runs_root
 
 
 def _contained(path: Path, root: Path) -> Path | None:
@@ -192,7 +210,9 @@ def scan_runs(repo: Path) -> list[RunRecord]:
     runs_dir = repo / RUNS_RELPATH
     runs_root = _runs_root(repo)
     records: list[RunRecord] = []
-    if not runs_dir.is_dir():
+    if runs_root is None or not runs_dir.is_dir():
+        # An escaping/invalid runs root contributes nothing — listing never reaches
+        # outside the repo. Deleting/gzip pruning rejects it outright (see prune()).
         return records
     for child in sorted(runs_dir.iterdir()):
         if not RUN_ID_RE.fullmatch(child.name):
@@ -296,13 +316,37 @@ def _delete_run(repo: Path, rec: RunRecord, runs_root: Path) -> PruneResult:
     for wt in worktrees:
         if wt.exists() and _worktree_dirty(wt):
             return PruneResult(rec.run_id, "skipped", reason="uncommitted changes in worktree")
+    # Remove WITHOUT --force: a worktree that turned dirty between the inventory
+    # check and here (a race) is rejected by git's own removal-time check rather
+    # than force-discarded. Such a refusal is a safety skip — no ref or run
+    # directory is deleted (they are removed only AFTER every worktree is gone).
     for wt in worktrees:
-        remove_registered_worktree(repo, wt)  # idempotent, keeps the lane branch
+        try:
+            remove_registered_worktree(repo, wt)  # keeps the lane branch, no --force
+        except WorktreeError as exc:
+            return PruneResult(
+                rec.run_id, "skipped", reason=f"worktree not safely removable: {exc}"
+            )
     for ref in _snapshot_refs(repo, rec.run_id):
         res = _git(repo, "update-ref", "-d", ref)
         if res.returncode != 0 and _ref_exists(repo, ref):
-            raise RetentionError(f"git update-ref -d {ref}: {res.stderr.strip()}")
-    shutil.rmtree(rec.run_dir, ignore_errors=False)
+            raise RetentionError(
+                f"{rec.run_id}: Worktrees entfernt, Ref-Löschung fehlgeschlagen "
+                f"({ref}): {res.stderr.strip()}",
+                failed=PruneResult(
+                    rec.run_id, "failed", reason=f"worktrees removed; ref {ref} remains"
+                ),
+            )
+    try:
+        shutil.rmtree(rec.run_dir, ignore_errors=False)
+    except OSError as exc:
+        raise RetentionError(
+            f"{rec.run_id}: Worktrees und Refs entfernt, Laufordner-Löschung "
+            f"fehlgeschlagen: {exc}",
+            failed=PruneResult(
+                rec.run_id, "failed", reason="worktrees and refs removed; run dir remains"
+            ),
+        ) from exc
     return PruneResult(rec.run_id, "deleted")
 
 
@@ -343,7 +387,12 @@ def _compress_run(rec: RunRecord, runs_root: Path) -> PruneResult:
         except (OSError, RetentionError) as exc:
             tmp.unlink(missing_ok=True)
             # The plain log is still present and authoritative; surface the failure.
-            raise RetentionError(f"{rec.run_id}: Kompression fehlgeschlagen: {exc}") from exc
+            raise RetentionError(
+                f"{rec.run_id}: Kompression fehlgeschlagen: {exc}",
+                failed=PruneResult(
+                    rec.run_id, "failed", reason="events.jsonl unverändert erhalten"
+                ),
+            ) from exc
         plain.unlink()  # the source is removed only after a valid .gz is in place
         return PruneResult(rec.run_id, "compressed")
     # No plain source: already compressed ONLY if the .gz exists AND is valid.
@@ -369,6 +418,10 @@ def prune(
     worktree (C4). Returns one result per PROCESSED candidate (C7)."""
     now = now or datetime.now(UTC)
     runs_root = _runs_root(repo)
+    if runs_root is None:
+        # An escaping/invalid .adw/runs is unsafe to prune (could reach outside the
+        # repo): a clear failure, never a silent empty run collection (P1).
+        raise RetentionError(f"{repo}: .adw/runs liegt außerhalb des Repositorys — unsicher")
     records = scan_runs(repo)
     candidates = _candidates(records, keep)
     threshold = None if older_than is None else now - timedelta(days=older_than)
@@ -379,8 +432,16 @@ def prune(
         if rec.phase not in _TERMINAL_PHASES:
             results.append(PruneResult(rec.run_id, "skipped", reason=f"phase {rec.phase}"))
             continue
-        if gzip_mode:
-            results.append(_compress_run(rec, runs_root))
-        else:
-            results.append(_delete_run(repo, rec, runs_root))
+        try:
+            if gzip_mode:
+                results.append(_compress_run(rec, runs_root))
+            else:
+                results.append(_delete_run(repo, rec, runs_root))
+        except RetentionError as exc:
+            # Preserve the progress made before the failure so the CLI can report the
+            # achieved state (completed candidates + the failing run's partial state).
+            exc.results = results
+            if exc.failed is None:
+                exc.failed = PruneResult(rec.run_id, "failed", reason=str(exc))
+            raise
     return results
