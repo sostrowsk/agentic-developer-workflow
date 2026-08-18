@@ -11,6 +11,8 @@ RED until the ``runs prune`` command and the retention core exist.
 """
 
 import gzip
+import os
+import shutil
 import subprocess
 from datetime import UTC, datetime, timedelta, timezone
 
@@ -335,3 +337,79 @@ def test_gzip_already_compressed_and_recompresses_interrupted(target_repo):
     assert result.exit_code == 0, result.output
     assert not (rd2 / "events.jsonl").exists()
     assert gzip.decompress((rd2 / "events.jsonl.gz").read_bytes()) == authoritative
+
+
+def test_gzip_run_without_any_log_is_skipped(target_repo):
+    """C5: a terminal run with NEITHER events.jsonl NOR events.jsonl.gz is skipped
+    (named), never falsely reported as already compressed, and fully preserved."""
+    rid = "aaaacccc"
+    write_state_only_run(target_repo, rid, phase="done")
+    result = prune(target_repo, "--keep", "0", "--gzip")
+    assert result.exit_code == 0, result.output
+    assert rid in result.output and "skipped" in result.output
+    assert (run_dir(target_repo, rid) / "state.json").is_file()
+
+
+def test_gzip_compression_failure_exits_one_and_keeps_plain(target_repo):
+    """C5/C7: a compression that cannot be completed safely is exit 1, and the
+    authoritative plain log is left untouched (never unlinked on failure)."""
+    rid = "aaaadddd"
+    rd = make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+    original = (rd / "events.jsonl").read_bytes()
+    # A non-empty directory at the .gz target name makes os.replace fail.
+    gzdir = rd / "events.jsonl.gz"
+    gzdir.mkdir()
+    (gzdir / "keep").write_text("x\n")
+
+    result = prune(target_repo, "--keep", "0", "--gzip")
+    assert result.exit_code == 1, result.output
+    assert (rd / "events.jsonl").read_bytes() == original  # authoritative log kept
+
+
+# --- P1: symlinked run directory / event log must never be touched outside the repo
+
+
+def test_prune_ignores_symlinked_run_directory_outside_repo(target_repo, tmp_path):
+    """A run directory that is a symlink to somewhere OUTSIDE the repo is never a
+    candidate — neither --gzip nor deleting prune may read, replace or delete
+    anything through it."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    log = outside / "events.jsonl"
+    log.write_text('{"seq": 1, "type": "run", "kind": "start", "payload": {}}\n')
+    original = log.read_bytes()
+    runs = target_repo / ".adw" / "runs"
+    runs.mkdir(parents=True, exist_ok=True)
+    os.symlink(outside, runs / "aaaa1111")
+
+    gz_result = prune(target_repo, "--keep", "0", "--gzip")
+    assert gz_result.exit_code == 0, gz_result.output
+    assert log.read_bytes() == original  # not compressed/replaced
+    assert not (outside / "events.jsonl.gz").exists()
+
+    del_result = prune(target_repo, "--keep", "0")
+    assert del_result.exit_code == 0, del_result.output
+    assert outside.is_dir() and log.exists()  # outside dir never removed
+
+
+# --- P2: a stale worktree registration (dir already gone) must not skip forever ---
+
+
+def test_prune_continues_with_stale_worktree_registration(target_repo):
+    """A registered worktree whose directory is already missing is a stale
+    registration, not a dirty worktree — prune clears it and completes, leaving no
+    orphan and keeping the lane branch (safe continuation of a partial prune)."""
+    from adw.worktrees import create_lane_worktree
+
+    rid = "aaaabbbb"
+    make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+    add_ref(target_repo, rid, 1)
+    wt = create_lane_worktree(target_repo, rid, "backend", "staging")
+    shutil.rmtree(wt)  # the worktree dir is gone; its registration remains
+
+    result = prune(target_repo, "--keep", "0")
+    assert result.exit_code == 0, result.output
+    assert not run_dir(target_repo, rid).is_dir()
+    assert prune_dry(target_repo).strip() == ""  # no orphaned registration
+    assert refs_of(target_repo, rid) == []
+    assert branch_exists(target_repo, lane_branch(rid, "backend"))

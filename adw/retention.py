@@ -68,6 +68,35 @@ def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     )
 
 
+# --- containment: never read/replace/delete anything outside the runs tree ------
+
+
+def _runs_root(repo: Path) -> Path:
+    return (repo.resolve() / RUNS_RELPATH).resolve()
+
+
+def _contained(path: Path, root: Path) -> Path | None:
+    """The real path if it stays within ``root`` after resolving EVERY symlink, else
+    None — the same discipline the GUI reader applies. Pruning must never follow a
+    symlinked run directory or event log out of the runs tree and delete/replace a
+    file elsewhere (scope + data-loss guard)."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    return resolved if resolved.is_relative_to(root) else None
+
+
+def _is_valid_gzip(path: Path) -> bool:
+    try:
+        with gzip.open(path, "rb") as fh:
+            while fh.read(1 << 16):
+                pass
+        return True
+    except (OSError, EOFError):
+        return False
+
+
 # --- log reading (plain OR gzip) -----------------------------------------------
 
 
@@ -161,11 +190,16 @@ def scan_runs(repo: Path) -> list[RunRecord]:
     """Every run directory under the repo, sorted oldest → newest by canonical date
     with a lexicographic run-id tie-break (deterministic, B4)."""
     runs_dir = repo / RUNS_RELPATH
+    runs_root = _runs_root(repo)
     records: list[RunRecord] = []
     if not runs_dir.is_dir():
         return records
     for child in sorted(runs_dir.iterdir()):
-        if not RUN_ID_RE.fullmatch(child.name) or not child.is_dir():
+        if not RUN_ID_RE.fullmatch(child.name):
+            continue
+        # A symlinked or escaping run directory is never a candidate — pruning it
+        # could reach a directory OUTSIDE the repository (P1).
+        if child.is_symlink() or _contained(child, runs_root) is None or not child.is_dir():
             continue
         path, fmt = _log_file(child)
         records.append(
@@ -248,15 +282,19 @@ def _snapshot_refs(repo: Path, run_id: str) -> list[str]:
 # --- deleting prune ------------------------------------------------------------
 
 
-def _delete_run(repo: Path, rec: RunRecord) -> PruneResult:
+def _delete_run(repo: Path, rec: RunRecord, runs_root: Path) -> PruneResult:
     """Delete one prune-able run in a fixed, resumable order (C3/C7): all worktree
     registrations first (via git, keeping the lane branch), then the snapshot refs,
     then the run directory. The directory is never removed while a worktree
     registration remains, so an interruption never orphans one."""
+    if rec.run_dir.is_symlink() or _contained(rec.run_dir, runs_root) is None:
+        raise RetentionError(f"{rec.run_id}: Laufordner liegt außerhalb der Runs — nicht gelöscht")
     worktrees = _run_worktrees(repo, rec.run_id)
     # C4: never force-remove a worktree with uncommitted work — skip the WHOLE run.
+    # A registered path whose directory is MISSING is a stale registration, not a
+    # dirty worktree: it is pruned below (never a permanent skip, P2).
     for wt in worktrees:
-        if _worktree_dirty(wt):
+        if wt.exists() and _worktree_dirty(wt):
             return PruneResult(rec.run_id, "skipped", reason="uncommitted changes in worktree")
     for wt in worktrees:
         remove_registered_worktree(repo, wt)  # idempotent, keeps the lane branch
@@ -275,29 +313,43 @@ def _ref_exists(repo: Path, ref: str) -> bool:
 # --- gzip prune (the keeping form) ---------------------------------------------
 
 
-def _compress_run(rec: RunRecord) -> PruneResult:
+def _compress_run(rec: RunRecord, runs_root: Path) -> PruneResult:
     """Compress ``events.jsonl`` → ``events.jsonl.gz`` atomically, keeping the run
-    whole (C5/E10). 'Already compressed' iff the .gz exists and the .jsonl is
-    absent; if both exist the .jsonl is authoritative and is recompressed."""
+    whole (C5/E10). 'Already compressed' iff a VALID .gz exists and the .jsonl is
+    absent; if both exist the .jsonl is authoritative and is recompressed. A run
+    with neither log is skipped (named), never falsely reported as compressed. A
+    failure that could not be safely completed is a RetentionError (exit 1), and
+    the authoritative plain log is left untouched."""
+    if rec.run_dir.is_symlink() or _contained(rec.run_dir, runs_root) is None:
+        raise RetentionError(
+            f"{rec.run_id}: Laufordner liegt außerhalb der Runs — nicht komprimiert"
+        )
     plain = rec.run_dir / "events.jsonl"
     gz = rec.run_dir / "events.jsonl.gz"
-    if not plain.exists():
-        # No plain source: either already compressed, or a legacy run with no log.
+    if plain.exists():
+        # The authoritative log must be a real regular file inside the runs tree —
+        # never compress/delete through a symlink that escapes it (P1).
+        if plain.is_symlink() or _contained(plain, runs_root) is None:
+            raise RetentionError(f"{rec.run_id}: events.jsonl verweist aus den Runs heraus")
+        data = plain.read_bytes()
+        tmp = rec.run_dir / f".events.jsonl.{os.getpid()}.gz.tmp"
+        try:
+            with gzip.open(tmp, "wb") as fh:
+                fh.write(data)
+            with gzip.open(tmp, "rb") as fh:  # validate before it becomes the result
+                if fh.read() != data:
+                    raise RetentionError("komprimierte Ausgabe war nicht verlustfrei")
+            os.replace(tmp, gz)
+        except (OSError, RetentionError) as exc:
+            tmp.unlink(missing_ok=True)
+            # The plain log is still present and authoritative; surface the failure.
+            raise RetentionError(f"{rec.run_id}: Kompression fehlgeschlagen: {exc}") from exc
+        plain.unlink()  # the source is removed only after a valid .gz is in place
+        return PruneResult(rec.run_id, "compressed")
+    # No plain source: already compressed ONLY if the .gz exists AND is valid.
+    if gz.exists() and _is_valid_gzip(gz):
         return PruneResult(rec.run_id, "already_compressed")
-    data = plain.read_bytes()
-    tmp = rec.run_dir / f".events.jsonl.{os.getpid()}.gz.tmp"
-    try:
-        with gzip.open(tmp, "wb") as fh:
-            fh.write(data)
-        with gzip.open(tmp, "rb") as fh:  # validate before it becomes the result
-            if fh.read() != data:
-                raise RetentionError("compressed output did not round-trip")
-        os.replace(tmp, gz)
-    except (OSError, RetentionError) as exc:
-        tmp.unlink(missing_ok=True)
-        return PruneResult(rec.run_id, "skipped", reason=f"compression failed: {exc}")
-    plain.unlink()  # the source is removed only after a valid .gz is in place
-    return PruneResult(rec.run_id, "compressed")
+    return PruneResult(rec.run_id, "skipped", reason="kein Ereignis-Log zum Komprimieren")
 
 
 # --- public prune --------------------------------------------------------------
@@ -316,6 +368,7 @@ def prune(
     runs are skipped and named (C2); deleting mode also skips a run with a dirty
     worktree (C4). Returns one result per PROCESSED candidate (C7)."""
     now = now or datetime.now(UTC)
+    runs_root = _runs_root(repo)
     records = scan_runs(repo)
     candidates = _candidates(records, keep)
     threshold = None if older_than is None else now - timedelta(days=older_than)
@@ -327,7 +380,7 @@ def prune(
             results.append(PruneResult(rec.run_id, "skipped", reason=f"phase {rec.phase}"))
             continue
         if gzip_mode:
-            results.append(_compress_run(rec))
+            results.append(_compress_run(rec, runs_root))
         else:
-            results.append(_delete_run(repo, rec))
+            results.append(_delete_run(repo, rec, runs_root))
     return results

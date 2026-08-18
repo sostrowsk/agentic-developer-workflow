@@ -439,6 +439,9 @@ def resume(
         ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
         typer.echo(f"Run {state.run_id} wird fortgesetzt (Phase: {state.phase})")
         _execute(ctx)
+    # Reaching done through `resume` is a normal successful completion → same
+    # automatic pruning as `run` (D3). An escalation/pause raised above and skips it.
+    _maybe_auto_prune(repo, config, state)
 
 
 @app.command()
@@ -478,6 +481,9 @@ def approve(
         ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
         typer.echo(f"Approval erteilt — Run {state.run_id} läuft weiter")
         _execute(ctx)
+    # Reaching done through `approve` is a normal successful completion → same
+    # automatic pruning as `run` (D3). A further pause/escalation raised above.
+    _maybe_auto_prune(repo, config, state)
 
 
 @app.command()
@@ -571,10 +577,24 @@ runs_app = typer.Typer(add_completion=False, help="Run-Verzeichnisse verwalten (
 app.add_typer(runs_app, name="runs")
 
 
-def _require_repo_dir(repo: Path) -> Path:
+def _require_repo(repo: Path) -> Path:
+    """A usable target repo: an existing directory that is a git worktree. Pruning
+    removes worktrees and snapshot refs and listing dates from the log — a non-git
+    directory cannot be operated on, so it is a clear error (exit 1), never a silent
+    success (B3)."""
     repo = repo.resolve()
     if not repo.is_dir():
         raise _fail(f"--repo {repo} existiert nicht oder ist kein verwendbares Verzeichnis")
+    try:
+        result = _git_plain(repo, "rev-parse", "--show-toplevel")
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise _fail(f"--repo {repo}: git nicht ausführbar — {exc}") from exc
+    # Require --repo to be the ROOT of a git work tree: a non-git directory fails,
+    # and a mere SUBDIRECTORY of a repo (whose toplevel differs) is rejected too, so
+    # pruning never touches an enclosing repo's worktrees/refs by accident.
+    toplevel = Path(result.stdout.strip()).resolve() if result.returncode == 0 else None
+    if toplevel != repo:
+        raise _fail(f"--repo {repo} ist kein verwendbares Git-Repository (Wurzel)")
     return repo
 
 
@@ -583,7 +603,7 @@ def runs_list(
     repo: Annotated[Path, typer.Option("--repo", help="Pfad zum Ziel-Repo")] = Path("."),
 ) -> None:
     """Show every run with the facts that reveal when pruning is due (B1–B4)."""
-    repo = _require_repo_dir(repo)
+    repo = _require_repo(repo)
     records = retention.scan_runs(repo)
     if not records:
         typer.echo(f"Keine Runs unter {repo / RUNS_RELPATH}")
@@ -618,7 +638,7 @@ def runs_prune(
     # Invalid N/DAYS: the usual CLI error (exit 2), BEFORE any run data changes.
     if keep < 0 or (older_than is not None and older_than < 0):
         raise typer.Exit(2)
-    repo = _require_repo_dir(repo)
+    repo = _require_repo(repo)
     try:
         results = retention.prune(repo, keep=keep, older_than=older_than, gzip_mode=gzip)
     except retention.RetentionError as exc:

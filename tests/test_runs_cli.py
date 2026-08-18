@@ -56,11 +56,10 @@ def test_prune_help_advertises_exactly_the_pinned_flags(home):  # noqa: F811
 # --- B3: list exit codes --------------------------------------------------------
 
 
-def test_list_empty_repo_exits_zero(home, tmp_path):  # noqa: F811
-    """B3: a valid repo with no runs still succeeds (exit 0)."""
-    repo = tmp_path / "repo"
-    (repo / ".adw" / "runs").mkdir(parents=True)
-    result = cli.invoke(app, ["runs", "list", "--repo", str(repo)])
+def test_list_empty_repo_exits_zero(target_repo):
+    """B3: a valid (git) repo with no runs still succeeds (exit 0)."""
+    (target_repo / ".adw" / "runs").mkdir(parents=True, exist_ok=True)
+    result = cli.invoke(app, ["runs", "list", "--repo", str(target_repo)])
     assert result.exit_code == 0, result.output
 
 
@@ -71,27 +70,40 @@ def test_list_unusable_repo_exits_one(home, tmp_path):  # noqa: F811
     assert result.exit_code == 1, result.output
 
 
+def test_list_non_git_directory_exits_one(home, tmp_path):  # noqa: F811
+    """B3: an existing but non-git directory is not a usable repo — clear error,
+    exit 1, never a silent success."""
+    plain = tmp_path / "plain"
+    (plain / ".adw" / "runs").mkdir(parents=True)
+    result = cli.invoke(app, ["runs", "list", "--repo", str(plain)])
+    assert result.exit_code == 1, result.output
+
+
+def test_prune_non_git_directory_exits_one(home, tmp_path):  # noqa: F811
+    """B3/C7: prune on an existing but non-git directory is exit 1 (unusable repo)."""
+    plain = tmp_path / "plain"
+    (plain / ".adw" / "runs").mkdir(parents=True)
+    result = cli.invoke(app, ["runs", "prune", "--repo", str(plain)])
+    assert result.exit_code == 1, result.output
+
+
 # --- B2: visible per-run fields, including legacy unknowns -----------------------
 
 
-def test_list_shows_run_id_and_phase(home, tmp_path):  # noqa: F811
+def test_list_shows_run_id_and_phase(target_repo):
     """B2: each recognised run shows at least its run-id and phase."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    write_run(repo, "aaaa1111", _done_lines(), phase="done")
-    result = cli.invoke(app, ["runs", "list", "--repo", str(repo)])
+    write_run(target_repo, "aaaa1111", _done_lines(), phase="done")
+    result = cli.invoke(app, ["runs", "list", "--repo", str(target_repo)])
     assert result.exit_code == 0, result.output
     assert "aaaa1111" in result.output
     assert "done" in result.output
 
 
-def test_list_legacy_run_without_log_does_not_crash(home, tmp_path):  # noqa: F811
+def test_list_legacy_run_without_log_does_not_crash(target_repo):
     """B2: a legacy run whose event count/log size cannot be determined (no
     events.jsonl) is still listed — a value renders visibly instead of aborting."""
-    repo = tmp_path / "repo"
-    repo.mkdir()
-    write_state_only_run(repo, "8f8dc4ff", phase="done")
-    result = cli.invoke(app, ["runs", "list", "--repo", str(repo)])
+    write_state_only_run(target_repo, "8f8dc4ff", phase="done")
+    result = cli.invoke(app, ["runs", "list", "--repo", str(target_repo)])
     assert result.exit_code == 0, result.output
     assert "8f8dc4ff" in result.output
 

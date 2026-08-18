@@ -149,10 +149,12 @@ def remove_registered_worktree(repo: Path, path: Path) -> None:
     repo = repo.resolve()
     with _WORKTREE_MUTATION_LOCK:
         _ready_marker(path).unlink(missing_ok=True)
-        if _worktree_registered(repo, path):
+        # ``git worktree remove`` needs the directory to exist; a registered path
+        # whose directory is already gone (a stale registration from a partially
+        # completed prune) is cleared by ``prune`` instead, so continuation never
+        # gets stuck and no orphan is left behind.
+        if path.exists() and _worktree_registered(repo, path):
             _git_effect(repo, "worktree", "remove", "--force", str(path))
-        # Clear any leftover registration (e.g. a resumed prune whose dir is gone),
-        # so ``git worktree prune --dry-run`` reports no orphan for the run.
         _git_effect(repo, "worktree", "prune")
 
 

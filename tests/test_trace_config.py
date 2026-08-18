@@ -149,3 +149,60 @@ def test_auto_prune_never_removes_a_non_terminal_run(target_repo):
     assert result.exit_code == 0, result.output
     assert (target_repo / ".adw" / "runs" / "cccc0009").is_dir()  # preserved
     assert RunState.find_latest(target_repo).phase == "done"
+
+
+def _remaining_seeds(repo, seeds):
+    return [rid for rid in seeds if (repo / ".adw" / "runs" / rid).is_dir()]
+
+
+def test_auto_prune_runs_after_approve_reaches_done(target_repo):
+    """D3: a run that reaches done through ``approve`` triggers auto-pruning too."""
+    _write(target_repo, "trace:\n  keep_runs: 2\n")
+    seeds = ["cccc0001", "cccc0002", "cccc0003"]
+    for i, rid in enumerate(seeds):
+        _seed_done_run(target_repo, rid, f"2026-08-0{i + 1}T12:00:00.000Z")
+
+    # No --no-approval → the run pauses at the plan gate (exit 2).
+    paused = cli.invoke(
+        app, ["run", "--repo", str(target_repo), "--issue", "Approve-Demo", "--dry-run"]
+    )
+    assert paused.exit_code == 2, paused.output
+    run_id = RunState.find_latest(target_repo).run_id
+
+    approved = cli.invoke(app, ["approve", run_id, "--repo", str(target_repo)])
+    assert approved.exit_code == 0, approved.output
+    assert RunState.load(target_repo, run_id).phase == "done"
+    # keep_runs=2: the just-approved run + newest seed survive; two oldest go.
+    assert _remaining_seeds(target_repo, seeds) == ["cccc0003"]
+
+
+def test_auto_prune_runs_after_resume_reaches_done(target_repo, monkeypatch):
+    """D3: a run that reaches done through ``resume`` triggers auto-pruning too."""
+    import adw.cli as cli_mod
+
+    _write(target_repo, "trace:\n  keep_runs: 2\n")
+    seeds = ["cccc0001", "cccc0002", "cccc0003"]
+    for i, rid in enumerate(seeds):
+        _seed_done_run(target_repo, rid, f"2026-08-0{i + 1}T12:00:00.000Z")
+
+    real = cli_mod._dry_run_runners
+
+    def crashing():
+        agents, codex = real()
+        agents.scripts["build_agent"].clear()
+        agents.script("build_agent", "nur ein Lauf")  # the second build run crashes
+        return agents, codex
+
+    with monkeypatch.context() as m:
+        m.setattr(cli_mod, "_dry_run_runners", crashing)
+        crashed = _cli_run(target_repo)
+        assert crashed.exit_code != 0, crashed.output
+    run_id = RunState.find_latest(target_repo).run_id
+    assert RunState.load(target_repo, run_id).phase == "build"  # died mid-build
+    # A crashed run does NOT auto-prune (it never reached done).
+    assert _remaining_seeds(target_repo, seeds) == seeds
+
+    resumed = cli.invoke(app, ["resume", run_id, "--repo", str(target_repo)])
+    assert resumed.exit_code == 0, resumed.output
+    assert RunState.load(target_repo, run_id).phase == "done"
+    assert _remaining_seeds(target_repo, seeds) == ["cccc0003"]
