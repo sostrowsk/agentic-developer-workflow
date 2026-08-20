@@ -206,3 +206,25 @@ def test_auto_prune_runs_after_resume_reaches_done(target_repo, monkeypatch):
     assert resumed.exit_code == 0, resumed.output
     assert RunState.load(target_repo, run_id).phase == "done"
     assert _remaining_seeds(target_repo, seeds) == ["cccc0003"]
+
+
+def test_auto_prune_reports_a_returned_partial_failure(target_repo, monkeypatch, capsys):
+    """D3: auto-pruning is fail-open — the finished run keeps `done` and the success
+    exit code — but a RETURNED partial failure (not an exception) must still be
+    reported visibly, not swallowed."""
+    from adw import cli as cli_mod
+    from adw.retention import PruneResult
+
+    def fake_prune(repo, **kwargs):
+        return [PruneResult("dead0001", "failed", reason="1 worktree(s) removed; frontend stuck")]
+
+    monkeypatch.setattr(cli_mod.retention, "prune", fake_prune)
+
+    state = type("S", (), {"phase": "done"})()
+    config = type("C", (), {"trace": type("T", (), {"keep_runs": 5})()})()
+    cli_mod._maybe_auto_prune(target_repo, config, state)
+
+    err = capsys.readouterr().err
+    assert "dead0001" in err, f"partial failure not reported: {err!r}"
+    assert "unvollst" in err.lower() or "failed" in err.lower()
+

@@ -187,6 +187,93 @@ def test_prune_skips_entire_run_when_a_worktree_is_dirty(target_repo):
     assert rid in worktree_list(target_repo)  # neither worktree forcibly removed
 
 
+def test_prune_reports_partial_failure_when_a_later_worktree_removal_refuses(
+    target_repo, monkeypatch
+):
+    """C4 (race window): the inventory finds every worktree clean, but a LATER
+    worktree turns dirty before its removal and git refuses it — after an earlier
+    worktree was already removed.
+
+    "skipped" means "the whole run is intact" (C4). Once a worktree is gone that
+    is no longer true, so the run must be reported as a PARTIAL FAILURE with the
+    achieved state and a nonzero exit — never as an intact safety skip.
+    """
+    from adw import retention
+    from adw.worktrees import WorktreeError, create_lane_worktree
+
+    rid = "aaaa7777"
+    make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+    add_ref(target_repo, rid, 1)
+    create_lane_worktree(target_repo, rid, "backend", "staging")
+    create_lane_worktree(target_repo, rid, "frontend", "staging")
+
+    # First removal succeeds, the second refuses — exactly the race the inventory
+    # cannot rule out (an external process dirties a worktree in between).
+    real = retention.remove_registered_worktree
+    calls = []
+
+    def flaky(repo, path):
+        calls.append(path)
+        if len(calls) == 1:
+            return real(repo, path)
+        raise WorktreeError(f"worktree enthält uncommittete Änderungen: {path}")
+
+    monkeypatch.setattr(retention, "remove_registered_worktree", flaky)
+
+    result = prune(target_repo, "--keep", "0")
+
+    assert len(calls) == 2, "expected a second removal attempt"
+    assert result.exit_code != 0, (
+        "a run that lost a worktree must not end with the success exit code:\n"
+        + result.output
+    )
+    assert "skipped" not in result.output.lower(), (
+        "the run is NOT an intact safety skip — one worktree is already gone:\n"
+        + result.output
+    )
+    assert rid in result.output
+    # The achieved state is preserved and reported: refs and run dir untouched,
+    # so a later prune can safely continue.
+    assert run_dir(target_repo, rid).is_dir()
+    assert refs_of(target_repo, rid) != []
+
+
+def test_partial_failure_does_not_stop_the_remaining_candidates(target_repo, monkeypatch):
+    """C4: a partial failure on one run must not abort the sweep — every other safe
+    candidate is still processed, and the command still ends nonzero."""
+    from adw import retention
+    from adw.worktrees import WorktreeError, create_lane_worktree
+
+    broken, safe = "aaaa8888", "aaaa9999"
+    make_run(target_repo, broken, _iso(datetime(2026, 8, 1)))
+    create_lane_worktree(target_repo, broken, "backend", "staging")
+    create_lane_worktree(target_repo, broken, "frontend", "staging")
+    make_run(target_repo, safe, _iso(datetime(2026, 8, 2)))
+    add_ref(target_repo, safe, 1)
+
+    real = retention.remove_registered_worktree
+    calls = []
+
+    def flaky(repo, path):
+        calls.append(path)
+        if len(calls) == 1:
+            return real(repo, path)
+        raise WorktreeError(f"worktree enthält uncommittete Änderungen: {path}")
+
+    monkeypatch.setattr(retention, "remove_registered_worktree", flaky)
+
+    result = prune(target_repo, "--keep", "0")
+
+    assert result.exit_code != 0, result.output
+    # The failing run is reported ...
+    assert broken in result.output
+    # ... and the later safe candidate was processed anyway.
+    assert not run_dir(target_repo, safe).exists(), (
+        "the safe candidate after the failing one was not processed:\n" + result.output
+    )
+    assert refs_of(target_repo, safe) == []
+
+
 def test_prune_removes_all_clean_worktrees_orphan_free(target_repo):
     """C4 (clean case): every lane worktree of a safe run is removed via git, so no
     orphan registration remains and both lane branches survive."""

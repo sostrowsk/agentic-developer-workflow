@@ -16,6 +16,20 @@
   var runId = body.getAttribute("data-run-id");
   if (!repo || !runId) return;
 
+  // --- client-injected chrome hints (A4): the server delivers them with the page
+  // as data attributes on <body>, so what the client writes into the Diff / Tools /
+  // Artifacts panels follows the language the server decided on. The English
+  // literal stays as the fallback for a page rendered without the attributes.
+  // ``el`` scopes the lookup: a hint that belongs to one panel (the diff hints
+  // live on the Diff section, which only exists for a bracketed node) is read from
+  // the nearest carrier, everything else from <body>.
+  function hint(name, fallback, el) {
+    var attr = "data-hint-" + name;
+    var src = (el && el.closest && el.closest("[" + attr + "]")) || body;
+    var value = src.getAttribute(attr);
+    return value === null || value === "" ? fallback : value;
+  }
+
   var base = "/api/runs/" + encodeURIComponent(repo) + "/" + encodeURIComponent(runId);
   var detailUrl = "/runs/" + encodeURIComponent(repo) + "/" + encodeURIComponent(runId);
   var streamUrl = base + "/stream";
@@ -208,7 +222,7 @@
     var body = panel.querySelector(".diff-body");
     if (!frm || !to || !body) return Promise.resolve();
     panel.setAttribute("data-loaded", "1");
-    body.textContent = "Loading…";
+    body.textContent = hint("loading", "Loading…");
     // The returned promise resolves once the patch is rendered, so a caller (the
     // adw:tab measure) completes only after the diff content is in the DOM (C1).
     return fetch(base + "/diff?from=" + encodeURIComponent(frm) + "&to=" + encodeURIComponent(to))
@@ -219,7 +233,7 @@
       .then(function (data) { renderDiff(body, data); })
       .catch(function () {
         panel.removeAttribute("data-loaded");
-        body.textContent = "(failed to load the diff — open the Diff tab again to retry)";
+        body.textContent = hint("diff-failed", "(failed to load the diff — open the Diff tab again to retry)", body);
       });
   }
 
@@ -227,7 +241,7 @@
     var files = (data && data.files) || [];
     var patch = (data && data.patch) || "";
     if (files.length === 0 && !patch) {
-      body.textContent = "No changes in this step.";
+      body.textContent = hint("no-changes", "No changes in this step.", body);
       return;
     }
     // Rendered as text into the existing <pre> (no divergent DOM construction):
@@ -259,7 +273,7 @@
     if (pre._loadPromise) return pre._loadPromise;
     if (pre.getAttribute("data-loaded")) return Promise.resolve();  // already rendered
     pre.setAttribute("data-loaded", "1");
-    pre.textContent = "Loading…";
+    pre.textContent = hint("loading", "Loading…");
     // Fetch ONLY this record (from_seq == to_seq), not the whole tail from seq to
     // the log end — expanding an early entry must not transfer the entire log.
     var promise = fetch(base + "/events?from_seq=" + encodeURIComponent(seq) + "&to_seq=" + encodeURIComponent(seq))
@@ -282,13 +296,13 @@
         }
         pre.textContent = found
           ? JSON.stringify(found.payload, null, 2)
-          : "(payload not found)";
+          : hint("payload-missing", "(payload not found)");
       })
       .catch(function () {
         pre._loadPromise = null;
         pre.removeAttribute("data-loaded"); // allow a retry on the next expand
         if (guarded && String(seq) !== String(selectedSeq)) return;
-        pre.textContent = "(failed to load — expand again to retry)";
+        pre.textContent = hint("load-failed-expand", "(failed to load — expand again to retry)");
       });
     pre._loadPromise = promise;
     return promise;
@@ -326,7 +340,7 @@
     var more = wrap ? wrap.querySelector("[data-artifact-more]") : null;
     if (!name || !pre) return Promise.resolve();
     summary.setAttribute("data-loaded", "1");
-    pre.textContent = "Loading…";
+    pre.textContent = hint("loading", "Loading…");
     // The returned promise resolves once the bounded initial slice is inserted, so
     // the adw:artifact measure (Aufgabe C) completes only after the fetched content
     // is rendered — a loading indicator is not completion (C1).
@@ -341,7 +355,7 @@
       })
       .catch(function () {
         summary.removeAttribute("data-loaded");  // allow a retry on re-open
-        pre.textContent = "(failed to load — open again to retry)";
+        pre.textContent = hint("load-failed-open", "(failed to load — open again to retry)");
       });
   }
 

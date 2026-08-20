@@ -319,15 +319,38 @@ def _delete_run(repo: Path, rec: RunRecord, runs_root: Path) -> PruneResult:
             return PruneResult(rec.run_id, "skipped", reason="uncommitted changes in worktree")
     # Remove WITHOUT --force: a worktree that turned dirty between the inventory
     # check and here (a race) is rejected by git's own removal-time check rather
-    # than force-discarded. Such a refusal is a safety skip — no ref or run
-    # directory is deleted (they are removed only AFTER every worktree is gone).
+    # than force-discarded. Refs and the run directory are deleted only AFTER
+    # every worktree is gone, so they are always still intact here.
+    #
+    # The REPORT depends on how far we got. "skipped" carries the C4 promise that
+    # the whole run is untouched; that stays true only while nothing has been
+    # removed yet. Once an earlier worktree is gone the run is a PARTIAL FAILURE,
+    # not an intact skip — reporting it as a skip would claim a preservation the
+    # run no longer has. Atomicity across git and the filesystem is not available
+    # (any external process may dirty a worktree at any moment), so the honest
+    # answer is the achieved state plus a nonzero exit, which a later prune
+    # safely continues from.
+    removed: list[Path] = []
     for wt in worktrees:
         try:
             remove_registered_worktree(repo, wt)  # keeps the lane branch, no --force
         except WorktreeError as exc:
+            if not removed:
+                return PruneResult(
+                    rec.run_id, "skipped", reason=f"worktree not safely removable: {exc}"
+                )
+            # Partial failure, NOT an abort: C4 requires the remaining safe
+            # candidates to be processed, so this is a per-run result the caller
+            # keeps going past — the nonzero exit comes from the result itself.
             return PruneResult(
-                rec.run_id, "skipped", reason=f"worktree not safely removable: {exc}"
+                rec.run_id,
+                "failed",
+                reason=(
+                    f"{len(removed)} worktree(s) removed; {wt.name} not safely "
+                    f"removable — refs and run dir kept, prune again to continue"
+                ),
             )
+        removed.append(wt)
     for ref in _snapshot_refs(repo, rec.run_id):
         res = _git(repo, "update-ref", "-d", ref)
         if res.returncode != 0 and _ref_exists(repo, ref):

@@ -662,6 +662,15 @@ def runs_prune(
         return
     for result in results:
         echo_result(result)
+    # A per-run partial failure (e.g. a worktree that turned dirty mid-removal)
+    # does not abort the sweep — the remaining safe candidates are processed
+    # first (C4) — but it must not end in the success exit code either.
+    failed = [r for r in results if r.action == "failed"]
+    if failed:
+        raise _fail(
+            "Pruning nicht sicher abgeschlossen fuer: "
+            + ", ".join(r.run_id for r in failed)
+        )
 
 
 def _maybe_auto_prune(repo: Path, config: AdwConfig, state: RunState) -> None:
@@ -680,6 +689,17 @@ def _maybe_auto_prune(repo: Path, config: AdwConfig, state: RunState) -> None:
     if removed:
         joined = ", ".join(removed)
         typer.echo(f"Auto-Pruning entfernte {len(removed)} alte(n) Lauf/Läufe: {joined}")
+    # A partial failure is RETURNED, not raised (a later worktree turned dirty
+    # mid-removal), so it would pass silently through the exception path above.
+    # Fail-open means the finished run keeps its done phase and success exit code —
+    # NOT that the damage goes unmentioned: report the achieved state visibly.
+    for result in results:
+        if result.action == "failed":
+            typer.echo(
+                f"Auto-Pruning unvollständig für {result.run_id}: {result.reason} "
+                "(Lauf bleibt done)",
+                err=True,
+            )
 
 
 # --- interne Verdrahtung ------------------------------------------------------

@@ -217,3 +217,85 @@ def test_run_list_page_language_is_selectable(home, tmp_path):  # noqa: F811
     app, _slug, _run_id = _build(tmp_path)
     assert _html_lang(TestClient(app).get("/").text) == "en"
     assert _html_lang(TestClient(app).get("/?lang=de").text) == "de"
+
+
+# --- A4: client-injected chrome hints follow the language too -------------------
+
+# The status texts app.js writes into the Diff / Tools / Artifacts panels are UI
+# CHROME (hint texts), not content. "No changes in this step." in particular is not
+# a transient state but the permanent result of an empty diff, so a German request
+# that renders it in English leaves visible English chrome behind.
+_JS_HINTS = (
+    "Loading…",
+    "No changes in this step.",
+    "(failed to load the diff — open the Diff tab again to retry)",
+    "(payload not found)",
+    "(failed to load — expand again to retry)",
+    "(failed to load — open again to retry)",
+)
+
+
+def test_client_injected_hints_are_served_translated(tmp_path):
+    """A4: every hint app.js can inject is delivered with the page in the requested
+    language, so a German request shows German chrome in the Diff/Tools/Artifacts
+    panels. The transport (data attributes) is an implementation detail; what is
+    pinned is that the German page carries German texts and the English one English.
+
+    The two DIFF hints ride on the Diff panel, which exists only for a bracketed
+    node — a page without a Diff tab must not carry them (several tests assert that
+    such a page contains no "Diff" at all). So they are checked on a run that HAS a
+    bracketed node.
+    """
+    from adw.gui.i18n import CATALOG
+    from tests.gui_app_helpers import bracketed_lane_lines
+
+    keys = [k for k, v in CATALOG["en"].items() if v in _JS_HINTS]
+    missing = sorted(set(_JS_HINTS) - set(CATALOG["en"].values()))
+    assert len(keys) == len(_JS_HINTS), f"not every client hint is in the catalog: {missing}"
+    for key in keys:
+        assert CATALOG["de"][key] != CATALOG["en"][key], f"{key} not translated"
+
+    diff_keys = {"hint_no_changes", "hint_diff_failed"}
+
+    # (a) a page WITHOUT a Diff tab carries every general hint ...
+    app, slug, rid = _build(tmp_path)
+    client = TestClient(app)
+    de = client.get(f"/runs/{slug}/{rid}?lang=de").text
+    en = client.get(f"/runs/{slug}/{rid}?lang=en").text
+    assert "tab-diff" not in de
+    for key in keys:
+        if key in diff_keys:
+            assert CATALOG["de"][key] not in de, f"{key} leaked onto a page without a Diff tab"
+            continue
+        assert CATALOG["de"][key] in de, f"German page misses {key!r}"
+        assert CATALOG["en"][key] in en, f"English page misses {key!r}"
+
+    # (b) ... and a page WITH a Diff tab additionally carries the diff hints.
+    repo = tmp_path / "repo_bracketed"
+    repo.mkdir(exist_ok=True)
+    write_run(repo, "bbbb2222", bracketed_lane_lines("bbbb2222"), phase="done")
+    app2 = create_app(repos=[str(repo)])
+    client2 = TestClient(app2)
+    slug2 = client2.get("/api/runs").json()[0]["repo"]
+    de2 = client2.get(f"/runs/{slug2}/bbbb2222?lang=de").text
+    en2 = client2.get(f"/runs/{slug2}/bbbb2222?lang=en").text
+    assert "tab-diff" in de2
+    for key in diff_keys:
+        assert CATALOG["de"][key] in de2, f"German diff panel misses {key!r}"
+        assert CATALOG["en"][key] in en2, f"English diff panel misses {key!r}"
+
+
+def test_client_script_reads_the_hints_from_the_page(tmp_path):
+    """A4 (wiring): the served app.js resolves its hint texts through the page
+    instead of using English literals directly, so the language the server decided
+    on also governs what the client injects. Asserted on the served script text —
+    wiring only, like the response-time tests do."""
+    app, slug, rid = _build(tmp_path)
+    client = TestClient(app)
+    js = client.get("/static/app.js").text
+    de = client.get(f"/runs/{slug}/{rid}?lang=de").text
+
+    # The page delivers the hints as data attributes ...
+    assert "data-hint-" in de, "the rendered page carries no hint data attributes"
+    # ... and the client reads them from there.
+    assert "data-hint-" in js, "app.js does not read the hints from the page"

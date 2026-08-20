@@ -75,6 +75,16 @@ _EN: dict[str, str] = {
     "tl_duration": "duration",
     "tl_cost": "cost",
     "tl_tokens": "tokens",
+    # Hints the CLIENT injects into the Diff / Tools / Artifacts panels. They are
+    # chrome, not content — "hint_no_changes" in particular is the PERMANENT result
+    # of an empty diff, not a transient state. Delivered with the page as data
+    # attributes so app.js renders them in the language the server decided on.
+    "hint_loading": "Loading…",
+    "hint_no_changes": "No changes in this step.",
+    "hint_diff_failed": "(failed to load the diff — open the Diff tab again to retry)",
+    "hint_payload_missing": "(payload not found)",
+    "hint_load_failed_expand": "(failed to load — expand again to retry)",
+    "hint_load_failed_open": "(failed to load — open again to retry)",
 }
 
 _DE: dict[str, str] = {
@@ -132,6 +142,12 @@ _DE: dict[str, str] = {
     "tl_duration": "Dauer",
     "tl_cost": "Kosten",
     "tl_tokens": "Tokens",
+    "hint_loading": "Wird geladen…",
+    "hint_no_changes": "Keine Änderungen in diesem Schritt.",
+    "hint_diff_failed": "(Diff konnte nicht geladen werden — Diff-Reiter erneut öffnen)",
+    "hint_payload_missing": "(kein Inhalt gefunden)",
+    "hint_load_failed_expand": "(Laden fehlgeschlagen — erneut aufklappen)",
+    "hint_load_failed_open": "(Laden fehlgeschlagen — erneut öffnen)",
 }
 
 CATALOG: dict[str, dict[str, str]] = {"en": _EN, "de": _DE}

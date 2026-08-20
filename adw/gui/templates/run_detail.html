@@ -42,7 +42,8 @@
    the Diff tab follows the derived bracket, not the node type (AC-B5: build-lane
    agent runs, gate iterations, the RED stage). The patch is fetched on demand. #}
 {% macro diff_panel(node) %}
-  <section class="tab tab-diff" data-tab-panel="diff" data-diff-from="{{ node.diff_from }}" data-diff-to="{{ node.diff_to }}">
+  <section class="tab tab-diff" data-tab-panel="diff" data-diff-from="{{ node.diff_from }}" data-diff-to="{{ node.diff_to }}"
+           data-hint-no-changes="{{ t.hint_no_changes }}" data-hint-diff-failed="{{ t.hint_diff_failed }}">
     <pre class="diff-body">{{ t.diff_hint }}</pre>
   </section>
 {% endmacro %}
@@ -186,7 +187,14 @@
     {% endif %}
   </div>
 {% endmacro %}
-<body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}"{% if focus_seq is not none %} data-focus="{{ focus_seq }}"{% endif %}>
+{#- Client-injected chrome hints (A4): delivered with the page so app.js renders
+    them in the language the server decided on. Fixed attributes on <body> — no
+    per-entry markup, so the bounded entry-node budget is untouched. -#}
+<body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}"{% if focus_seq is not none %} data-focus="{{ focus_seq }}"{% endif %}
+      data-hint-loading="{{ t.hint_loading }}"
+      data-hint-payload-missing="{{ t.hint_payload_missing }}"
+      data-hint-load-failed-expand="{{ t.hint_load_failed_expand }}"
+      data-hint-load-failed-open="{{ t.hint_load_failed_open }}">
   <header class="run-header">
     <a class="lang-switch" href="?{{ switch_qs }}">{{ t.lang_switch }}</a>
     <h1>Run {{ detail.run.run_id }}{% if detail.run.status is not none %} &mdash; {{ detail.run.status }}{% endif %}</h1>
