@@ -13,6 +13,53 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.8.0] — 2026-08-20
+
+### Hinzugefügt
+- **`adw runs list` und `adw runs prune`** machen die Lauf-Retention bedienbar.
+  `list` zeigt Run-ID, Phase, Datum, Ereigniszahl und Log-Größe, damit sichtbar
+  wird, wann Pruning fällig ist. `prune [--keep N] [--older-than DAYS] [--gzip]`
+  behält per Default die 20 jüngsten Läufe und arbeitet die ältesten zuerst ab.
+  - Das Löschen eines Laufs entfernt seinen Ordner, seine Snapshot-Refs
+    (`refs/adw/<run_id>/*`) **und seine registrierten Git-Worktrees** — letztere
+    über die Git-Worktree-Verwaltung statt per `rmtree`, sodass keine verwaiste
+    Registrierung zurückbleibt und der Lane-Branch erhalten bleibt. Das ist
+    wesentlich: 96 % der 595 MB Laufdaten dieses Repos liegen in diesen
+    Worktrees; ein Pruning, das sie ausspart, gäbe rund 3 % frei.
+  - **Nichts wird je gewaltsam entfernt.** Ein Lauf, der nicht `done` oder
+    `escalated` ist, wird nie gepruned — sein State ist die Grundlage seiner
+    Fortsetzbarkeit. Ein Lauf mit uncommitteten Änderungen in *irgendeinem*
+    seiner Worktrees wird komplett übersprungen, und jeder übersprungene Lauf
+    wird benannt statt stillschweigend ausgelassen.
+  - `--gzip` ist die *behaltende* Form: Sie komprimiert `events.jsonl` und lässt
+    Laufordner, State, Worktrees und Snapshot-Refs unangetastet, sodass der Lauf
+    vollständig benutzbar bleibt, Diff-Reiter eingeschlossen. Die Kompression ist
+    atomar (temporäre Datei plus Rename), und die `.gz` erbt die 0600-Rechte des
+    Logs — es enthält ungeschwärzte Prompts und Tool-Ausgaben.
+  - Gelöscht wird in fester, fortsetzbarer Reihenfolge (Worktrees, dann Refs,
+    dann Ordner). Eine verweigerte Worktree-Entfernung behält das Erreichte,
+    benennt es, lässt die übrigen sicheren Kandidaten weiterhin bearbeiten und
+    endet mit Nichtnull-Exit; ein Fehler beim Entfernen der Refs oder des Ordners
+    bricht den Durchlauf ab und meldet den erreichten Zustand, sodass ein
+    späteres Pruning fortsetzen kann.
+- **`trace:`-Config-Block**: `enabled` (Default `true`) schaltet das Ereignis-Log
+  ganz ab, `keep_runs` (Default `20`, `0` deaktiviert) steuert automatisches
+  Pruning nach einem erfolgreichen Lauf. Auto-Pruning ist fail-open — es ändert
+  nie Phase oder Exit-Code des fertigen Laufs —, meldet aber, was es getan oder
+  nicht geschafft hat.
+- **Der Reader liest `events.jsonl.gz` transparent**, ein komprimierter Lauf
+  liefert dieselben Ereignisse, dieselbe Reihenfolge und dieselben `seq`-Werte
+  wie sein unkomprimiertes Original.
+- **GUI auf Deutsch und Englisch.** Die Sprache wird pro Request als `?lang=` →
+  Cookie → `Accept-Language` → `en` bestimmt; der Default bleibt Englisch.
+  Übersetzt wird nur die Chrome — Prompts, Agent-Ausgaben, Findings,
+  Artefakt-Körper und Gate-Output sind in beiden Sprachen byte-identisch. Im
+  Header steht ein Umschalter, der den in der URL getragenen Seitenzustand
+  erhält — gefensterter Ausschnitt und fokussierter Knoten. Auch die vom Client
+  injizierten
+  Hinweise (Laden, leerer Diff, Ladefehler) werden mit der Seite ausgeliefert,
+  sodass eine deutsche Seite keine englischen Reste zeigt.
+
 ## [0.7.0] — 2026-08-17
 
 ### Hinzugefügt
@@ -315,6 +362,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.8.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.0...v0.5.1

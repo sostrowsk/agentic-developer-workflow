@@ -12,6 +12,47 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.8.0] — 2026-08-20
+
+### Added
+- **`adw runs list` and `adw runs prune`** make run retention operable. `list`
+  shows run id, phase, date, event count and log size, so it is visible when
+  pruning is due. `prune [--keep N] [--older-than DAYS] [--gzip]` keeps the 20
+  newest runs by default and works oldest-first.
+  - Deleting a run removes its directory, its snapshot refs
+    (`refs/adw/<run_id>/*`) **and its registered git worktrees** — the latter
+    through git's worktree management rather than a plain `rmtree`, so no orphaned
+    registration is left behind and the lane branch survives. This matters: 96 %
+    of this repo's 595 MB of run data lives in those worktrees, so a prune that
+    skipped them would reclaim about 3 %.
+  - **Nothing is ever force-removed.** A run that is not `done` or `escalated` is
+    never pruned — its state is what makes it resumable. A run with uncommitted
+    changes in *any* of its worktrees is skipped whole, and every skipped run is
+    named rather than silently passed over.
+  - `--gzip` is the *keeping* form: it compresses `events.jsonl` and leaves the
+    run directory, state, worktrees and snapshot refs intact, so the run stays
+    fully browsable including its Diff tab. Compression is atomic (temp file plus
+    rename) and the `.gz` inherits the log's 0600 permissions — the event log
+    holds unredacted prompts and tool output.
+  - Deletion runs in a fixed, resumable order (worktrees, then refs, then
+    directory). A refused worktree removal keeps what it achieved, names it,
+    lets the sweep carry on with the remaining safe candidates, and ends the
+    command nonzero; a failure while removing refs or the directory stops the
+    sweep and reports the achieved state, so a later prune can continue.
+- **`trace:` config block**: `enabled` (default `true`) switches the event log
+  off entirely, `keep_runs` (default `20`, `0` disables) drives automatic pruning
+  after a successful run. Auto-pruning is fail-open — it never changes the
+  finished run's phase or exit code — but reports what it did or failed to do.
+- **The reader handles `events.jsonl.gz` transparently**, so a compressed run
+  yields the same events, order and `seq` values as its uncompressed original.
+- **GUI in German and English.** Language is chosen per request as `?lang=` →
+  cookie → `Accept-Language` → `en`; the default stays English. Only chrome is
+  translated — prompts, agent output, findings, artifact bodies and gate output
+  are byte-identical in both languages. The header carries a switch that keeps
+  the page state carried in the URL — the paged window and a focused node. Hints the
+  client injects (loading, empty diff, load failures) are delivered with the page,
+  so a German page shows no English leftovers.
+
 ## [0.7.0] — 2026-08-17
 
 ### Added
@@ -295,6 +336,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.8.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.0...v0.5.1
