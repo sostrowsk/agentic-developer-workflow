@@ -1,326 +1,188 @@
+# Interface contract — Single-Lane project (`backend`).
+#
+# Scope of this contract: ONLY externally observable surfaces of the change —
+# the status VALUES in the JSON responses of the two read endpoints, and the
+# observable template behavior that renders them. It does NOT pin internal
+# helper signatures (`_node_status`, `_summary`, `_phase_bar`), dictionary keys
+# beyond the response fields already present, `_WAITING_TYPES`' membership, or
+# any markup/CSS wording. Existing response shapes are unchanged; this change
+# only WIDENS the value domain of three already-present `status` fields and
+# adds derivation rules for when those values appear. No routes or events are
+# added or removed.
+
 openapi: 3.1.0
 info:
-  title: ADW Run Inspector — i18n (de/en) + `adw runs list`/`prune` + `trace:`-Config
-  version: 1.0.0
-  description: |
-    Minimaler externer Vertrag für den einzelnen Workstream `backend`
-    (Single-Lane-Projekt — es gibt keine `frontend`-Lane). Gepinnt wird nur
-    die extern beobachtbare Fläche gemäß Contract-Hinweis des Issues:
+  title: ADW Run Inspector — waiting/awaiting status surfaces
+  version: 0.8.1
 
-      (1) die CLI von `adw runs list` und `adw runs prune` — Flags, Exit-Codes,
-          was entfernt bzw. komprimiert wird, die Nie-Pruning-Zusage für
-          nicht-terminale Läufe;
-      (2) die Config-Keys `trace.enabled` und `trace.keep_runs` samt Defaults
-          und Validierung;
-      (3) die Sprachauswahl-Reihenfolge samt englischem Default (das eine
-          beobachtbare Template-Verhalten);
-      (4) die Worktree-Zusagen des löschenden Prunings und der `--gzip`-Form;
-      (5) der transparente Gzip-Reader (dieselbe fachliche Ausgabe aus
-          `events.jsonl` wie aus `events.jsonl.gz`).
+paths:
+  /api/runs:
+    get:
+      summary: List runs across all registered repos (unchanged shape).
+      responses:
+        "200":
+          description: Array of run summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunSummary"
 
-    NICHT gepinnt: interne Helper-Signaturen, Modul-/Dateizuschnitt,
-    Dictionary-Schlüssel und deren Wortlaut, Markup/CSS, der genaue
-    Meldungswortlaut (jenseits der genannten Muss-Inhalte), die
-    Ausgabespalten-Reihenfolge von `runs list`, Testanzahl/Fixtures, die
-    interne Repräsentation des kanonischen Lauf-Datums sowie
-    Implementierungsmechanik (Kompressions-/Löschalgorithmus, Schrittfolgen,
-    Bibliothekswahl) — gepinnt sind stattdessen deren beobachtbare Zusagen.
+  /api/runs/{repo}/{run_id}:
+    get:
+      summary: Run detail (unchanged shape).
+      parameters:
+        - { name: repo, in: path, required: true, schema: { type: string } }
+        - { name: run_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Run detail object.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunDetail"
 
-    Dieser Lauf fügt KEINE HTTP-Route, KEIN Event und KEINE neue Laufzeit-
-    Dependency hinzu und entfernt keine Route. Beobachtbar ändern sich: die
-    beiden HTML-Routen (Sprachverhalten nach x-adw-template-behavior) und
-    ALLE Event-Log-lesenden Routen (Antwortverhalten für `events.jsonl.gz`
-    bzw. gz-only-Läufe nach x-adw-reader-behavior) — enumeriert in
-    x-adw-scope.changed_http_routes. Der Config-Schalter `trace.enabled` ist
-    ausschließlich über sein beobachtbares Verhalten gepinnt (x-adw-config).
+components:
+  schemas:
 
-servers: []
+    RunSummary:
+      type: object
+      description: >
+        Existing summary object. Only the `status` field's value domain and
+        derivation change; all other fields keep their current meaning.
+      properties:
+        status:
+          $ref: "#/components/schemas/RunStatus"
+      # Other fields (run_id, repo, repo_exists, issue, phase, start,
+      # duration, cost, event_count, has_trace) are unchanged and not re-pinned.
 
-paths: {}
+    RunDetail:
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/RunSummary"
+        phases:
+          type: array
+          items:
+            $ref: "#/components/schemas/PhaseCell"
+        tree:
+          type: array
+          items:
+            $ref: "#/components/schemas/TreeNode"
+      # Other detail fields (problems, raw) are unchanged and not re-pinned.
 
-x-adw-scope:
-  workstreams:
-    - backend
-  surfaces:
-    - cli_option
-    - cli_exit_code
-    - cli_stdout
-    - config_key
-    - filesystem_effect
-    - git_effect
-    - template_behavior
-    - reader_behavior
-  added_http_routes: []
-  removed_http_routes: []
-  changed_http_routes:
-    # Sprachverhalten (x-adw-template-behavior) UND Gzip-Lesen (x-adw-reader-behavior):
-    - "GET /"
-    - "GET /runs/{repo}/{run_id}"
-    # nur Gzip-Lesen (x-adw-reader-behavior) — Antwortverhalten für gz-/gz-only-Läufe:
-    - "GET /api/runs"
-    - "GET /api/runs/{repo}/{run_id}"
-    - "GET /api/runs/{repo}/{run_id}/events"
-    - "GET /api/runs/{repo}/{run_id}/diff"
-    - "GET /api/runs/{repo}/{run_id}/stream"   # SSE
-  unchanged_http_routes:              # lesen kein Event-Log; Antwortverhalten unverändert
-    - "GET /api/runs/{repo}/{run_id}/artifacts/{name}"
-    - "GET /static/*"
-  added_events: []
-  new_runtime_dependencies: []
+    PhaseCell:
+      type: object
+      properties:
+        name:  { type: string }
+        status:
+          $ref: "#/components/schemas/PhaseStatus"
+        duration:
+          type: [number, "null"]
 
-# --- (1) CLI: die neue Gruppe `runs` mit `list` und `prune` -------------------
+    TreeNode:
+      type: object
+      description: A trace-tree node (recursive via `children`, unchanged shape).
+      properties:
+        status:
+          $ref: "#/components/schemas/NodeStatus"
+      # Node type/label/seq/children/etc. are unchanged and not re-pinned.
 
-x-adw-cli:
-  group:
-    command: adw runs
-    help_lists_group: true          # `adw --help` führt eine `runs`-Gruppe auf (B1)
-    subcommands:
-      - list
-      - prune
+    # --- Status value domains (the actual contract of this change) -------------
 
-  list:
-    command: adw runs list
-    options:
-      repo:
-        spelling: "--repo <path>"
-        default: current_working_directory   # wie die bestehenden Kommandos
-    shows_per_run_at_least:                   # B2 — Spaltenauswahl/Reihenfolge nicht gepinnt
-      - run_id
-      - phase
-      - date            # kanonisches Lauf-Datum nach x-adw-run-date
-      - event_count     # zählt events.jsonl UND events.jsonl.gz
-      - log_size        # Größe von events.jsonl bzw. events.jsonl.gz
-    unknown_value_rendering: |
-      Ein bei einem Legacy-Lauf nicht ermittelbarer Wert (z. B. die
-      Ereigniszahl ohne Log) wird sichtbar als unbekannt dargestellt, statt den
-      Aufruf scheitern zu lassen (B2). Die konkrete Darstellung ist nicht gepinnt.
-    exit_codes:
-      success: 0                    # auch ohne Läufe (B3)
-      repo_missing_or_unusable: 1   # verständliche Meldung (B3)
+    RunStatus:
+      description: >
+        Run-level status. `awaiting_approval` already existed as a TERMINAL
+        value from a closed `run` span's end payload; this change additionally
+        makes it appear for an OPEN `run` span (see rule R2). Values are
+        language-neutral and never translated. `null` for a state-only run
+        outside the approval phases.
+      oneOf:
+        - type: "null"
+        - type: string
+          enum: [running, awaiting_approval, done, escalated]
 
-  prune:
-    command: adw runs prune
-    options:
-      repo:
-        spelling: "--repo <path>"
-        default: current_working_directory
-      keep:
-        spelling: "--keep <N>"
-        default: 20                 # C1 — kein Default löscht mehr als --keep 20 (E5)
-        accepts: nonnegative_integer
-      older_than:
-        spelling: "--older-than <DAYS>"
-        default: none               # kein Altersfilter → alle nicht geschützten Kandidaten
-        accepts: nonnegative_integer
-      gzip:
-        spelling: "--gzip"
-        default: false
-    no_additional_flags: true       # E5 — genau diese Fläche, keine weiteren Flags
-    no_interactive_prompt: true     # E5
-    no_dry_run: true                # Deferred: kein --dry-run
-    candidate_selection:
-      rule: |
-        `--keep N` schützt die neuesten N Läufe des Repos; die übrigen werden
-        vom ältesten zum neuesten bearbeitet. Ist `--older-than DAYS` gesetzt,
-        werden unter den nicht geschützten nur Läufe bearbeitet, deren
-        kanonisches Datum mindestens DAYS Tage zurückliegt. Neu/alt, Reihen-
-        folge und Alter bemessen sich ausschließlich am kanonischen Lauf-Datum
-        samt Tie-Breaker (siehe x-adw-run-date). (C1)
-      age_predicate: "run_time <= now_utc - DAYS * 24h"   # Gleichheit an der Grenze = alt genug
-      now_utc_evaluated: once_per_invocation
-    per_candidate_result:            # C7 — pro bearbeitetem Kandidat: Run-ID + Ergebnis
-      - deleted
-      - compressed
-      - already_compressed
-      - skipped_with_reason
-    exit_codes:
-      success: 0                     # vollständig ausgeführt; Sicherheits-Skips sind KEIN Fehler (C7)
-      repo_invalid_or_unsafe_completion: 1
-      invalid_flag_value: 2          # ungültiges N/DAYS → üblicher CLI-Fehler, KEINE Run-Daten-Änderung (C1)
+    PhaseStatus:
+      description: Status of a phase cell in the phase bar. `awaiting` is new (R3).
+      type: string
+      enum: [pending, active, awaiting, completed, failed]
 
-# --- (1b) Nie-Pruning-Zusage für nicht-terminale Läufe ------------------------
+    NodeStatus:
+      description: >
+        Status of a trace-tree node. `waiting` is new (R1); it is `null` for
+        non-span nodes.
+      oneOf:
+        - type: "null"
+        - type: string
+          enum: [running, waiting, passed, failed, done]
 
-x-adw-prune-safety:
-  prunable_states:                   # C2 — nur diese Phasen sind prune-fähig
-    - done
-    - escalated
-  non_terminal_run:
-    action: skipped
-    reported_with: [run_id, phase]   # übersprungen UND benannt, nie stillschweigend
-    fully_preserved: true            # gilt für löschendes Pruning, --gzip und Auto-Pruning
-  uncommitted_worktree:              # C4 — Schutz uncommitteter Arbeit
-    trigger: any_worktree_of_the_candidate_has_uncommitted_changes
-    action: skip_entire_run
-    forcibly_removed: none           # auch kein sauberer Worktree desselben Laufs
-    other_components_preserved:
-      - run_dir
-      - state
-      - event_log
-      - snapshot_refs
-      - lane_branches
-    reported_with: [run_id, reason]
-    other_safe_candidates: still_processed
-    promise: "prune verwirft niemals fremde Arbeit"
+  # --- Observable derivation rules & template behavior ------------------------
+  # (Not OpenAPI schema; the binding behavioral contract both the code and the
+  #  tests build against. No internal signature is implied.)
+  x-behavior:
+    R1_tree_waiting:
+      applies_to: RunDetail.tree[*].status
+      rule: >
+        An OPEN (still-running) span whose event type is `ci.wait` or `gate`
+        reports `waiting` instead of `running`. Any other open span (e.g.
+        `agent.run`, codex spans) still reports `running`. A CLOSED
+        `ci.wait`/`gate` span keeps its prior result (`gate` →
+        `passed`/`failed`, otherwise `done`). The Timeline's existing
+        `state: waiting|active` output is unchanged, and the same open
+        `ci.wait`/`gate` span that the Timeline reports as waiting reports
+        `waiting` in the tree — the two surfaces never disagree for the same
+        span.
 
-# --- (1c) Löschendes Pruning: Dateisystem-/Git-Effekt und Fehler-Invariante ---
+    R2_run_awaiting_approval:
+      applies_to: [RunSummary.status, RunDetail.run.status]
+      rule: >
+        Event-log is authoritative when a trace exists. A run whose `run` span
+        is OPEN (no matching `run` end) and whose most recent `approval` event
+        is `event: awaited` with no later `event: granted` reports
+        `awaiting_approval` instead of `running`. A later `granted` returns the
+        still-open run to `running`. A CLOSED `run` span's status is unchanged
+        (from its end payload: `done`/`escalated`/`awaiting_approval`); this
+        derivation never alters a terminal result.
+        Fallback WITHOUT a trace: a run whose state phase is `awaiting_approval`
+        or `awaiting_spec_approval` reports `awaiting_approval`. With a trace,
+        the event log wins — the state phase never overrides a later `granted`.
+        A state-only run outside those two phases stays statusless (`null`),
+        never a false `running` or `awaiting_approval`.
+      cross_endpoint: >
+        Both endpoints report the SAME status for the same run in the same
+        existing `status` field.
 
-x-adw-prune-delete:
-  removes_per_prunable_run:          # C3
-    - "run directory .adw/runs/<run_id>/"
-    - "snapshot refs refs/adw/<run_id>/*"
-    - "ALL registered git worktrees under .adw/runs/<run_id>/trees/<lane>"
-  # Der Entfernungsmechanismus (Git-Worktree-Verwaltung statt rmtree) ist
-  # Plan-Guardrail (Task 8); gepinnt sind hier nur die post_conditions.
-  preserved:
-    - "lane branches adw/<run_id>/*"   # C3/C8 — Branches bleiben erhalten
-  post_conditions:                     # C3/C8 — beobachtbar über git
-    - "git worktree list lists no worktree of the run"
-    - "git worktree prune --dry-run reports no orphan for the run"
-    - "for every deleted run: no snapshot ref and no orphaned worktree registration remain"
-  partial_failure_guarantees:          # C7 — beobachtbare Zusagen; die Schrittfolge selbst
-    #                                    ist Implementierung und steht im Plan
-    - "zu KEINEM Zeitpunkt existiert eine verwaiste Worktree-Registrierung für einen bereits entfernten Laufordner (der Laufordner verschwindet nie vor der sauberen Behandlung aller seiner Registrierungen)"
-    - "bereits erfolgreich entfernte Bestandteile bleiben entfernt; ein Teilfehler macht nichts rückgängig"
-    - "die Ausgabe benennt für den betroffenen Lauf den erreichten Zustand (welche Bestandteile fehlen)"
-    - "ein erneuter prune-Aufruf setzt sicher fort: der teilweise bearbeitete Lauf ist weiterhin Kandidat, bereits entfernte Worktrees/Refs sind kein Fehler, die verbleibenden Bestandteile werden nachgeholt"
-  exact_retention:                     # C8
-    condition: "alle Läufe terminal, sicher löschbar und alt genug"
-    result: "prune --keep N lässt exakt die neuesten N Laufordner zurück"
+    R3_phase_awaiting:
+      applies_to: RunDetail.phases[*].status
+      rule: >
+        For a run paused at an approval gate, the waiting business phase reports
+        `awaiting` instead of `active`:
+        spec gate (`approval` event `gate: spec`; fallback state phase
+        `awaiting_spec_approval`) → phase `spec`;
+        plan gate (`approval` event `gate: plan`; fallback state phase
+        `awaiting_approval`) → phase `plan`.
+        The awaiting phase is not simultaneously `active`/`pending`/`completed`;
+        no other phase is `active` at the same time; the other phases keep their
+        previously derived states. After the matching `granted`, `awaiting`
+        disappears and the bar follows the normal phase progression.
+        `RunDetail.phases` retains its existing seven business-phase cells: no
+        additional approval-phase cell appears in the response, and none is
+        rendered by the phase bar.
 
-# --- (1d) `--gzip` als behaltende Form ---------------------------------------
-
-x-adw-prune-gzip:
-  compresses: "events.jsonl -> events.jsonl.gz"   # ausschließlich (C5)
-  guarantees:                         # beobachtbar; der Schreibmechanismus steht im Plan
-    - "events.jsonl wird erst entfernt, wenn eine vollständige, gültige events.jsonl.gz vorliegt — ein Abbruch verliert nie die maßgebliche Quelle"
-    - "eine korrupte/unvollständige .gz gilt nie als Ergebnis; solange events.jsonl existiert, ist sie maßgeblich"
-    - "erneutes --gzip repariert einen unterbrochenen Zustand (ersetzt die alte .gz)"
-  already_compressed_iff: "events.jsonl.gz exists AND events.jsonl is absent"
-  both_present_means: "interrupted earlier attempt -> events.jsonl is authoritative, recompress"
-  preserved:                          # C5/E10 — die behaltende Form
-    - run_dir
-    - state
-    - worktrees_with_registration
-    - "all snapshot refs refs/adw/<run_id>/*"
-    - lane_branches
-  note: "ohne Refs verlöre genau dieser behaltene Lauf seinen Diff-Reiter (E10)"
-
-# --- (1e) kanonisches Lauf-Datum (B4) ----------------------------------------
-
-x-adw-run-date:
-  used_for: [list_display, keep_ordering, older_than_age_check]
-  primary: "timestamp of the run's start event (events.jsonl or events.jsonl.gz)"
-  fallbacks_in_order:
-    - "mtime of the persisted state in the run directory"
-    - "mtime of the run directory itself"
-  always_determinable: true
-  normalization: |
-    Alle Zeitstempel auf UTC normalisiert: Offset-behaftete werden umgerechnet,
-    naive (offsetlose) als UTC interpretiert; Datei-Zeitstempel sind Epoch-
-    basiert und damit bereits UTC.
-  tie_breaker: "run_id lexicographically"   # deterministisch bei Gleichstand
-
-# --- (2) Config: der `trace:`-Block ------------------------------------------
-
-x-adw-config:
-  file: .adw/config.yaml
-  block: trace
-  optional: true                     # fehlender Block/Keys → genannte Defaults (D1)
-  keys:
-    enabled:
-      type: strict_boolean           # nur echter Boolean akzeptiert (D1)
-      default: true
-      false_effect: "kein events.jsonl angelegt/erweitert; kein Disabled-Marker, keine Emitter-Warnung; Lauf, State, Phasen und Resume unberührt (D2)"
-    keep_runs:
-      type: nonnegative_integer      # Booleans zählen NICHT als Integer (D1)
-      default: 20
-      zero_effect: "kein automatisches Pruning (D3)"
-  invalid_value: "über den bestehenden Config-Fehlerpfad mit klarer Meldung abgewiesen, BEVOR ein Lauf startet (D1)"
-  auto_prune:                        # D3
-    trigger: "run finished in phase done AND trace.keep_runs > 0"
-    behaves_like: manual_deleting_prune   # gleiche Regeln/Zusagen C2–C4, C8
-    protected_newest: keep_runs
-    older_than_filter: none
-    never_triggered_by: [escalated, interrupted, awaiting_approval]
-    fail_open:
-      run_phase_unchanged: done
-      run_exit_code_unchanged: true
-      error_reporting: "sichtbar in der Kommando-Ausgabe des Laufs, nicht verschluckt"
-      step_invariant: same_as_x-adw-prune-delete.partial_failure_guarantees
-
-# --- (3) Sprachauswahl + englischer Default (das beobachtbare Template-Verhalten)
-
-x-adw-template-behavior:
-  language:
-    supported:
-      - en
-      - de
-    default: en                      # A2 — letzter Fallback ist immer en
-    selection_order:                 # A2 — pro GUI-Request, genau diese Reihenfolge
-      - "query parameter ?lang=de|en"
-      - "language cookie"
-      - "first supported language from Accept-Language"
-      - en
-    fallthrough: "nicht unterstützte/fehlende Werte einer Stufe fallen zur nächsten Stufe durch"
-    request_without_any_language: renders_fully_english
-    cookie:
-      set_by: "explicit VALID ?lang=de|en selection"     # A3
-      invalid_query_sets_cookie: false
-      used_by: "subsequent requests without ?lang (per selection_order)"
-    translated: ui_chrome_only       # A4 — Labels, Reiternamen, Spaltenköpfe, Navigations-/Hinweistexte
-    never_translated:                # A4/E2 — Inhalte rendern sprachunabhängig byteidentisch
-      - prompts
-      - agent_output
-      - findings
-      - artifact_bodies
-      - gate_output
-      - tool_inputs_and_outputs
-      - raw_event_payloads
-    switch_link:
-      location: header               # A5 — ein Link, kein Umschalter darüber hinaus (Deferred)
-      preserves_query_params: [offset, tools_offset, focus, limit, raw_q, raw_type, and_all_view_relevant_params]
-      preserves_node_selection: true
-      changes_only: language
-    regression_guard: |
-      tests/test_gui_language.py bleibt OHNE Änderung grün, einschließlich
-      `"Antwort" not in html` und `"kein Event-Log" not in html` am
-      Default-Request (E3).
-
-# --- (4/5) transparenter Gzip-Reader (C6) ------------------------------------
-
-x-adw-reader-behavior:
-  transparent_gzip:
-    applies_to_routes:               # C6 — alle Event-Log-lesenden Routen (s. x-adw-scope)
-      - "GET /"
-      - "GET /runs/{repo}/{run_id}"
-      - "GET /api/runs"
-      - "GET /api/runs/{repo}/{run_id}"
-      - "GET /api/runs/{repo}/{run_id}/events"
-      - "GET /api/runs/{repo}/{run_id}/diff"
-      - "GET /api/runs/{repo}/{run_id}/stream"
-    reads: [events.jsonl, events.jsonl.gz]
-    both_present_prefers: events.jsonl   # konsistent zu --gzip (C5/C6)
-    identical_output:                # dieselbe fachliche Ausgabe aus beiden Formen
-      - same_events_same_order
-      - same_event_count
-      - same_bad_line_handling
-      - same_seq_gap_handling
-      - same_derived_views
-    run_discoverable_with_gz_only: true   # ein komprimierter Lauf bleibt auffindbar
-    gzipped_run_in_gui: "vollständig lesbar inkl. Diff-Ansichten über die erhaltenen Refs"
-
-# --- Unverändertes beobachtbares Verhalten ------------------------------------
-# (Datei-Einfrierungen — adw/snapshots.py, events.py-Änderungsgrenze — sind
-# Plan-Guardrails, kein Vertragsbestandteil; siehe Plan Tasks 11 und 14.)
-
-x-adw-unchanged-observable:
-  event_log:
-    schema_and_seq: unchanged        # Format/Schema von events.jsonl inkl. seq-Vergabe
-    fail_open: "ein Logging-Fehler lässt nie einen Lauf scheitern (wie bisher)"
-  http:
-    routes_not_listed_as_changed: unchanged   # s. x-adw-scope.unchanged_http_routes
-  gui:
-    windowing_dom_cap_performance_measures: unchanged
-  cli:
-    limits_circuit_breaker_review_loop_policy_phase_order: unchanged
-  gui_exit_state_compat: "bestehende Run-States bleiben unverändert resumier-/approvebar"
+    R4_presentation:
+      rule: >
+        `waiting` (tree node), `awaiting_approval` (run status) and `awaiting`
+        (phase) are rendered visually distinguishable from `running`; the
+        styling is additive — every existing status presentation remains.
+        Labels for the newly visible states exist in English and German,
+        semantically equivalent in both languages. `awaiting_approval` carries
+        the strongest visual emphasis of all states (only state requiring human
+        action). JSON status values stay language-neutral and untranslated.
+      template_surfaces: >
+        The run list's status column and the run-detail header both render the
+        derived run status (R2): while a run awaits approval, BOTH surfaces
+        show `awaiting_approval` with its label and the strongest visual
+        emphasis; the phase bar renders the derived phase status (R3) and the
+        trace tree renders the derived node status (R1). No markup, CSS
+        selectors, or helper functions are prescribed.
