@@ -35,6 +35,12 @@ _EN: dict[str, str] = {
     "no_trace": "no trace",
     "no_trace_title": "no event log for this run",
     "no_trace_line": "no trace — no event log for this run",
+    # Labels for the newly visible states (§7.2): a tree node that is technically
+    # WAITING, a run/phase pausing for a human APPROVAL. `awaiting_approval` is the
+    # only state that needs a person to act and is emphasised the strongest.
+    "status_waiting": "waiting",
+    "status_awaiting": "awaiting",
+    "status_awaiting_approval": "awaiting approval",
     "lang_switch": "Deutsch",
     "tab_trace": "Trace",
     "tab_timeline": "Timeline",
@@ -102,6 +108,9 @@ _DE: dict[str, str] = {
     "no_trace": "kein Trace",
     "no_trace_title": "kein Ereignis-Log für diesen Lauf",
     "no_trace_line": "kein Trace — kein Ereignis-Log für diesen Lauf",
+    "status_waiting": "wartet",
+    "status_awaiting": "wartet",
+    "status_awaiting_approval": "wartet auf Freigabe",
     "lang_switch": "English",
     "tab_trace": "Trace",
     "tab_timeline": "Timeline",

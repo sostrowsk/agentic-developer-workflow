@@ -370,6 +370,49 @@ def _run_span(events):
     return first_start, None  # the last run span remains open → running
 
 
+def _latest_approval_event(events):
+    """The most recent ``approval`` event's ``event`` value (``awaited`` or
+    ``granted``) over the log, or None. The approval events sit on the run span
+    (cli.py:480/721); a later ``granted`` supersedes an earlier ``awaited``."""
+    latest = None
+    for e in events:
+        if e.get("type") == "approval":
+            ev = (e.get("payload") or {}).get("event")
+            if ev in ("awaited", "granted"):
+                latest = ev
+    return latest
+
+
+def _awaiting_gate_phase(events, state_phase):
+    """The business phase (``spec``/``plan``) a run is paused at for human approval,
+    or None. The event log wins: the latest ``approval`` event, if ``awaited``
+    without a later ``granted``, names the gate (``gate: spec`` → ``spec``,
+    ``gate: plan`` → ``plan``). Without any approval event (a run without a trace),
+    the state phase is the fallback (``awaiting_spec_approval`` → ``spec``,
+    ``awaiting_approval`` → ``plan``)."""
+    gate = None
+    seen = False
+    for e in events:
+        if e.get("type") != "approval":
+            continue
+        payload = e.get("payload") or {}
+        ev = payload.get("event")
+        if ev == "awaited":
+            seen = True
+            g = payload.get("gate")
+            gate = g if g in ("spec", "plan") else None
+        elif ev == "granted":
+            seen = True
+            gate = None  # the pause is lifted — no phase is awaiting any more
+    if seen:
+        return gate
+    if state_phase == "awaiting_spec_approval":
+        return "spec"
+    if state_phase == "awaiting_approval":
+        return "plan"
+    return None
+
+
 def _summary(slug, run_id, events, state) -> dict:
     start_rec, end_rec = _run_span(events)
     start_payload = (start_rec or {}).get("payload") or {}
@@ -382,9 +425,25 @@ def _summary(slug, run_id, events, state) -> dict:
     if isinstance(issue, str) and len(issue) > _ISSUE_MAX:
         issue = issue[:_ISSUE_MAX] + "…"
     if end_rec is not None:
+        # A CLOSED run span keeps its terminal end-payload status untouched
+        # (done/escalated/awaiting_approval) — the open-span derivation below never
+        # rewrites a finished result (R2).
         status = end_payload.get("status")
     elif start_rec is not None:
-        status = "running"  # a run span started but has no matching end yet
+        # An open run span is `running` — unless the event log shows it paused at a
+        # human-approval gate (latest `approval` is `awaited`, no later `granted`),
+        # in which case it is `awaiting_approval` even though the span is still open.
+        if _latest_approval_event(events) == "awaited":
+            status = "awaiting_approval"
+        else:
+            status = "running"
+    elif not events and state is not None and state.phase in (
+        "awaiting_approval", "awaiting_spec_approval"
+    ):
+        # Fallback WITHOUT a trace (E4): a run with no event log whose state phase is
+        # an approval phase reports `awaiting_approval`. With a trace the event log is
+        # authoritative (handled above), so this never overrides a later `granted`.
+        status = "awaiting_approval"
     else:
         # No run span at all (a state-only run, Aufgabe G): the status is not
         # derivable from state — leave it empty, never a false 'running'.
@@ -437,6 +496,10 @@ def _phase_bar(events, state_phase) -> list[dict]:
                 if st and "start" not in info:
                     info["start"] = st[1]
     current_idx = PHASES.index(state_phase) if state_phase in PHASES else None
+    # The business phase (spec/plan) the run is paused at for human approval, if any
+    # (R3). Its span has already ended (into awaiting_*), so `awaiting` must win over
+    # the `completed` it would otherwise get; after `granted` this is None again.
+    awaiting = _awaiting_gate_phase(events, state_phase)
     bar = []
     for i, name in enumerate(PHASES):
         info = spans.get(name)
@@ -445,7 +508,9 @@ def _phase_bar(events, state_phase) -> list[dict]:
             a, b = _ts_epoch(info["start"]), _ts_epoch(info["end"])
             duration = (b - a) if (a is not None and b is not None) else None
         ended = bool(info and info.get("start") and info.get("end"))
-        if name in failed:  # failure wins over a merely-present end record
+        if name == awaiting:  # waiting for human approval — not active, not completed
+            status = "awaiting"
+        elif name in failed:  # failure wins over a merely-present end record
             status = "failed"
         elif ended:
             status = "completed"
@@ -551,7 +616,10 @@ def _node_status(node):
     if not _is_span(node):
         return None
     if node.running:
-        return "running"
+        # An open span that is pure WAITING (CI poll, gate runtime) is `waiting`,
+        # not `running` — the same `_WAITING_TYPES` the Timeline uses (R1). Every
+        # other open span (agent.run, codex, run, phase, lane, round) stays running.
+        return "waiting" if node.type in _WAITING_TYPES else "running"
     if node.type == "gate":
         return "passed" if (node.end_payload or {}).get("passed") else "failed"
     return "done"

@@ -44,6 +44,22 @@ tr.missing-repo { color: var(--muted); opacity: 0.55; font-style: italic; }
 .phase-active { background: #fff4d6; font-weight: 600; }
 .phase-pending { color: var(--muted); }
 .phase-failed { background: #fde5e5; }
+/* A phase pausing at a human-approval gate: distinct from `active` (working) —
+   dashed accent border, so a glance separates "working" from "waiting on a human". */
+.phase-awaiting { background: #e9ecff; font-weight: 600; border-style: dashed; border-color: #3651d6; }
+
+/* The derived run status shown in the run list and the detail header. Only the
+   new `awaiting_approval` gets its own emphasis; the other values render plainly.
+   It is the ONE state that needs a person to act, so it is emphasised the
+   strongest of all states (R4). */
+.run-status { border-radius: 3px; padding: 0 0.35rem; }
+.run-status.status-awaiting_approval {
+  background: #3651d6;
+  color: #fff;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
 
 main.detail { display: block; }
 /* Trace view: the two-column trace tree | detail panes layout. */
@@ -74,6 +90,9 @@ main.detail { display: block; }
 /* Per-status icon glyph coloured by the node's serialized status. */
 .node .icon { display: inline-block; width: 1.2em; text-align: center; color: var(--muted); }
 .node-running > .icon, .node-running > details > summary > .icon { color: #c90; }
+/* A pure-waiting open span (CI poll / gate runtime): distinct hue from running
+   work, so the tree separates "working" from "technically waiting" (R1). */
+.node-waiting > .icon, .node-waiting > details > summary > .icon { color: #3651d6; }
 .node-failed > .icon, .node-failed > details > summary > .icon { color: #c33; }
 .node-done > .icon, .node-done > details > summary > .icon,
 .node-passed > .icon, .node-passed > details > summary > .icon { color: var(--accent); }

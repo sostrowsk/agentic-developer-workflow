@@ -27,7 +27,7 @@
         <td>{{ e.repo }}</td>
         <td class="issue">{{ e.issue if e.issue is not none else "" }}</td>
         <td>{{ e.phase if e.phase is not none else "" }}</td>
-        <td>{{ e.status if e.status is not none else "" }}</td>
+        <td>{% if e.status is not none %}<span class="run-status status-{{ e.status }}">{{ t.get("status_" + e.status, e.status) }}</span>{% endif %}</td>
         <td class="ts">{{ e.start | fmt_ts }}</td>
         <td class="dur">{{ e.duration | fmt_duration }}</td>
         <td class="cost">{{ e.cost | fmt_cost }}</td>

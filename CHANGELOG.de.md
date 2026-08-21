@@ -13,6 +13,30 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Der Run-Inspector unterscheidet „arbeitet" von „wartet" von „wartet auf
+  Menschen".** Drei bisher ununterscheidbare Situationen sind jetzt getrennt,
+  rein aus dem vorhandenen Event-Log abgeleitet (keine neuen Events, Routen oder
+  Persistenz):
+  - Der Trace-Baum gibt einem offenen `ci.wait`-/`gate`-Span den Status
+    `waiting` (leeres CI-Pollen oder Gate-Laufzeit) statt `running`; derselbe
+    Span, den die Timeline schon als wartend zeichnet, stimmt nun im Baum überein.
+    Ein beendeter `gate`/`ci.wait`-Span behält sein Ergebnis (`passed`/`failed`,
+    sonst `done`).
+  - Ein an einem Approval-Gate pausierter Lauf meldet `awaiting_approval` — nicht
+    `running` — in `GET /api/runs`, `GET /api/runs/{repo}/{run_id}`, der Run-Liste
+    und im Run-Detail-Kopf, auch solange sein `run`-Span offen ist. Abgeleitet
+    wird das aus dem jüngsten `approval`-Event (`awaited` ohne späteres
+    `granted`); ein Lauf ohne Trace fällt auf seine State-Phase zurück. Ein
+    beendeter `run`-Span behält seinen terminalen End-Payload-Status unverändert.
+  - Die Phasenleiste zeigt die wartende Fachphase (`spec` bzw. `plan`) als
+    `awaiting` statt `active`.
+  - `awaiting_approval` — der einzige Zustand, in dem ein Mensch handeln muss —
+    wird optisch am stärksten hervorgehoben; neues CSS und EN/DE-Labels sind
+    additiv, die JSON-Statuswerte bleiben sprachneutral.
+
 ## [0.8.0] — 2026-08-20
 
 ### Hinzugefügt

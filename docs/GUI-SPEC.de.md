@@ -338,6 +338,19 @@ Status (läuft / wartet auf Approval / fertig / eskaliert) · Start · Dauer ·
 Kosten · Event-Zahl. Sortierbar, Filter nach Repo und Status. Laufende Runs
 zuerst, live aktualisiert.
 
+Ein Lauf, dessen `run`-Span noch offen ist, aber an einem Approval-Gate pausiert,
+meldet `awaiting_approval` — nicht `running` — sowohl in der Statusspalte der
+Run-Liste als auch im Run-Detail-Kopf (beide Endpunkte sind stets einig).
+Abgeleitet wird das aus dem Event-Log: das jüngste `approval`-Event ist `awaited`
+ohne späteres `granted` (ein späteres `granted` bringt den weiterhin offenen Lauf
+wieder auf `running`); ein beendeter `run`-Span behält den terminalen Status aus
+seinem End-Payload unverändert. Für einen Lauf ohne Trace ist die State-Phase der
+Fallback — `awaiting_approval` / `awaiting_spec_approval` → `awaiting_approval`.
+`awaiting_approval` ist der einzige Zustand, in dem ein Mensch handeln muss, und
+wird optisch am stärksten hervorgehoben. Die JSON-Statuswerte bleiben
+sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werden
+übersetzt.
+
 **B — Run-Detail (`/runs/{repo}/{run_id}`)** — die Hauptansicht:
 
 ```
@@ -357,13 +370,21 @@ zuerst, live aktualisiert.
 ```
 
 1. **Phasen-Landkarte** (Kopf): die sieben Phasen als Statusleiste — erledigt /
-   aktiv / ausstehend / gescheitert, mit jeweiliger Dauer. Klick scrollt den
-   Baum zu dieser Phase. Das ist die Orientierungsebene; sie spiegelt den
+   aktiv / ausstehend / **wartet** / gescheitert, mit jeweiliger Dauer. Klick
+   scrollt den Baum zu dieser Phase. Ein an einem Approval-Gate pausierter Lauf
+   zeigt seine wartende Fachphase (`spec` bzw. `plan`) als `awaiting` statt
+   `active`; keine andere Phase ist dann aktiv, und `awaiting` entfällt, sobald
+   das Gate freigegeben ist. Das ist die Orientierungsebene; sie spiegelt den
    Flowchart aus `docs/adw-flowchart.excalidraw`.
 2. **Trace-Baum** (links): der Span-Baum aus §4.2, aufklappbar, chronologisch.
    Je Knoten: Icon (Status), Label, Dauer, bei Loops `n/cap`. Lanes sind
    Geschwister — Parallelität ist als zwei offene Äste sichtbar. Auto-Scroll zum
-   aktiven Knoten im Live-Modus (abschaltbar).
+   aktiven Knoten im Live-Modus (abschaltbar). Ein offener Span, der reines
+   **Warten** ist (eine `ci.wait`-Poll-Schleife oder eine `gate`-Laufzeit — die
+   gemeinsame `_WAITING_TYPES`), liest `waiting` statt `running`, sodass leeres
+   Pollen von echter Arbeit unterschieden wird; derselbe Span, den die Timeline
+   als wartend zeichnet, liest auch hier `waiting`. Ein beendeter
+   `gate`/`ci.wait`-Span behält sein Ergebnis (`passed`/`failed`, sonst `done`).
 3. **Detail-Pane** (rechts): abhängig vom gewählten Knoten. Für `agent.run` vier
    Reiter:
    - **Prompt** — der vollständige Task-String plus System-Append, Monospace,

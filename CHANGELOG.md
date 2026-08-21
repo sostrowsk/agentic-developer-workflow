@@ -12,6 +12,28 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Added
+- **The Run Inspector tells "working" from "waiting" from "waiting on a human".**
+  Three situations that used to look identical are now distinct, derived purely
+  from the existing event log (no new events, routes or persistence):
+  - The trace tree gives an open `ci.wait` / `gate` span the status `waiting`
+    (idle CI polling or gate runtime) instead of `running`; the same span the
+    Timeline already draws as waiting now agrees in the tree. A closed
+    `gate`/`ci.wait` span keeps its result (`passed`/`failed`, else `done`).
+  - A run paused at an approval gate reports `awaiting_approval` — not
+    `running` — in `GET /api/runs`, `GET /api/runs/{repo}/{run_id}`, the run list
+    and the run-detail header, even while its `run` span is still open. It is
+    derived from the latest `approval` event (`awaited` without a later
+    `granted`); a run without a trace falls back to its state phase. A closed
+    `run` span keeps its terminal end-payload status untouched.
+  - The phase bar shows the waiting business phase (`spec` or `plan`) as
+    `awaiting` instead of `active`.
+  - `awaiting_approval` — the only state that needs a person to act — is
+    emphasised the strongest; new CSS and EN/DE labels are additive, the JSON
+    status values stay language-neutral.
+
 ## [0.8.0] — 2026-08-20
 
 ### Added

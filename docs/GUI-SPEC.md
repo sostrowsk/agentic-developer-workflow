@@ -329,6 +329,18 @@ status (running / awaiting approval / done / escalated) · start · duration ·
 cost · event count. Sortable, filter by repo and status. Running runs first,
 live-updating.
 
+A run whose `run` span is still open but is paused at an approval gate reports
+`awaiting_approval` — not `running` — in both the run list's status column and
+the run-detail header (the two endpoints always agree). This is derived from the
+event log: the most recent `approval` event is `awaited` with no later `granted`
+(a later `granted` returns the still-open run to `running`); a closed `run` span
+keeps the terminal status from its end payload untouched. For a run without a
+trace, the state phase is the fallback — `awaiting_approval` / `awaiting_spec_approval`
+→ `awaiting_approval`. `awaiting_approval` is the one state that needs a person to
+act and is emphasised the strongest of all states. The JSON status values stay
+language-neutral (`waiting`, `awaiting`, `awaiting_approval`); only their labels
+are translated.
+
 **B — Run detail (`/runs/{repo}/{run_id}`)** — the main view:
 
 ```
@@ -348,13 +360,20 @@ live-updating.
 ```
 
 1. **Phase map** (header): the seven phases as a status bar — done / active /
-   pending / failed, with duration each. Click scrolls the tree to that phase.
-   This is the orientation layer; it mirrors the flowchart in
+   pending / **awaiting** / failed, with duration each. Click scrolls the tree to
+   that phase. A run paused at an approval gate shows its waiting business phase
+   (`spec` or `plan`) as `awaiting` instead of `active`; no other phase is active
+   then, and `awaiting` disappears once the gate is granted. This is the
+   orientation layer; it mirrors the flowchart in
    `docs/adw-flowchart.excalidraw`.
 2. **Trace tree** (left): the span tree from §4.2, collapsible, chronological.
    Each node: icon (status), label, duration, and for loops `n/cap`. Lanes are
    siblings — parallelism is visible as two open branches. Auto-scroll to the
-   active node while live (toggleable).
+   active node while live (toggleable). An open span that is pure **waiting** (a
+   `ci.wait` poll loop or a `gate` runtime — the shared `_WAITING_TYPES`) reads
+   `waiting`, not `running`, so idle polling is told apart from real work; the
+   same span the Timeline draws as waiting reads `waiting` here too. A closed
+   `gate`/`ci.wait` span keeps its result (`passed`/`failed`, else `done`).
 3. **Detail pane** (right): depends on the selected node. For `agent.run` four
    tabs:
    - **Prompt** — the full task string plus system append, monospace, copyable
