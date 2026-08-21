@@ -397,13 +397,17 @@ def _awaiting_gate_phase(events, state_phase):
             continue
         payload = e.get("payload") or {}
         ev = payload.get("event")
+        g = payload.get("gate")
+        g = g if g in ("spec", "plan") else None
         if ev == "awaited":
             seen = True
-            g = payload.get("gate")
-            gate = g if g in ("spec", "plan") else None
+            gate = g
         elif ev == "granted":
             seen = True
-            gate = None  # the pause is lifted — no phase is awaiting any more
+            if g == gate:
+                # Only the grant naming the SAME gate lifts THIS pause; a grant for
+                # a different gate belongs to another approval and leaves it awaiting.
+                gate = None
     if seen:
         return gate
     if state_phase == "awaiting_spec_approval":

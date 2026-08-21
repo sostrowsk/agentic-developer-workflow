@@ -84,6 +84,27 @@ def plan_gate_lines(*, granted=False, issue="Plan gate pause"):
     return lines
 
 
+def spec_gate_then_grants_lines(*, match=False, issue="Spec gate, mismatched grant"):
+    """A SPEC gate ``awaited`` followed by a ``granted`` for a DIFFERENT gate
+    (``plan``) — a non-matching grant that must NOT lift the spec pause. With
+    ``match`` a later ``granted`` for ``spec`` (the matching gate) is appended,
+    which does lift it."""
+    lines = [
+        rec(1, "run", "start", "R", None, sec=0, payload=run_start_payload(issue)),
+        rec(2, "phase", "start", "S", "R", sec=1, payload={"name": "spec", "from_phase": "spec"}),
+        rec(3, "phase", "end", "S", "R", sec=2,
+            payload={"name": "spec", "to_phase": "awaiting_spec_approval"}),
+        rec(4, "approval", "point", "R", sec=3, payload={"gate": "spec", "event": "awaited"}),
+        # A grant for the OTHER gate — it names a different gate than the awaited one.
+        rec(5, "approval", "point", "R", sec=4, payload={"gate": "plan", "event": "granted"}),
+    ]
+    if match:
+        lines.append(
+            rec(6, "approval", "point", "R", sec=5, payload={"gate": "spec", "event": "granted"})
+        )
+    return lines
+
+
 def _assert_single_awaiting(status_by_name, awaiting_phase):
     """The named phase is the ONLY ``awaiting`` cell, and no phase is ``active`` at
     the same time; the seven business-phase cells are all still present."""
@@ -125,3 +146,30 @@ def test_after_granted_the_phase_bar_follows_the_normal_progression(
     assert "awaiting" not in status_by_name.values()
     assert status_by_name["build"] == "active"
     assert status_by_name["plan"] == "completed"
+
+
+def test_a_non_matching_grant_does_not_lift_the_awaiting_phase(
+    home, tmp_path  # noqa: F811
+):
+    """R3: only the grant that names the SAME gate lifts the pause. A ``spec``
+    ``awaited`` followed by a ``granted`` for ``plan`` (a different gate) leaves
+    the ``spec`` phase ``awaiting`` — the mismatched grant is not this pause's."""
+    status_by_name = _phases(
+        tmp_path, spec_gate_then_grants_lines(match=False), phase="awaiting_spec_approval"
+    )
+
+    _assert_single_awaiting(status_by_name, "spec")
+
+
+def test_a_matching_grant_after_a_non_matching_one_lifts_the_awaiting_phase(
+    home, tmp_path  # noqa: F811
+):
+    """R3: after the mismatched ``plan`` grant, a later ``granted`` for ``spec``
+    (the matching gate) does lift the pause — ``spec`` is no longer ``awaiting``,
+    even though the event log (not the state phase) is what resolves it."""
+    status_by_name = _phases(
+        tmp_path, spec_gate_then_grants_lines(match=True), phase="awaiting_spec_approval"
+    )
+
+    assert "awaiting" not in status_by_name.values()
+    assert status_by_name["spec"] == "completed"
