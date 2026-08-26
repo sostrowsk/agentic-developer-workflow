@@ -230,6 +230,54 @@ def test_escalated_without_event_log_stays_usable(home, tmp_path):  # noqa: F811
     assert rc["aborts"] == []
 
 
+@pytest.mark.parametrize("bad_payload", ["a bare string", ["reason", "in", "a", "list"], 42])
+def test_non_mapping_escalation_payload_does_not_500(home, tmp_path, bad_payload):  # noqa: F811
+    """AC 7: a truthy but non-mapping escalation payload (a crafted/corrupt string,
+    list or number) yields no 5xx — reason/phase are null, never accessed via
+    ``.get`` on a non-mapping, and the run still escalates (kind ``none``)."""
+    esc = rec(3, "escalation", "point", "B", sec=2, payload={})
+    esc["payload"] = bad_payload                         # override the {} default
+    lines = [
+        rec(1, "run", "start", "R", None, sec=0, payload=run_start_payload("Bad payload")),
+        rec(2, "phase", "start", "B", "R", sec=1, payload={"name": "build", "from_phase": "build"}),
+        esc,
+        rec(4, "run", "end", "R", None, sec=3, payload=run_end_payload("escalated")),
+    ]
+    client, slug, _p, run_id = _client(tmp_path, lines=lines, phase="escalated")
+    rc = _detail(client, slug, run_id)["recovery"]       # 200, not 500
+
+    assert rc["kind"] == "none"
+    assert rc["reason"] is None and rc["phase"] is None
+    assert rc["anchor_seq"] == 3
+
+
+def test_abort_payloads_are_carried_verbatim(home, tmp_path):  # noqa: F811
+    """AC 6/7: abort payloads are carried VERBATIM with no truthiness coercion — a
+    present null/empty-list/populated payload survives unchanged; only a genuinely
+    ABSENT payload key falls back to the documented empty object."""
+    null_ab = rec(3, "limit.hit", "point", "B", sec=2, payload={})
+    null_ab["payload"] = None                            # present null
+    list_ab = rec(4, "circuit_breaker", "point", "B", sec=3, payload={})
+    list_ab["payload"] = []                              # present empty list
+    dict_ab = rec(5, "limit.hit", "point", "B", sec=4,
+                  payload={"limit": "fix_cycles", "value": 3, "cap": 3})
+    missing_ab = rec(6, "circuit_breaker", "point", "B", sec=5, payload={})
+    del missing_ab["payload"]                            # genuinely absent
+    lines = [
+        rec(1, "run", "start", "R", None, sec=0, payload=run_start_payload("Atypical aborts")),
+        rec(2, "phase", "start", "B", "R", sec=1, payload={"name": "build", "from_phase": "build"}),
+        null_ab, list_ab, dict_ab, missing_ab,
+        rec(7, "escalation", "point", "B", sec=6, payload={"reason": "r", "phase": "build"}),
+        rec(8, "run", "end", "R", None, sec=7, payload=run_end_payload("escalated")),
+    ]
+    client, slug, _p, run_id = _client(tmp_path, lines=lines, phase="escalated")
+    rc = _detail(client, slug, run_id)["recovery"]
+
+    assert [a["payload"] for a in rc["aborts"]] == [
+        None, [], {"limit": "fix_cycles", "value": 3, "cap": 3}, {},
+    ]
+
+
 def test_escalation_with_missing_payload_fields_is_robust(home, tmp_path):  # noqa: F811
     """AC 7: an escalation event whose payload lacks ``reason``/``phase`` yields
     ``null`` for those, never a substitute — but the run still escalates

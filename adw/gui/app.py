@@ -512,6 +512,14 @@ def _summary(slug, run_id, events, state) -> dict:
     }
 
 
+def _mapping_payload(rec) -> dict:
+    """The event's payload if it is a mapping, else an empty dict. A crafted or
+    corrupt event whose ``payload`` is a truthy non-mapping (string/list/number)
+    must never reach ``.get`` — it would raise and turn a read into a 5xx (AC 7)."""
+    payload = rec.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
 def _phase_bar(events, state_phase) -> list[dict]:
     spans: dict[str, dict] = {}
     starts: dict[str, tuple] = {}
@@ -520,14 +528,14 @@ def _phase_bar(events, state_phase) -> list[dict]:
         etype = e.get("type")
         if etype == "escalation":
             # The escalation point names the phase it escalated FROM (phases.py).
-            phase = (e.get("payload") or {}).get("phase")
+            phase = _mapping_payload(e).get("phase")
             if phase:
                 failed.add(phase)
             continue
         if etype != "phase":
             continue
         sid = e.get("span")
-        payload = e.get("payload") or {}
+        payload = _mapping_payload(e)
         name = payload.get("name")
         if e.get("kind") == "start":
             starts[sid] = (name, e.get("ts"))
@@ -1458,7 +1466,10 @@ def _escalated_recovery(events) -> dict:
     if escalations:
         governing = escalations[-1]
         anchor_seq = governing["seq"]
-        payload = governing.get("payload") or {}
+        # An atypical (non-mapping) payload — a crafted or corrupt string/list/number
+        # — yields null reason/phase, never a 5xx (AC 7). Only a real mapping carries
+        # reason/phase, taken verbatim.
+        payload = _mapping_payload(governing)
         reason = payload.get("reason")
         phase = payload.get("phase")
         # The aborts of THIS escalation: between the immediately prior escalation
@@ -1469,7 +1480,12 @@ def _escalated_recovery(events) -> dict:
             if e.get("type") not in _ABORT_TYPES or not isinstance(seq, int):
                 continue
             if seq < anchor_seq and (prior_seq is None or seq > prior_seq):
-                aborts.append({"type": e["type"], "seq": seq, "payload": e.get("payload") or {}})
+                # The payload is carried VERBATIM (no truthiness coercion): a present
+                # null/empty/list payload survives unchanged (AC 6/7); only a
+                # genuinely ABSENT payload key falls back to the documented empty
+                # object.
+                ab_payload = e["payload"] if "payload" in e else {}
+                aborts.append({"type": e["type"], "seq": seq, "payload": ab_payload})
         aborts.sort(key=lambda a: a["seq"])
     return {
         "kind": "none",

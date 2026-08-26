@@ -268,6 +268,29 @@
     perfEndAfterContent("adw:tab:start", "adw:tab:end", "adw:tab", activateTab(tabs, btn.getAttribute("data-tab")));
   });
 
+  // The recovery card's escalation-report link opens the Artifacts tab and reveals
+  // the escalation.md entry — read-only navigation through the EXISTING tab/artifact
+  // machinery (no navigation, no fetch of its own): opening the <details> fires the
+  // native toggle the artifact loader already listens for. If the artifact is
+  // missing there is no such entry and the tab's existing "missing" state stands.
+  document.addEventListener("click", function (event) {
+    var link = event.target.closest ? event.target.closest("[data-recovery-artifact]") : null;
+    if (!link) return;
+    event.preventDefault();
+    activateRunTab("artifacts");
+    // Match the entry by attribute VALUE (not by embedding the artifact name — which
+    // contains a `.` — into a selector) so a filename with dots resolves reliably.
+    var name = link.getAttribute("data-recovery-artifact");
+    var summary = null;
+    document.querySelectorAll("summary[data-artifact]").forEach(function (s) {
+      if (!summary && s.getAttribute("data-artifact") === name) summary = s;
+    });
+    if (summary) {
+      var details = summary.closest("details");
+      if (details) details.open = true;  // opening fires toggle -> loadArtifact
+    }
+  });
+
   // --- node-level Diff tab (Aufgabe B): request exactly this node's derived
   // from/to snapshot pair and render the changed-file list plus the patch. Own
   // means only — no third-party highlighter (E5).

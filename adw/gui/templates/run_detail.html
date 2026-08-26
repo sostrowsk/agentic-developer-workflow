@@ -17,6 +17,37 @@
        tab server-side. Point events have no subtree range, so no jump. #}
     {% if node.end_seq is defined and node.end_seq is not none %}<a class="raw-jump" href="?limit={{ limit }}{% if raw_q %}&amp;raw_q={{ raw_q|urlencode }}{% endif %}{% if raw_type %}&amp;raw_type={{ raw_type|urlencode }}{% endif %}&amp;raw_from_seq={{ node.seq }}&amp;raw_to_seq={{ node.end_seq }}">{{ t.raw_jump }}</a>{% endif %}
 {% endmacro %}
+{# Recovery card (§7.2): the next step for a run that needs human intervention. Pure
+   display — the command is selectable text, never executed (E1). In the escalation
+   case (kind `none`) it is anchored at the governing escalation tree node (the macro
+   is called INSIDE that node's <li>, with a run-level fallback when the node is not
+   in the current window) and its report link opens the escalation.md entry in the
+   Artifacts tab through the existing tab/artifact machinery — it never duplicates
+   the report's content. #}
+{% macro recovery_card() %}
+{%- set rc = detail.recovery %}
+  <section class="recovery-card recovery-{{ rc.kind }}" data-recovery-card data-recovery-kind="{{ rc.kind }}"{% if rc.kind == 'none' and rc.anchor_seq is not none %} data-anchor-seq="{{ rc.anchor_seq }}"{% endif %}>
+    <h2 class="recovery-title">{{ t.recovery_title }}</h2>
+    {% if rc.kind == 'none' %}
+    <p class="recovery-new-run">{{ t.recovery_new_run }}</p>
+    {% if rc.reason is not none %}<p class="recovery-reason"><span class="recovery-label">{{ t.recovery_reason }}:</span> {{ rc.reason }}</p>{% endif %}
+    {% if rc.phase is not none %}<p class="recovery-phase"><span class="recovery-label">{{ t.recovery_phase }}:</span> {{ rc.phase }}</p>{% endif %}
+    {% if rc.aborts %}
+    <div class="recovery-aborts"><span class="recovery-label">{{ t.recovery_aborts }}:</span>
+      <ul class="recovery-abort-list">
+        {% for a in rc.aborts %}
+        <li class="recovery-abort" data-seq="{{ a.seq }}">{{ a.type }}: <code>{{ a.payload | tojson }}</code></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    <a class="recovery-artifact" href="#" data-recovery-artifact="{{ rc.escalation_artifact }}">{{ t.recovery_report }}</a>
+    {% else %}
+    <p class="recovery-phase"><span class="recovery-label">{{ t.recovery_phase }}:</span> {{ detail.run.phase }}</p>
+    <p class="recovery-command-line"><span class="recovery-label">{{ t.recovery_command }}:</span> <code class="recovery-command">{{ rc.command }}</code></p>
+    {% endif %}
+  </section>
+{% endmacro %}
 {# The read-only run-context panel (§7.2): the six-field run state AT the selected
    node's seq — a plain field list, no chart. Each value is EMPTY when null (never a
    fabricated 0). Rendered here with `latest_context` (the no-selection / live view);
@@ -257,34 +288,17 @@
     </div>
   </header>
 
-  {#- Recovery card (§7.2): the next step for a run that needs human intervention.
-      Rendered ONLY when the derived `recovery` object is present. Pure display —
-      the command is selectable text, never executed (E1). In the escalation case
-      it is anchored at the governing escalation node (data-anchor-seq) and links to
-      escalation.md in the Artifacts tab instead of duplicating its content. -#}
-  {% if detail.recovery is defined %}
-  {%- set rc = detail.recovery %}
-  <section class="recovery-card recovery-{{ rc.kind }}" data-recovery-card data-recovery-kind="{{ rc.kind }}"{% if rc.kind == 'none' and rc.anchor_seq is not none %} data-anchor-seq="{{ rc.anchor_seq }}"{% endif %}>
-    <h2 class="recovery-title">{{ t.recovery_title }}</h2>
-    {% if rc.kind == 'none' %}
-    <p class="recovery-new-run">{{ t.recovery_new_run }}</p>
-    {% if rc.reason is not none %}<p class="recovery-reason"><span class="recovery-label">{{ t.recovery_reason }}:</span> {{ rc.reason }}</p>{% endif %}
-    {% if rc.phase is not none %}<p class="recovery-phase"><span class="recovery-label">{{ t.recovery_phase }}:</span> {{ rc.phase }}</p>{% endif %}
-    {% if rc.aborts %}
-    <div class="recovery-aborts"><span class="recovery-label">{{ t.recovery_aborts }}:</span>
-      <ul class="recovery-abort-list">
-        {% for a in rc.aborts %}
-        <li class="recovery-abort" data-seq="{{ a.seq }}">{{ a.type }}: <code>{{ a.payload | tojson }}</code></li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endif %}
-    <a class="recovery-artifact" href="#artifacts" data-recovery-artifact="{{ rc.escalation_artifact }}">{{ t.recovery_report }}</a>
-    {% else %}
-    <p class="recovery-phase"><span class="recovery-label">{{ t.recovery_phase }}:</span> {{ detail.run.phase }}</p>
-    <p class="recovery-command-line"><span class="recovery-label">{{ t.recovery_command }}:</span> <code class="recovery-command">{{ rc.command }}</code></p>
-    {% endif %}
-  </section>
+  {#- Recovery card placement: an escalation card (kind `none`) is anchored at the
+      governing escalation tree node inside the Trace tab (below). It is rendered
+      here at RUN LEVEL only as a fallback — for `approve`/`resume` (no escalation
+      node exists) and for an escalated run whose anchor node is not in the current
+      trace window (or has no usable anchor at all). `anchor_in_window` decides. -#}
+  {% set rc_ns = namespace(anchor_in_window=false) %}
+  {% if detail.recovery is defined and detail.recovery.kind == 'none' and detail.recovery.anchor_seq is not none %}
+    {% for row in tree_window.rows %}{% if row.node.seq == detail.recovery.anchor_seq %}{% set rc_ns.anchor_in_window = true %}{% endif %}{% endfor %}
+  {% endif %}
+  {% if detail.recovery is defined and not (detail.recovery.kind == 'none' and rc_ns.anchor_in_window) %}
+  {{ recovery_card() }}
   {% endif %}
 
   <main class="detail">
@@ -313,6 +327,7 @@
               <li class="node node-{{ row.node.status }}" data-seq="{{ row.node.seq }}" data-tree-entry
                   data-context='{{ row.node.context | compact_context | tojson }}' style="--depth:{{ row.depth }}">
                 {{ tree_row(row.node) }}
+                {%- if detail.recovery is defined and detail.recovery.kind == 'none' and detail.recovery.anchor_seq is not none and row.node.seq == detail.recovery.anchor_seq %}{{ recovery_card() }}{% endif %}
               </li>
               {% endfor %}
             </ul>

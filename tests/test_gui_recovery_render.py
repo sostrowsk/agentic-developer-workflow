@@ -71,14 +71,32 @@ def _card(html: str) -> str:
     return html[start:end if end != -1 else None]
 
 
-def test_escalated_card_is_anchored_and_shows_context(home, tmp_path):  # noqa: F811
-    """AC 10: exactly one card, anchored at the governing escalation node
-    (``data-anchor-seq``), showing reason, affected phase, the new-run hint and the
-    link to ``escalation.md``; no continuation command."""
+def _enclosing_open_tag(html: str, tag: str) -> str:
+    """The opening ``<tag …>`` element that the recovery card sits INSIDE — i.e. the
+    nearest ``<tag`` before the card marker. Proves DOM placement rather than a mere
+    attribute value: an escalation card must be nested in its escalation node's
+    ``<li>``, not floating at the top of the document."""
+    i = html.find("data-recovery-card")
+    assert i != -1, "no recovery card in the page"
+    start = html.rfind("<" + tag, 0, i)
+    assert start != -1, f"no enclosing <{tag}> before the card"
+    return html[start:html.find(">", start) + 1]
+
+
+def test_escalated_card_is_anchored_at_the_escalation_node(home, tmp_path):  # noqa: F811
+    """AC 10/P10: exactly one card, structurally NESTED in the tree entry whose
+    ``data-seq`` equals the governing escalation's ``anchor_seq`` — showing reason,
+    affected phase, the new-run hint and the link to ``escalation.md``; no
+    continuation command. The anchoring is a real DOM placement, not just an
+    attribute."""
     client, slug, _p = _client(tmp_path, lines=escalated_lines(), phase="escalated")
     html = client.get(f"/runs/{slug}/{RUN_ID}").text
 
     assert html.count("data-recovery-card") == 1
+    # The card's nearest enclosing element is the escalation node's tree entry <li>.
+    li = _enclosing_open_tag(html, "li")
+    assert 'data-seq="3"' in li and "data-tree-entry" in li
+
     card = _card(html)
     assert 'data-recovery-kind="none"' in card
     assert 'data-anchor-seq="3"' in card             # the escalation event's seq
@@ -95,20 +113,29 @@ def test_escalated_card_lists_the_abort_events(home, tmp_path):  # noqa: F811
     from tests.test_gui_recovery_api import escalation_history_lines
 
     client, slug, _p = _client(tmp_path, lines=escalation_history_lines(), phase="escalated")
-    card = _card(client.get(f"/runs/{slug}/{RUN_ID}").text)
+    html = client.get(f"/runs/{slug}/{RUN_ID}").text
 
+    # Anchored in the escalation node's tree entry (seq 7).
+    li = _enclosing_open_tag(html, "li")
+    assert 'data-seq="7"' in li and "data-tree-entry" in li
+
+    card = _card(html)
     assert 'data-anchor-seq="7"' in card
     assert "lane:backend" in card                    # circuit_breaker scope value
     assert "gate_iterations" in card                 # limit.hit value
 
 
 def test_approve_card_is_run_level_with_command_and_is_display_only(home, tmp_path):  # noqa: F811
-    """AC 10/11: the approve/resume card sits at run level (no anchor) and shows
-    the command as plain, selectable text; it triggers nothing (no form/button)."""
+    """AC 10/11: the approve/resume card sits at run level (before the tab
+    container, not inside a tree entry) and shows the command as plain, selectable
+    text; it triggers nothing (no form/button)."""
     client, slug, path = _client(tmp_path, state_only=True, phase="awaiting_approval")
     html = client.get(f"/runs/{slug}/{RUN_ID}").text
 
     assert html.count("data-recovery-card") == 1
+    # Run-level placement: the card precedes the Trace tab (it is not nested in a
+    # tree entry <li>).
+    assert html.index("data-recovery-card") < html.index('data-tab-panel="trace"')
     card = _card(html)
     assert 'data-recovery-kind="approve"' in card
     assert "data-anchor-seq" not in card             # run-level, no escalation node
@@ -146,3 +173,18 @@ def test_command_line_is_not_translated(home, tmp_path):  # noqa: F811
     assert command in en and command in de          # same command text in both languages
     assert CATALOG["de"]["recovery_command"] in _card(de)
     assert CATALOG["en"]["recovery_command"] in _card(en)
+
+
+def test_recovery_link_opens_artifacts_tab_and_reveals_escalation_md(tmp_path):
+    """AC 9/10: clicking the escalation-report link activates the Artifacts tab,
+    opens the escalation.md entry and loads its content on demand — read-only
+    navigation through the existing tab/artifact machinery, no page navigation.
+    Executed against the SERVED app.js via the plain-node harness."""
+    from tests.gui_js_harness import run_scenario
+
+    obs = run_scenario(tmp_path, "recovery-link")
+    assert obs["navigations"] == []                  # read-only: no URL navigation
+    assert obs["artifacts_active"] is True           # the Artifacts tab is activated
+    assert obs["trace_active"] is False              # ... and the Trace tab deactivated
+    assert obs["details_open"] is True               # the escalation.md entry is revealed
+    assert obs["fetch_escalation"] >= 1              # ... and its content loads on demand

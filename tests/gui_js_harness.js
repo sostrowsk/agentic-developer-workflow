@@ -712,6 +712,65 @@ async function runContextLiveSwap() {
   return { ok: true, before: before, after: after };
 }
 
+function recoveryLinkDom() {
+  // A run-level tab group (trace active, artifacts inactive) whose Artifacts panel
+  // holds the escalation.md entry as a closed <details>, plus the recovery card
+  // whose report link targets it. A dummy node/pane lets the initial applySelection
+  // select without a fetch.
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  const btnTrace = el("button", { classes: ["tab-btn", "active"], attrs: { "data-tab": "trace" } });
+  const btnArt = el("button", { classes: ["tab-btn"], attrs: { "data-tab": "artifacts" } });
+  const buttons = el("div", { classes: ["tab-buttons"], children: [btnTrace, btnArt] });
+  const tracePanel = el("section", { classes: ["tab", "tab-trace", "active"],
+    attrs: { "data-tab-panel": "trace" } });
+  const pre = el("pre", { attrs: { "data-artifact-body": "" } });
+  const more = el("a", { attrs: { "data-artifact-more": "", href: "#" } });
+  more.hidden = true;
+  const summary = el("summary", { classes: ["artifact-open"],
+    attrs: { "data-artifact": "escalation.md" } });
+  const details = el("details", { classes: ["artifact-wrap"], children: [summary, pre, more] });
+  const artPanel = el("section", { classes: ["tab", "tab-artifacts"],
+    attrs: { "data-tab-panel": "artifacts" }, children: [details] });
+  const tabs = el("div", { classes: ["tabs", "run-tabs"], attrs: { "data-tabs": "" },
+    children: [buttons, tracePanel, artPanel] });
+  const link = el("a", { classes: ["recovery-artifact"],
+    attrs: { "data-recovery-artifact": "escalation.md", href: "#" } });
+  const card = el("section", { classes: ["recovery-card"],
+    attrs: { "data-recovery-card": "", "data-recovery-kind": "none" }, children: [link] });
+  const trace = el("div", { classes: ["trace"],
+    children: [el("div", { classes: ["node"], attrs: { "data-seq": "1" } })] });
+  const panes = el("div", { classes: ["panes"],
+    children: [el("div", { classes: ["pane"], attrs: { "data-seq": "1" } })] });
+  const main = el("main", { classes: ["detail"], children: [tabs, trace, panes] });
+  body.append(card, main);
+  return { body, link, artPanel, tracePanel, details };
+}
+
+async function runRecoveryLink() {
+  const dom = recoveryLinkDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: dom.link, preventDefault: function () {} }); await drain();
+
+  // In a browser, opening the <details> fires a toggle -> loadArtifact. Mirror that
+  // here to prove the revealed entry actually loads its content on demand.
+  let fetch_escalation = 0;
+  if (dom.details.open) {
+    dispatch("toggle", { target: dom.details }); await drain();
+    fetch_escalation = pendingFetchCount("/artifacts/escalation.md");
+  }
+
+  return {
+    ok: true,
+    navigations: navigations.slice(),          // no navigation: read-only link
+    artifacts_active: dom.artPanel.classes.has("active"),
+    trace_active: dom.tracePanel.classes.has("active"),
+    details_open: dom.details.open,
+    fetch_escalation: fetch_escalation,
+  };
+}
+
 // ---------------------------------------------------------------------------
 const APP = process.argv[2];
 const SCENARIO = process.argv[3];
@@ -730,6 +789,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "context-panel") result = await runContextPanel();
   else if (SCENARIO === "context-live-swap") result = await runContextLiveSwap();
   else if (SCENARIO === "artifact") result = await runArtifact();
+  else if (SCENARIO === "recovery-link") result = await runRecoveryLink();
   else throw new Error("unknown scenario: " + SCENARIO);
   process.stdout.write(JSON.stringify(result));
 })().catch((err) => {
