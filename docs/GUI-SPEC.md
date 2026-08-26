@@ -392,7 +392,21 @@ are translated.
 3. **Detail pane** (right): depends on the selected node. For `agent.run` four
    tabs:
    - **Prompt** — the full task string plus system append, monospace, copyable
-     (the prompt-optimization lever).
+     (the prompt-optimization lever). Additionally a **unified diff** of this
+     prompt against the prompt of the *previous* `agent.run` of the **same agent
+     in the same lane** within this run — so a fix round's appended findings block
+     is visible without laying two Prompt tabs side by side. The predecessor is
+     chosen purely structurally (same agent string, same lane, the greatest `seq`
+     below this node's) *before* prompt usability matters; other runs, agents or
+     lanes are never borrowed. The diff is produced server-side with the standard
+     library `difflib` only (`splitlines()`, `unified_diff(prev, cur, n=3,
+     lineterm="")`, joined with `\n`); a trailing-newline-only difference counts as
+     identical. The tab shows exactly one distinguishable state: *no predecessor*
+     (both derived fields `prompt_diff`/`previous_prompt_seq` null), *identical
+     prompt* (`prompt_diff` `""` with `previous_prompt_seq` set — distinct from the
+     null case) or the visible diff. The two fields are additive, purely derived
+     from the already-loaded event stream, and ride only `agent.run` nodes of
+     `GET /api/runs/{repo}/{run_id}`.
    - **Answer** — final text plus all intermediate assistant messages.
    - **Tools** — chronological tool-call list, each expandable to full input
      and full result.
@@ -412,7 +426,23 @@ are translated.
      `escalation.md`, `followups.md`, the drafts from dual authoring — rendered
      as Markdown, with the drafts side by side against the synthesis.
    - **Raw**: the event log as a filterable JSON list — the fallback that always
-     works, even for event types the GUI does not know yet.
+     works, even for event types the GUI does not know yet. Beside the existing
+     free-text (`raw_q`) and event-type (`raw_type`) filters and the `limit`
+     window it accepts an **inclusive seq range** (`raw_from_seq`/`raw_to_seq`,
+     each bound optional and one-sided-capable). The range is composed server-side
+     (logical AND) with the other filters; `limit` windows only the fully filtered
+     match set and the reported `total` stays the pre-window size; the offered
+     `types` list stays the full type set of the log. A non-numeric bound is
+     treated as absent (that bound inactive) and an upper bound below the lower
+     yields a defined empty set — never a 5xx. Every **span node** in the trace
+     tree offers a jump into this Raw tab pre-filtered to the node's already-exposed
+     `[seq, end_seq]` subtree range (a pure seq-range filter — interleaved events
+     of parallel spans inside the interval are *not* excluded); the jump preserves
+     the current `raw_q`/`raw_type`/`limit` and activates the existing Raw tab (no
+     second Raw widget). An active range is shown with its bounds and cleared in
+     isolation — clearing drops only the seq range and keeps `raw_q`/`raw_type`/
+     `limit`. The read-only events route (`…/events`) is unchanged: still only
+     `from_seq`/`to_seq`, no `type`, no pagination.
 
 5. **Run-context panel** (beside the detail pane): a read-only field list showing
    the run state **at the seq of the selected node** — answering *why* a node went
@@ -460,7 +490,7 @@ are translated.
 | --- | --- |
 | `GET /api/runs` | run list (JSON) |
 | `GET /api/runs/{repo}/{run_id}` | metadata + span tree |
-| `GET /api/runs/{repo}/{run_id}/events?from_seq=N&type=…` | raw events, paginated |
+| `GET /api/runs/{repo}/{run_id}/events?from_seq=N&to_seq=M` | raw events, seq-range only |
 | `GET /api/runs/{repo}/{run_id}/stream` | SSE live tail |
 | `GET /api/runs/{repo}/{run_id}/diff?from=REF&to=REF` | step diff |
 | `GET /api/runs/{repo}/{run_id}/artifacts/{name}` | artifact content |

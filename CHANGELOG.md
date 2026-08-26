@@ -12,6 +12,27 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Added
+- **Node → Raw-log jump and prompt diff in the Run Inspector.** Every span node in
+  the trace tree now offers a jump into the existing Raw tab pre-filtered to the
+  node's exposed `[seq, end_seq]` subtree range, so the raw events of one subtree
+  are found without hand-searching for seq bounds. The Raw tab gained an inclusive
+  seq-range filter (`raw_from_seq`/`raw_to_seq`, each optional/one-sided) composed
+  server-side with the existing `raw_q`/`raw_type`/`limit`; `total` stays the
+  pre-window match count and `types` stays the full log type set. A non-numeric
+  bound is inactive and an inverted range is a defined empty set — never a 5xx. An
+  active range is shown with its bounds and cleared in isolation (keeping
+  `raw_q`/`raw_type`/`limit`). The `agent.run` **Prompt** tab additionally shows a
+  unified diff of its prompt against the previous run of the same agent in the same
+  lane within this run (predecessor chosen structurally by agent + lane + greatest
+  smaller `seq`); `GET /api/runs/{repo}/{run_id}` carries additive derived
+  `prompt_diff`/`previous_prompt_seq` fields on `agent.run` nodes, distinguishing
+  "no predecessor" (both null) from "identical prompt" (`""` with the seq set). The
+  diff is produced with the standard-library `difflib` only. The read-only
+  `…/events` route is unchanged (still only `from_seq`/`to_seq`).
+
 ## [0.11.0] — 2026-08-26
 
 ### Added

@@ -13,6 +13,30 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Absprung vom Knoten in den Raw-Log und Prompt-Diff im Run-Inspector.** Jeder
+  Span-Knoten im Trace-Baum bietet nun einen Absprung in den bestehenden Raw-Reiter,
+  vorgefiltert auf den exponierten Teilbaum-Bereich `[seq, end_seq]` des Knotens —
+  so werden die Rohereignisse eines Teilbaums ohne manuelle Suche nach Seq-Grenzen
+  gefunden. Der Raw-Reiter erhielt einen inklusiven Seq-Bereichsfilter
+  (`raw_from_seq`/`raw_to_seq`, jede Grenze optional/einseitig), serverseitig mit
+  den bestehenden `raw_q`/`raw_type`/`limit` komponiert; `total` bleibt die
+  Treffermenge vor der Fensterung und `types` die volle Typmenge des Logs. Eine
+  nicht-numerische Grenze ist inaktiv, ein umgekehrter Bereich ergibt eine
+  definierte leere Menge — nie ein 5xx. Ein aktiver Bereich wird mit seinen Grenzen
+  angezeigt und isoliert aufgehoben (unter Erhalt von `raw_q`/`raw_type`/`limit`).
+  Der **Prompt**-Reiter eines `agent.run` zeigt zusätzlich einen Unified Diff seines
+  Prompts gegen den vorherigen Lauf desselben Agenten in derselben Lane innerhalb
+  dieses Laufs (Vorgänger strukturell nach Agent + Lane + größter kleinerer `seq`);
+  `GET /api/runs/{repo}/{run_id}` führt an `agent.run`-Knoten die additiven,
+  abgeleiteten Felder `prompt_diff`/`previous_prompt_seq` und unterscheidet „kein
+  Vorgänger" (beide null) von „identischer Prompt" (`""` mit gesetzter `seq`). Der
+  Diff entsteht ausschließlich mit der Standardbibliothek `difflib`. Die
+  schreibgeschützte `…/events`-Route bleibt unverändert (weiterhin nur
+  `from_seq`/`to_seq`).
+
 ## [0.11.0] — 2026-08-26
 
 ### Hinzugefügt

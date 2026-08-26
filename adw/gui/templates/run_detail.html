@@ -11,6 +11,11 @@
     <span class="label">{{ node.label }}</span>
     {% if node.duration is not none %}<span class="dur">{{ node.duration | fmt_duration }}</span>{% endif %}
     {% if node.type == "round" and node.n is defined %}<span class="round">{{ node.n }}/{{ node.cap }}</span>{% endif %}
+    {# A2/R5: jump into the EXISTING Raw tab pre-filtered to this span's exposed
+       [seq, end_seq]. A plain query-param link — it preserves the current
+       q/type/limit and only adds the seq range (R6); landing activates the Raw
+       tab server-side. Point events have no subtree range, so no jump. #}
+    {% if node.end_seq is defined and node.end_seq is not none %}<a class="raw-jump" href="?limit={{ limit }}{% if raw_q %}&amp;raw_q={{ raw_q|urlencode }}{% endif %}{% if raw_type %}&amp;raw_type={{ raw_type|urlencode }}{% endif %}&amp;raw_from_seq={{ node.seq }}&amp;raw_to_seq={{ node.end_seq }}">{{ t.raw_jump }}</a>{% endif %}
 {% endmacro %}
 {# The read-only run-context panel (§7.2): the six-field run state AT the selected
    node's seq — a plain field list, no chart. Each value is EMPTY when null (never a
@@ -114,9 +119,21 @@
           <button type="button" class="tab-btn" data-tab="tools">{{ t.tab_tools }}</button>
           {% if bracketed %}<button type="button" class="tab-btn" data-tab="diff">{{ t.tab_diff }}</button>{% endif %}
         </div>
-        <section class="tab tab-prompt active" data-tab-panel="prompt">
+        {# The full prompt (unchanged) plus exactly one distinguishable prompt-diff
+           state (R7): "no predecessor" (both fields null), "identical prompt"
+           (empty diff, predecessor seq set) or the visible unified diff. #}
+        <section class="tab tab-prompt active" data-tab-panel="prompt"
+                 data-prompt-diff-state="{% if node.previous_prompt_seq is none %}none{% elif node.prompt_diff == '' %}identical{% else %}diff{% endif %}">
           <pre>{{ node.payload.prompt if node.payload else "" }}
 {{ node.payload.system_append if node.payload else "" }}</pre>
+          {% if node.previous_prompt_seq is none %}
+          <p class="prompt-diff-none">{{ t.prompt_diff_none }}</p>
+          {% elif node.prompt_diff == "" %}
+          <p class="prompt-diff-identical">{{ t.prompt_diff_identical }}</p>
+          {% else %}
+          <p class="prompt-diff-heading">{{ t.prompt_diff_heading }}</p>
+          <pre class="prompt-diff">{{ node.prompt_diff }}</pre>
+          {% endif %}
         </section>
         <section class="tab tab-answer" data-tab-panel="answer">
           <pre class="final">{{ node.end_payload.result_text if node.end_payload else "" }}</pre>
@@ -159,14 +176,18 @@
 {# Run-level Raw tab (Aufgabe C): the event log as a filterable list — the
    fallback that works even for event types the GUI does not model. The first
    `limit` rows are server-rendered; "Load more" raises the window server-side. #}
-{% macro raw_view(detail, limit, raw_q, raw_type) %}
+{% macro raw_view(detail, limit, raw_q, raw_type, raw_from_seq, raw_to_seq) %}
   <div class="raw">
     {# The filters submit (GET, same route) so the ``type`` and free-text search
        run SERVER-SIDE over the FULL serialized payload — a match beyond the
        rendered preview is still found (AC-C2). The client also narrows the loaded
-       rows instantly as you type; pressing Enter runs the exhaustive search. #}
+       rows instantly as you type; pressing Enter runs the exhaustive search. The
+       active seq range rides along as hidden inputs so changing q/type/limit
+       never drops it — only the explicit "clear" does (R6). #}
     <form class="raw-controls" method="get">
       <input type="hidden" name="limit" value="{{ limit }}">
+      <input type="hidden" name="raw_from_seq" value="{{ raw_from_seq if raw_from_seq is not none else '' }}">
+      <input type="hidden" name="raw_to_seq" value="{{ raw_to_seq if raw_to_seq is not none else '' }}">
       <label class="raw-type-label">{{ t.raw_type }}
         <select class="raw-type-filter" name="raw_type">
           <option value="">{{ t.raw_all_types }}</option>
@@ -176,6 +197,14 @@
       <input type="search" class="raw-search" name="raw_q" value="{{ raw_q }}" placeholder="{{ t.raw_filter_placeholder }}" aria-label="{{ t.raw_filter_placeholder }}">
       <button type="submit" class="raw-search-all">{{ t.raw_search_all }}</button>
     </form>
+    {# An active seq range, shown with its active bounds (one-sided as one-sided),
+       plus a control that clears ONLY the range and keeps q/type/limit (R6). #}
+    {% if raw_from_seq is not none or raw_to_seq is not none %}
+    <p class="raw-range" data-raw-from="{{ raw_from_seq if raw_from_seq is not none else '' }}" data-raw-to="{{ raw_to_seq if raw_to_seq is not none else '' }}">
+      {{ t.raw_range }}: {% if raw_from_seq is not none %}#{{ raw_from_seq }}{% endif %}&ndash;{% if raw_to_seq is not none %}#{{ raw_to_seq }}{% endif %}
+      <a class="raw-range-clear" href="?limit={{ limit }}{% if raw_q %}&amp;raw_q={{ raw_q|urlencode }}{% endif %}{% if raw_type %}&amp;raw_type={{ raw_type|urlencode }}{% endif %}">{{ t.raw_range_clear }}</a>
+    </p>
+    {% endif %}
     {% if detail.problems %}
     <ul class="raw-problem-list">
     {% for p in detail.problems %}
@@ -204,7 +233,7 @@
     {% endif %}
     <p class="raw-empty" hidden>{{ t.raw_no_matches }}</p>
     {% if detail.raw.total > detail.raw.window|length %}
-    <a class="load-more" href="?limit={{ limit * 4 }}{% if raw_q %}&amp;raw_q={{ raw_q|urlencode }}{% endif %}{% if raw_type %}&amp;raw_type={{ raw_type|urlencode }}{% endif %}">{{ t.raw_load_more }} ({{ detail.raw.total - detail.raw.window|length }} {{ t.raw_hidden }})</a>
+    <a class="load-more" href="?limit={{ limit * 4 }}{% if raw_q %}&amp;raw_q={{ raw_q|urlencode }}{% endif %}{% if raw_type %}&amp;raw_type={{ raw_type|urlencode }}{% endif %}{% if raw_from_seq is not none %}&amp;raw_from_seq={{ raw_from_seq }}{% endif %}{% if raw_to_seq is not none %}&amp;raw_to_seq={{ raw_to_seq }}{% endif %}">{{ t.raw_load_more }} ({{ detail.raw.total - detail.raw.window|length }} {{ t.raw_hidden }})</a>
     {% endif %}
   </div>
 {% endmacro %}
@@ -229,14 +258,17 @@
   </header>
 
   <main class="detail">
+    {# An active Raw seq range means the user jumped here from a span node, so the
+       Raw tab opens active instead of Trace (R5) — a plain server-render choice,
+       no second Raw widget. #}
     <div class="tabs run-tabs" data-tabs>
       <div class="tab-buttons" role="tablist">
-        <button type="button" class="tab-btn active" data-tab="trace">{{ t.tab_trace }}</button>
+        <button type="button" class="tab-btn{% if not raw_range_active %} active{% endif %}" data-tab="trace">{{ t.tab_trace }}</button>
         <button type="button" class="tab-btn" data-tab="timeline">{{ t.tab_timeline }}</button>
         <button type="button" class="tab-btn" data-tab="artifacts">{{ t.tab_artifacts }}</button>
-        <button type="button" class="tab-btn" data-tab="raw">{{ t.tab_raw }}</button>
+        <button type="button" class="tab-btn{% if raw_range_active %} active{% endif %}" data-tab="raw">{{ t.tab_raw }}</button>
       </div>
-      <section class="tab tab-trace active" data-tab-panel="trace">
+      <section class="tab tab-trace{% if not raw_range_active %} active{% endif %}" data-tab-panel="trace">
         <div class="trace-layout">
           <section class="trace">
             {% if not detail.run.has_trace %}
@@ -353,8 +385,8 @@
         </ul>
       </section>
 
-      <section class="tab tab-raw" data-tab-panel="raw">
-        {{ raw_view(detail, limit, raw_q, raw_type) }}
+      <section class="tab tab-raw{% if raw_range_active %} active{% endif %}" data-tab-panel="raw">
+        {{ raw_view(detail, limit, raw_q, raw_type, raw_from_seq, raw_to_seq) }}
       </section>
     </div>
   </main>

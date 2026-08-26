@@ -405,7 +405,23 @@ sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werd
 3. **Detail-Pane** (rechts): abhängig vom gewählten Knoten. Für `agent.run` vier
    Reiter:
    - **Prompt** — der vollständige Task-String plus System-Append, Monospace,
-     kopierbar (der Hebel für Prompt-Optimierung).
+     kopierbar (der Hebel für Prompt-Optimierung). Zusätzlich ein **Unified Diff**
+     dieses Prompts gegen den Prompt des *vorherigen* `agent.run` **desselben
+     Agenten in derselben Lane** innerhalb dieses Laufs — so wird der angehängte
+     Findings-Block einer Fix-Runde sichtbar, ohne zwei Prompt-Reiter
+     nebeneinanderzulegen. Der Vorgänger wird rein strukturell bestimmt (gleicher
+     Agent-String, gleiche Lane, größte `seq` kleiner als die dieses Knotens),
+     *bevor* die Verwertbarkeit des Prompts eine Rolle spielt; andere Läufe,
+     Agenten oder Lanes werden nie herangezogen. Der Diff entsteht serverseitig
+     ausschließlich mit der Standardbibliothek `difflib` (`splitlines()`,
+     `unified_diff(prev, cur, n=3, lineterm="")`, mit `\n` verbunden); ein
+     Unterschied allein im abschließenden Zeilenumbruch gilt als identisch. Der
+     Reiter zeigt genau einen unterscheidbaren Zustand: *kein Vorgänger* (beide
+     abgeleiteten Felder `prompt_diff`/`previous_prompt_seq` null), *identischer
+     Prompt* (`prompt_diff` `""` mit gesetztem `previous_prompt_seq` — vom
+     Null-Fall unterscheidbar) oder der sichtbare Diff. Beide Felder sind additiv,
+     rein aus dem bereits geladenen Event-Strom abgeleitet und hängen nur an
+     `agent.run`-Knoten von `GET /api/runs/{repo}/{run_id}`.
    - **Antwort** — finaler Text plus alle Zwischen-Assistant-Messages.
    - **Tools** — chronologische Tool-Call-Liste, jeder aufklappbar auf vollen
      Input und volles Ergebnis.
@@ -425,7 +441,26 @@ sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werd
      `escalation.md`, `followups.md`, die Entwürfe aus dem Dual Authoring — als
      Markdown gerendert, die Entwürfe nebeneinander gegen die Synthese.
    - **Raw**: das Event-Log als filterbare JSON-Liste — der Fallback, der immer
-     funktioniert, auch für Event-Typen, die die GUI noch nicht kennt.
+     funktioniert, auch für Event-Typen, die die GUI noch nicht kennt. Neben den
+     bestehenden Filtern für Freitext (`raw_q`) und Ereignistyp (`raw_type`) und
+     der `limit`-Fensterung akzeptiert er einen **inklusiven Seq-Bereich**
+     (`raw_from_seq`/`raw_to_seq`, jede Grenze optional und einseitig einsetzbar).
+     Der Bereich wird serverseitig (logisches UND) mit den übrigen Filtern
+     komponiert; `limit` fenstert erst die vollständig gefilterte Treffermenge und
+     der ausgewiesene `total` bleibt die Größe vor der Fensterung; die angebotene
+     `types`-Liste bleibt die volle Typmenge des Logs. Eine nicht-numerische Grenze
+     gilt als fehlend (diese Grenze inaktiv), eine obere Grenze kleiner als die
+     untere ergibt eine definierte leere Menge — nie ein 5xx. Jeder **Span-Knoten**
+     im Trace-Baum bietet einen Absprung in diesen Raw-Reiter, vorgefiltert auf den
+     bereits exponierten Teilbaum-Bereich `[seq, end_seq]` des Knotens (ein reiner
+     Seq-Bereichsfilter — verschränkte Events paralleler Spans innerhalb des
+     Intervalls werden *nicht* ausgeschlossen); der Absprung erhält die aktuellen
+     `raw_q`/`raw_type`/`limit` und aktiviert den bestehenden Raw-Reiter (kein
+     zweites Raw-Widget). Ein aktiver Bereich wird mit seinen Grenzen angezeigt und
+     isoliert aufgehoben — das Aufheben entfernt nur den Seq-Bereich und behält
+     `raw_q`/`raw_type`/`limit`. Die schreibgeschützte Events-Route (`…/events`)
+     bleibt unverändert: weiterhin nur `from_seq`/`to_seq`, kein `type`, keine
+     Paginierung.
 
 5. **Kontext-Panel „Lauf-Zustand"** (neben dem Detail-Pane): eine read-only
    Feldliste, die den Lauf-Zustand **zum Stand des ausgewählten Knotens** zeigt —
@@ -478,7 +513,7 @@ sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werd
 | --- | --- |
 | `GET /api/runs` | Run-Liste (JSON) |
 | `GET /api/runs/{repo}/{run_id}` | Metadaten + Span-Baum |
-| `GET /api/runs/{repo}/{run_id}/events?from_seq=N&type=…` | Roh-Events, paginiert |
+| `GET /api/runs/{repo}/{run_id}/events?from_seq=N&to_seq=M` | Roh-Events, nur Seq-Bereich |
 | `GET /api/runs/{repo}/{run_id}/stream` | SSE-Live-Tail |
 | `GET /api/runs/{repo}/{run_id}/diff?from=REF&to=REF` | Schritt-Diff |
 | `GET /api/runs/{repo}/{run_id}/artifacts/{name}` | Artefakt-Inhalt |

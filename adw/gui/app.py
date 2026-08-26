@@ -10,6 +10,7 @@ is only consumed here, never modified.
 """
 
 import bisect
+import difflib
 import json
 import os
 import re
@@ -78,6 +79,18 @@ def _parse_offset(raw) -> int:
     except (TypeError, ValueError):
         return 0
     return max(0, min(value, 100_000_000))
+
+
+def _parse_seq_bound(raw):
+    """An optional INCLUSIVE Raw seq bound: the integer value, or None when the
+    value is missing or non-numeric — in which case that bound is inactive (a
+    one-sided or absent range). This mirrors the tolerance ``_parse_limit`` /
+    ``_parse_offset`` already show toward invalid Raw parameters, so a crafted or
+    empty bound is a defined no-op, never a 5xx (E4 / R4)."""
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 def _entry_window(limit) -> int:
@@ -793,11 +806,84 @@ def _subtree_seq_range(node, own_ranges, children) -> tuple:
     return lo, hi
 
 
+# --- prompt diff against the previous run (GUI-SPEC §7.2) -----------------------
+# A purely DERIVED projection of the SAME event stream the detail view already
+# loaded (no new reader/route/event/persistence): each `agent.run` node's prompt
+# diffed against the previous `agent.run` of THE SAME agent in THE SAME lane within
+# THIS run (E3). The predecessor is chosen STRUCTURALLY — same agent string, same
+# lane, greatest seq below the node's — BEFORE prompt usability matters (D1); an
+# unusable immediate predecessor is never skipped for an older valid one. The
+# lane is the enclosing `lane` span's name, threaded exactly as `_serialize` does.
+
+
+def _agent_run_index(roots) -> list:
+    """Every `agent.run` span start as ``(seq, agent, lane, prompt)``, the lane
+    threaded from the enclosing ``lane`` span (as in ``_serialize``). ``agent`` and
+    ``prompt`` are taken verbatim from the start payload (so a missing / non-string
+    value stays as-is for the usability checks in ``_prompt_diff_for``)."""
+    items: list = []
+
+    def walk(node, lane):
+        if not _is_span(node):
+            return
+        payload = node.start_payload if node.start_payload is not None else node.end_payload
+        node_lane = lane
+        if node.type == "lane" and isinstance(payload, dict) and payload.get("name"):
+            node_lane = payload["name"]
+        if node.type == "agent.run":
+            start = node.start_payload if isinstance(node.start_payload, dict) else {}
+            items.append((node.seq, start.get("agent"), node_lane, start.get("prompt")))
+        for c in node.children:
+            walk(c, node_lane)
+
+    for r in roots:
+        walk(r, None)
+    return items
+
+
+def _prompt_diff_for(seq, agent, lane, prompt, index) -> tuple:
+    """The ``(prompt_diff, previous_prompt_seq)`` pair for one `agent.run` (D1-D3).
+    Returns ``(None, None)`` — the "no predecessor" case — when this node has no
+    usable string ``agent``/``prompt``, when no same-agent/same-lane candidate with
+    a smaller seq exists, or when the structurally chosen immediate predecessor has
+    no usable string ``prompt`` (the older valid run is NEVER substituted)."""
+    if not isinstance(seq, int) or not isinstance(agent, str) or not isinstance(prompt, str):
+        return None, None
+    prev = None  # (seq, prompt) of the greatest-seq candidate below `seq`
+    for cand_seq, cand_agent, cand_lane, cand_prompt in index:
+        if (
+            cand_agent == agent and cand_lane == lane
+            and isinstance(cand_seq, int) and cand_seq < seq
+            and (prev is None or cand_seq > prev[0])
+        ):
+            prev = (cand_seq, cand_prompt)
+    if prev is None:
+        return None, None
+    prev_seq, prev_prompt = prev
+    if not isinstance(prev_prompt, str):
+        return None, None
+    diff = "\n".join(
+        difflib.unified_diff(prev_prompt.splitlines(), prompt.splitlines(), n=3, lineterm="")
+    )
+    return diff, prev_seq
+
+
+def _prompt_diffs(roots) -> dict:
+    """``{agent_run_seq: (prompt_diff, previous_prompt_seq)}`` for every `agent.run`
+    of the run — the derived map ``_serialize`` attaches to its `agent.run` nodes."""
+    index = _agent_run_index(roots)
+    return {
+        seq: _prompt_diff_for(seq, agent, lane, prompt, index)
+        for seq, agent, lane, prompt in index
+    }
+
+
 def _serialize(node, tool_names=None, *, lane=None, own_ranges=None, snaps=None,
-               context_at=None) -> dict:
+               context_at=None, prompt_diffs=None) -> dict:
     tool_names = tool_names or {}
     own_ranges = own_ranges or {}
     snaps = snaps or {}
+    prompt_diffs = prompt_diffs or {}
     context_at = context_at or (lambda _cutoff: _empty_context())
     if _is_span(node):
         payload = node.start_payload if node.start_payload is not None else node.end_payload
@@ -806,7 +892,7 @@ def _serialize(node, tool_names=None, *, lane=None, own_ranges=None, snaps=None,
             node_lane = payload["name"]
         children = [
             _serialize(c, tool_names, lane=node_lane, own_ranges=own_ranges, snaps=snaps,
-                       context_at=context_at)
+                       context_at=context_at, prompt_diffs=prompt_diffs)
             for c in node.children
         ]
         lo, hi = _subtree_seq_range(node, own_ranges, children)
@@ -834,6 +920,14 @@ def _serialize(node, tool_names=None, *, lane=None, own_ranges=None, snaps=None,
             "context": context_at(hi),
             "children": children,
         }
+        if node.type == "agent.run":
+            # Additive, purely derived fields (D1-D3): the prompt diff against the
+            # previous run of the same agent in the same lane. Present ONLY on
+            # `agent.run` nodes; `previous_prompt_seq` is set even for an empty
+            # (identical) diff, distinguishing it from the null "no predecessor".
+            diff, prev_seq = prompt_diffs.get(node.seq, (None, None))
+            d["prompt_diff"] = diff
+            d["previous_prompt_seq"] = prev_seq
         if node.type == "round" and isinstance(node.start_payload, dict):
             d["n"] = node.start_payload.get("n")
             d["cap"] = node.start_payload.get("cap")
@@ -867,7 +961,23 @@ def _serialize_payload(payload) -> str:
         return str(payload)
 
 
-def _raw_view(events, limit, *, q=None, type_filter=None) -> dict:
+def _in_seq_range(seq, from_seq, to_seq) -> bool:
+    """Whether ``seq`` satisfies the (optionally one-sided) inclusive range. When
+    a bound is active an event whose ``seq`` is not an integer never satisfies it,
+    and each active bound is inclusive; an upper bound below the lower yields a
+    predicate that no ``seq`` satisfies (a defined empty set, R1/R4)."""
+    if from_seq is None and to_seq is None:
+        return True
+    if not isinstance(seq, int) or isinstance(seq, bool):
+        return False
+    if from_seq is not None and seq < from_seq:
+        return False
+    if to_seq is not None and seq > to_seq:
+        return False
+    return True
+
+
+def _raw_view(events, limit, *, q=None, type_filter=None, from_seq=None, to_seq=None) -> dict:
     """Run-level Raw tab data (Aufgabe C): the distinct event types, and a bounded
     window of ``limit`` matching rows (seq, type, a payload-text preview). The
     ``type``/free-text filters are applied SERVER-SIDE over the FULL serialized
@@ -875,11 +985,18 @@ def _raw_view(events, limit, *, q=None, type_filter=None) -> dict:
     (AC-C2). Every matching event, and each event's COMPLETE payload, stays
     reachable through the events route (the rows lazy-load the full payload) and
     the ``?limit`` paging (AC-C4). ``types`` lists all types of the log so the
-    filter offers them even when the current window is filtered down."""
+    filter offers them even when the current window is filtered down.
+
+    The optional inclusive ``from_seq``/``to_seq`` seq range is composed with the
+    existing filters by logical AND (A1/R2); it never narrows ``types`` (R3), and
+    the reported ``total`` stays the size of the full match set before the
+    ``limit`` window."""
     types = sorted({e.get("type") for e in events if e.get("type")})
     q_low = q.lower() if q else None
     matches = []
     for e in events:
+        if not _in_seq_range(e.get("seq"), from_seq, to_seq):
+            continue
         if type_filter and e.get("type") != type_filter:
             continue
         full = _serialize_payload(e.get("payload"))
@@ -1288,7 +1405,7 @@ def _artifacts_listing(run_dir: Path) -> list[dict]:
 
 def _run_detail(
     ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path, *,
-    limit=_DISPLAY_WINDOW, raw_q=None, raw_type=None,
+    limit=_DISPLAY_WINDOW, raw_q=None, raw_type=None, raw_from_seq=None, raw_to_seq=None,
 ) -> dict:
     events, problems = _read_events(run_dir, runs_root)
     state = _load_state(run_dir, runs_root, ref.path, run_id)
@@ -1304,17 +1421,19 @@ def _run_detail(
     roots = build_tree(events)
     round_ranges = _round_subtree_ranges(roots, own_ranges)
     context_at = _context_deriver(events, round_ranges)
+    prompt_diffs = _prompt_diffs(roots)
     return {
         "run": _summary(ref.slug, run_id, events, state),
         "phases": _phase_bar(events, state.phase if state is not None else None),
         "tree": [
             _serialize(n, tool_names, own_ranges=own_ranges, snaps=snaps,
-                       context_at=context_at)
+                       context_at=context_at, prompt_diffs=prompt_diffs)
             for n in roots
         ],
         "latest_context": context_at(_latest_cutoff(events)),
         "problems": [asdict(p) for p in problems],
-        "raw": _raw_view(events, limit, q=raw_q, type_filter=raw_type),
+        "raw": _raw_view(events, limit, q=raw_q, type_filter=raw_type,
+                         from_seq=raw_from_seq, to_seq=raw_to_seq),
     }
 
 
@@ -1639,8 +1758,15 @@ def create_app(repos=None) -> FastAPI:
         # a match beyond the rendered preview is still found; empty -> no filter.
         raw_q = request.query_params.get("raw_q") or None
         raw_type = request.query_params.get("raw_type") or None
+        # A2/A1: the Raw tab's inclusive seq range. Each bound is tolerant like the
+        # other Raw params (a non-numeric bound is inactive, R4); an active range
+        # activates the Raw tab on landing (the span-node jump is a plain link).
+        raw_from_seq = _parse_seq_bound(request.query_params.get("raw_from_seq"))
+        raw_to_seq = _parse_seq_bound(request.query_params.get("raw_to_seq"))
+        raw_range_active = raw_from_seq is not None or raw_to_seq is not None
         detail = _run_detail(
-            ref, run_id, run_dir, runs_root, limit=limit, raw_q=raw_q, raw_type=raw_type
+            ref, run_id, run_dir, runs_root, limit=limit, raw_q=raw_q, raw_type=raw_type,
+            raw_from_seq=raw_from_seq, raw_to_seq=raw_to_seq,
         )
         # Bound the materialised entry nodes by COUNT (Aufgabe A): one global budget
         # per collection, held across nesting levels and across navigation.
@@ -1668,6 +1794,8 @@ def create_app(repos=None) -> FastAPI:
         html = _TEMPLATES.get_template("run_detail.html").render({
             "detail": detail, "limit": limit, "offset": offset, "focus_seq": focus_seq,
             "raw_q": raw_q or "", "raw_type": raw_type or "",
+            "raw_from_seq": raw_from_seq, "raw_to_seq": raw_to_seq,
+            "raw_range_active": raw_range_active,
             "tree_window": tree_window, "tool_window": tool_window, "pane_nodes": pane_nodes,
             "timeline": _timeline(events),
             "artifacts": _artifacts_listing(run_dir),
