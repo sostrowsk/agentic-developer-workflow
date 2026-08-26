@@ -350,7 +350,11 @@
           {% set usable_lanes = detail.change_scope.lanes | selectattr('diff_available') | list %}
           <section class="change-scope" data-change-scope aria-label="{{ t.change_scope_title }}">
             <h3 class="change-scope-title">{{ t.change_scope_title }}</h3>
-            {% if usable_lanes %}
+            {#- Every observed lane keeps its own entry (AC-6): an unavailable lane —
+                including a span-only lane with no snapshot — shows its name and a clear
+                "no diff available" instead of a table, never hidden. Only the file
+                TABLE is a usable-lane thing; when NO lane has a usable diff the global
+                "no run diff available" statement is added below (AC-7), not instead. -#}
             {%- for lane in detail.change_scope.lanes %}
             <div class="change-scope-lane" data-lane="{{ lane.lane }}"
                  data-diff-available="{{ 'true' if lane.diff_available else 'false' }}">
@@ -372,7 +376,7 @@
               {%- endif %}
             </div>
             {%- endfor %}
-            {% else %}
+            {% if not usable_lanes %}
             <p class="change-scope-no-run-diff">{{ t.change_scope_no_run_diff }}</p>
             {% endif %}
             <div class="change-scope-declared">

@@ -513,6 +513,27 @@ def test_run_detail_states_no_run_diff_and_no_declared_scope(home, tmp_path):  #
     assert CATALOG["en"]["change_scope_no_declared"] in html
 
 
+def test_run_detail_keeps_every_unavailable_lane_visible(home, tmp_path):  # noqa: F811
+    """S6/AC-6/AC-7: even when EVERY observed lane is unavailable, each lane stays
+    visible with its name and its own "no diff available" state (never hidden) — the
+    global "no run diff available" statement is shown IN ADDITION, and only the file
+    tables are dropped, not the lane entries."""
+    repo = tmp_path / "repo"
+    write_run(repo, RUN_ID, _wrap([
+        _lane_start(3, "backend"),          # span only -> 0 snapshots
+        _lane_start(5, "frontend"),
+        _snap(6, "frontend", _ref(1)),      # exactly one snapshot
+    ]), phase="done")
+    html = _page(_client(repo), _slug_for(repo))
+
+    # Each observed lane keeps its own entry (data-lane is unique to the block).
+    assert 'data-lane="backend"' in html and 'data-lane="frontend"' in html
+    # ... each with its per-lane "no diff available" fallback (one per lane) ...
+    assert html.count(CATALOG["en"]["change_scope_no_diff"]) >= 2
+    # ... plus the global "no run diff available" statement in addition.
+    assert CATALOG["en"]["change_scope_no_run_diff"] in html
+
+
 def test_change_scope_chrome_labels_are_bilingual(home, tmp_path):  # noqa: F811
     """B6: every change-scope chrome label exists in BOTH language blocks, non-empty,
     with identical key sets; German values are not mere copies of the English."""

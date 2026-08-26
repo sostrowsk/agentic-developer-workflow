@@ -611,9 +611,12 @@ sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werd
      `files: null` — kanonisch genau diese Form, nie `[]`, nie ein weggelassenes Feld —
      dargestellt als „kein Diff verfügbar" statt einer leeren Tabelle. Eine
      fehlgeschlagene Lane blockiert andere Lanes nie und macht aus der sonst
-     erfolgreichen Detail-Anfrage nie ein 5xx. Hat **keine** Lane einen verwertbaren
-     Diff, entfällt die Tabellenansicht mit klarer Aussage „kein Lauf-Diff verfügbar",
-     der deklarierte Scope bleibt darstellbar.
+     erfolgreichen Detail-Anfrage nie ein 5xx. Jede beobachtete Lane behält ihren
+     eigenen Eintrag (Name + Zustand je Lane), sodass eine nur über ihren Span
+     beobachtete Lane ohne Snapshot nie verborgen wird. Hat **keine** Lane einen
+     verwertbaren Diff, entfallen nur die Datei-Tabellen — jede Lane zeigt weiterhin
+     ihr „kein Diff verfügbar" — und es kommt eine klare globale Aussage „kein
+     Lauf-Diff verfügbar" hinzu, der deklarierte Scope bleibt darstellbar.
    - **Deklarierter Scope**: `declared_scope` ist eine lesbare, **semantisch
      äquivalente** YAML-Serialisierung aller Top-Level-`x-adw-*`-Blöcke der
      `contract.yaml` (gelesen nur über den bestehenden Whitelist-Artefakt-Pfad mit dem

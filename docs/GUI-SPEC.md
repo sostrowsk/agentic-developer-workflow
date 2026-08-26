@@ -577,9 +577,11 @@ are translated.
      error), is `diff_available: false` with `files: null` — canonically this shape,
      never `[]`, never an omitted field — shown as "no diff available" instead of an
      empty table. A failed lane never blocks other lanes and never turns the
-     otherwise-successful detail request into a 5xx. When **no** lane has a usable diff,
-     the table view is dropped with a clear "no run diff available" statement while the
-     declared scope still renders.
+     otherwise-successful detail request into a 5xx. Every observed lane keeps its own
+     entry (name + per-lane state), so a span-only lane with no snapshot is never
+     hidden. When **no** lane has a usable diff, only the file tables are dropped — each
+     lane still shows its "no diff available" — and a clear global "no run diff
+     available" statement is added, while the declared scope still renders.
    - **Declared scope**: `declared_scope` is a readable, **semantically equivalent**
      YAML serialization of all top-level `x-adw-*` blocks of `contract.yaml` (read only
      through the existing whitelist artifact path with the already-present `yaml`
