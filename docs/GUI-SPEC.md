@@ -554,6 +554,50 @@ are translated.
      markers) are bilingual (`adw/gui/i18n.py`); the task texts are content and are
      not translated.
 
+8. **Change scope** (always present): the run detail shows, side by side, which files
+   the run actually changed — grouped per lane, with `+/-` counts per file — and the
+   scope the contract declares, as it stands. Both facts sit **unjudged** next to each
+   other; whether a change is "in scope" is decided by a human. It is a purely derived
+   projection of the already-loaded events, the existing snapshots and the whitelisted
+   `contract.yaml` — no new git operation, route, event or persistence. Observable as
+   an additive `change_scope` object (`lanes` + `declared_scope`) on
+   `GET /api/runs/{repo}/{run_id}`; the key is **always** present.
+   - **File lists** (per lane): a lane is *observed* when the event log carries a
+     `lane` span with a non-empty name **or** a structurally valid snapshot event (ref
+     form `refs/adw/<run_id>/<seq>`) declaring it — the lanes appear in first-observation
+     order (smallest seq), one entry per name. For a lane with **≥ 2** valid snapshots
+     the entry carries the diff between its lowest- and highest-seq snapshot — produced
+     by the **existing** snapshot/diff/numstat logic, one comparison per lane, other
+     lanes never mixed in — as `diff_available: true` with `files` (each `path`,
+     `additions`, `deletions`; a binary file's counts are `null`, shown as "not
+     numerically available"). A produced diff with no changes is `files: []` (shown as
+     "no changed files found"), distinct from unavailable.
+   - **Unusable / failed diffs** (robustness): a lane with **0 or 1** valid snapshot,
+     or whose diff fails despite a pair (missing snapshot object, timeout, execution
+     error), is `diff_available: false` with `files: null` — canonically this shape,
+     never `[]`, never an omitted field — shown as "no diff available" instead of an
+     empty table. A failed lane never blocks other lanes and never turns the
+     otherwise-successful detail request into a 5xx. When **no** lane has a usable diff,
+     the table view is dropped with a clear "no run diff available" statement while the
+     declared scope still renders.
+   - **Declared scope**: `declared_scope` is a readable, **semantically equivalent**
+     YAML serialization of all top-level `x-adw-*` blocks of `contract.yaml` (read only
+     through the existing whitelist artifact path with the already-present `yaml`
+     module), in document order, values and nesting unchanged — no rename, merge,
+     normalization or interpretation, and textual details (comments, quoting) are not
+     preserved. A missing, unreadable, non-mapping, non-safely-loadable or
+     `x-adw-`-less contract (a non-string top-level key is ignored, never a crash), or
+     a boundary-escaping symlink, yields `declared_scope: null`, shown clearly as "no
+     declared scope" — a neutral absence, not a violation.
+   - **No judgement** (E1): there is no field or marker for "in scope"/"out of
+     scope"/"violation"/conformance, no file↔`x-adw-*` mapping and no derived rating —
+     the `change_scope`, lane and file objects carry exactly the listed keys. A
+     structured file scope and a real violation check are deliberately deferred.
+   - **Read-only** (E6): pure additive projection — no new route, event, write or
+     state; all existing response fields are unchanged. Chrome labels (heading, `+/-`
+     column headers, the fallback texts) are bilingual (`adw/gui/i18n.py`); file paths
+     and the declared scope are content and are not translated.
+
 ### 7.3 Live update
 
 - `GET /api/runs/{repo}/{run_id}/stream` — SSE. Server tails `events.jsonl` by

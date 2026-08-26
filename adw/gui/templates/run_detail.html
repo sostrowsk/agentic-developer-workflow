@@ -339,6 +339,51 @@
             {% endfor %}
           </section>
           {% endif %}
+          {#- Change scope (§7.2): read-only "what this run changed" (the files each
+              observed lane touched, first vs last snapshot) beside the contract's
+              declared `x-adw-*` scope. Facts side by side, NO judgement (E1): no
+              in-/out-of-scope marker, no file↔scope mapping. File paths and the
+              declared scope are CONTENT (never translated); only the chrome labels
+              switch. `change_scope` is always present; when no lane has a usable diff
+              the table view is dropped with a clear statement, while the declared
+              scope still renders. Pure display: no form/button (E6). -#}
+          {% set usable_lanes = detail.change_scope.lanes | selectattr('diff_available') | list %}
+          <section class="change-scope" data-change-scope aria-label="{{ t.change_scope_title }}">
+            <h3 class="change-scope-title">{{ t.change_scope_title }}</h3>
+            {% if usable_lanes %}
+            {%- for lane in detail.change_scope.lanes %}
+            <div class="change-scope-lane" data-lane="{{ lane.lane }}"
+                 data-diff-available="{{ 'true' if lane.diff_available else 'false' }}">
+              <p class="change-scope-lane-name">{{ lane.lane }}</p>
+              {%- if not lane.diff_available %}
+              <p class="change-scope-no-diff">{{ t.change_scope_no_diff }}</p>
+              {%- elif lane.files | length == 0 %}
+              <p class="change-scope-no-files">{{ t.change_scope_no_files }}</p>
+              {%- else %}
+              <table class="change-scope-files"><thead><tr><th class="cs-path"></th><th class="cs-add">{{ t.change_scope_col_add }}</th><th class="cs-del">{{ t.change_scope_col_del }}</th></tr></thead><tbody>
+              {%- for f in lane.files %}
+                {%- if f.additions is none and f.deletions is none %}
+<tr class="cs-file"><td class="cs-path">{{ f.path }}</td><td class="cs-bin" colspan="2">{{ t.change_scope_binary }}</td></tr>
+                {%- else %}
+<tr class="cs-file"><td class="cs-path">{{ f.path }}</td><td class="cs-add">{{ f.additions }}</td><td class="cs-del">{{ f.deletions }}</td></tr>
+                {%- endif %}
+              {%- endfor %}
+</tbody></table>
+              {%- endif %}
+            </div>
+            {%- endfor %}
+            {% else %}
+            <p class="change-scope-no-run-diff">{{ t.change_scope_no_run_diff }}</p>
+            {% endif %}
+            <div class="change-scope-declared">
+              <h4 class="change-scope-declared-title">{{ t.change_scope_declared }}</h4>
+              {% if detail.change_scope.declared_scope is not none %}
+              <pre class="change-scope-declared-text">{{ detail.change_scope.declared_scope }}</pre>
+              {% else %}
+              <p class="change-scope-no-declared">{{ t.change_scope_no_declared }}</p>
+              {% endif %}
+            </div>
+          </section>
           <section class="trace">
             {% if not detail.run.has_trace %}
             <p class="no-trace-hint">{{ t.no_trace_line }}</p>

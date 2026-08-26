@@ -126,6 +126,18 @@ _EN: dict[str, str] = {
     "plan_skeleton_title": "Planned tasks",
     "plan_skeleton_pending": "pending",
     "plan_skeleton_done": "done",
+    # Change-scope chrome (§7.2): the heading of the change-scope block, the +/-
+    # column headers and the fallback texts. Only these labels switch language — the
+    # file paths and the declared contract scope are CONTENT and stay untranslated.
+    "change_scope_title": "Change scope",
+    "change_scope_col_add": "+",
+    "change_scope_col_del": "−",
+    "change_scope_binary": "not numerically available",
+    "change_scope_no_diff": "no diff available",
+    "change_scope_no_files": "no changed files found",
+    "change_scope_no_run_diff": "no run diff available",
+    "change_scope_declared": "Declared scope",
+    "change_scope_no_declared": "no declared scope",
 }
 
 _DE: dict[str, str] = {
@@ -217,6 +229,15 @@ _DE: dict[str, str] = {
     "plan_skeleton_title": "Geplante Aufgaben",
     "plan_skeleton_pending": "ausstehend",
     "plan_skeleton_done": "erledigt",
+    "change_scope_title": "Änderungsumfang",
+    "change_scope_col_add": "+",
+    "change_scope_col_del": "−",
+    "change_scope_binary": "nicht numerisch verfügbar",
+    "change_scope_no_diff": "kein Diff verfügbar",
+    "change_scope_no_files": "keine geänderten Dateien gefunden",
+    "change_scope_no_run_diff": "kein Lauf-Diff verfügbar",
+    "change_scope_declared": "Deklarierter Scope",
+    "change_scope_no_declared": "kein deklarierter Scope",
 }
 
 CATALOG: dict[str, dict[str, str]] = {"en": _EN, "de": _DE}

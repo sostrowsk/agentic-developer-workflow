@@ -22,6 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlencode
 
+import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -1622,6 +1623,11 @@ def _run_detail(
         "raw": _raw_view(events, limit, q=raw_q, type_filter=raw_type,
                          from_seq=raw_from_seq, to_seq=raw_to_seq),
     }
+    # The change-scope projection is ALWAYS present (unlike the conditional
+    # recovery/plan_skeleton): the files each observed lane changed beside the
+    # declared contract scope, both derived from the already-loaded events/snaps and
+    # the whitelisted `contract.yaml` — no new git path, route, event or state.
+    detail["change_scope"] = _change_scope(events, snaps, ref.path, run_dir)
     # The recovery projection is added ONLY when the run needs human intervention
     # (kind determined); otherwise the key is absent (no empty object forced).
     recovery = _recovery(ref, run_id, state, run_summary, events)
@@ -1709,6 +1715,102 @@ def _git_diff(repo_path, frm: str, to: str) -> dict:
         # diff. Non-5xx, and never a partial/one-sided result.
         raise HTTPException(status_code=404, detail="Snapshot diff unavailable")
     return {"files": _parse_numstat(numstat.stdout), "patch": patch.stdout}
+
+
+# --- change scope projection (Änderungsumfang eines Laufs) ----------------------
+# An additive, purely DERIVED view: the files each observed lane actually changed
+# (its first vs last snapshot, via the EXISTING snapshot/diff/numstat logic) placed
+# beside the contract's declared `x-adw-*` scope as readable YAML text. It makes NO
+# judgement (no in-/out-of-scope marker, E1) and introduces no new git path, route,
+# event or state (E5/E6).
+
+# The narrow set of expected operational diff errors a per-lane comparison may raise
+# via the existing `_git_diff`: its own HTTPException(404) on a missing snapshot
+# object / one-sided failure, plus the SubprocessError (incl. TimeoutExpired) and
+# OSError that propagate from `subprocess.run`. A programming error is NOT swallowed.
+_CHANGE_SCOPE_DIFF_ERRORS = (HTTPException, subprocess.SubprocessError, OSError)
+
+
+def _observed_lanes(events, snaps: dict) -> list:
+    """The observed lanes in first-observation order (AC-1/S1). A lane is observed
+    via a `lane` span with a non-empty `payload.name`, OR via a structurally valid
+    snapshot (already filtered into `snaps`). The order key is the smallest seq
+    across both sources; each name yields exactly one entry."""
+    first_seq: dict = {}
+
+    def observe(name, seq):
+        if not name or not isinstance(seq, int):
+            return
+        prev = first_seq.get(name)
+        if prev is None or seq < prev:
+            first_seq[name] = seq
+
+    for e in events:
+        if e.get("type") == "lane" and e.get("kind") == "start":
+            observe((e.get("payload") or {}).get("name"), e.get("seq"))
+    for lane, pairs in snaps.items():
+        for seq, _ref in pairs:
+            observe(lane, seq)
+    return sorted(first_seq, key=lambda name: (first_seq[name], name))
+
+
+def _lane_change(repo_path, lane: str, snaps: dict) -> dict:
+    """One lane's change entry (AC-1/AC-6/AC-7/AC-8/S2/S3). With >= 2 valid
+    snapshots the diff between its lowest- and highest-seq snapshot is produced via
+    the existing `_git_diff` (a produced diff with no changes is `files: []`).
+    Otherwise — 0/1 snapshot, or any expected diff error despite a pair — the
+    canonical unavailable shape `diff_available: false` / `files: null` (never `[]`,
+    never omitted, never a false empty diff)."""
+    pairs = snaps.get(lane) or []
+    if len(pairs) >= 2:
+        frm, to = pairs[0][1], pairs[-1][1]
+        try:
+            files = _git_diff(repo_path, frm, to)["files"]
+        except _CHANGE_SCOPE_DIFF_ERRORS:
+            return {"lane": lane, "diff_available": False, "files": None}
+        return {"lane": lane, "diff_available": True, "files": files}
+    return {"lane": lane, "diff_available": False, "files": None}
+
+
+def _declared_scope(run_dir: Path) -> str | None:
+    """The contract's declared scope as readable YAML text, or None (AC-3/AC-4/S4).
+    Reads `contract.yaml` ONLY through the existing whitelist/containment path,
+    selects every top-level entry whose key is a STRING with the `x-adw-` prefix in
+    document order, and re-dumps them (semantic equivalence, not text fidelity). A
+    missing/unreadable/non-mapping/unserializable contract, or the absence of a
+    matching key, yields None — never an error, never a judgement."""
+    path = _resolve_artifact(run_dir, "contract.yaml")
+    if path is None:
+        return None
+    contained = _contained(path, run_dir)
+    if contained is None or not contained.is_file():
+        return None
+    try:
+        loaded = yaml.safe_load(contained.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        return None
+    if not isinstance(loaded, dict):
+        return None
+    # A legally loaded mapping may carry non-string keys (numeric, bool, null, …);
+    # they are ignored, never subjected to a prefix operation.
+    selected = {
+        key: value for key, value in loaded.items()
+        if isinstance(key, str) and key.startswith("x-adw-")
+    }
+    if not selected:
+        return None
+    try:
+        return yaml.safe_dump(selected, sort_keys=False, allow_unicode=True)
+    except yaml.YAMLError:
+        return None
+
+
+def _change_scope(events, snaps: dict, repo_path, run_dir: Path) -> dict:
+    """The additive `change_scope` object (B4): the per-lane changed files beside
+    the declared contract scope. Always present; `lanes` may be `[]` and
+    `declared_scope` may be `null`."""
+    lanes = [_lane_change(repo_path, lane, snaps) for lane in _observed_lanes(events, snaps)]
+    return {"lanes": lanes, "declared_scope": _declared_scope(run_dir)}
 
 
 def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:

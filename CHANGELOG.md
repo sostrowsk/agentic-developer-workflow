@@ -12,6 +12,28 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Added
+- **Change scope of a run in the Run Inspector.** The run detail now shows, side by
+  side, which files a run actually changed — grouped per lane, with `+/-` counts per
+  file — and the scope the contract declares, as it stands. The file lists come from
+  the existing snapshot/diff logic: per observed lane exactly one comparison between
+  its first and last snapshot (`refs/adw/<run_id>/<seq>`), with a binary file shown
+  as "not numerically available"; no new git operation and the diff route is
+  unchanged. The declared scope is a readable, semantically equivalent YAML rendering
+  of the contract's top-level `x-adw-*` blocks, read through the existing whitelist
+  artifact path with the already-present `yaml` module; a missing, unreadable,
+  non-mapping or `x-adw-`-less `contract.yaml` shows a clear "no declared scope"
+  instead. **No automatic judgement is made** — no file is marked "in scope" or "out
+  of scope"; the facts sit side by side and a human evaluates them. Robust against
+  missing data: a lane with no usable snapshot pair shows "no diff available", and a
+  run with no usable diff at all drops the table with a clear statement — never a 5xx,
+  never an empty table without explanation. Observable as an additive, derived
+  `change_scope` object (`lanes` + `declared_scope`) on
+  `GET /api/runs/{repo}/{run_id}`; all existing response fields are unchanged
+  (additive, read-only).
+
 ## [0.14.0] — 2026-08-26
 
 ### Added

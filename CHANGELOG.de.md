@@ -13,6 +13,29 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Änderungsumfang eines Laufs im Run Inspector.** Das Run-Detail zeigt jetzt
+  nebeneinander, welche Dateien ein Lauf tatsächlich geändert hat — gruppiert je Lane,
+  mit `+/-`-Zahlen je Datei — und den im Contract deklarierten Scope, so wie er
+  dasteht. Die Dateilisten stammen aus der bestehenden Snapshot-/Diff-Logik: je
+  beobachteter Lane genau ein Vergleich zwischen ihrem ersten und letzten Snapshot
+  (`refs/adw/<run_id>/<seq>`), eine Binärdatei als „nicht numerisch verfügbar"; keine
+  neue Git-Operation, die Diff-Route bleibt unverändert. Der deklarierte Scope ist
+  eine lesbare, semantisch äquivalente YAML-Wiedergabe der Top-Level-`x-adw-*`-Blöcke
+  des Contracts, gelesen über den bestehenden Whitelist-Artefakt-Pfad mit dem bereits
+  vorhandenen `yaml`-Modul; ein fehlendes, unlesbares, kein-Mapping- oder
+  `x-adw-`-loses `contract.yaml` zeigt stattdessen klar „kein deklarierter Scope".
+  **Es wird kein automatisches Urteil gefällt** — keine Datei wird als „im Scope" oder
+  „außerhalb" markiert; die Fakten stehen nebeneinander, die Bewertung macht der
+  Mensch. Robust gegen fehlende Daten: eine Lane ohne verwertbares Snapshot-Paar zeigt
+  „kein Diff verfügbar", ein Lauf ganz ohne verwertbaren Diff lässt die Tabelle mit
+  klarer Aussage entfallen — nie ein 5xx, nie eine leere Tabelle ohne Erklärung.
+  Beobachtbar als additives, abgeleitetes `change_scope`-Objekt (`lanes` +
+  `declared_scope`) an `GET /api/runs/{repo}/{run_id}`; alle bestehenden
+  Antwortfelder bleiben unverändert (additiv, read-only).
+
 ## [0.14.0] — 2026-08-26
 
 ### Hinzugefügt

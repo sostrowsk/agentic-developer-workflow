@@ -103,6 +103,23 @@ main.detail { display: block; }
 .plan-skeleton-tasks { margin: 0; padding-left: 1.25rem; }
 .plan-skeleton-task { margin: 0.1rem 0; }
 
+/* The read-only change-scope block (§7.2): per-lane changed files with +/- counts
+   beside the declared contract scope. Facts side by side, no judgement. */
+.change-scope { grid-column: 1 / -1; border: 1px solid var(--border, #d0d7de); border-radius: 6px; padding: 0.5rem 0.75rem; }
+.change-scope-title { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.change-scope-lane + .change-scope-lane { margin-top: 0.5rem; }
+.change-scope-lane-name { margin: 0 0 0.25rem; font-weight: 600; }
+.change-scope-files { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
+.change-scope-files td, .change-scope-files th { padding: 0.05rem 0.5rem 0.05rem 0; text-align: left; }
+.change-scope-files .cs-add, .change-scope-files .cs-del { text-align: right; font-variant-numeric: tabular-nums; width: 3.5rem; }
+.change-scope-files .cs-add { color: var(--ok, #1a7f37); }
+.change-scope-files .cs-del { color: var(--err, #cf222e); }
+.change-scope-files .cs-bin { opacity: 0.7; font-style: italic; }
+.change-scope-no-diff, .change-scope-no-files, .change-scope-no-run-diff, .change-scope-no-declared { margin: 0.25rem 0; opacity: 0.8; }
+.change-scope-declared { margin-top: 0.6rem; }
+.change-scope-declared-title { margin: 0 0 0.25rem; font-size: 0.9rem; }
+.change-scope-declared-text { margin: 0; padding: 0.4rem 0.6rem; background: var(--code-bg, #f6f8fa); border-radius: 4px; overflow-x: auto; white-space: pre; }
+
 /* The read-only run-context panel: a plain field list, no chart (E5). Null fields
    render empty, never a fabricated 0. */
 .run-context { border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; align-self: start; }

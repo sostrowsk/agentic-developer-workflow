@@ -585,6 +585,57 @@ sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werd
      `pending`/`done`-Marker) sind beidsprachig (`adw/gui/i18n.py`); die Aufgabentexte
      sind Inhalt und werden nicht übersetzt.
 
+8. **Änderungsumfang** (immer vorhanden): das Run-Detail zeigt nebeneinander, welche
+   Dateien der Lauf tatsächlich geändert hat — gruppiert je Lane, mit `+/-`-Zahlen je
+   Datei — und den im Contract deklarierten Scope, so wie er dasteht. Beide Fakten
+   stehen **unbewertet** nebeneinander; ob eine Änderung „im Scope" liegt, entscheidet
+   der Mensch. Es ist eine rein abgeleitete Projektion der bereits geladenen Events,
+   der bestehenden Snapshots und der gewhitelisteten `contract.yaml` — keine neue
+   Git-Operation, Route, kein neues Event, keine Persistenz. Beobachtbar als additives
+   `change_scope`-Objekt (`lanes` + `declared_scope`) an
+   `GET /api/runs/{repo}/{run_id}`; der Schlüssel ist **immer** vorhanden.
+   - **Dateilisten** (je Lane): eine Lane ist *beobachtet*, wenn das Event-Log einen
+     `lane`-Span mit nicht-leerem Namen **oder** ein strukturell gültiges
+     Snapshot-Event (Ref-Form `refs/adw/<run_id>/<seq>`) trägt, das sie deklariert — die
+     Lanes erscheinen in Erstbeobachtungs-Reihenfolge (kleinstes Seq), ein Eintrag je
+     Name. Bei **≥ 2** gültigen Snapshots trägt der Eintrag den Diff zwischen ihrem
+     Snapshot mit niedrigstem und höchstem Seq — erzeugt durch die **bestehende**
+     Snapshot-/Diff-/Numstat-Logik, genau ein Vergleich je Lane, andere Lanes nie
+     einbezogen — als `diff_available: true` mit `files` (je `path`, `additions`,
+     `deletions`; Binärdatei → `null`, dargestellt als „nicht numerisch verfügbar").
+     Ein erfolgreicher Diff ohne Änderungen ist `files: []` („keine geänderten Dateien
+     gefunden"), unterscheidbar von „nicht verfügbar".
+   - **Unbrauchbare / fehlgeschlagene Diffs** (Robustheit): eine Lane mit **0 oder 1**
+     gültigem Snapshot oder deren Diff trotz Paar fehlschlägt (fehlendes
+     Snapshot-Objekt, Timeout, Ausführungsfehler) ist `diff_available: false` mit
+     `files: null` — kanonisch genau diese Form, nie `[]`, nie ein weggelassenes Feld —
+     dargestellt als „kein Diff verfügbar" statt einer leeren Tabelle. Eine
+     fehlgeschlagene Lane blockiert andere Lanes nie und macht aus der sonst
+     erfolgreichen Detail-Anfrage nie ein 5xx. Hat **keine** Lane einen verwertbaren
+     Diff, entfällt die Tabellenansicht mit klarer Aussage „kein Lauf-Diff verfügbar",
+     der deklarierte Scope bleibt darstellbar.
+   - **Deklarierter Scope**: `declared_scope` ist eine lesbare, **semantisch
+     äquivalente** YAML-Serialisierung aller Top-Level-`x-adw-*`-Blöcke der
+     `contract.yaml` (gelesen nur über den bestehenden Whitelist-Artefakt-Pfad mit dem
+     bereits vorhandenen `yaml`-Modul), in Dokumentreihenfolge, Werte und
+     Verschachtelung unverändert — ohne Umbenennung, Zusammenführung, Normalisierung
+     oder Interpretation, textliche Details (Kommentare, Quoting) bleiben nicht
+     erhalten. Ein fehlendes, unlesbares, kein-Mapping-, nicht sicher ladbares oder
+     `x-adw-`-loses Contract (ein Nicht-String-Top-Level-Schlüssel wird ignoriert, nie
+     ein Absturz) oder ein ausbrechender Symlink ergibt `declared_scope: null`, klar
+     als „kein deklarierter Scope" dargestellt — eine neutrale Abwesenheit, keine
+     Verletzung.
+   - **Kein Urteil** (E1): es gibt kein Feld und keine Markierung für „im
+     Scope"/„außerhalb"/„Verletzung"/Konformität, keine Datei↔`x-adw-*`-Zuordnung und
+     keine abgeleitete Wertung — `change_scope`, Lane- und Datei-Objekte tragen genau
+     die gelisteten Schlüssel. Ein strukturierter Datei-Scope und eine echte
+     Verletzungsprüfung sind bewusst Deferred.
+   - **Read-only** (E6): rein additive Projektion — keine neue Route, kein Event, kein
+     Schreibzugriff, kein Zustand; alle bestehenden Antwortfelder bleiben unverändert.
+     Die Chrome-Labels (Überschrift, `+/-`-Spaltenköpfe, die Fallback-Texte) sind
+     beidsprachig (`adw/gui/i18n.py`); Dateipfade und der deklarierte Scope sind Inhalt
+     und werden nicht übersetzt.
+
 ### 7.3 Live-Update
 
 - `GET /api/runs/{repo}/{run_id}/stream` — SSE. Der Server tailt `events.jsonl`
