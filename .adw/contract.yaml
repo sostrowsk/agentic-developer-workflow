@@ -1,27 +1,25 @@
 # Interface contract — Single-Lane project (`backend`).
 #
-# Scope of this contract: ONLY externally observable surfaces of the change —
-# the status VALUES in the JSON responses of the two read endpoints, and the
-# observable template behavior that renders them. It does NOT pin internal
-# helper signatures (`_node_status`, `_summary`, `_phase_bar`), dictionary keys
-# beyond the response fields already present, `_WAITING_TYPES`' membership, or
-# any markup/CSS wording. Existing response shapes are unchanged; this change
-# only WIDENS the value domain of three already-present `status` fields and
-# adds derivation rules for when those values appear. No routes or events are
-# added or removed.
+# This contract pins only the externally observable additions: the boolean
+# `dry_run` field in the two existing run responses, its visible behavior on the
+# two existing HTML surfaces, and the run-list status ordering. It does not pin
+# internal helper signatures, concrete markup, CSS selectors, event schemas, or
+# unchanged response fields. No route or event is added or removed.
 
 openapi: 3.1.0
 info:
-  title: ADW Run Inspector — waiting/awaiting status surfaces
-  version: 0.8.1
+  title: ADW Run Inspector — dry-run identification & status ordering
+  version: 1.0.0
 
 paths:
   /api/runs:
     get:
-      summary: List runs across all registered repos (unchanged shape).
+      summary: List runs across all registered repositories.
       responses:
         "200":
-          description: Array of run summaries.
+          description: >
+            Existing array of run summaries, now including `dry_run` on every
+            run record and ordered according to R4.
           content:
             application/json:
               schema:
@@ -31,158 +29,151 @@ paths:
 
   /api/runs/{repo}/{run_id}:
     get:
-      summary: Run detail (unchanged shape).
+      summary: Return the existing run-detail representation.
       parameters:
-        - { name: repo, in: path, required: true, schema: { type: string } }
-        - { name: run_id, in: path, required: true, schema: { type: string } }
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: Run detail object.
+          description: >
+            Existing run-detail object whose nested run summary now includes
+            `dry_run`.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunDetail"
 
+  /:
+    get:
+      summary: Existing HTML run list.
+      responses:
+        "200":
+          description: >
+            Existing server-rendered run-list page. Pinned additions: the
+            dry-run row marking per R2 and the status ordering per R4.
+            Templates, selectors, and markup are not prescribed.
+          content:
+            text/html: {}
+
+  /runs/{repo}/{run_id}:
+    get:
+      summary: Existing HTML run detail.
+      parameters:
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: >
+            Existing server-rendered run-detail page. Pinned addition: the
+            viewport-persistent dry-run marking in the header per R3.
+            Templates, selectors, and markup are not prescribed.
+          content:
+            text/html: {}
+
 components:
   schemas:
-
     RunSummary:
       type: object
       description: >
-        Existing summary object. Only the `status` field's value domain and
-        derivation change; all other fields keep their current meaning.
+        Existing run-summary object. This contract adds and pins only `dry_run`;
+        all pre-existing properties retain their current shape and meaning.
+      required:
+        - dry_run
       properties:
-        status:
-          $ref: "#/components/schemas/RunStatus"
-      # Other fields (run_id, repo, repo_exists, issue, phase, start,
-      # duration, cost, event_count, has_trace) are unchanged and not re-pinned.
+        dry_run:
+          type: boolean
+          default: false
+          description: >
+            True exactly when the start payload of the `run` span contains
+            `dry_run: true`; false for explicit false, a missing field, or a
+            missing `run` span.
 
     RunDetail:
       type: object
+      description: >
+        Existing run-detail object. Only the nested run summary's `dry_run`
+        addition is pinned here.
+      required:
+        - run
       properties:
         run:
           $ref: "#/components/schemas/RunSummary"
-        phases:
-          type: array
-          items:
-            $ref: "#/components/schemas/PhaseCell"
-        tree:
-          type: array
-          items:
-            $ref: "#/components/schemas/TreeNode"
-      # Other detail fields (problems, raw) are unchanged and not re-pinned.
 
-    PhaseCell:
-      type: object
-      properties:
-        name:  { type: string }
-        status:
-          $ref: "#/components/schemas/PhaseStatus"
-        duration:
-          type: [number, "null"]
+x-behavior:
+  R1_dry_run_derivation:
+    applies_to:
+      - RunSummary.dry_run
+      - RunDetail.run.dry_run
+    rule: >
+      `dry_run` is derived exclusively from the start payload of the `run`
+      span. A payload value of true yields true. An explicit false, an absent
+      field, or a completely absent `run` span yields false and never an error.
+      Missing `usage`, token, totals, or other content data has no effect on
+      this value. No heuristic, new persisted state, instrumentation change, or
+      event-schema change participates in the derivation.
+    cross_endpoint: >
+      For the same event-log content, GET /api/runs and
+      GET /api/runs/{repo}/{run_id} expose the same boolean value in their
+      respective existing run record.
 
-    TreeNode:
-      type: object
-      description: A trace-tree node (recursive via `children`, unchanged shape).
-      properties:
-        status:
-          $ref: "#/components/schemas/NodeStatus"
-      # Node type/label/seq/children/etc. are unchanged and not re-pinned.
+  R2_run_list_presentation:
+    surface: "GET / (HTML run list)"
+    rule: >
+      Every rendered run row whose run record has `dry_run: true` displays a
+      clearly visible, short Dry-Run label associated with that row. A row with
+      `dry_run: false` displays no Dry-Run designation. The label comes from the
+      existing English/German i18n catalog and follows the selected language.
+      Its visibility does not depend on `usage`, token, or other content data.
+      The designation does not alter status, retention, selection behavior, or
+      table semantics. Concrete markup and CSS wording are not prescribed.
 
-    # --- Status value domains (the actual contract of this change) -------------
+  R3_run_detail_presentation:
+    surface: "GET /runs/{repo}/{run_id} (HTML run-detail header)"
+    rule: >
+      A run detail whose run record has `dry_run: true` displays a
+      non-dismissible designation with banner character in the header. The
+      designation remains visible in the viewport while the user scrolls the
+      trace tree (e.g. a sticky header or sticky banner); a notice that merely
+      appears at the document start and scrolls out of view does not conform.
+      A run with `dry_run: false` displays no Dry-Run designation. The short
+      label comes from the existing English/German i18n catalog and follows the
+      selected language. Its visibility does not depend on `usage`, token, or
+      other content data. Concrete markup, CSS selectors, and the persistence
+      mechanism are not prescribed.
 
-    RunStatus:
-      description: >
-        Run-level status. `awaiting_approval` already existed as a TERMINAL
-        value from a closed `run` span's end payload; this change additionally
-        makes it appear for an OPEN `run` span (see rule R2). Values are
-        language-neutral and never translated. `null` for a state-only run
-        outside the approval phases.
-      oneOf:
-        - type: "null"
-        - type: string
-          enum: [running, awaiting_approval, done, escalated]
+  R4_run_list_order:
+    applies_to: "GET /api/runs response order and GET / run-list order"
+    groups:
+      - awaiting_approval
+      - running
+      - remaining_statuses
+    rule: >
+      Runs are grouped first by status: every `awaiting_approval` run precedes
+      every `running` run and every run in the remaining-status group; every
+      `running` run precedes every run in the remaining-status group. Within
+      each group, the existing newest-first ordering is preserved. The
+      `dry_run` value affects neither group membership nor ordering within a
+      group. No configurable ordering, filter, or grouping by `dry_run` is
+      introduced.
 
-    PhaseStatus:
-      description: Status of a phase cell in the phase bar. `awaiting` is new (R3).
-      type: string
-      enum: [pending, active, awaiting, completed, failed]
-
-    NodeStatus:
-      description: >
-        Status of a trace-tree node. `waiting` is new (R1); it is `null` for
-        non-span nodes.
-      oneOf:
-        - type: "null"
-        - type: string
-          enum: [running, waiting, passed, failed, done]
-
-  # --- Observable derivation rules & template behavior ------------------------
-  # (Not OpenAPI schema; the binding behavioral contract both the code and the
-  #  tests build against. No internal signature is implied.)
-  x-behavior:
-    R1_tree_waiting:
-      applies_to: RunDetail.tree[*].status
-      rule: >
-        An OPEN (still-running) span whose event type is `ci.wait` or `gate`
-        reports `waiting` instead of `running`. Any other open span (e.g.
-        `agent.run`, codex spans) still reports `running`. A CLOSED
-        `ci.wait`/`gate` span keeps its prior result (`gate` →
-        `passed`/`failed`, otherwise `done`). The Timeline's existing
-        `state: waiting|active` output is unchanged, and the same open
-        `ci.wait`/`gate` span that the Timeline reports as waiting reports
-        `waiting` in the tree — the two surfaces never disagree for the same
-        span.
-
-    R2_run_awaiting_approval:
-      applies_to: [RunSummary.status, RunDetail.run.status]
-      rule: >
-        Event-log is authoritative when a trace exists. A run whose `run` span
-        is OPEN (no matching `run` end) and whose most recent `approval` event
-        is `event: awaited` with no later `event: granted` reports
-        `awaiting_approval` instead of `running`. A later `granted` returns the
-        still-open run to `running`. A CLOSED `run` span's status is unchanged
-        (from its end payload: `done`/`escalated`/`awaiting_approval`); this
-        derivation never alters a terminal result.
-        Fallback WITHOUT a trace: a run whose state phase is `awaiting_approval`
-        or `awaiting_spec_approval` reports `awaiting_approval`. With a trace,
-        the event log wins — the state phase never overrides a later `granted`.
-        A state-only run outside those two phases stays statusless (`null`),
-        never a false `running` or `awaiting_approval`.
-      cross_endpoint: >
-        Both endpoints report the SAME status for the same run in the same
-        existing `status` field.
-
-    R3_phase_awaiting:
-      applies_to: RunDetail.phases[*].status
-      rule: >
-        For a run paused at an approval gate, the waiting business phase reports
-        `awaiting` instead of `active`:
-        spec gate (`approval` event `gate: spec`; fallback state phase
-        `awaiting_spec_approval`) → phase `spec`;
-        plan gate (`approval` event `gate: plan`; fallback state phase
-        `awaiting_approval`) → phase `plan`.
-        The awaiting phase is not simultaneously `active`/`pending`/`completed`;
-        no other phase is `active` at the same time; the other phases keep their
-        previously derived states. After the matching `granted`, `awaiting`
-        disappears and the bar follows the normal phase progression.
-        `RunDetail.phases` retains its existing seven business-phase cells: no
-        additional approval-phase cell appears in the response, and none is
-        rendered by the phase bar.
-
-    R4_presentation:
-      rule: >
-        `waiting` (tree node), `awaiting_approval` (run status) and `awaiting`
-        (phase) are rendered visually distinguishable from `running`; the
-        styling is additive — every existing status presentation remains.
-        Labels for the newly visible states exist in English and German,
-        semantically equivalent in both languages. `awaiting_approval` carries
-        the strongest visual emphasis of all states (only state requiring human
-        action). JSON status values stay language-neutral and untranslated.
-      template_surfaces: >
-        The run list's status column and the run-detail header both render the
-        derived run status (R2): while a run awaits approval, BOTH surfaces
-        show `awaiting_approval` with its label and the strongest visual
-        emphasis; the phase bar renders the derived phase status (R3) and the
-        trace tree renders the derived node status (R1). No markup, CSS
-        selectors, or helper functions are prescribed.
+  unchanged_surfaces:
+    rule: >
+      Timeline, Artifacts, Raw, SSE, retention, persistence, and all other
+      existing interfaces and behaviors remain unchanged. No new route, tab,
+      event, filter, or Dry-Run-specific retention behavior is introduced.
