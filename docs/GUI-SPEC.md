@@ -326,8 +326,17 @@ adw gui [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--lang de|en
 
 Table across all registered repos: run ID · repo · issue (truncated) · phase ·
 status (running / awaiting approval / done / escalated) · start · duration ·
-cost · event count. Sortable, filter by repo and status. Running runs first,
-live-updating.
+cost · event count. Sortable, filter by repo and status. Runs are grouped by
+status: `awaiting_approval` first, then `running`, then the rest — the run that
+needs a person to act stays at the top instead of sinking below newer finished
+runs. Within each group the existing newest-first order is kept. Live-updating.
+
+A dry run (`dry_run: true` in the `run` start payload) carries a short `Dry-Run`
+label on its row so a content-thin simulation is never mistaken for a real run
+with little output. The label follows the selected language; it is a marking
+only — it never changes status, ordering, filtering or retention. When the field
+is absent (older logs) or the `run` span is missing, the run is treated as a
+normal run.
 
 A run whose `run` span is still open but is paused at an approval gate reports
 `awaiting_approval` — not `running` — in both the run list's status column and
@@ -359,6 +368,12 @@ are translated.
 └──────────────────────┴───────────────────────────────────┘
 ```
 
+0. **Dry-run banner** (header): a dry run additionally carries a persistent
+   `Dry-Run` banner in the header that stays pinned to the top of the viewport
+   (a sticky header) while the trace tree scrolls, so the run cannot be mistaken
+   for a real one even far down the tree. It is derived from the same `dry_run`
+   field as the run list, follows the selected language, and appears only for a
+   dry run; a normal run's header is unchanged.
 1. **Phase map** (header): the seven phases as a status bar — done / active /
    pending / **awaiting** / failed, with duration each. Click scrolls the tree to
    that phase. A run paused at an approval gate shows its waiting business phase

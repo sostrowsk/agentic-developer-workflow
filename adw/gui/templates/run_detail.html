@@ -195,7 +195,8 @@
       data-hint-payload-missing="{{ t.hint_payload_missing }}"
       data-hint-load-failed-expand="{{ t.hint_load_failed_expand }}"
       data-hint-load-failed-open="{{ t.hint_load_failed_open }}">
-  <header class="run-header">
+  <header class="run-header"{% if detail.run.dry_run %} data-dry-run{% endif %}>
+    {% if detail.run.dry_run %}<div class="dry-run-banner">{{ t.dry_run }}</div>{% endif %}
     <a class="lang-switch" href="?{{ switch_qs }}">{{ t.lang_switch }}</a>
     <h1>Run {{ detail.run.run_id }}{% if detail.run.status is not none %} &mdash; <span class="run-status status-{{ detail.run.status }}">{{ t.get("status_" + detail.run.status, detail.run.status) }}</span>{% endif %}</h1>
     <div class="phase-bar">

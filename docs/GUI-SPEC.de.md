@@ -335,8 +335,18 @@ adw gui [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--lang de|en
 
 Tabelle über alle registrierten Repos: Run-ID · Repo · Issue (gekürzt) · Phase ·
 Status (läuft / wartet auf Approval / fertig / eskaliert) · Start · Dauer ·
-Kosten · Event-Zahl. Sortierbar, Filter nach Repo und Status. Laufende Runs
-zuerst, live aktualisiert.
+Kosten · Event-Zahl. Sortierbar, Filter nach Repo und Status. Läufe sind nach
+Status gruppiert: `awaiting_approval` zuerst, dann `running`, dann der Rest — der
+handlungsbedürftige Lauf bleibt oben, statt unter neuere fertige Läufe zu
+rutschen. Innerhalb jeder Gruppe bleibt die bestehende Reihenfolge „neueste
+zuerst". Live aktualisiert.
+
+Ein Trockenlauf (`dry_run: true` im `run`-Start-Payload) trägt ein kurzes
+`Dry-Run`-Label in seiner Zeile, damit eine inhaltsarme Simulation nie mit einem
+echten Lauf mit wenig Ausgabe verwechselt wird. Das Label folgt der gewählten
+Sprache; es ist nur eine Kennzeichnung — es ändert weder Status noch Reihenfolge,
+Filter oder Retention. Fehlt das Feld (ältere Logs) oder der `run`-Span, gilt der
+Lauf als normaler Lauf.
 
 Ein Lauf, dessen `run`-Span noch offen ist, aber an einem Approval-Gate pausiert,
 meldet `awaiting_approval` — nicht `running` — sowohl in der Statusspalte der
@@ -369,6 +379,13 @@ sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werd
 └──────────────────────┴───────────────────────────────────┘
 ```
 
+0. **Trockenlauf-Banner** (Kopf): ein Trockenlauf trägt zusätzlich ein
+   durchgehendes `Dry-Run`-Banner im Kopf, das beim Scrollen im Trace-Baum am
+   oberen Rand des Viewports angeheftet bleibt (sticky Kopf), damit der Lauf auch
+   weit unten im Baum nicht mit einem echten verwechselt wird. Es stammt aus
+   demselben `dry_run`-Feld wie die Run-Liste, folgt der gewählten Sprache und
+   erscheint nur bei einem Trockenlauf; der Kopf eines normalen Laufs bleibt
+   unverändert.
 1. **Phasen-Landkarte** (Kopf): die sieben Phasen als Statusleiste — erledigt /
    aktiv / ausstehend / **wartet** / gescheitert, mit jeweiliger Dauer. Klick
    scrollt den Baum zu dieser Phase. Ein an einem Approval-Gate pausierter Lauf

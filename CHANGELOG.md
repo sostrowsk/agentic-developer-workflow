@@ -12,6 +12,25 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Added
+- **Dry runs are unmistakable in the Run Inspector.** A dry run (derived purely
+  from the existing `dry_run` field in the `run` start payload — no new event,
+  route or persistence) carries a short `Dry-Run` label on its run-list row and a
+  persistent `Dry-Run` banner in the run-detail header that stays pinned to the
+  top of the viewport (sticky header) while the trace tree scrolls, so a
+  content-thin simulation is never mistaken for a real run. The `dry_run` boolean
+  now also appears on the run record of `GET /api/runs` and
+  `GET /api/runs/{repo}/{run_id}`; a missing field or missing `run` span reads as
+  `false`.
+
+### Changed
+- **The run list groups by status priority.** Runs are ordered
+  `awaiting_approval` first, then `running`, then the rest (previously only
+  `running` was pulled to the front, so a run awaiting a human sank below newer
+  finished runs). Within each group the newest-first order is unchanged.
+
 ## [0.9.0] — 2026-08-26
 
 ### Added

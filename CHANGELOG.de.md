@@ -13,6 +13,27 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Trockenläufe sind im Run-Inspector unverwechselbar.** Ein Trockenlauf (rein
+  aus dem vorhandenen `dry_run`-Feld im `run`-Start-Payload abgeleitet — kein
+  neues Event, keine neue Route, keine Persistenz) trägt ein kurzes
+  `Dry-Run`-Label in seiner Run-Listen-Zeile und ein durchgehendes
+  `Dry-Run`-Banner im Run-Detail-Kopf, das beim Scrollen im Trace-Baum am oberen
+  Viewport-Rand angeheftet bleibt (sticky Kopf), damit eine inhaltsarme Simulation
+  nie mit einem echten Lauf verwechselt wird. Das boolesche `dry_run` erscheint
+  jetzt auch im Run-Datensatz von `GET /api/runs` und
+  `GET /api/runs/{repo}/{run_id}`; ein fehlendes Feld oder ein fehlender
+  `run`-Span gilt als `false`.
+
+### Geändert
+- **Die Run-Liste gruppiert nach Status-Priorität.** Läufe sind in der Reihenfolge
+  `awaiting_approval`, dann `running`, dann der Rest sortiert (bisher wurde nur
+  `running` nach vorn gezogen, sodass ein auf einen Menschen wartender Lauf unter
+  neuere fertige Läufe rutschte). Innerhalb jeder Gruppe bleibt die Reihenfolge
+  „neueste zuerst" unverändert.
+
 ## [0.9.0] — 2026-08-26
 
 ### Hinzugefügt

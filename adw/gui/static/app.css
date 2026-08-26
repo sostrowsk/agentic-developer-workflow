@@ -61,6 +61,24 @@ tr.missing-repo { color: var(--muted); opacity: 0.55; font-style: italic; }
   letter-spacing: 0.02em;
 }
 
+/* Dry-run identification (R2/R3). The run-list row carries a short tag; a dry
+   run's whole detail header is pinned to the top of the viewport (position:
+   sticky) so its banner stays visible while the trace tree scrolls — a static
+   top-of-document note would scroll out of view. Additive: a normal run's chrome
+   is unchanged. */
+.dry-run-tag, .dry-run-banner {
+  background: #8a4b00;
+  color: #fff;
+  border-radius: 3px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-size: 0.75rem;
+  padding: 0 0.35rem;
+}
+.dry-run-banner { display: block; padding: 0.25rem 0.6rem; text-align: center; }
+.run-header[data-dry-run] { position: sticky; top: 0; z-index: 5; }
+
 main.detail { display: block; }
 /* Trace view: the two-column trace tree | detail panes layout. */
 .trace-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }

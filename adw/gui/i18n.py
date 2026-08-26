@@ -41,6 +41,10 @@ _EN: dict[str, str] = {
     "status_waiting": "waiting",
     "status_awaiting": "awaiting",
     "status_awaiting_approval": "awaiting approval",
+    # A short label (not translated prose) marking a simulated (dry) run on the run
+    # list row and in the run-detail header banner. A conventional single-token
+    # loanword that reads identically in both languages.
+    "dry_run": "Dry-Run",
     "lang_switch": "Deutsch",
     "tab_trace": "Trace",
     "tab_timeline": "Timeline",
@@ -111,6 +115,8 @@ _DE: dict[str, str] = {
     "status_waiting": "wartet",
     "status_awaiting": "wartet",
     "status_awaiting_approval": "wartet auf Freigabe",
+    # Single-token loanword — identical in both languages (see the i18n parity test).
+    "dry_run": "Dry-Run",
     "lang_switch": "English",
     "tab_trace": "Trace",
     "tab_timeline": "Timeline",

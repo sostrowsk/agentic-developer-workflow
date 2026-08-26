@@ -23,7 +23,7 @@
     {% for e in entries %}
       {% if e.repo_exists %}
       <tr class="run-row{% if not e.has_trace %} no-trace{% endif %}">
-        <td class="run-id"><a href="/runs/{{ e.repo }}/{{ e.run_id }}">{{ e.run_id }}</a></td>
+        <td class="run-id"><a href="/runs/{{ e.repo }}/{{ e.run_id }}">{{ e.run_id }}</a>{% if e.dry_run %} <span class="dry-run-tag">{{ t.dry_run }}</span>{% endif %}</td>
         <td>{{ e.repo }}</td>
         <td class="issue">{{ e.issue if e.issue is not none else "" }}</td>
         <td>{{ e.phase if e.phase is not none else "" }}</td>

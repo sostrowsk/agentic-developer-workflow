@@ -457,6 +457,11 @@ def _summary(slug, run_id, events, state) -> dict:
         "repo": slug,
         "repo_exists": True,
         "issue": issue,
+        # A dry run is derived exclusively from the `run` start payload (E1/E4): a
+        # true value there is a dry run; an explicit false, a missing field or a
+        # missing `run` span are all a normal run. Missing usage/token data never
+        # participates — no heuristic.
+        "dry_run": start_payload.get("dry_run") is True,
         "phase": state.phase if state is not None else None,
         "status": status,
         "start": (start_rec or {}).get("ts"),
@@ -1240,9 +1245,12 @@ def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
             except OSError:
                 continue  # one unreadable run must not drop the rest of the repo
             entries.append(_summary(ref.slug, child.name, events, state))
-    # Stable ordering: newest start first, then running runs pulled to the front.
+    # Stable ordering: newest start first, then grouped by status priority —
+    # `awaiting_approval` (needs a human) ahead of `running` ahead of the rest.
+    # A stable sort keeps the newest-first ordering within each group.
+    _status_rank = {"awaiting_approval": 0, "running": 1}
     entries.sort(key=lambda e: e.get("start") or "", reverse=True)
-    entries.sort(key=lambda e: 0 if e.get("status") == "running" else 1)
+    entries.sort(key=lambda e: _status_rank.get(e.get("status"), 2))
     return entries
 
 
