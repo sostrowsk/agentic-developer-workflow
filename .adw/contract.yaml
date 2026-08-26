@@ -1,22 +1,35 @@
 # Interface contract — Single-Lane project (`backend`).
 #
-# This contract pins ONLY the externally observable additions to the existing
-# run-detail surfaces: per-node `context` and top-level `latest_context` in the
-# JSON response of GET /api/runs/{repo}/{run_id}, their cutoff/null semantics
-# (null instead of a fabricated 0), and the observable behavior of the read-only
-# context panel on the existing run-detail page. It does NOT pin internal helper
-# signatures, internal dictionary keys, unchanged response fields, concrete
-# markup, CSS, or event schemas. No route or event is added or removed.
+# This delta contract pins ONLY the externally observable additions to the
+# existing run-detail surfaces:
+#   1. The inclusive seq-range filter of the Raw tab on the server-rendered page
+#      GET /runs/{repo}/{run_id} (query parameters `raw_from_seq`/`raw_to_seq`),
+#      its composition with the existing q/type/limit filters, and its tolerance
+#      for invalid values.
+#   2. Two additive, purely DERIVED fields — `prompt_diff` and
+#      `previous_prompt_seq` — on serialized `agent.run` trace nodes in the JSON
+#      response of GET /api/runs/{repo}/{run_id}, including the distinction
+#      between "no predecessor" and "identical prompt".
+#   3. The observable jump / range / prompt-diff behavior on the run-detail page.
+#
+# It does NOT pin internal helper signatures, internal dictionary keys, unchanged
+# response fields, concrete markup, CSS, or event schemas. No route or event is
+# added or removed. The events route GET /api/runs/{repo}/{run_id}/events is NOT
+# touched (E1) and therefore not represented as a path here: it keeps exactly
+# `from_seq`/`to_seq`, no `type`, no pagination, no new response fields (see
+# x-behavior.unchanged_surfaces).
 
 openapi: 3.1.0
 info:
-  title: ADW Run Inspector — node-time run context (delta only)
+  title: ADW Run Inspector — node→raw jump + prompt diff (delta only)
   version: 1.0.0
 
 paths:
   /api/runs/{repo}/{run_id}:
     get:
-      summary: Existing run-detail route — unchanged except two additive fields.
+      summary: >
+        Existing run-detail route — unchanged except two additive derived fields
+        on `agent.run` trace nodes.
       parameters:
         - name: repo
           in: path
@@ -31,14 +44,15 @@ paths:
       responses:
         "200":
           description: >
-            Existing run-detail object, now including `context` on every
-            existing trace node and top-level `latest_context`. No new error
-            surface: a run without a trace or without the relevant events
-            yields 200 with null fields, never a 5xx.
+            Existing run-detail object. Every serialized `agent.run` trace node
+            now carries `prompt_diff` and `previous_prompt_seq`, derived solely
+            from the already-loaded event stream. No new error surface: missing
+            or non-string `agent`/`prompt`, or an absent predecessor, yields the
+            null case, never a 5xx.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunDetailContextAdditions"
+                $ref: "#/components/schemas/RunDetailPromptDiffAdditions"
 
   /runs/{repo}/{run_id}:
     get:
@@ -54,223 +68,252 @@ paths:
           required: true
           schema:
             type: string
+        - name: raw_q
+          in: query
+          required: false
+          description: Existing Raw-tab free-text filter (unchanged).
+          schema:
+            type: string
+        - name: raw_type
+          in: query
+          required: false
+          description: Existing Raw-tab event-type filter (unchanged).
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Existing Raw-tab / list windowing (unchanged).
+          schema:
+            type: integer
+        - name: raw_from_seq
+          in: query
+          required: false
+          description: >
+            Optional INCLUSIVE lower seq bound of the Raw tab (new). A missing or
+            non-numeric value leaves this bound inactive (see R1_range/R4_invalid).
+          schema:
+            type: string
+        - name: raw_to_seq
+          in: query
+          required: false
+          description: >
+            Optional INCLUSIVE upper seq bound of the Raw tab (new). A missing or
+            non-numeric value leaves this bound inactive (see R1_range/R4_invalid).
+          schema:
+            type: string
       responses:
         "200":
           description: >
-            Existing HTML run-detail page, with the read-only context field
-            list and selection behavior pinned by P1_context_panel. Markup and
-            CSS are not part of the contract.
+            Existing HTML run-detail page. The Raw tab honors the inclusive
+            seq-range filter (R1–R4); every span node offers a jump into the Raw
+            tab pre-filtered to `[seq, end_seq]` (R5); the Prompt tab shows the
+            prompt diff / empty states (R7). Markup and CSS are not part of the
+            contract; a 5xx is never a valid response to any seq-bound value.
           content:
             text/html: {}
 
 components:
   schemas:
-    RunContext:
+    AgentRunPromptDiffFields:
       type: object
-      description: >
-        The fixed, read-only six-field run context at a given seq cutoff.
-        Exactly these six keys — never more, never fewer. Every absent datum
-        is null, never a fabricated 0.
-      additionalProperties: false
+      additionalProperties: true
       required:
-        - phase
-        - round
-        - limit_hits
-        - circuit_breakers
-        - cost_usd
-        - followups
+        - prompt_diff
+        - previous_prompt_seq
+      description: >
+        Additive derived fields present on serialized trace nodes whose existing
+        `type` is exactly `agent.run`. They are NOT added to other node types.
       properties:
-        phase:
+        prompt_diff:
           type:
             - string
             - "null"
           description: >
-            Latest valid phase observation at or before the applicable cutoff
-            (see C3_phase), or null when no such observation exists.
-        round:
-          oneOf:
-            - $ref: "#/components/schemas/RoundContext"
-            - type: "null"
-          description: >
-            Innermost recorded enclosing round (see C4_round), or null outside
-            any recorded round.
-        limit_hits:
+            `null` when no usable predecessor exists (see D2_no_predecessor).
+            Otherwise the unified diff string produced exactly per
+            D3_diff_format; `""` (empty string, NOT null) denotes an identical
+            prompt.
+        previous_prompt_seq:
           type:
             - integer
             - "null"
-          minimum: 1
           description: >
-            Count of `limit.hit` events recorded through the cutoff; null
-            (never 0) when none has been recorded by then.
-        circuit_breakers:
-          type:
-            - integer
-            - "null"
-          minimum: 1
-          description: >
-            Count of `circuit_breaker` events recorded through the cutoff;
-            null (never 0) when none has been recorded by then.
-        cost_usd:
-          type:
-            - number
-            - "null"
-          description: >
-            Cumulative USD cost recorded by completed `agent.run` events
-            through the cutoff; null (never 0) when no usable cost value has
-            been recorded by then. Invalid values are not invented as cost.
-        followups:
-          type:
-            - integer
-            - "null"
-          minimum: 1
-          description: >
-            Count of `followup` events recorded through the cutoff; null
-            (never 0) when none has been recorded by then.
+            The integer `seq` of the predecessor `agent.run` actually used for
+            the diff (also set when `prompt_diff` is `""`), or `null` when none
+            was used.
 
-    RoundContext:
+    TraceNodePromptDiffAddition:
       type: object
-      additionalProperties: false
-      required:
-        - loop
-        - n
-        - cap
-      properties:
-        loop:
-          type:
-            - string
-            - "null"
-        n:
-          type:
-            - integer
-            - "null"
-        cap:
-          type:
-            - integer
-            - "null"
+      additionalProperties: true
       description: >
-        Exactly the recorded `{loop, n, cap}` values of the applicable round.
-        Missing individual values remain null and are never filled in,
-        estimated, or inferred.
-
-    TraceNodeContextAddition:
-      type: object
-      description: >
-        Existing trace-node object at ANY depth of the tree. This schema pins
-        only the new `context` property and the recursion through the existing
-        `children` collection; all other existing node properties (including
-        `seq`/`end_seq`) retain their current shape and meaning. Every trace
-        node, at every nesting level, carries a `context`.
-      required:
-        - context
+        Existing trace-node object at ANY depth of the tree. The if/then/else
+        conditional below enforces that every node whose existing `type` equals
+        `agent.run` carries and requires both derived fields
+        (AgentRunPromptDiffFields), while any OTHER node type is REJECTED if it
+        carries either of the two fields (the `false` subschemas forbid the
+        properties without restricting unrelated existing properties); the
+        recursion through `children` applies the same conditional at every
+        depth. All other existing node properties (including `type`, `seq`,
+        `end_seq`, `payload`) retain their current shape and meaning.
+      if:
+        type: object
+        required:
+          - type
+        properties:
+          type:
+            const: agent.run
+      then:
+        $ref: "#/components/schemas/AgentRunPromptDiffFields"
+      else:
+        type: object
+        properties:
+          prompt_diff: false
+          previous_prompt_seq: false
+      examples:
+        - type: agent.run
+          seq: 41
+          end_seq: 57
+          prompt_diff: ""
+          previous_prompt_seq: 12
+          children: []
+        - type: step
+          seq: 58
+          end_seq: 60
+          children: []
       properties:
-        context:
-          $ref: "#/components/schemas/RunContext"
         children:
           type: array
           description: >
-            Existing child collection (present on span nodes; other child
-            fields remain unconstrained). Each child is itself a trace node
-            and therefore carries its own `context`.
+            Existing child collection. Each child is itself a trace node and, if
+            it is an `agent.run`, carries the two derived properties.
           items:
-            $ref: "#/components/schemas/TraceNodeContextAddition"
+            $ref: "#/components/schemas/TraceNodePromptDiffAddition"
 
-    RunDetailContextAdditions:
+    RunDetailPromptDiffAdditions:
       type: object
+      additionalProperties: true
       description: >
-        Existing run-detail object. This schema pins only top-level
-        `latest_context` and the `context` addition on every existing node in
-        `tree`; all other properties retain their current shape and meaning.
-        `latest_context` is present on every 200 response, INCLUDING a run
-        with no trace (then all six fields are null).
+        Existing run-detail object. This schema pins only the `prompt_diff` /
+        `previous_prompt_seq` additions on `agent.run` nodes within `tree`; all
+        other properties (including the `raw` view) retain their current shape
+        and meaning. The events route is not represented here — it is unchanged.
       required:
         - tree
-        - latest_context
       properties:
         tree:
           type: array
           items:
-            $ref: "#/components/schemas/TraceNodeContextAddition"
-        latest_context:
-          $ref: "#/components/schemas/RunContext"
+            $ref: "#/components/schemas/TraceNodePromptDiffAddition"
 
 x-behavior:
-  C1_node_cutoff:
+  R1_range:
+    surface: "GET /runs/{repo}/{run_id} (HTML run detail), Raw tab"
     rule: >
-      Every existing trace node has exactly one `context`. For a point-event
-      node, the cutoff is that event's `seq`. For a span node, the cutoff is
-      the node's already exposed `end_seq` (subtree maximum); for a running
-      span this is the highest seq observed so far in its subtree. Only events
-      with `seq` less than or equal to the cutoff participate — a span context
-      thus includes qualifying events inside the span after its start but
-      excludes later events. Changing node selection exposes the selected
-      node's historical context (time travel).
+      The Raw tab accepts an optional inclusive lower and upper seq bound
+      (`raw_from_seq`/`raw_to_seq`). When both are active, an event matches only
+      if `lower <= seq <= upper`; each bound is inclusive. When only one bound
+      is active, it filters one-sided. When a seq range is active, an event
+      whose `seq` is not an integer does not satisfy it. With no active bound
+      the Raw tab behaves exactly as before.
 
-  C2_latest_cutoff:
+  R2_composition:
     rule: >
-      Top-level `latest_context` is derived from all events through the
-      greatest observed `seq`. Existing live-update mechanisms refresh it; the
-      SSE protocol is unchanged.
+      The seq range is composed server-side (logical AND) with the existing Raw
+      filters: an event appears only if it satisfies the range AND the free-text
+      filter `q` (still evaluated over the FULL serialized payload) AND the type
+      filter `type`. The `limit` window is applied only to the fully filtered
+      match set; the reported `total` remains the size of the match set BEFORE
+      windowing. An active range changes neither the full-payload free-text
+      search nor the reachability of complete payloads via the events route.
 
-  C3_phase:
+  R3_types_unchanged:
     rule: >
-      `phase` is derived from exactly two existing sources: a non-empty `name`
-      in a `phase` span's start payload, and a non-empty `phase` in a
-      `state.saved` event payload; empty or absent values are not
-      observations. The valid observation with the greatest event `seq` at or
-      before the cutoff wins (seqs are unique — no tie). `state.saved` is
-      interpreted only according to its existing `{seq, phase}` payload and is
-      neither treated as a state dump nor extended. If no valid observation
-      exists, `phase` is null.
+      The `types` list the Raw tab offers stays the full type set of the log,
+      exactly as today, even while a seq range is active.
 
-  C4_round:
-    node_context: >
-      If a node lies inside a recorded `round` span, or is itself that round
-      node, `round` contains the nearest enclosing round's recorded
-      `{loop, n, cap}` values. Outside any recorded round it is null.
-    latest_context: >
-      For `latest_context`, `round` is the innermost recorded round whose span
-      contains the event with the greatest `seq`. The round's start and end
-      events count as contained, so a just-starting or just-ending round is
-      still shown; once the latest event is outside every round (e.g. after
-      its end), `round` is null.
-    missing_values: >
-      Missing individual round values remain null and are never completed,
-      estimated, or inferred.
-
-  C5_counts_and_cost:
+  R4_invalid:
     rule: >
-      `limit_hits`, `circuit_breakers`, and `followups` count, respectively,
-      recorded `limit.hit`, `circuit_breaker`, and `followup` events through
-      the applicable cutoff. A count is null, never zero, if no event of its
-      type has been recorded by that cutoff. `cost_usd` is the cumulative
-      USD cost recorded by completed `agent.run` events through the cutoff.
-      If no usable cost value has been recorded by then, `cost_usd` is null;
-      invalid values do not create a cost.
+      Invalid seq-bound values yield a defined response — never a traceback,
+      never a 5xx — while any concurrently set `q`/`type`/`limit` stay effective.
+      A non-numeric bound is treated as a missing bound (that bound inactive),
+      consistent with the tolerance the existing Raw parameters already show
+      toward invalid values. An upper bound smaller than the lower bound yields
+      a defined EMPTY match set with `total` 0.
 
-  C6_empty_or_incomplete_trace:
+  R5_span_jump:
     rule: >
-      A run without a trace has no trace nodes, no synthetic node, and no
-      top-level field named `context`. It still has `latest_context`, with
-      exactly the six required fields all null, and never fails with HTTP 5xx.
-      Missing event types or incomplete payloads leave only the affected
-      fields null rather than creating zero values or an error.
+      Every span node in the trace tree offers a jump into the EXISTING Raw tab.
+      The jump activates the Raw tab and sets the inclusive range to the node's
+      already-exposed `[seq, end_seq]` values (`end_seq` is the subtree maximum);
+      the Raw tab then shows all events whose `seq` lies in that interval, under
+      the other Raw filters and within `limit`. The filter is a pure seq-range
+      filter: events of interleaved/parallel spans whose `seq` falls in the
+      interval are NOT excluded; no structural subtree-membership check is done.
+      No second Raw widget appears in the detail pane. Existing `q`/`type`/`limit`
+      values are preserved unchanged; only the seq range is added.
 
-  P1_context_panel:
-    surface: "GET /runs/{repo}/{run_id} (HTML run detail)"
+  R6_range_visibility_and_clear:
     rule: >
-      Beside the existing detail pane, the page displays a read-only fixed
-      field list for `phase`, `round`, `limit_hits`, `circuit_breakers`,
-      `cost_usd`, and `followups` — a field list only, no chart or curve.
-      Selecting a trace node displays that node's complete `context`; changing
-      the selection updates every field (time travel). With no node selected,
-      the panel displays `latest_context`, including during a live run. Null
-      fields are rendered empty — never as numeric zero or an inferred value.
-      Existing detail-pane tabs keep their content and behavior. Concrete
-      markup and CSS are not prescribed.
+      An active seq range is visible in the Raw tab with its active bounds
+      (one-sided ranges shown as one-sided), and the Raw tab offers a way to
+      clear it. Clearing removes ONLY the seq bounds; `q`, `type`, and `limit`
+      keep their current values. Changing `q`, `type`, or `limit` does not
+      implicitly drop an active range — only the explicit clear does. With no
+      active range, no range state is asserted.
+
+  D1_predecessor_selection:
+    surface: "GET /api/runs/{repo}/{run_id} — serialized agent.run nodes"
+    rule: >
+      The predecessor is determined purely STRUCTURALLY, BEFORE prompt usability
+      matters: among the earlier `agent.run` starts of THE SAME run with the same
+      `agent` string and the same lane, the predecessor is the one with the
+      greatest `seq` less than the considered node's `seq`. Prompt usability does
+      NOT filter the candidates — an immediate predecessor with a missing or
+      non-string `prompt` is not skipped, and an older valid run is never used as
+      a substitute. Other runs, agents, or lanes are never used as predecessor.
+
+  D2_no_predecessor:
+    rule: >
+      The "no predecessor" case (`prompt_diff: null` AND
+      `previous_prompt_seq: null`; the prompt display states clearly that no
+      predecessor is available — never a guessed substitute, never an error)
+      holds exactly when: the considered `agent.run` has no usable string for
+      `agent` or `prompt`; OR no candidate per D1 exists; OR the immediate
+      predecessor determined per D1 has no usable string `prompt`. In this case
+      the unusable predecessor's `seq` is never reported as used.
+
+  D3_diff_format:
+    rule: >
+      When a usable predecessor exists, `previous_prompt_seq` is its integer
+      `seq` and `prompt_diff` is the diff string. The diff is produced
+      byte-exactly by this fixed recipe: both prompts split via `splitlines()`
+      (without line endings); `difflib.unified_diff` called with the predecessor
+      prompt's lines as the first argument and the current prompt's lines as the
+      second, `n=3`, `lineterm=""` and the default filename/timestamp arguments;
+      the lines joined with `"\n"`. An identical prompt yields `prompt_diff: ""`
+      (not null), with `previous_prompt_seq` still set. A difference in the
+      trailing newline alone counts as identical (empty diff). The three cases —
+      "no predecessor", "identical prompt", and "difference" — are
+      distinguishable both in the JSON response and visibly in the UI.
+
+  R7_prompt_tab:
+    surface: "GET /runs/{repo}/{run_id} (HTML run detail), Prompt tab"
+    rule: >
+      The existing Prompt tab still shows the full prompt (`payload.prompt`,
+      unchanged) and additionally shows exactly one distinguishable state: "no
+      predecessor" when `prompt_diff` and `previous_prompt_seq` are null;
+      "identical prompt" when `prompt_diff` is `""` and `previous_prompt_seq` is
+      an integer; or the visible unified diff when `prompt_diff` is non-empty
+      and `previous_prompt_seq` is an integer. The other detail-pane tabs keep
+      their behavior.
 
   unchanged_surfaces:
     rule: >
-      Existing response fields and routes retain their semantics; no route is
-      added or removed. The SSE protocol and the event schemas are unchanged.
-      Timeline, Artifacts, Raw, and Diff keep their content and behavior. The
-      panel offers no configurable field set and no selection persistence.
+      GET /api/runs/{repo}/{run_id}/events is unchanged: exactly
+      `from_seq`/`to_seq`, no `type`, no pagination, no new response fields
+      (E1). No route or event is added or removed; the SSE surface is
+      unchanged; no new tab appears in the detail pane. Timeline, Artifacts,
+      and the existing snapshot Diff tab keep their content and behavior.
+      Internal helper signatures and concrete markup/CSS are not part of this
+      contract.

@@ -1,206 +1,242 @@
-# Plan: Kontext-Panel „Lauf-Zustand zu diesem Knoten" im Run-Detail
+# Plan: Vom Knoten in den Raw-Log springen + Prompt-Diff gegen die Vorrunde
 
 Single-Lane-Projekt: Es gibt nur den Workstream **backend**, keinen separaten
-Frontend-Lane. Die GUI ist eine FastAPI-+-Jinja-+-Vanilla-JS-App; Template-,
+Frontend-Lane. Die GUI ist eine FastAPI-+-Jinja-+-Vanilla-JS-App; Template-
 und Client-Verhaltensanpassungen gehören deshalb zum Backend-Workstream.
 Sowohl die JSON-Route `GET /api/runs/{repo}/{run_id}` als auch die HTML-Seite
 `GET /runs/{repo}/{run_id}` konsumieren dasselbe `_run_detail(...)`-Dict — eine
 einzige Ableitung speist beide Flächen.
 
-Gebaut wird strikt gegen `.adw/contract.yaml`. Der Contract pinnt nur die
-extern beobachtbare Fläche: `context` an jedem bestehenden Trace-Knoten,
-`latest_context` auf oberster Ebene, deren Cutoff-/`null`-Semantik sowie das
-Auswahl-, Zeitreise- und Leer-Verhalten des read-only Panels auf der
-bestehenden Run-Detail-Seite. Interne Helper-Signaturen, interne
-Dictionary-Schlüssel und konkretes Markup/CSS sind nicht Teil des Contracts.
-
-Die Ableitung nutzt ausschließlich den Event-Strom, den `_run_detail()` in
-`adw/gui/app.py` bereits lädt. Vorhandene Seq-Zuordnung und Kostenlogik werden
-wiederverwendet; es entstehen weder Reader, Route, Event, Persistenz noch
-Dateizugriff oder Laufzeit-Dependency.
+Gebaut wird strikt gegen `.adw/contract.yaml`. Beide Funktionen sind rein
+abgeleitete Projektionen des bereits geladenen Event-Stroms: kein neuer Reader,
+keine neue Route, kein neues Event, keine Persistenz, keine neue Dependency
+(`difflib` ist Standardbibliothek). Der Contract pinnt nur die extern
+beobachtbare Fläche: das Seq-Bereichsfilter-Verhalten des Raw-Tabs samt
+Komposition mit `q`/`type`/`limit` und Verhalten bei ungültigen Werten, die
+neuen abgeleiteten Antwortfelder `prompt_diff`/`previous_prompt_seq` an
+serialisierten `agent.run`-Knoten in `GET /api/runs/{repo}/{run_id}`, sowie das
+beobachtbare Verhalten von Absprung, Bereichsanzeige/-aufhebung und
+Prompt-Diff-Anzeige auf der bestehenden Run-Detail-Seite. Die Events-Route
+`GET /api/runs/{repo}/{run_id}/events` wird NICHT angefasst (E1). Interne
+Helper-Signaturen, interne Dictionary-Schlüssel und konkretes Markup/CSS sind
+nicht Teil des Contracts.
 
 ## Grounding (im Code verifiziert)
 
-- `_run_detail(...)` (`adw/gui/app.py:1110`) baut das Detail-Dict (`run`,
-  `phases`, `tree`, `problems`, `raw`), berechnet bereits `events` und
-  `own_ranges = _span_seq_ranges(events)` (`app.py:1117`) und serialisiert
-  jeden Baum-Knoten über `_serialize(...)` (`app.py:770`).
-- `_serialize` exponiert pro Span-Knoten bereits `seq` und `end_seq`
-  (Subtree-Maximum via `_subtree_seq_range`, `app.py:755`), pro Punkt-Knoten
-  `seq`. `end_seq` ist exakt der von der Spec geforderte Span-Cutoff (AC 2).
-- Kosten-Semantik existiert für die zwei vorhandenen Formen: `_subtree_cost`
-  (`app.py:637`, über Modell-Knoten) und `_events_cost` (`app.py:894`, über
-  eine Event-Liste: `agent.run`/`kind==end`/`cost_usd`, `null` statt `0`).
-  Die Cutoff-Ableitung ist event-listen-förmig und wendet daher die
-  `_events_cost`-Semantik auf die gefilterte Liste an — eine Rechenart,
-  keine zweite (E4, AC 7).
-- `round`-Spans tragen `start_payload` `{loop, n, cap}` (genutzt ab
-  `app.py:805`).
-- `state.saved` trägt nur `{seq, phase}` (Issue, verifiziert) — wird rein als
-  dieses Payload ausgewertet, nie als Zustands-Dump, nie erweitert (E1, AC 4).
-- Die HTML-Seite (`run_detail_page`, `app.py:1432`) rendert die Knoten
-  serverseitig; `static/app.js` toggelt `.selected` bei Auswahl. Keine
-  clientseitige Neu-Ableitung — die Panel-Daten reisen pro Knoten im Render mit.
+- Der Raw-Tab wird von `_raw_view(events, limit, *, q=None, type_filter=None)`
+  (`adw/gui/app.py:870`) gebaut: er filtert serverseitig über den vollständig
+  serialisierten Payload (`q`) und den Ereignistyp (`type`), fenstert über
+  `limit` und meldet `total` als Größe der VOLLSTÄNDIGEN Treffermenge vor der
+  Fensterung. `types` ist die volle Typmenge des Logs, unabhängig von den
+  aktiven Filtern. Einen Seq-Bereichsfilter hat er nicht.
+- `_raw_view` wird aus `_run_detail(...)` (`adw/gui/app.py:1289`) mit `raw_q`,
+  `raw_type`, `limit` aufgerufen. Die HTML-Seite `run_detail_page`
+  (`adw/gui/app.py:1622`) liest `raw_q`/`raw_type` aus den Query-Parametern
+  (`app.py:1640`); die JSON-Route `api_run_detail` (`app.py:1538`) ruft
+  `_run_detail` ohne Raw-Filter auf — der Seq-Bereich betrifft daher nur die
+  HTML-Seite.
+- `_parse_limit` (`app.py:55`) und `_parse_offset` (`app.py:74`) definieren die
+  bestehende Toleranz für Raw-Parameter: nicht-numerische Werte fallen still
+  auf einen Default zurück, kein 5xx. Die Seq-Grenzen folgen exakt dieser
+  Konvention (E4, AC 4).
+- Die Bereichsinformation je Knoten existiert bereits: `_span_seq_ranges()`
+  (`app.py:715`) und `_subtree_seq_range()` (`app.py:781`); jeder serialisierte
+  Span-Knoten exponiert sein Subtree-Maximum bereits als `end_seq`
+  (`_serialize`, `app.py:796`). Der Absprungbereich `[seq, end_seq]` ist damit
+  ohne neue Ableitung verfügbar (AC 5).
+- `_serialize` (`app.py:796`) erhält beim rekursiven Abstieg die aktuelle
+  `lane` (aus dem umschließenden `lane`-Span mit `payload.name`). Der
+  `agent`-String und der `prompt` eines `agent.run` liegen im Start-Payload
+  (der Prompt-Tab zeigt `payload.prompt`). Lane und Prompt eines `agent.run`
+  sind damit während der Serialisierung bekannt.
+- Die HTML-Seite rendert die Knoten serverseitig; `static/app.js` schaltet die
+  Detail-Pane-Tabs und die `.selected`-Auswahl. Der bestehende Raw-Tab ist ein
+  Tab dieses Panes — der Absprung ist ein Wechsel dorthin, kein zweites Widget
+  (E5). Clientseitiges Verhalten ist über den JS-Harness
+  (`tests/gui_js_harness.js` + `tests/gui_js_harness.py`, plain `node`) testbar.
 
 ## Workstream: backend
 
-### B1 — Kontextmodell und Cutoff-Ableitung in `adw/gui/app.py` (AC 1, 2, 10, 11)
+### B1 — Seq-Grenzen parsen und durchreichen (AC 1, 4; E4)
 
-- Eine rein abgeleitete Kontextstruktur mit genau den sechs Feldern `phase`,
-  `round`, `limit_hits`, `circuit_breakers`, `cost_usd`, `followups` erzeugen.
-- Für Punkt-Ereignisse deren `seq` als Cutoff verwenden. Für Span-Knoten das
-  bereits in der Baum-Antwort exponierte `end_seq` (Subtree-Maximum; bei
-  laufenden Spans die höchste bislang im Subtree beobachtete `seq`).
-- Für jeden Cutoff ausschließlich Events mit `seq <= cutoff` berücksichtigen.
-  Dadurch enthalten abgeschlossene und laufende Span-Kontexte auch passende
-  Ereignisse innerhalb ihres Subtrees nach dem Span-Start, aber keine
-  späteren Ereignisse.
-- Die vorhandene Seq-Zuordnung (`_span_seq_ranges()`, `_subtree_seq_range()`)
-  wiederverwenden; keine alternative Span- oder Cutoff-Semantik einführen.
-- „Nie gesehen" von „null-mal gesehen" unterscheiden: Zähl- und Kostenfelder
-  starten als `None` und werden erst beim ersten Vorkommen zur Zahl — nie ein
-  erfundenes `0`.
-- Unvollständige oder ungültige Payloads defensiv behandeln: Nur das jeweils
-  betroffene Feld bleibt leer; die Detail-Antwort darf deshalb nicht mit
-  HTTP 5xx scheitern.
+- Die HTML-Detail-Route liest die zwei neuen optionalen Query-Parameter
+  `raw_from_seq` und `raw_to_seq` (Namen im Contract fixiert), tolerant nach
+  dem Muster von `_parse_limit`/`_parse_offset`: eine fehlende ODER
+  nicht-numerische Grenze ist eine inaktive Grenze (einseitig oder gar kein
+  Bereich), nie ein Fehler, nie ein 5xx.
+- Die geparsten Grenzen an `_run_detail`/`_raw_view` durchreichen, analog zu
+  `raw_q`/`raw_type`. Die JSON-Route und die Events-Route bleiben unberührt.
 
-### B2 — Phasenstand bis zum Cutoff (AC 4, 10)
+### B2 — Seq-Bereichsfilter im Raw-Tab (AC 1, 2, 3, 4; E4)
 
-- `phase` ausschließlich aus zwei vorhandenen Quellen ableiten: dem
-  nichtleeren Start-Payload-Feld `name` eines `phase`-Spans und dem
-  nichtleeren Payload-Feld `phase` eines `state.saved`-Ereignisses.
-  Leere/fehlende Werte zählen nicht als Beobachtung.
-- Von allen gültigen Beobachtungen bis einschließlich Cutoff gewinnt die mit
-  der höchsten Event-`seq` (Seqs sind eindeutig — kein Gleichstand).
-- `state.saved` ausschließlich gemäß seinem bestehenden Payload `{seq, phase}`
-  auswerten; weder als Zustands-Dump behandeln noch erweitern (E1).
-- Ohne gültige Phasenbeobachtung `phase: null`.
+- `_raw_view` um den inklusiven Seq-Bereichsfilter erweitern: ein Event bleibt
+  in der Treffermenge nur, wenn seine ganzzahlige `seq` — sofern eine Grenze
+  aktiv ist — `untere Grenze ≤ seq ≤ obere Grenze` erfüllt. Bei aktivem Bereich
+  erfüllt ein Event OHNE ganzzahlige `seq` den Filter nicht.
+- Der Bereich wird MIT den bestehenden Filtern komponiert (logisches UND): ein
+  Event erscheint nur, wenn es zugleich Bereich, `q` (weiterhin über den
+  vollständigen Payload) und `type` erfüllt. Die `limit`-Fensterung wird erst
+  auf die vollständig gefilterte Menge angewandt; `total` bleibt die Größe der
+  Treffermenge VOR der Fensterung.
+- `types` bleibt unverändert die volle Typmenge des Logs, auch bei aktivem
+  Bereich (AC 3). Vollständige Payloads bleiben über die Events-Route
+  erreichbar (AC 2).
+- Ist nur eine Grenze gesetzt, filtert sie einseitig. Ist die obere Grenze
+  kleiner als die untere, ergibt sich eine definierte leere Treffermenge mit
+  `total` 0 — kein Sonderfall-Code, natürliche Folge des Prädikats (AC 4).
+- Ohne Bereichsangabe verhält sich `_raw_view` byte-identisch wie bisher.
 
-### B3 — Umgebende Runde am Cutoff (AC 5, 10)
+### B3 — Absprung, Bereichsanzeige und -aufhebung im Raw-Tab (AC 5, 6, 7; E5)
 
-- `round` ist die innerste `round`, deren Span-Seq-Bereich den Cutoff enthält
-  (eigener `round`-Knoten eingeschlossen), als `{loop, n, cap}` aus dem
-  `start_payload` dieses Spans. Fehlende Einzelwerte bleiben `null`; nichts
-  ergänzen oder schätzen.
-- Die bestehenden Span-Bereiche aus `_span_seq_ranges()` nutzen; „enthält"
-  heißt Start- bis End-Event einschließlich — eine gerade startende oder
-  gerade endende Runde wird noch gezeigt.
-- Für `latest_context` ist der Cutoff die höchste Event-`seq`; dasselbe
-  Containment liefert `round: null`, sobald das jüngste Event außerhalb jeder
-  Runde liegt (etwa nach deren Ende).
+- Jeder Span-Knoten im Trace-Baum bekommt eine Bedienmöglichkeit, die in den
+  bestehenden Raw-Tab wechselt und dessen Seq-Bereich auf die bereits
+  exponierten Knotenwerte `[seq, end_seq]` setzt. Es entsteht kein zweites
+  Raw-Widget; der bestehende Raw-Tab wird aktiviert. Der Filter ist ein reiner
+  Seq-Bereichsfilter — keine strukturelle Teilbaum-Zugehörigkeitsprüfung;
+  Events verschränkter/paralleler Spans innerhalb des Intervalls werden nicht
+  ausgeschlossen (AC 5).
+- Beim Absprung bleiben vorhandene `q`-/`type`-/`limit`-Werte erhalten; nur der
+  Seq-Bereich wird zusätzlich gesetzt (AC 6). Umgesetzt über die bestehende
+  query-parameter-getriebene Render-Mechanik der Seite (Absprung-Ziel trägt die
+  bestehenden Raw-Parameter mit den zusätzlichen Seq-Grenzen).
+- Die aktiven Grenzen werden beim Rendern des bestehenden Raw-Filterformulars
+  und des bestehenden „mehr laden"-Mechanismus mitgeführt, sodass eine Änderung
+  an `q`, `type` oder `limit` den aktiven Bereich nicht unbeabsichtigt
+  entfernt — nur das explizite Aufheben entfernt ihn (AC 7).
+- Ein aktiver Seq-Bereich wird im Raw-Tab mit seinen aktiven Grenzen sichtbar
+  angezeigt (einseitige Bereiche entsprechend einseitig), samt einer
+  Bedienmöglichkeit zum Aufheben. Das Aufheben entfernt ausschließlich die
+  Seq-Grenzen; `q`, `type` und `limit` behalten ihre Werte (AC 7). Ohne
+  aktiven Bereich wird kein Bereichszustand behauptet.
+- Feld-/Steuerbeschriftungen laufen wie alle Chrome-Texte über den bestehenden
+  i18n-Katalog (`adw/gui/i18n.py`) — bestehende Konvention, kein neuer
+  Mechanismus.
 
-### B4 — Zähl- und Kostenfelder bis zum Cutoff (AC 6, 7, 8, 10)
+### B4 — Vorgänger-Ermittlung des `agent.run` (AC 8, 9; E3)
 
-- `limit_hits`, `circuit_breakers`, `followups` als Anzahl der bis
-  einschließlich Cutoff protokollierten `limit.hit`-, `circuit_breaker`- bzw.
-  `followup`-Ereignisse; ohne ein solches Ereignis `null`, nicht `0`.
-- `cost_usd` als kumulierte Summe der bis einschließlich Cutoff
-  protokollierten Kosten abgeschlossener `agent.run`-Ereignisse: die
-  Event-Liste auf `seq <= cutoff` filtern und darauf dieselbe Kosten-Semantik
-  wie `_events_cost` anwenden — keine zweite Kosten-Rechenart (E4).
-- Ohne verwertbaren Kostenwert `cost_usd: null`; ungültige Werte werden nicht
-  in erfundene Kosten umgewandelt.
+- Aus dem bereits geladenen Baum/Event-Strom einen Index aller `agent.run`-
+  Starts bilden, jeweils mit `seq`, `agent`-String, serialisierungszeitlicher
+  Lane und `prompt`. Die Lane stammt aus dem umschließenden `lane`-Span (wie in
+  `_serialize` bereits geführt), NICHT aus einer neuen Quelle.
+- Der Vorgänger eines betrachteten `agent.run` wird rein STRUKTURELL bestimmt,
+  BEVOR Prompt-Verwertbarkeit eine Rolle spielt: unter den früheren
+  `agent.run`-Starts DESSELBEN Laufs mit demselben `agent`-String und derselben
+  Lane ist der Vorgänger der mit der größten `seq` kleiner als die des
+  betrachteten Knotens. Andere Läufe, Agenten oder Lanes werden nie als
+  Vorgänger verwendet (E3).
+- Die Prompt-Verwertbarkeit filtert die Kandidaten NICHT: ein unmittelbarer
+  Vorgänger mit fehlendem oder nicht-String-`prompt` wird nicht übersprungen,
+  ein älterer gültiger Lauf nie als Ersatz verwendet (AC 8; gezielter Test).
+- Hat der betrachtete `agent.run` selbst keinen verwertbaren String für
+  `agent` oder `prompt`, existiert kein Kandidat, oder hat der so bestimmte
+  unmittelbare Vorgänger keinen verwertbaren String-`prompt`, dann gilt der
+  Normalfall „kein Vorgänger": `prompt_diff: null` und
+  `previous_prompt_seq: null` — insbesondere wird die `seq` eines unbrauchbaren
+  unmittelbaren Vorgängers nie als „verwendet" ausgewiesen. Nie ein geratener
+  Ersatz, nie ein Fehler (AC 9).
 
-### B5 — Antwort von `GET /api/runs/{repo}/{run_id}` erweitern (AC 1, 2, 3, 10, 11)
+### B5 — Diff-Erzeugung und Antwortfelder (AC 10, 11, 13; E2, E6)
 
-- In `_serialize` jedem Knoten sein `context` anhand seines Cutoffs anhängen
-  (`end_seq` für Spans, `seq` für Punkt-Ereignisse); die Ableitung so
+- Existiert ein verwertbarer Vorgänger, `previous_prompt_seq` = dessen
+  ganzzahlige `seq` und `prompt_diff` = der serverseitig erzeugte Diff-String;
+  `previous_prompt_seq` bleibt auch bei leerem Diff gesetzt.
+- Der Diff wird byte-genau nach fixiertem Format erzeugt: beide Prompts via
+  `splitlines()` (ohne Zeilenenden) zerlegt; `difflib.unified_diff` mit dem
+  Vorgänger-Prompt als erstem und dem aktuellen Prompt als zweitem Argument,
+  `n=3`, `lineterm=""` und den Standardwerten für Dateinamen/Zeitstempel; die
+  Zeilen mit `"\n"` verbunden. Ein identischer Prompt ergibt `prompt_diff: ""`
+  (nicht `null`); ein Unterschied allein im abschließenden Zeilenumbruch gilt
+  als identisch (leerer Diff) (AC 10, 11; E6).
+- Nur `difflib` aus der Standardbibliothek; keine Diff-Bibliothek, kein
+  Syntax-Highlighter, kein Frontend-Paket (E2).
+- In `_serialize` jedem `agent.run`-Knoten `prompt_diff` und
+  `previous_prompt_seq` als rein abgeleitete Felder anhängen; die Ableitung so
   durchreichen, wie `own_ranges`/`snaps` bereits durchgereicht werden — keine
-  Modelländerung.
-- In `_run_detail` auf oberster Ebene `latest_context` ergänzen, abgeleitet
-  bis zur höchsten Event-`seq` (bzw. mit sechs `null`-Feldern, wenn keine
-  Events existieren).
-- Lauf ohne Trace: leerer `tree`, daher kein per-Knoten-`context` und KEIN
-  top-level `context`-Feld — nur `latest_context` mit sechs `null`-Feldern;
-  nie ein synthetischer Knoten, nie ein 5xx (AC 10).
-- Jeder `context` hat EXAKT die sechs Schlüssel — nicht mehr, nicht weniger
-  (E3). Bestehende Antwortfelder und Routen behalten ihre Semantik; Timeline,
-  Artifacts, Raw, Diff und SSE bleiben unberührt.
+  Modelländerung. Andere Knotentypen erhalten die Felder nicht. Bestehende
+  Felder behalten ihre Semantik. Die Ermittlung nutzt ausschließlich den
+  bereits geladenen Event-Strom (AC 13).
 
-### B6 — Read-only Kontext-Panel im Run-Detail (AC 3, 9, 10)
+### B6 — Prompt-Diff-Anzeige im Prompt-Tab (AC 10, 12; Nicht-Ziele)
 
-- In `run_detail.html` neben dem Detail-Pane eine feste read-only Feldliste
-  für die sechs Kontextfelder rendern, pro Knoten aus dessen `context`
-  gespeist. Nur eine Feldliste — kein Diagramm, keine Verlaufskurve (E5).
-- Auswahl-Verdrahtung in `static/app.js` über den bestehenden
-  Auswahlmechanismus (`.selected`-Toggle): Bei Auswahlwechsel aktualisiert
-  das Panel alle Felder auf den `context` des neu gewählten Knotens
-  (Zeitreise); ohne Auswahl zeigt es `latest_context` (Live-Lauf). Bestehende
-  Aktualisierungsmechanismen verwenden; keine SSE-Erweiterung, keine
-  clientseitige Neu-Ableitung. Die Verdrahtung bleibt — wie das übrige
-  `app.js` — über den bestehenden JS-Harness in plain `node` ausführbar
-  testbar (siehe Tests).
-- `null`-Werte leer anzeigen — nie als numerische Null oder geschätzter Wert.
-- Feldbeschriftungen laufen wie alle Chrome-Texte der Seite über den
-  bestehenden i18n-Katalog (`adw/gui/i18n.py`, `CATALOG[lang]`, im Code
-  verifiziert) — bestehende Konvention, kein neuer Mechanismus: hartkodierte
-  Labels wären in einer der beiden Sprachen falsch.
-- Die vorhandenen Detail-Pane-Tabs und deren Inhalte bleiben unverändert.
-  Kein konfigurierbares Feld-Set, keine Nutzereinstellung, keine
-  Auswahlpersistenz. Konkretes Markup/CSS bleibt Implementierungsdetail.
+- Der bestehende Prompt-Tab zeigt weiterhin den vollständigen Prompt
+  (`payload.prompt`, unverändert) und ergänzt zusätzlich den Diff bzw. genau
+  einen der drei unterscheidbaren Zustände:
+  - „kein Vorgänger" (`prompt_diff: null`, `previous_prompt_seq: null`) —
+    klare Aussage, dass kein Vorgänger verfügbar ist, kein Fehler, kein
+    geratener Ersatz;
+  - „identischer Prompt" (`prompt_diff: ""` mit ganzzahliger
+    `previous_prompt_seq`) — als eigener, vom vorigen unterscheidbarer
+    Leerzustand;
+  - „Unterschied" (nichtleerer `prompt_diff` mit ganzzahliger
+    `previous_prompt_seq`) — der Diff-String.
+- Die übrigen Detail-Pane-Tabs (Timeline, Artifacts, Raw als Struktur, Diff,
+  Kontext) behalten ihr bisheriges Verhalten. Kein neues Tab, kein
+  Prompt-Editor, kein Zwischenablage-Subsystem, keine Persistenz.
+- Client-Verdrahtung über den bestehenden Auswahl-/Tab-Mechanismus in
+  `static/app.js`; keine clientseitige Neu-Ableitung, keine SSE-Erweiterung.
+  Neue sichtbare Texte über den bestehenden EN/DE-i18n-Katalog. Konkretes
+  Markup/CSS bleibt Implementierungsdetail.
 
-### B7 — Dokumentation und Changelog (AC 12)
+### B7 — Dokumentation und Changelog (AC 14)
 
-- `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md` synchron in §7.2: das Panel,
-  die Zeitreise-Semantik (Cutoff = Knoten-`seq` bzw. Span-`end_seq`), der
-  `latest_context`-Fallback ohne Auswahl und die Leer-Semantik
-  (`null` statt `0`, leere Anzeige).
+- `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md` synchron in §7.2: der
+  Seq-Bereichsfilter (Komposition mit `q`/`type`/`limit`, Aufhebung), der
+  Absprung vom Span-Knoten auf `[seq, end_seq]` sowie Vorgängerauswahl,
+  fixiertes Ausgabeformat und die drei Leer-/Diff-Zustände des Prompt-Diffs.
 - `CHANGELOG.md` und `CHANGELOG.de.md` synchron unter `Unreleased`.
 
 ## Tests (unter `tests/` als `test_gui_*.py`)
 
-Richtwert ~12 neue Tests (Bestand: 892); mehr als ~20 gilt als Scope-Drift.
+Richtwert ~14 neue Tests (Bestand: 936); mehr als ~22 gilt als Scope-Drift.
 
-Abdeckung der Ableitungs-Semantik über die JSON-Antwort von
-`GET /api/runs/{repo}/{run_id}` bzw. `_run_detail`:
+Serverseitige Semantik (über die gerenderte Raw-Ansicht bzw. `_raw_view`/
+`_run_detail`):
 
-- Kontext pro Punkt-Knoten berücksichtigt ausschließlich Events bis zu dessen
-  `seq`.
-- Span-Kontext verwendet `end_seq`/Subtree-Maximum und enthält ein Kosten-,
-  `limit.hit`- und `followup`-Ereignis innerhalb des Spans nach dessen
-  Start-`seq`.
-- Ein späteres Ereignis beeinflusst einen früheren Knoten-Kontext nicht;
-  Auswahlwechsel zeigt den jeweiligen historischen Kontext (Zeitreise).
-- Phasen-Präzedenz zwischen `state.saved.phase` und `phase`-Span-Start nach
-  höchster `seq` (Beispiel der Spec: seq 30 `spec` vs. seq 40 `plan`);
-  fehlende oder leere Beobachtungen ergeben `phase: null`.
-- Round-Zuordnung: eigener bzw. umgebender `round`-Span, fehlende
-  Einzelwerte, `round: null` außerhalb einer Runde sowie
-  `latest_context.round` innerhalb vs. nach Ende einer Runde.
-- `limit_hits`, `circuit_breakers`, `followups` zählen nur tatsächlich bis
-  zum Cutoff protokollierte Ereignisse und sind ohne Beobachtung `null`,
-  nicht `0`.
-- `cost_usd` folgt der bestehenden Kosten-Semantik, summiert nur verwertbare
-  abgeschlossene `agent.run`-Kosten bis zum Cutoff und ist ohne verwertbaren
-  Wert `null`.
-- `latest_context` ist ohne Auswahl maßgeblich und spiegelt den Stand bis zur
-  höchsten Event-`seq`.
-- Jeder Knoten-`context` und `latest_context` enthält genau die sechs
-  vereinbarten Felder.
-- Ein Lauf ohne Trace liefert ohne Fehler keinen synthetischen Knoten, kein
-  top-level `context` und ein `latest_context` mit sechs `null`-Feldern.
-- Fehlende Eventtypen und unvollständige Payloads verursachen weder erfundene
-  Nullwerte noch HTTP 5xx.
+- Inklusive beidseitige Seq-Grenzen sowie jeweils einseitige untere und obere
+  Grenze.
+- Komposition des Bereichs mit `q`, `type` und `limit`, samt `total` als Größe
+  der Treffermenge VOR der `limit`-Fensterung; `types` bleibt die volle
+  Typmenge auch bei aktivem Bereich.
+- Nicht-numerische Grenze wird als inaktiv behandelt (verhält sich wie keine
+  Grenze); widersprüchlicher Bereich (obere < untere) ergibt eine definierte
+  leere Menge mit `total` 0 — kein 5xx; gleichzeitig gesetzte
+  `q`/`type`/`limit` bleiben wirksam.
+- Events ohne ganzzahlige `seq` erfüllen einen aktiven Bereichsfilter nicht.
 
-Abdeckung des beobachtbaren Panel-Verhaltens:
+Vorgänger und Prompt-Diff (über die JSON-Antwort von
+`GET /api/runs/{repo}/{run_id}` bzw. `_run_detail`):
 
-- Markup-Ebene, über die gerenderte HTML-Seite (`GET /runs/{repo}/{run_id}`)
-  im bestehenden GUI-Test-Stil: Die Seite enthält das Panel als read-only
-  Feldliste neben dem Detail-Pane; pro gerendertem Knoten reisen dessen
-  `context`-Daten mit, der `latest_context`-Fallback ist im Markup verfügbar.
-- Verhaltens-Ebene, AUSFÜHRBAR clientseitig über den bestehenden JS-Harness
-  (`tests/gui_js_harness.js`, gefahren aus pytest via `run_scenario` in
-  `tests/gui_js_harness.py`): Der Harness treibt das SERVIERTE `app.js` in
-  plain `node` gegen repräsentative DOM-Fixtures aus Panel und Knoten — kein
-  Browser-Framework, keine neue Dependency; `node` ist bereits
-  verpflichtendes Verifikationswerkzeug des Test-Gates. Neue Szenarien
-  assertieren den Auswahl-Handler direkt:
-  - initial, ohne Auswahl, zeigt das Panel `latest_context`;
-  - Auswahl eines Knotens aktualisiert alle sechs Felder auf dessen `context`;
-  - Auswahlwechsel aktualisiert erneut alle sechs Felder (Zeitreise);
-  - Aufheben der Auswahl fällt auf `latest_context` zurück;
-  - `null`-Werte bleiben auch nach diesen Übergängen leer — nie `0`, nie ein
-    geschätzter Wert.
+- Vorgängerauswahl nach `agent`-String, Lane und größter kleinerer `seq`;
+  andere Läufe/Agenten/Lanes werden nie als Vorgänger verwendet.
+- „kein Vorgänger" (`prompt_diff: null`, `previous_prompt_seq: null`) bei
+  fehlenden oder nicht-String-Daten für `agent`/`prompt` bzw. fehlendem
+  Kandidaten.
+- Gezielter Test: ein unmittelbarer Vorgänger mit unverwertbarem `prompt`
+  ergibt `prompt_diff: null` — KEIN älterer gültiger `agent.run` wird als
+  Ersatz gegen N−2 verwendet.
+- `prompt_diff: ""` bei identischem Prompt (mit gesetzter
+  `previous_prompt_seq`), unterscheidbar vom Fall „kein Vorgänger".
+- Die Felder `prompt_diff`/`previous_prompt_seq` erscheinen ausschließlich an
+  `agent.run`-Knoten, an keinem anderen Knotentyp (AC 13; Assertion innerhalb
+  der obigen Serialisierungs-Tests, kein eigener zusätzlicher Test).
+- Byte-genaues Unified-Diff-Format (`splitlines()`, `unified_diff` mit `n=3`,
+  `lineterm=""`, Join mit `"\n"`), einschließlich Gleichheit bei
+  ausschließlich abweichendem abschließendem Zeilenumbruch.
+
+Beobachtbares Client-/Markup-Verhalten:
+
+- Markup-Ebene über die gerenderte HTML-Seite (`GET /runs/{repo}/{run_id}`):
+  Absprung eines Span-Knotens setzt den Bereich auf `[seq, end_seq]` (die Tests
+  prüfen die Intervallgrenzen und fordern KEINEN Ausschluss verschränkter
+  Events innerhalb des Intervalls); der aktive Bereich ist mit seinen Grenzen
+  sichtbar; die Bereichsaufhebung entfernt nur die Grenzen und erhält
+  `q`/`type`/`limit`; es entsteht kein zweites Raw-Widget.
+- Verhaltens-Ebene, soweit erforderlich AUSFÜHRBAR clientseitig über den
+  bestehenden JS-Harness (`tests/gui_js_harness.js`, gefahren aus pytest via
+  `run_scenario` in `tests/gui_js_harness.py`, plain `node`, keine neue
+  Dependency): Absprung aktiviert den Raw-Tab mit gesetztem Bereich unter
+  Erhalt der übrigen Filter; die Prompt-Anzeige unterscheidet die drei
+  Zustände „kein Vorgänger", „identischer Prompt" und „Unterschied".
 
 ## Gates (Definition of Done)
 
@@ -209,21 +245,23 @@ Abdeckung des beobachtbaren Panel-Verhaltens:
 - `uv run ruff check .` grün.
 - `uv run pytest -x -q` grün.
 - EN/DE-Dokumentation und Changelog-Einträge synchron.
-- Keine neue Laufzeit-Dependency, kein CDN.
-- Keine neue Route, kein Reader, kein zusätzlicher Datei-Zugriff, kein Event,
-  kein Persistenzzustand, keine SSE-Protokolländerung.
-- Timeline, Artifacts, Raw, Diff und bestehende Detail-Pane-Tabs unverändert.
+- `GET /api/runs/{repo}/{run_id}/events` unverändert und weiterhin nur über
+  `from_seq`/`to_seq` filterbar (E1).
+- Keine neue Dependency (E2, nur `difflib`), keine Persistenz, kein neues Tab,
+  kein neuer Reader, keine neue Route, kein neues Event, keine
+  SSE-Protokolländerung.
+- Timeline, Artifacts, Diff-Tab und SSE unverändert.
 - Kein unter „Deferred (bewusst nicht gebaut)" genannter Mechanismus ist
   Bestandteil der Änderung.
 
 ## Deferred (bewusst nicht gebaut)
 
 Nachvollziehbar, aber für die Ausgangslage unverhältnismäßig. KEINE
-Akzeptanzkriterien — und bindend auch für den Review-/Codex-/Fix-Zyklus:
-was hier steht, wird dort nicht nachgebaut.
+Akzeptanzkriterien — und bindend auch für den Review-/Codex-/Fix-Zyklus: was
+hier steht, wird dort nicht nachgebaut.
 
-- Verlauf/Zeitreihe einer Kennzahl über den gesamten Lauf (Kurve, Sparkline).
-- Vergleich des Zustands zweier Knoten nebeneinander.
-- Export des berechneten Lauf-Zustands (Datei/Clipboard/Route).
-- Erweiterung des Panels um weitere Events, Kennzahlen oder frei wählbare
-  Felder.
+- Diff zwischen beliebig gewählten Trace-Knoten oder Prompts.
+- Wort- oder Zeichen-Level-Diff.
+- Prompt-Vorlagen-Extraktion (Trennung stabiler Rahmen vom variablen
+  Findings-Block).
+- Syntax-Highlighting des Diffs.
