@@ -1,35 +1,22 @@
 # Interface contract — Single-Lane project (`backend`).
 #
-# This contract pins only the externally observable additions: the boolean
-# `dry_run` field in the two existing run responses, its visible behavior on the
-# two existing HTML surfaces, and the run-list status ordering. It does not pin
-# internal helper signatures, concrete markup, CSS selectors, event schemas, or
-# unchanged response fields. No route or event is added or removed.
+# This contract pins ONLY the externally observable additions to the existing
+# run-detail surfaces: per-node `context` and top-level `latest_context` in the
+# JSON response of GET /api/runs/{repo}/{run_id}, their cutoff/null semantics
+# (null instead of a fabricated 0), and the observable behavior of the read-only
+# context panel on the existing run-detail page. It does NOT pin internal helper
+# signatures, internal dictionary keys, unchanged response fields, concrete
+# markup, CSS, or event schemas. No route or event is added or removed.
 
 openapi: 3.1.0
 info:
-  title: ADW Run Inspector — dry-run identification & status ordering
+  title: ADW Run Inspector — node-time run context (delta only)
   version: 1.0.0
 
 paths:
-  /api/runs:
-    get:
-      summary: List runs across all registered repositories.
-      responses:
-        "200":
-          description: >
-            Existing array of run summaries, now including `dry_run` on every
-            run record and ordered according to R4.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/RunSummary"
-
   /api/runs/{repo}/{run_id}:
     get:
-      summary: Return the existing run-detail representation.
+      summary: Existing run-detail route — unchanged except two additive fields.
       parameters:
         - name: repo
           in: path
@@ -44,28 +31,18 @@ paths:
       responses:
         "200":
           description: >
-            Existing run-detail object whose nested run summary now includes
-            `dry_run`.
+            Existing run-detail object, now including `context` on every
+            existing trace node and top-level `latest_context`. No new error
+            surface: a run without a trace or without the relevant events
+            yields 200 with null fields, never a 5xx.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunDetail"
-
-  /:
-    get:
-      summary: Existing HTML run list.
-      responses:
-        "200":
-          description: >
-            Existing server-rendered run-list page. Pinned additions: the
-            dry-run row marking per R2 and the status ordering per R4.
-            Templates, selectors, and markup are not prescribed.
-          content:
-            text/html: {}
+                $ref: "#/components/schemas/RunDetailContextAdditions"
 
   /runs/{repo}/{run_id}:
     get:
-      summary: Existing HTML run detail.
+      summary: Existing server-rendered run-detail page.
       parameters:
         - name: repo
           in: path
@@ -80,100 +57,220 @@ paths:
       responses:
         "200":
           description: >
-            Existing server-rendered run-detail page. Pinned addition: the
-            viewport-persistent dry-run marking in the header per R3.
-            Templates, selectors, and markup are not prescribed.
+            Existing HTML run-detail page, with the read-only context field
+            list and selection behavior pinned by P1_context_panel. Markup and
+            CSS are not part of the contract.
           content:
             text/html: {}
 
 components:
   schemas:
-    RunSummary:
+    RunContext:
       type: object
       description: >
-        Existing run-summary object. This contract adds and pins only `dry_run`;
-        all pre-existing properties retain their current shape and meaning.
+        The fixed, read-only six-field run context at a given seq cutoff.
+        Exactly these six keys — never more, never fewer. Every absent datum
+        is null, never a fabricated 0.
+      additionalProperties: false
       required:
-        - dry_run
+        - phase
+        - round
+        - limit_hits
+        - circuit_breakers
+        - cost_usd
+        - followups
       properties:
-        dry_run:
-          type: boolean
-          default: false
+        phase:
+          type:
+            - string
+            - "null"
           description: >
-            True exactly when the start payload of the `run` span contains
-            `dry_run: true`; false for explicit false, a missing field, or a
-            missing `run` span.
+            Latest valid phase observation at or before the applicable cutoff
+            (see C3_phase), or null when no such observation exists.
+        round:
+          oneOf:
+            - $ref: "#/components/schemas/RoundContext"
+            - type: "null"
+          description: >
+            Innermost recorded enclosing round (see C4_round), or null outside
+            any recorded round.
+        limit_hits:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: >
+            Count of `limit.hit` events recorded through the cutoff; null
+            (never 0) when none has been recorded by then.
+        circuit_breakers:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: >
+            Count of `circuit_breaker` events recorded through the cutoff;
+            null (never 0) when none has been recorded by then.
+        cost_usd:
+          type:
+            - number
+            - "null"
+          description: >
+            Cumulative USD cost recorded by completed `agent.run` events
+            through the cutoff; null (never 0) when no usable cost value has
+            been recorded by then. Invalid values are not invented as cost.
+        followups:
+          type:
+            - integer
+            - "null"
+          minimum: 1
+          description: >
+            Count of `followup` events recorded through the cutoff; null
+            (never 0) when none has been recorded by then.
 
-    RunDetail:
+    RoundContext:
+      type: object
+      additionalProperties: false
+      required:
+        - loop
+        - n
+        - cap
+      properties:
+        loop:
+          type:
+            - string
+            - "null"
+        n:
+          type:
+            - integer
+            - "null"
+        cap:
+          type:
+            - integer
+            - "null"
+      description: >
+        Exactly the recorded `{loop, n, cap}` values of the applicable round.
+        Missing individual values remain null and are never filled in,
+        estimated, or inferred.
+
+    TraceNodeContextAddition:
       type: object
       description: >
-        Existing run-detail object. Only the nested run summary's `dry_run`
-        addition is pinned here.
+        Existing trace-node object at ANY depth of the tree. This schema pins
+        only the new `context` property and the recursion through the existing
+        `children` collection; all other existing node properties (including
+        `seq`/`end_seq`) retain their current shape and meaning. Every trace
+        node, at every nesting level, carries a `context`.
       required:
-        - run
+        - context
       properties:
-        run:
-          $ref: "#/components/schemas/RunSummary"
+        context:
+          $ref: "#/components/schemas/RunContext"
+        children:
+          type: array
+          description: >
+            Existing child collection (present on span nodes; other child
+            fields remain unconstrained). Each child is itself a trace node
+            and therefore carries its own `context`.
+          items:
+            $ref: "#/components/schemas/TraceNodeContextAddition"
+
+    RunDetailContextAdditions:
+      type: object
+      description: >
+        Existing run-detail object. This schema pins only top-level
+        `latest_context` and the `context` addition on every existing node in
+        `tree`; all other properties retain their current shape and meaning.
+        `latest_context` is present on every 200 response, INCLUDING a run
+        with no trace (then all six fields are null).
+      required:
+        - tree
+        - latest_context
+      properties:
+        tree:
+          type: array
+          items:
+            $ref: "#/components/schemas/TraceNodeContextAddition"
+        latest_context:
+          $ref: "#/components/schemas/RunContext"
 
 x-behavior:
-  R1_dry_run_derivation:
-    applies_to:
-      - RunSummary.dry_run
-      - RunDetail.run.dry_run
+  C1_node_cutoff:
     rule: >
-      `dry_run` is derived exclusively from the start payload of the `run`
-      span. A payload value of true yields true. An explicit false, an absent
-      field, or a completely absent `run` span yields false and never an error.
-      Missing `usage`, token, totals, or other content data has no effect on
-      this value. No heuristic, new persisted state, instrumentation change, or
-      event-schema change participates in the derivation.
-    cross_endpoint: >
-      For the same event-log content, GET /api/runs and
-      GET /api/runs/{repo}/{run_id} expose the same boolean value in their
-      respective existing run record.
+      Every existing trace node has exactly one `context`. For a point-event
+      node, the cutoff is that event's `seq`. For a span node, the cutoff is
+      the node's already exposed `end_seq` (subtree maximum); for a running
+      span this is the highest seq observed so far in its subtree. Only events
+      with `seq` less than or equal to the cutoff participate — a span context
+      thus includes qualifying events inside the span after its start but
+      excludes later events. Changing node selection exposes the selected
+      node's historical context (time travel).
 
-  R2_run_list_presentation:
-    surface: "GET / (HTML run list)"
+  C2_latest_cutoff:
     rule: >
-      Every rendered run row whose run record has `dry_run: true` displays a
-      clearly visible, short Dry-Run label associated with that row. A row with
-      `dry_run: false` displays no Dry-Run designation. The label comes from the
-      existing English/German i18n catalog and follows the selected language.
-      Its visibility does not depend on `usage`, token, or other content data.
-      The designation does not alter status, retention, selection behavior, or
-      table semantics. Concrete markup and CSS wording are not prescribed.
+      Top-level `latest_context` is derived from all events through the
+      greatest observed `seq`. Existing live-update mechanisms refresh it; the
+      SSE protocol is unchanged.
 
-  R3_run_detail_presentation:
-    surface: "GET /runs/{repo}/{run_id} (HTML run-detail header)"
+  C3_phase:
     rule: >
-      A run detail whose run record has `dry_run: true` displays a
-      non-dismissible designation with banner character in the header. The
-      designation remains visible in the viewport while the user scrolls the
-      trace tree (e.g. a sticky header or sticky banner); a notice that merely
-      appears at the document start and scrolls out of view does not conform.
-      A run with `dry_run: false` displays no Dry-Run designation. The short
-      label comes from the existing English/German i18n catalog and follows the
-      selected language. Its visibility does not depend on `usage`, token, or
-      other content data. Concrete markup, CSS selectors, and the persistence
-      mechanism are not prescribed.
+      `phase` is derived from exactly two existing sources: a non-empty `name`
+      in a `phase` span's start payload, and a non-empty `phase` in a
+      `state.saved` event payload; empty or absent values are not
+      observations. The valid observation with the greatest event `seq` at or
+      before the cutoff wins (seqs are unique — no tie). `state.saved` is
+      interpreted only according to its existing `{seq, phase}` payload and is
+      neither treated as a state dump nor extended. If no valid observation
+      exists, `phase` is null.
 
-  R4_run_list_order:
-    applies_to: "GET /api/runs response order and GET / run-list order"
-    groups:
-      - awaiting_approval
-      - running
-      - remaining_statuses
+  C4_round:
+    node_context: >
+      If a node lies inside a recorded `round` span, or is itself that round
+      node, `round` contains the nearest enclosing round's recorded
+      `{loop, n, cap}` values. Outside any recorded round it is null.
+    latest_context: >
+      For `latest_context`, `round` is the innermost recorded round whose span
+      contains the event with the greatest `seq`. The round's start and end
+      events count as contained, so a just-starting or just-ending round is
+      still shown; once the latest event is outside every round (e.g. after
+      its end), `round` is null.
+    missing_values: >
+      Missing individual round values remain null and are never completed,
+      estimated, or inferred.
+
+  C5_counts_and_cost:
     rule: >
-      Runs are grouped first by status: every `awaiting_approval` run precedes
-      every `running` run and every run in the remaining-status group; every
-      `running` run precedes every run in the remaining-status group. Within
-      each group, the existing newest-first ordering is preserved. The
-      `dry_run` value affects neither group membership nor ordering within a
-      group. No configurable ordering, filter, or grouping by `dry_run` is
-      introduced.
+      `limit_hits`, `circuit_breakers`, and `followups` count, respectively,
+      recorded `limit.hit`, `circuit_breaker`, and `followup` events through
+      the applicable cutoff. A count is null, never zero, if no event of its
+      type has been recorded by that cutoff. `cost_usd` is the cumulative
+      USD cost recorded by completed `agent.run` events through the cutoff.
+      If no usable cost value has been recorded by then, `cost_usd` is null;
+      invalid values do not create a cost.
+
+  C6_empty_or_incomplete_trace:
+    rule: >
+      A run without a trace has no trace nodes, no synthetic node, and no
+      top-level field named `context`. It still has `latest_context`, with
+      exactly the six required fields all null, and never fails with HTTP 5xx.
+      Missing event types or incomplete payloads leave only the affected
+      fields null rather than creating zero values or an error.
+
+  P1_context_panel:
+    surface: "GET /runs/{repo}/{run_id} (HTML run detail)"
+    rule: >
+      Beside the existing detail pane, the page displays a read-only fixed
+      field list for `phase`, `round`, `limit_hits`, `circuit_breakers`,
+      `cost_usd`, and `followups` — a field list only, no chart or curve.
+      Selecting a trace node displays that node's complete `context`; changing
+      the selection updates every field (time travel). With no node selected,
+      the panel displays `latest_context`, including during a live run. Null
+      fields are rendered empty — never as numeric zero or an inferred value.
+      Existing detail-pane tabs keep their content and behavior. Concrete
+      markup and CSS are not prescribed.
 
   unchanged_surfaces:
     rule: >
-      Timeline, Artifacts, Raw, SSE, retention, persistence, and all other
-      existing interfaces and behaviors remain unchanged. No new route, tab,
-      event, filter, or Dry-Run-specific retention behavior is introduced.
+      Existing response fields and routes retain their semantics; no route is
+      added or removed. The SSE protocol and the event schemas are unchanged.
+      Timeline, Artifacts, Raw, and Diff keep their content and behavior. The
+      panel offers no configurable field set and no selection persistence.
