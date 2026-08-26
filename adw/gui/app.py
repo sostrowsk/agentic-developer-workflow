@@ -766,7 +766,11 @@ def _snapshots_by_lane(events, run_id) -> dict:
         payload = e.get("payload") or {}
         lane = payload.get("lane")
         ref = payload.get("ref")
-        if not isinstance(seq, int) or not lane or not _is_snapshot_ref(ref, run_id):
+        # The lane must be a non-empty STRING: a malformed non-string value (numeric,
+        # or an unhashable list/mapping) is ignored — never a dictionary key (which
+        # would raise TypeError) and never a non-string lane in the response.
+        if (not isinstance(seq, int) or not isinstance(lane, str) or not lane
+                or not _is_snapshot_ref(ref, run_id)):
             continue
         by_lane.setdefault(lane, []).append((seq, ref))
     for lane in by_lane:
@@ -838,7 +842,11 @@ def _agent_run_index(roots) -> list:
             return
         payload = node.start_payload if node.start_payload is not None else node.end_payload
         node_lane = lane
-        if node.type == "lane" and isinstance(payload, dict) and payload.get("name"):
+        # A lane name is only adopted when it is a non-empty STRING: a malformed
+        # non-string `payload.name` (numeric, or an unhashable list/mapping) is
+        # ignored so it never reaches a lane-keyed lookup as an unhashable key.
+        if (node.type == "lane" and isinstance(payload, dict)
+                and isinstance(payload.get("name"), str) and payload["name"]):
             node_lane = payload["name"]
         if node.type == "agent.run":
             start = node.start_payload if isinstance(node.start_payload, dict) else {}
@@ -898,7 +906,11 @@ def _serialize(node, tool_names=None, *, lane=None, own_ranges=None, snaps=None,
     if _is_span(node):
         payload = node.start_payload if node.start_payload is not None else node.end_payload
         node_lane = lane
-        if node.type == "lane" and isinstance(payload, dict) and payload.get("name"):
+        # A lane name is only adopted when it is a non-empty STRING: a malformed
+        # non-string `payload.name` (numeric, or an unhashable list/mapping) is
+        # ignored so it never reaches a lane-keyed lookup as an unhashable key.
+        if (node.type == "lane" and isinstance(payload, dict)
+                and isinstance(payload.get("name"), str) and payload["name"]):
             node_lane = payload["name"]
         children = [
             _serialize(c, tool_names, lane=node_lane, own_ranges=own_ranges, snaps=snaps,
@@ -1739,7 +1751,10 @@ def _observed_lanes(events, snaps: dict) -> list:
     first_seq: dict = {}
 
     def observe(name, seq):
-        if not name or not isinstance(seq, int):
+        # A lane name must be a non-empty STRING (contract `lane: string`): a numeric
+        # or unhashable `payload.name` is ignored, never a non-string lane and never
+        # a mixed-type sort key.
+        if not isinstance(name, str) or not name or not isinstance(seq, int):
             return
         prev = first_seq.get(name)
         if prev is None or seq < prev:

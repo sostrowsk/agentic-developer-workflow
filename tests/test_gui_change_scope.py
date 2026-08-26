@@ -306,6 +306,60 @@ def test_snapshot_only_lane_appears_and_invalid_snapshot_events_are_ignored(home
     assert [f["path"] for f in by["solo"]["files"]] == ["solo/a.py"]
 
 
+def _bad_lane_start(seq, name):
+    """A `lane` span whose `payload.name` is a malformed (non-string) value."""
+    return rec(seq, "lane", "start", f"L{seq}", "PB", sec=seq,
+               payload={"name": name, "branch": "b", "worktree": "wt",
+                        "base_sha": None, "ports": {}})
+
+
+def _bad_snap(seq, lane, ref):
+    """A structurally valid snapshot ref whose `payload.lane` is a malformed value."""
+    return rec(seq, "snapshot", "point", "L", sec=seq,
+               payload={"lane": lane, "tree": "t", "ref": ref, "label": "s"})
+
+
+def test_non_string_lane_names_are_ignored_without_a_5xx(home, tmp_path):  # noqa: F811
+    """AC-1/S1 (contract `lane: string`): a numeric/`None`/empty `payload.name` on a
+    lane span and a numeric `payload.lane` on a snapshot never become a lane — the
+    only observed lane is the valid string one, and every reported `lane` is a
+    non-empty string. The response stays 200."""
+    repo = tmp_path / "repo"
+    write_run(repo, RUN_ID, _wrap([
+        _lane_start(3, "backend"),
+        _bad_lane_start(4, 42),                 # numeric span name -> ignored
+        _bad_lane_start(5, ""),                 # empty span name -> ignored
+        _bad_lane_start(6, None),               # missing span name -> ignored
+        _bad_snap(7, 7, _ref(1)),               # numeric snapshot lane -> ignored
+        _bad_snap(8, 7, _ref(2)),
+    ]), phase="done")
+    r = _client(repo).get(f"/api/runs/{_slug_for(repo)}/{RUN_ID}")
+    assert r.status_code == 200
+
+    lanes = r.json()["change_scope"]["lanes"]
+    assert [ln["lane"] for ln in lanes] == ["backend"]
+    assert all(isinstance(ln["lane"], str) and ln["lane"] for ln in lanes)
+
+
+def test_unhashable_lane_values_do_not_crash_the_detail(home, tmp_path):  # noqa: F811
+    """AC-1/S1 robustness: an unhashable `payload.lane`/`payload.name` (a list or
+    mapping) — which would raise `TypeError` if used as a dict key — is ignored, not
+    a 5xx. The valid string lane is the only entry, and every `lane` is a string."""
+    repo = tmp_path / "repo"
+    write_run(repo, RUN_ID, _wrap([
+        _lane_start(3, "backend"),
+        _bad_lane_start(4, ["oops"]),           # unhashable span name
+        _bad_snap(5, {"k": "v"}, _ref(1)),      # unhashable snapshot lane
+        _bad_snap(6, ["x"], _ref(2)),           # unhashable snapshot lane
+    ]), phase="done")
+    r = _client(repo).get(f"/api/runs/{_slug_for(repo)}/{RUN_ID}")
+    assert r.status_code == 200
+
+    lanes = r.json()["change_scope"]["lanes"]
+    assert [ln["lane"] for ln in lanes] == ["backend"]
+    assert all(isinstance(ln["lane"], str) for ln in lanes)
+
+
 # --- AC-6 / AC-7: canonical shapes for unusable and empty diffs -----------------
 
 
