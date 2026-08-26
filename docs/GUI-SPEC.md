@@ -516,6 +516,43 @@ are translated.
      the command text, never in a URL (the slug rule of §7.4 is unchanged). All card
      labels are bilingual (`adw/gui/i18n.py`); the command line, event values,
      `run_id` and repo path are not translated.
+7. **Plan skeleton** (when the run's `plan.md` yields planned tasks): the Trace view
+   shows, per workstream, a read-only list of the tasks *still planned* beside/above
+   that lane's trace — so "planned" (skeleton) and "done" (trace) sit in one view. It
+   is a purely derived projection of the run's `plan.md` (read only through the
+   existing whitelist artifact path) and of the already-loaded event stream (for the
+   coarse lane status) — no new event, reader, route or persistence. Observable as an
+   additive `plan_skeleton` array on `GET /api/runs/{repo}/{run_id}`, present
+   **exactly** when `plan.md` yields at least one `## Workstream:` section with a
+   `###` task, and **absent** otherwise (never a forced empty list).
+   - **Parse rules** (exactly two, no identifier pattern, no Markdown parser, no
+     dependency): a *section* starts at a line `## Workstream: <name>` and ends at the
+     next `##` heading (any line starting with `##` that is not `###`) or at end of
+     file; `<name>` is the text after the exact prefix `## Workstream: `. A *task* is
+     every line in the section starting with the exact prefix `### ` — the task text
+     is the remainder **verbatim** (the marker and exactly one separator space
+     removed, no split into identifier and title, no further trimming). A bare `###`
+     with no following text is no task; `###` lines outside a section or after its
+     closing `##` heading do not count. The heterogeneous forms across runs
+     (`### B1 — …`, `### 1. …`, `### A.1 — …`, `### Aufgabe A — …`, `### Aufgabe B1 —
+     …`) are all kept, one task each. One entry per section with ≥1 task, in document
+     order; a section without a task produces no entry.
+   - **Status** is coarse and on the **lane level** only: `done` when the `lane` span
+     whose name equals the workstream ends with `completed: true`; otherwise
+     `pending` — including a `lane` end without `completed: true`, a still-running
+     lane, and a not-yet-started lane. There is no per-task and no per-node status,
+     and no guessed task-to-node mapping. A not-yet-started lane still shows its
+     `pending` list **without** creating an empty or artificial trace node; the trace
+     tree and its node structure are unchanged.
+   - **Fallback** (robustness): a `plan.md` that is missing, empty, unreadable, absent
+     per the artifact path (a symlink escaping the run directory), or that carries no
+     matching section yields **no** skeleton — `plan_skeleton` is absent, no error, no
+     empty box, and the rest of the detail response and the existing view are
+     unchanged.
+   - **Read-only** (E5): pure display — no checking off, no editing, no write route,
+     no new persistence. Chrome labels (the list heading and the `pending`/`done`
+     markers) are bilingual (`adw/gui/i18n.py`); the task texts are content and are
+     not translated.
 
 ### 7.3 Live update
 

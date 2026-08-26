@@ -90,6 +90,19 @@ main.detail { display: block; }
    column — and the page — to grow horizontally. */
 .trace-layout > section, .trace-layout > .run-context { min-width: 0; }
 
+/* Plan skeleton (§7.2): the read-only "what's still planned" list spans the full
+   trace-layout width above the trace/panes/context columns, so "planned" (skeleton)
+   and "done" (trace) sit in one view. Pure display — no interactive affordance. */
+.plan-skeleton { grid-column: 1 / -1; border: 1px solid var(--border, #d0d7de); border-radius: 6px; padding: 0.5rem 0.75rem; }
+.plan-skeleton-title { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.plan-skeleton-lane + .plan-skeleton-lane { margin-top: 0.5rem; }
+.plan-skeleton-head { margin: 0 0 0.25rem; display: flex; gap: 0.5rem; align-items: baseline; }
+.plan-skeleton-name { font-weight: 600; }
+.plan-skeleton-status { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.8; }
+.plan-skeleton-status.status-done { color: var(--ok, #1a7f37); }
+.plan-skeleton-tasks { margin: 0; padding-left: 1.25rem; }
+.plan-skeleton-task { margin: 0.1rem 0; }
+
 /* The read-only run-context panel: a plain field list, no chart (E5). Null fields
    render empty, never a fabricated 0. */
 .run-context { border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; align-self: start; }

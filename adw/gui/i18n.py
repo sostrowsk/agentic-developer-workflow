@@ -120,6 +120,12 @@ _EN: dict[str, str] = {
     "recovery_command": "Next command",
     "recovery_new_run": "This run has escalated — a new run is required.",
     "recovery_report": "Escalation report",
+    # Plan-skeleton chrome (§7.2): the heading of the per-lane planned-task list and
+    # the coarse lane-level status markers. The task texts themselves are CONTENT and
+    # stay untranslated — only these chrome labels switch.
+    "plan_skeleton_title": "Planned tasks",
+    "plan_skeleton_pending": "pending",
+    "plan_skeleton_done": "done",
 }
 
 _DE: dict[str, str] = {
@@ -208,6 +214,9 @@ _DE: dict[str, str] = {
     "recovery_command": "Nächstes Kommando",
     "recovery_new_run": "Dieser Lauf ist eskaliert — ein neuer Lauf ist nötig.",
     "recovery_report": "Eskalationsbericht",
+    "plan_skeleton_title": "Geplante Aufgaben",
+    "plan_skeleton_pending": "ausstehend",
+    "plan_skeleton_done": "erledigt",
 }
 
 CATALOG: dict[str, dict[str, str]] = {"en": _EN, "de": _DE}

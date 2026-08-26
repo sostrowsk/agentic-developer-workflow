@@ -542,6 +542,48 @@ sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werd
      *nur* im Kommandotext, nie in einer URL (die Slug-Regel aus §7.4 bleibt
      unangetastet). Alle Kartenlabels sind beidsprachig (`adw/gui/i18n.py`); die
      Kommandozeile, Eventwerte, `run_id` und Repo-Pfad werden nicht übersetzt.
+7. **Plan-Skelett** (wenn die `plan.md` des Laufs geplante Aufgaben ergibt): die
+   Trace-Ansicht zeigt je Workstream eine read-only Liste der *noch geplanten*
+   Aufgaben neben bzw. über dem Trace-Baum derselben Lane — so liegen „geplant"
+   (Skelett) und „geleistet" (Trace) in einer Ansicht. Es ist eine rein abgeleitete
+   Projektion aus der `plan.md` des Laufs (nur über den bestehenden
+   Whitelist-Artefakt-Pfad gelesen) und dem bereits geladenen Event-Strom (für den
+   groben Lane-Status) — kein neues Event, kein neuer Reader, keine neue Route, keine
+   Persistenz. Beobachtbar als additives `plan_skeleton`-Feld in
+   `GET /api/runs/{repo}/{run_id}`, vorhanden **genau dann**, wenn `plan.md`
+   mindestens einen `## Workstream:`-Abschnitt mit einer `###`-Aufgabe ergibt, sonst
+   **abwesend** (nie eine erzwungene leere Liste).
+   - **Parse-Regeln** (genau zwei, kein Kennungs-Muster, kein Markdown-Parser, keine
+     Abhängigkeit): ein *Abschnitt* beginnt bei einer Zeile `## Workstream: <name>`
+     und endet bei der nächsten `##`-Überschrift (jede Zeile, die mit `##` beginnt,
+     aber kein `###`) oder am Dateiende; `<name>` ist der Text nach dem exakten
+     Präfix `## Workstream: `. Eine *Aufgabe* ist jede Zeile im Abschnitt mit dem
+     exakten Präfix `### ` — der Aufgabentext ist der Rest **wortgetreu** (Markierung
+     und genau ein Trennleerzeichen entfernt, keine Zerlegung in Kennung und Titel,
+     kein weiteres Trimmen). Ein bloßes `###` ohne Folgetext ist keine Aufgabe;
+     `###`-Zeilen außerhalb eines Abschnitts oder nach dessen abschließender
+     `##`-Überschrift zählen nicht. Die über die Läufe hinweg uneinheitlichen Formen
+     (`### B1 — …`, `### 1. …`, `### A.1 — …`, `### Aufgabe A — …`, `### Aufgabe B1 —
+     …`) bleiben alle erhalten, je eine Aufgabe. Ein Eintrag je Abschnitt mit ≥1
+     Aufgabe, in Dokumentreihenfolge; ein Abschnitt ohne Aufgabe erzeugt keinen
+     Eintrag.
+   - **Status** ist grob und nur auf **Lane-Ebene**: `done`, wenn die `lane`-Span,
+     deren Name dem Workstream gleicht, mit `completed: true` endet; sonst `pending`
+     — auch bei einem `lane`-Ende ohne `completed: true`, einer laufenden und einer
+     noch nicht gestarteten Lane. Es gibt keinen Status je Aufgabe und je Knoten und
+     keine geratene Aufgabe↔Knoten-Zuordnung. Eine noch nicht gestartete Lane zeigt
+     ihre `pending`-Liste trotzdem, **ohne** einen leeren oder künstlichen
+     Trace-Knoten zu erzeugen; der Trace-Baum und seine Knotenstruktur bleiben
+     unverändert.
+   - **Fallback** (Robustheit): eine `plan.md`, die fehlt, leer, unlesbar oder über
+     den Artefakt-Pfad abwesend ist (ein aus der Run-Verzeichnisgrenze ausbrechender
+     Symlink) oder keinen passenden Abschnitt trägt, ergibt **kein** Skelett —
+     `plan_skeleton` ist abwesend, kein Fehler, kein leerer Kasten, und die übrige
+     Detail-Antwort sowie die bisherige Ansicht bleiben unverändert.
+   - **Read-only** (E5): reine Anzeige — kein Abhaken, keine Bearbeitung, keine
+     Schreibroute, keine neue Persistenz. Die Chrome-Labels (Listenüberschrift und die
+     `pending`/`done`-Marker) sind beidsprachig (`adw/gui/i18n.py`); die Aufgabentexte
+     sind Inhalt und werden nicht übersetzt.
 
 ### 7.3 Live-Update
 

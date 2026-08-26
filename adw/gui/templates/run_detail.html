@@ -316,6 +316,29 @@
       </div>
       <section class="tab tab-trace{% if not raw_range_active %} active{% endif %}" data-tab-panel="trace">
         <div class="trace-layout">
+          {#- Plan skeleton (§7.2): read-only "what's still planned" beside/above the
+              trace, one list per `## Workstream:` section of plan.md, mapped to the
+              lane of the same name. Present only when `plan_skeleton` is derived (no
+              empty box). It is NOT bound to a trace node — a not-yet-started lane still
+              shows its `pending` list without an artificial node. Task texts are
+              CONTENT (never translated); only the chrome labels switch. Pure display:
+              no form/button/checkbox (E5). -#}
+          {% if detail.plan_skeleton is defined %}
+          <section class="plan-skeleton" data-plan-skeleton aria-label="{{ t.plan_skeleton_title }}">
+            <h3 class="plan-skeleton-title">{{ t.plan_skeleton_title }}</h3>
+            {% for ws in detail.plan_skeleton %}
+            <div class="plan-skeleton-lane" data-workstream="{{ ws.workstream }}" data-skeleton-status="{{ ws.status }}">
+              <p class="plan-skeleton-head"><span class="plan-skeleton-name">{{ ws.workstream }}</span>
+                <span class="plan-skeleton-status status-{{ ws.status }}">{{ t['plan_skeleton_' + ws.status] }}</span></p>
+              <ul class="plan-skeleton-tasks">
+                {% for task in ws.tasks %}
+                <li class="plan-skeleton-task">{{ task }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endfor %}
+          </section>
+          {% endif %}
           <section class="trace">
             {% if not detail.run.has_trace %}
             <p class="no-trace-hint">{{ t.no_trace_line }}</p>

@@ -12,6 +12,25 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Added
+- **Plan skeleton in the trace view of the Run Inspector.** When a run's `plan.md`
+  is present, the run detail now derives, per `## Workstream:` section, a read-only
+  list of its planned tasks (every `###` heading, text taken verbatim) and shows it
+  beside/above that lane's trace — so "planned" (skeleton) and "done" (trace) sit in
+  one view. The parser follows exactly two rules (a section is `## Workstream:
+  <name>` up to the next `##` heading; a task is every `### ` line), with no
+  identifier pattern and no Markdown dependency, so the heterogeneous heading forms
+  across runs are all kept. Each list carries a coarse lane-level status: `done` once
+  the matching lane ends with `completed: true`, otherwise `pending` (including a
+  not-yet-started lane, shown without inventing a trace node). `plan.md` is read only
+  through the existing whitelist artifact path; a missing, empty, unreadable or
+  unmatching plan yields no skeleton (no empty box, no change to existing behavior).
+  Observable as an additive, derived `plan_skeleton` array on
+  `GET /api/runs/{repo}/{run_id}`; chrome labels are bilingual (`adw/gui/i18n.py`),
+  the task texts are content and are not translated (GUI-SPEC §7.2).
+
 ## [0.13.0] — 2026-08-26
 
 ### Added

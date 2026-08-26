@@ -1412,6 +1412,96 @@ def _artifacts_listing(run_dir: Path) -> list[dict]:
     return items
 
 
+# --- plan skeleton: the derived "what's still planned" projection ----------------
+# A pure projection of the run's `plan.md` — read ONLY through the whitelist artifact
+# path (`_resolve_artifact` + `_contained`, so a boundary-escaping symlink counts as
+# absent) — and of the already-built trace (for the coarse lane status). PRESENT
+# exactly when `plan.md` yields at least one `## Workstream:` section with a `###`
+# task, ABSENT otherwise. No new event, route, reader or persistence (E2/E4/E5).
+
+_WORKSTREAM_PREFIX = "## Workstream: "
+_TASK_PREFIX = "### "
+
+
+def _read_plan_md(run_dir: Path) -> str | None:
+    """The run's `plan.md` text, or None when it is missing, unreadable, not a plain
+    file, or a symlink escaping the run directory — resolved ONLY through the
+    existing whitelist artifact path (never from URL segments)."""
+    resolved = _resolve_artifact(run_dir, "plan.md")
+    if resolved is None:
+        return None
+    contained = _contained(resolved, run_dir)
+    if contained is None or not contained.is_file():
+        return None
+    try:
+        return contained.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
+def _parse_plan_sections(text: str) -> list[dict]:
+    """The `## Workstream:` sections of `plan.md`, each with its `###` tasks, by
+    EXACTLY two rules (E3): a section runs from a `## Workstream: <name>` line to the
+    next `##` heading (any line starting with `##` that is not `###`) or EOF; a task
+    is every `### ` line in it, its text taken VERBATIM after the `### ` prefix (no
+    identifier pattern, no further trimming). A bare `###` yields no task; only
+    sections with >= 1 task are returned, in document order."""
+    sections: list[dict] = []
+    current: dict | None = None
+    for line in text.splitlines():
+        if line.startswith(_WORKSTREAM_PREFIX):
+            current = {"workstream": line[len(_WORKSTREAM_PREFIX):], "tasks": []}
+            sections.append(current)
+        elif line.startswith("##") and not line.startswith("###"):
+            current = None                       # any other `##` heading closes the section
+        elif current is not None and line.startswith(_TASK_PREFIX):
+            task = line[len(_TASK_PREFIX):]
+            if task:                             # a `###`/`### ` with no text is no task
+                current["tasks"].append(task)
+    return [s for s in sections if s["tasks"]]
+
+
+def _completed_lane_names(roots) -> set[str]:
+    """The names of the `lane` spans whose end carries `completed: true` — the only
+    lanes whose skeleton counts as `done` (S3_status). Derived from the already-built
+    trace; no per-task or per-node status."""
+    done: set[str] = set()
+
+    def walk(nodes):
+        for node in nodes or []:
+            if node.type == "lane":
+                payload = node.start_payload if isinstance(node.start_payload, dict) \
+                    else (node.end_payload if isinstance(node.end_payload, dict) else {})
+                name = payload.get("name")
+                if name is not None and _aggregate_outcome(node) == "completed":
+                    done.add(name)
+            walk(getattr(node, "children", None))
+
+    walk(roots)
+    return done
+
+
+def _plan_skeleton(run_dir: Path, roots) -> list[dict]:
+    """The derived skeleton: one entry per `## Workstream:` section with >= 1 task,
+    each `{workstream, status, tasks}` with a coarse lane-level `pending`/`done`. An
+    empty list (no `plan.md`, or none matching) means the field is omitted (B3)."""
+    text = _read_plan_md(run_dir)
+    if text is None:
+        return []
+    sections = _parse_plan_sections(text)
+    if not sections:
+        return []
+    done = _completed_lane_names(roots)
+    return [
+        {
+            "workstream": s["workstream"],
+            "status": "done" if s["workstream"] in done else "pending",
+            "tasks": s["tasks"],
+        }
+        for s in sections
+    ]
+
+
 # --- recovery card: the derived next-step projection (Aufgabe backend) ----------
 # A pure projection of the already-loaded run state (`state.phase`), the existing
 # run-status derivation, the event stream and the server-resolved `RepoRef.path`.
@@ -1537,6 +1627,11 @@ def _run_detail(
     recovery = _recovery(ref, run_id, state, run_summary, events)
     if recovery is not None:
         detail["recovery"] = recovery
+    # The plan skeleton is added ONLY when `plan.md` yields a matching section with a
+    # task; otherwise the key is absent (no empty list forced) — same additive shape.
+    skeleton = _plan_skeleton(run_dir, roots)
+    if skeleton:
+        detail["plan_skeleton"] = skeleton
     return detail
 
 

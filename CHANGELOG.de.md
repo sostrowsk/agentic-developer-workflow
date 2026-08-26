@@ -13,6 +13,27 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Plan-Skelett in der Trace-Ansicht des Run Inspector.** Ist für einen Lauf
+  `plan.md` vorhanden, leitet das Run-Detail je `## Workstream:`-Abschnitt eine
+  read-only Liste der geplanten Aufgaben ab (jede `###`-Überschrift, Text wortgetreu)
+  und zeigt sie neben bzw. über dem Trace-Baum derselben Lane — so liegen „geplant"
+  (Skelett) und „geleistet" (Trace) in einer Ansicht. Der Parser kennt genau zwei
+  Regeln (Abschnitt = `## Workstream: <name>` bis zur nächsten `##`-Überschrift;
+  Aufgabe = jede `### `-Zeile), ohne Kennungs-Muster und ohne Markdown-Abhängigkeit,
+  sodass die über die Läufe hinweg uneinheitlichen Überschriftenformen alle erhalten
+  bleiben. Jede Liste trägt einen groben Status auf Lane-Ebene: `done`, sobald die
+  zugehörige Lane mit `completed: true` endet, sonst `pending` (auch bei noch nicht
+  gestarteter Lane, ohne dafür einen Trace-Knoten zu erfinden). `plan.md` wird nur
+  über den bestehenden Whitelist-Artefakt-Pfad gelesen; fehlt es, ist es leer,
+  unlesbar oder unpassend, entfällt das Skelett (kein leerer Kasten, keine Änderung
+  am bisherigen Verhalten). Beobachtbar als additives, abgeleitetes
+  `plan_skeleton`-Feld in `GET /api/runs/{repo}/{run_id}`; die Chrome-Labels sind
+  zweisprachig (`adw/gui/i18n.py`), die Aufgabentexte sind Inhalt und werden nicht
+  übersetzt (GUI-SPEC §7.2).
+
 ## [0.13.0] — 2026-08-26
 
 ### Hinzugefügt
