@@ -1,320 +1,225 @@
 # Interface contract — Single-Lane project (`backend`).
 #
-# This delta contract pins ONLY the externally observable additions for the
-# "make a run's change scope visible" feature:
-#   1. One additive, purely DERIVED `change_scope` object on the JSON response of
-#      GET /api/runs/{repo}/{run_id}: `lanes` (the actually-changed files per
-#      observed lane, with +/- counts) and `declared_scope` (a readable,
-#      semantically equivalent YAML serialization of the contract's `x-adw-*`
-#      blocks, or null).
-#   2. The observable rules for the lane set, its order, and the canonical
-#      per-lane shapes (available vs. empty vs. unavailable diff).
-#   3. The observable content and fallback of `declared_scope`.
-#   4. That NO judgement is made (no in-scope/out-of-scope/violation field).
-#   5. The observable read-only rendering and fallback texts of the change-scope
-#      block on the existing HTML run-detail page.
+# This feature has NO HTTP surface: it adds two configurable breakpoints that
+# pause an ADW run via the EXISTING approval path. The contract therefore pins
+# only the externally observable, non-HTTP surfaces (config, CLI exit + approve,
+# persisted state field, event log):
+#   1. The `breakpoints:` config key: the exactly-two allowed values, the empty
+#      default, and that any other value is a config error that stops the run
+#      from starting (C1_config).
+#   2. The pause behavior: persisted phase `awaiting_approval`, process exit
+#      code 2, continuation via `adw approve <run_id> --repo <path>`, and the two
+#      boundaries at which each breakpoint pauses (C2_pause, C3_boundaries).
+#   3. The new persisted state field `pending_breakpoint` (which breakpoint
+#      waits) — NOT a new `Phase` value (C4_state).
+#   4. The `approval` event with `gate` = breakpoint name and
+#      `event` = awaited/granted, and the idempotency of holds (C5_event,
+#      C6_idempotency).
+#   5. The effect of `--no-approval` (`skip_approval`) on breakpoints
+#      (C7_no_approval).
 #
-# It does NOT pin internal helper signatures, module layout, dependency or
-# artifact-resolution choices, git invocation details, concrete markup, or CSS.
-# Implementation constraints (reuse of the existing snapshot/diff/numstat logic,
-# the untouched diff route, `adw/phases.py`, no new dependency, and so on) live
-# in `.adw/plan.md` and its Definition of Done, not here. No route or event is
-# added or removed; the `change_scope` key is the only observable addition.
+# It does NOT pin internal helper signatures, module layout, the order of
+# orchestrator steps, or any dictionary/internal key. Implementation constraints
+# (no new `Phase` literal — E3b, no second pause mechanism — E3, the untouched
+# diff/snapshot/retention path) live in `.adw/plan.md` and its Definition of
+# Done, not here. No existing route, phase value, or event type is added or
+# removed; `breakpoints` (config), `pending_breakpoint` (state) and the two new
+# `gate` values are the only observable additions.
 
 openapi: 3.1.0
 info:
-  title: ADW Run Inspector — change scope in the run detail (delta only)
-  version: 1.3.1
+  title: ADW Breakpoints — configurable holds as a generalized approval (delta only)
+  version: 1.0.0
 
-paths:
-  /api/runs/{repo}/{run_id}:
-    get:
-      summary: >
-        Existing run-detail route — unchanged except one additive derived
-        `change_scope` object (per-lane changed files with +/- counts, plus the
-        declared contract scope as readable YAML text or null). On an otherwise
-        successful run-detail request, change-scope derivation never causes a
-        5xx and never yields an invented or one-sided diff; the route's existing
-        status behavior (e.g. for an unknown repository or run) is unchanged and
-        not redefined by this delta.
-      parameters:
-        - name: repo
-          in: path
-          required: true
-          description: Existing registry slug; never the real repository path.
-          schema:
-            type: string
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: >
-            Existing run-detail object, plus one additive top-level
-            `change_scope` object. All other response fields (`run`, `phases`,
-            `tree`, `latest_context`, `problems`, `raw`, and the existing optional
-            `recovery`/`plan_skeleton`) keep their current shape and meaning.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/RunDetailChangeScopeAddition"
-
-  /runs/{repo}/{run_id}:
-    get:
-      summary: Existing server-rendered run-detail page.
-      parameters:
-        - name: repo
-          in: path
-          required: true
-          description: Existing registry slug; never the real repository path.
-          schema:
-            type: string
-        - name: run_id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: >
-            Existing HTML run-detail page. It renders the change-scope block
-            READ-ONLY beside the rest of the detail (S6_render): per lane the
-            changed files with path and +/- counts (binary → "not numerically
-            available"); a lane without a usable diff shows "no diff available"
-            (not an empty table); when no lane has a usable diff pair the table
-            view is dropped with a clear statement, while the declared-scope part
-            still renders. The declared contract scope shows as readable YAML
-            text, or "no declared scope" when absent. No
-            in-scope/out-of-scope/violation marker is shown. Markup and CSS are
-            not part of the contract.
-          content:
-            text/html: {}
+# No `paths`: the observable surfaces of this feature are the target-repo config,
+# the CLI process contract, the persisted run state, and the event log — pinned
+# below as schemas and as x-adw-behavior rules.
 
 components:
   schemas:
-    ChangeScopeFile:
-      type: object
-      additionalProperties: false
-      required:
-        - path
-        - additions
-        - deletions
+    BreakpointName:
       description: >
-        One changed file of a lane's diff, in the order git's numstat reports it
-        (S2_lane_diff). Exactly these keys — no judgement or annotation field
-        exists (S5_no_judgement).
-      properties:
-        path:
-          type: string
-        additions:
-          type: [integer, "null"]
-          minimum: 0
-          description: Added lines; null for a binary file (mirrors numstat `-`).
-        deletions:
-          type: [integer, "null"]
-          minimum: 0
-          description: Deleted lines; null for a binary file (mirrors numstat `-`).
+        The closed, enumerated set of breakpoints. Exactly these two string
+        values are allowed anywhere a breakpoint is named — the config list,
+        the `pending_breakpoint` state field, and the `approval` event `gate`.
+      type: string
+      enum:
+        - before_integration
+        - before_push
 
-    ChangeScopeLane:
-      type: object
-      additionalProperties: false
-      required:
-        - lane
-        - diff_available
-        - files
+    AdwConfigBreakpointsAddition:
       description: >
-        One observed lane (S1_lanes). Carries the lane name, whether a usable
-        diff exists, and either the changed files or null. Exactly these keys —
-        no judgement or annotation field exists (S5_no_judgement).
-      properties:
-        lane:
-          type: string
-          minLength: 1
-          description: >
-            The lane name. In this single-lane project this is `backend`; the
-            field is not constrained to that value.
-        diff_available:
-          type: boolean
-          description: >
-            true exactly when the lane has at least two valid snapshots AND the
-            diff between its lowest-seq and highest-seq snapshot was produced
-            successfully; false otherwise (S3_shapes).
-        files:
-          type: [array, "null"]
-          description: >
-            When `diff_available` is true: the changed files (possibly `[]` for a
-            successful diff with no changed files). When `diff_available` is
-            false: canonically `null` — never `[]`, never an omitted field
-            (S3_shapes).
-          items:
-            $ref: "#/components/schemas/ChangeScopeFile"
-
-    ChangeScope:
+        The additive, OPTIONAL top-level `breakpoints:` key of
+        `.adw/config.yaml`. This schema pins only this key; every existing
+        config key keeps its current shape and meaning. Absent or empty →
+        today's behavior, no extra holds (C1_config).
       type: object
-      additionalProperties: false
-      required:
-        - lanes
-        - declared_scope
-      description: >
-        The additive change-scope projection. Facts sit side by side; no
-        judgement (S5_no_judgement). Exactly these two keys.
       properties:
-        lanes:
+        breakpoints:
+          description: >
+            List of active breakpoints. Each element MUST be a `BreakpointName`.
+            Default when the key is absent: the empty list. Any other value (an
+            unknown string such as `after_round:2`, a typo, a wrong type such as
+            a mapping or a boolean element) is a config error under the existing
+            strict validation and the run does NOT start (C1_config). Element
+            order and repetition carry no meaning: the breakpoints act as an
+            enabled set, and no breakpoint holds more than once.
           type: array
-          description: >
-            One entry per observed lane, ordered by first observation in the
-            event log (S1_lanes). Empty when no lane is observed.
           items:
-            $ref: "#/components/schemas/ChangeScopeLane"
-        declared_scope:
-          type: [string, "null"]
-          description: >
-            The contract's declared scope as readable YAML text — a semantically
-            equivalent serialization of the `x-adw-*` entries — or null
-            (S4_declared_scope).
+            $ref: "#/components/schemas/BreakpointName"
+      examples:
+        - breakpoints: []
+        - breakpoints: [before_integration]
+        - breakpoints: [before_integration, before_push]
 
-    RunDetailChangeScopeAddition:
+    RunStateBreakpointAddition:
+      description: >
+        Existing persisted run state (`.adw/runs/<run_id>/state.json`), plus one
+        additive field `pending_breakpoint`. Every other state field keeps its
+        current shape and meaning; the `phase` field's set of values is
+        UNCHANGED (no new `Phase` literal — C4_state). The field persists across
+        crash, `resume` and `approve`.
+      type: object
+      properties:
+        pending_breakpoint:
+          description: >
+            Which breakpoint the run is currently waiting at, or null when it is
+            not waiting at a breakpoint. Set exactly while the run is paused at a
+            breakpoint (with `phase == "awaiting_approval"`); cleared on
+            `approve`. Old states without the field load as null (C4_state).
+          oneOf:
+            - $ref: "#/components/schemas/BreakpointName"
+            - type: "null"
+
+    ApprovalGate:
+      description: >
+        The closed set of `approval` event gate names after this change. The
+        existing gates keep the values `spec` and `plan`; the two breakpoint
+        names are the only additions.
+      type: string
+      enum:
+        - spec
+        - plan
+        - before_integration
+        - before_push
+
+    ApprovalEvent:
+      description: >
+        The existing `approval` event, now also emitted for breakpoints. Same
+        shape as the existing `spec`/`plan` gate events; GUI and timeline render
+        a breakpoint with no special case (C5_event).
       type: object
       additionalProperties: true
       required:
-        - change_scope
-      description: >
-        Existing run-detail object. This schema pins only the additive
-        `change_scope` object; every other property (`run`, `phases`, `tree`,
-        `latest_context`, `problems`, `raw`, and the existing optional
-        `recovery`/`plan_skeleton`) keeps its current shape and meaning. The
-        `change_scope` key is ALWAYS present.
+        - gate
+        - event
       properties:
-        change_scope:
-          $ref: "#/components/schemas/ChangeScope"
-      examples:
-        - change_scope:
-            lanes:
-              - lane: backend
-                diff_available: true
-                files:
-                  - path: adw/gui/app.py
-                    additions: 42
-                    deletions: 3
-                  - path: assets/logo.png
-                    additions: null
-                    deletions: null
-            declared_scope: |
-              x-adw-surfaces:
-                - GET /api/runs/{repo}/{run_id}
-              x-adw-invariants:
-                - read-only
-        - change_scope:
-            lanes:
-              - lane: backend
-                diff_available: false
-                files: null
-            declared_scope: null
-        - change_scope:
-            lanes:
-              - lane: backend
-                diff_available: true
-                files: []
-            declared_scope: null
+        gate:
+          $ref: "#/components/schemas/ApprovalGate"
+        event:
+          description: >
+            `awaited` when the run actually enters the wait; `granted` when the
+            hold is released. Only actually-entered states are logged — no
+            fabricated `awaited`/`granted` for a breakpoint the run did not wait
+            at (C5_event).
+          type: string
+          enum:
+            - awaited
+            - granted
 
 x-adw-behavior:
-  S1_lanes:
-    surface: "GET /api/runs/{repo}/{run_id} — change_scope.lanes"
+  C1_config:
+    surface: ".adw/config.yaml — key `breakpoints`"
     rule: >
-      `change_scope.lanes` has exactly one entry per OBSERVED lane. A lane is
-      observed exactly when the run's event log (a) contains a `lane` span with a
-      non-empty name (`payload.name`) or (b) contains a snapshot event that
-      passes the existing structural validation (ref form
-      `refs/adw/<run_id>/<seq>`) declaring that lane. Snapshot events that fail
-      this validation contribute neither to the lane set nor to snapshot pairs.
-      A lane observed only via valid snapshots (no `lane` span) appears with its
-      diff; multiple observations of the same lane name yield exactly one entry.
-      The list order is the order of first observation in the event log
-      (smallest seq across both sources), deterministically derivable from the
-      run's events. When no lane is observed, `lanes` is `[]`.
+      `.adw/config.yaml` accepts an OPTIONAL top-level key `breakpoints` as a
+      list. The only allowed elements are the two strings `before_integration`
+      and `before_push`. When the key is absent or the list is empty, ADW
+      behaves exactly as today: no additional holds arise, and the existing spec
+      and plan approvals keep their phases, exit codes, CLI continuation and
+      their `approval` events with gates `spec`/`plan`. Any other value — an
+      unknown string (e.g. `after_round:2`), a typo, or a wrong type — is a
+      config error with a clear message, consistent with the existing strict
+      validation; the run does NOT start and the value is never silently
+      ignored.
 
-  S2_lane_diff:
+  C2_pause:
+    surface: "adw run / adw resume — process contract"
     rule: >
-      When an observed lane has at least two valid snapshots, its entry carries
-      the diff between the snapshot with the LOWEST and the one with the HIGHEST
-      seq of that lane — exactly one comparison per lane. Files appear in the
-      order git's numstat reports them; each file carries `path`, `additions`,
-      `deletions`, and a binary file's `additions`/`deletions` are `null`.
-      Snapshots of other lanes are never included.
+      At an ACTIVE breakpoint the run pauses via the existing approval path: the
+      persisted state phase is `awaiting_approval`, the process exits with code
+      2, and the run continues with `adw approve <run_id> --repo <path>`. No new
+      pause mechanism is introduced and no new `Phase` literal is added; which
+      breakpoint waits is recorded solely in `pending_breakpoint`. `adw approve`
+      on a run that is waiting at a breakpoint releases it and continues from
+      exactly that point, without repeating already-completed phases. `adw
+      approve` on a run that is NOT waiting for approval is a clean error with a
+      clear message, without changing the run.
 
-  S3_shapes:
+  C3_boundaries:
     rule: >
-      The per-lane shape is canonical and distinguishes three cases:
-        (1) Available diff: `diff_available: true`, `files` is an array. An
-            available comparison that finds NO changed files is `files: []`
-            (never null) — the view says clearly that no changed files were
-            found, never an unexplained empty table.
-        (2) No usable diff: an observed lane with no or exactly ONE valid
-            snapshot (a self-diff of a single snapshot would be guaranteed empty
-            and falsely claim "no changes", so it is not shown) has
-            `diff_available: false` and `files: null` — exactly this form, never
-            an omitted field and never `[]`. This includes a lane observed only
-            via its `lane` span with no valid snapshot at all: its entry is NOT
-            dropped.
-        (3) Diff failure: if a lane's diff fails despite a snapshot pair
-            (missing snapshot object, timeout, one-sided failure), the lane is
-            treated exactly as case (2) — `diff_available: false`,
-            `files: null`, never a successful empty diff (`files: []`). A failed
-            diff of one lane never prevents rendering available diffs of other
-            lanes.
-      On an otherwise successful run-detail request, none of these cases changes
-      the status: change-scope derivation failures never cause a 5xx and never
-      yield a one-sided or invented diff. The route's pre-existing status
-      behavior outside change-scope derivation is not redefined here.
+      Each active breakpoint pauses the run at most once, at a boundary defined
+      by OBSERVABLE work:
+        `before_integration` — pauses after all build lanes have passed their
+          gates green, and before any integration/merge work or any subsequent
+          review work has begun. In single-lane operation (no separate merge
+          work) this means: after the build lane completes, before
+          `codex_review` work begins.
+        `before_push` — pauses after the final review completes and before ANY
+          work of the CI phase begins: no push, no CI preparation (including the
+          integration/E2E preparation that parallel mode performs at the start
+          of the CI phase), and no forge/CI polling. At the hold nothing has
+          been pushed. This holds for both single-lane and parallel
+          orchestration, for both paths that reach the breakpoint.
 
-  S4_declared_scope:
+  C4_state:
+    surface: ".adw/runs/<run_id>/state.json — field `pending_breakpoint`"
     rule: >
-      `change_scope.declared_scope` is either readable YAML text or `null`. When
-      the run's `contract.yaml` artifact is readable and is a YAML mapping, the
-      text is a readable, SEMANTICALLY EQUIVALENT YAML serialization of ALL
-      top-level entries whose key has the prefix `x-adw-` — preserving the
-      selected keys' document order, their values and nesting, with no rename,
-      merge, normalization or interpretation of content. Textual details of the
-      source (comments, quoting, scalar styles, anchors, formatting) are NOT
-      preserved and are not promised. Other top-level entries of the contract do
-      not appear. When `contract.yaml` is missing, unreadable, not a YAML
-      mapping, not safely loadable or serializable, or contains no top-level key
-      with prefix `x-adw-`, `declared_scope` is `null` and the view says clearly
-      "no declared scope" — no error, no invented judgement. Absence is a
-      neutral state, not a scope violation.
+      The waiting breakpoint is held in a dedicated state field
+      `pending_breakpoint` with the value `before_integration` or `before_push`
+      while the run is paused at that breakpoint, and null otherwise. The
+      `Phase` set of values is NOT extended (E3b): the hold reuses
+      `awaiting_approval`, so the phase bar, retention and the recovery card stay
+      unchanged. The field is persisted and survives crash, `resume` and
+      `approve`; an old state without the field reads as null.
 
-  S5_no_judgement:
+  C5_event:
+    surface: "event log — `approval` event"
     rule: >
-      The API and the view merely place file lists and scope text side by side.
-      There is no field and no marker for "in scope", "out of scope",
-      "violation", conformance or contract quality, no mapping of a file path to
-      an `x-adw-*` entry, and no warning, rating or run decision derived from
-      them (A3, E1). The `change_scope`, lane and file objects carry exactly the
-      schema-listed keys (`additionalProperties: false`). No violation check
-      exists; a finding "the violation check is missing" is out of scope,
-      including in the review loop.
+      Every breakpoint is logged as an `approval` event: `gate` = the breakpoint
+      name (`before_integration` or `before_push`), `event` = `awaited` when the
+      wait is entered and `event` = `granted` on release — exactly the shape of
+      the existing `spec`/`plan` gate events, so GUI and timeline render the
+      breakpoint with no special case. Only actually-entered states are logged:
+      no fabricated `awaited`/`granted` for a breakpoint the run did not wait at
+      (in particular under `--no-approval`, or for a disabled or already granted
+      breakpoint). Per actual entry into a breakpoint wait, exactly ONE logical
+      `awaited` event ends up in the log — this holds even if the process
+      crashes between persisting the waiting state and writing the event log
+      (the missing event is caught up on the next `resume`), and a repeated
+      `adw resume` of a run already waiting at an ungranted breakpoint still
+      exits with code 2 but appends no duplicate `awaited` event. The GUI shows
+      the waiting run and the recovery hint
+      `adw approve <run_id> --repo <path>` as for the existing approval gates,
+      with no new write path and no new phase value; the GUI stays read-only.
 
-  S6_render:
-    surface: "GET /runs/{repo}/{run_id} (HTML run detail)"
+  C6_idempotency:
     rule: >
-      The change-scope block renders read-only in the run detail: per lane the
-      changed files with path and +/- counts, where `null` (binary) is shown
-      understandably as "not numerically available". A lane with no usable diff
-      shows clearly "no diff available" instead of an empty table. When no lane
-      has a usable snapshot pair, the table view is dropped with a clear "no run
-      diff available" statement, while the declared-scope part still renders.
-      The declared scope shows as readable YAML text (S4_declared_scope), or
-      "no declared scope" when absent. Chrome labels follow the GUI language;
-      scope text and file paths are content and are not translated. Markup and
-      CSS are not part of the contract.
+      A breakpoint that has been granted does not hold the run a second time —
+      not even if the run then crashes and is continued with `adw resume`:
+      `resume` after a granted release runs through without stopping again. An
+      `adw resume` on a run waiting at a NOT-yet-granted breakpoint runs no work
+      behind the breakpoint — the run stays in the waiting state, as with the
+      existing approval gates. When both breakpoints are active, the run holds
+      once at each in turn: after `before_integration` is granted it continues to
+      `before_push` and holds there again with exit code 2; after that is granted
+      it runs through. No breakpoint holds twice.
 
-  S7_additive_readonly:
+  C7_no_approval:
+    surface: "adw run --no-approval / --gates"
     rule: >
-      The change-scope block is a pure derived projection: no new route or
-      event, no write, no new state, no action that changes the run or the
-      repository (E6). No route or event is added or removed; all pre-existing
-      response fields of the run-detail route and the request/response behavior
-      of all other routes are unchanged — the `change_scope` key is the only
-      observable addition.
+      `--no-approval` (`skip_approval`, also when set via a `--gates` mode) ALSO
+      skips the breakpoints: a run with this switch holds at no configured
+      breakpoint. It is ONE switch for "no human approval in this run", not two
+      separate ones. The skipping survives crash + resume, exactly as the
+      existing `skip_approval` is pinned in the state, and it emits no fabricated
+      breakpoint events (C5_event).

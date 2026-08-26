@@ -1,177 +1,147 @@
-# Spec: Änderungsumfang eines Laufs sichtbar machen (Dateien + deklarierter Scope)
+# Spec — Breakpoints: konfigurierbare Haltepunkte als verallgemeinerte Approval
 
-## Ziel
-Das Run-Detail der GUI zeigt an einer Stelle nebeneinander, (a) welche Dateien ein
-Lauf tatsächlich geändert hat — mit `+/-`-Zahlen je Datei, gruppiert je Lane — und
-(b) den im Contract deklarierten Scope so, wie er dort steht. Beide Fakten stehen
-unbewertet nebeneinander; die Beurteilung, ob eine Änderung „im Scope" liegt, macht
-der Mensch. Grundlage ist ausschließlich die bereits vorhandene Snapshot- und
-Diff-Logik; es entsteht keine neue Git-Operation, keine neue Route, keine neue
-Dependency und kein neuer Zustand.
+## Goal (Ziel)
+ADW hält heute nur an zwei fest verdrahteten Stellen der Authoring-Phase an
+(nach Spec, nach Plan). Die teuren, schwer umkehrbaren Schritte — Integration/Merge
+und Push/CI — laufen ohne Halt durch. Dieses Vorhaben macht genau zwei zusätzliche
+Haltepunkte per Config aktivierbar (`before_integration`, `before_push`), die den
+Lauf an denselben, bereits vorhandenen Approval-Pfad übergeben: Pause mit
+Exit-Code 2, Fortsetzung über `adw approve <run_id> --repo <pfad>`, idempotent über
+Crash und `resume` hinweg. Kein neuer Pausen-Mechanismus, kein neuer Phasenwert,
+keine GUI-Steuerung. Default: das heutige Verhalten bleibt unverändert.
 
-## Umfang (Scope)
-- Erweiterung der Antwort von `GET /api/runs/{repo}/{run_id}` um ein additives
-  Top-Level-Feld `change_scope` mit den Lane-Dateilisten und dem deklarierten
-  Contract-Scope.
-- Genau ein Vergleich je Lane: erster gegen letzten gültigen Snapshot dieser Lane
-  (aus `_snapshots_by_lane`, dieselbe Strukturvalidierung der Refs
-  `refs/adw/<run_id>/<seq>` wie heute). Je Datei `additions`/`deletions` in der
-  Form, die die bestehende Numstat-Auswertung liefert (Binärdatei → `null`).
-- Lesen von `contract.yaml` über den bestehenden whitelist-basierten Artefakt-Pfad
-  mit dem bereits vorhandenen `yaml`-Modul; Anzeige aller Top-Level-Blöcke, deren
-  Schlüssel mit `x-adw-` beginnt, als lesbarer YAML-Text — ohne Vereinheitlichung
-  oder Interpretation.
-- Erklärte Zustände für fehlende/unbrauchbare Lane-Snapshots, fehlenden Lauf-Diff
-  insgesamt und fehlenden deklarierten Scope.
-- Darstellung im Run-Detail (Single-Lane `backend`), read-only wie der Rest der
-  GUI. Interne Helper-Signaturen, Markup und CSS sind nicht Teil des Contracts.
-- Doku: `docs/GUI-SPEC.md` + `docs/GUI-SPEC.de.md` (§7.2), `CHANGELOG.md` +
-  `CHANGELOG.de.md` (`Unreleased`).
+## Scope (Umfang)
+- Neuer optionaler Config-Schlüssel `breakpoints:` in `.adw/config.yaml` als Liste
+  aus einer festen Menge zulässiger Werte.
+- Genau zwei Haltepunkte: `before_integration` (nach Abschluss aller Build-Lanes,
+  bevor Integrations-/Merge-Arbeit oder nachfolgende Review-Arbeit beginnt) und
+  `before_push` (nach dem finalen Review, bevor jegliche CI-Phasen-Arbeit
+  einschließlich Push beginnt).
+- Wiederverwendung des bestehenden Approval-Pausenpfads: State-Phase
+  `awaiting_approval`, Exit-Code 2, `approval_granted`-Semantik, Fortsetzung mit
+  `adw approve <run_id> --repo <pfad>`.
+- Neues State-Feld (z. B. `pending_breakpoint`), das festhält, welcher Haltepunkt
+  wartet — statt eines neuen `Phase`-Literals.
+- `approval`-Event für Anzeige/Timeline, mit dem Haltepunktnamen als `gate`.
+- Wirkung von `--no-approval` (`skip_approval`) auf die Haltepunkte.
+- Doku (SPEC, GUI-SPEC soweit die Anzeige betroffen ist, Handbuch,
+  `examples/config.yaml`, CHANGELOG).
 
-## Nicht-Ziele
-- **Kein automatisches Urteil.** Keine Datei wird als „im Scope" oder „außerhalb"
-  markiert; es gibt keine Verletzungsprüfung. Die Datengrundlage dafür existiert
-  nicht (kein Contract nennt Dateien/Pfadmuster) — ein Finding „es fehlt die
-  Verletzungsprüfung" ist gegenstandslos, auch im Review-Loop (E1).
-- Keine Ableitung von Dateien oder Pfadmustern aus fachlichen Scope-Texten und
-  keine Normalisierung der uneinheitlichen `x-adw-*`-Formen (`surfaces`,
-  `externally_observable_surfaces`, `invariants`, …).
-- Keine Änderung an `contract.yaml` oder an der Contract-Erzeugung in
-  `adw/phases.py`; ein strukturierter Datei-Scope ist Deferred (E3).
-- Kein OpenAPI-Validator, keine Schema-Prüfung des Contracts, keine neue
-  Dependency (E2).
-- Kein zweiter Git-Aufrufpfad, keine neue Git-Operation, keine Änderung an der
-  Diff-Route `GET …/diff` oder an `_git_diff`/`_parse_numstat` (E5).
-- Kein Scope-Check je Schritt/Fix-Runde, keine Historie (E4).
-- Kein Gate, keine Durchsetzung, keine Konfigurationsoption, kein Export (E6).
-- Keine Bewertung der Contract-Qualität, keine Cross-Run-Auswertung.
-- Keine Änderung an Timeline, Raw, Trace, Diff-Tab oder SSE; kein
-  Persistenz-Zustand.
+## Non-Goals (Nicht-Ziele)
+- Kein Debugger, kein Step-/Einzelschritt-Modus, kein „ab Knoten weiterlaufen",
+  kein Rücksprung, kein Abbruch-Kommando (E4). Fortsetzen heißt immer: weiter ab
+  dem Haltepunkt.
+- Kein freies Schema, keine Ausdruckssprache, keine Bedingungen, keine Haltepunkte
+  innerhalb einer Lane, keine Haltepunkte je Lane oder je Runde (E2).
+- Keine Laufzeit-Änderung von Breakpoints eines laufenden Runs, keine neue
+  CLI-Subcommand-Familie.
+- Keine GUI-Steuerung: die GUI bleibt read-only, kein Schreibpfad aus dem Browser,
+  kein Non-Goal aus GUI-SPEC §2 wird aufgehoben (E1).
+- Kein neuer Pausen-Mechanismus: der bestehende Approval-Pfad wird verallgemeinert,
+  nicht dupliziert (E3).
+- Das `Phase`-Literal in `adw/state.py` wird NICHT erweitert (E3b). `PHASES`,
+  Phasenleiste, Retention (`_TERMINAL_PHASES`) und die Recovery-Karte bleiben
+  unverändert.
+- Der Diff-, Snapshot- und Retention-Pfad bleibt unangetastet.
 
-## Akzeptanzkriterien
-Alle Kriterien beschreiben beobachtbares Verhalten der Antwort von
-`GET /api/runs/{repo}/{run_id}` und ihrer Darstellung im Run-Detail.
+## Acceptance Criteria (Akzeptanzkriterien)
 
-**AC-1 (Lane-Menge, Reihenfolge und Dateiliste — A1, E4):** Die Antwort enthält
-additiv ein Top-Level-Feld `change_scope`; dessen Feld `lanes` ist eine Liste
-mit genau einem Eintrag je beobachteter Lane. Beobachtet ist eine Lane genau
-dann, wenn das Event-Log dieses Laufs (a) einen `lane`-Span mit nicht-leerem
-Namen (`payload.name`) enthält oder (b) ein Snapshot-Event, das die bestehende
-Strukturvalidierung besteht (Ref-Form `refs/adw/<run_id>/<seq>`, wie in
-`_snapshots_by_lane`), diese Lane deklariert. Snapshot-Events, die diese
-Validierung nicht bestehen, tragen weder zur Lane-Menge noch zu Snapshot-Paaren
-bei — dieselbe Behandlung wie heute beim Bracketing. Eine nur über gültige
-Snapshots beobachtete Lane (ohne `lane`-Span) erscheint mit ihrem Diff; mehrere
-Beobachtungen desselben Lane-Namens ergeben genau einen Eintrag. Die Reihenfolge
-der Liste ist die der ersten Beobachtung im Event-Log (kleinstes Seq über beide
-Quellen) — deterministisch aus den bereits geladenen Events ableitbar.
+### Konfiguration
+- **AC1** — `.adw/config.yaml` akzeptiert einen optionalen Schlüssel `breakpoints:`
+  als Liste. Zulässige Elemente sind ausschließlich die Zeichenketten
+  `before_integration` und `before_push`. (A1, E2)
+- **AC2** — Fehlt `breakpoints:` oder ist die Liste leer, verhält sich ADW exakt wie
+  heute: es entstehen keine zusätzlichen Haltepunkte. Die bestehenden Spec- und
+  Plan-Approvals behalten ihre Phasen, Exit-Codes, CLI-Fortsetzung und ihre
+  `approval`-Events mit den Gates `spec` bzw. `plan`. (A1)
+- **AC3** — Ein unbekannter Wert in `breakpoints:` (z. B. `after_round:2`,
+  Tippfehler, falscher Typ) ist ein Config-Fehler mit klarer Meldung, konsistent mit
+  der übrigen strengen Validierung; der Lauf startet nicht. Keine stille
+  Ignorierung. (A1, E5)
 
-Hat eine Lane mindestens zwei gültige Snapshots, enthält ihr Eintrag `lane`
-(Name), `diff_available: true` und `files`: die Dateien des Diffs zwischen dem
-Snapshot mit dem niedrigsten und dem mit dem höchsten Seq dieser Lane, in der
-Reihenfolge der bestehenden Numstat-Auswertung. Jeder Datei-Eintrag trägt `path`,
-`additions` und `deletions`; bei Binärdateien sind `additions`/`deletions`
-`null`. Snapshots anderer Lanes werden nie einbezogen.
+### Pausenverhalten
+- **AC4** — Ist `before_integration` aktiv, pausiert der Lauf genau einmal an der
+  Grenze, die sich über die beobachtbare Arbeit definiert: alle Build-Lanes haben
+  ihre Gates grün bestanden, und es hat noch keine Integrations-/Merge-Arbeit und
+  keine nachfolgende Review-Arbeit begonnen. Die persistierte State-Phase ist beim
+  Halt `awaiting_approval` (gemäß AC6). Im Single-Lane-Betrieb (in dem keine eigene
+  Merge-Arbeit anfällt) heißt das: Halt nach Abschluss der Build-Lane, bevor
+  `codex_review`-Arbeit beginnt. (A1, A2)
+- **AC5** — Ist `before_push` aktiv, pausiert der Lauf genau einmal an der Grenze
+  nach Abschluss des finalen Reviews und bevor JEGLICHE Arbeit der `ci`-Phase
+  beginnt: kein Push, keine CI-Vorbereitung (einschließlich der Integrations-/
+  E2E-Vorbereitung, die der Parallel-Modus zu Beginn der CI-Phase ausführt), kein
+  Forge-/CI-Polling. Beim Halt ist noch nichts gepusht. Das gilt für Single-Lane-
+  wie für Parallel-Modus-Orchestrierung und wird für beide Pfade getestet, soweit
+  sie den Haltepunkt erreichen. (A1, A2)
+- **AC6** — An einem aktiven Haltepunkt pausiert der Lauf über den bestehenden
+  Approval-Pfad: State-Phase `awaiting_approval`, Prozess-Exit-Code 2, Fortsetzung
+  mit `adw approve <run_id> --repo <pfad>`. Es wird KEIN neues `Phase`-Literal
+  eingeführt; welcher Haltepunkt wartet, steht in einem eigenen State-Feld (z. B.
+  `pending_breakpoint`) mit dem Wert `before_integration` bzw. `before_push`.
+  (A2, E3, E3b)
+- **AC7** — `adw approve <run_id>` auf einen an einem Haltepunkt wartenden Lauf gibt
+  den Haltepunkt frei und setzt den Lauf ab genau diesem Punkt fort (keine
+  Wiederholung bereits abgeschlossener Phasen). (A2)
 
-**AC-2 (Bestehende Diff-Logik als einzige Datenquelle — E5):** Die Dateilisten
-entstehen mit derselben Git-Diff- und Numstat-Logik, die bereits die Diff-Route
-versorgt, inklusive der bestehenden Struktur- und Laufzugehörigkeitsvalidierung
-der Snapshot-Refs. Es entsteht keine neue Art von Git-Operation, Worktree, Index
-und Refs bleiben unberührt, und Anfrage wie Antwort von
-`GET /api/runs/{repo}/{run_id}/diff` bleiben unverändert.
+### Idempotenz
+- **AC8** — Ein bereits freigegebener Haltepunkt hält den Lauf kein zweites Mal an —
+  auch nicht, wenn der Lauf danach abstürzt und per `adw resume` fortgesetzt wird.
+  `resume` nach einer erteilten Freigabe läuft ohne erneuten Halt durch. (A2, E6)
+- **AC9** — `adw resume` auf einen Lauf, der an einem noch NICHT freigegebenen
+  Haltepunkt wartet, führt keine Arbeit hinter dem Haltepunkt aus: der Lauf bleibt
+  im Wartezustand (wie bei den bestehenden Approval-Gates). (A2, E6)
+- **AC10** — `adw approve` auf einen Lauf, der NICHT auf eine Freigabe wartet, ist
+  ein sauberer Fehler mit klarer Meldung (wie heute für Nicht-Approval-Phasen),
+  ohne den Lauf zu verändern. (E6)
+- **AC11** — Sind beide Haltepunkte aktiv, hält der Lauf nacheinander an jedem
+  einmal: nach dem Freigeben von `before_integration` läuft er bis `before_push`
+  weiter und hält dort erneut mit Exit-Code 2; nach dessen Freigabe läuft er durch.
+  Kein Haltepunkt hält doppelt. (A1, A2, E6)
 
-**AC-3 (Contract-Scope als Text — A2, E2):** `change_scope` enthält
-`declared_scope`, entweder als lesbaren YAML-Text oder `null`. Ist ein lesbares
-`contract.yaml` vorhanden, gibt der Text alle Top-Level-Einträge mit
-Schlüssel-Präfix `x-adw-` in Dokumentreihenfolge wieder — Schlüssel, Werte und
-Verschachtelung inhaltlich unverändert, ohne Umbenennung, Zusammenführung oder
-Interpretation. Andere Top-Level-Einträge des Contracts erscheinen nicht.
+### Ereignis-Log / Anzeige
+- **AC12** — Jeder Haltepunkt wird als `approval`-Event geloggt: `gate` = Name des
+  Haltepunkts (`before_integration` bzw. `before_push`), `event` = `awaited` beim
+  Eintreten des Wartens und `event` = `granted` bei der Freigabe. Damit stellen GUI
+  und Timeline den Haltepunkt ohne Sonderfall dar. Es werden nur tatsächlich
+  eingetretene Zustände geloggt — kein fingiertes `awaited`/`granted` für
+  Haltepunkte, an denen der Lauf nicht gewartet hat. (A3)
+- **AC13** — Die GUI bildet den wartenden Lauf wie die bestehenden Approval-Gates ab
+  (wartender Lauf sichtbar, Recovery-/Handlungshinweis `adw approve <run_id> --repo
+  <pfad>`), ohne neuen Schreibpfad und ohne neuen Phasenwert. Die GUI bleibt
+  read-only. (A3, E1, E3b)
 
-**AC-4 (Fehlender/leerer Scope — A2):** Fehlt `contract.yaml`, ist es nicht über
-den bestehenden Artefakt-Pfad lesbar, kein YAML-Mapping oder nicht sicher als
-YAML lesbar, oder enthält es keinen Top-Level-Schlüssel mit Präfix `x-adw-`, ist
-`declared_scope: null` und die Ansicht sagt klar „kein deklarierter Scope" — ohne
-Fehler, ohne 5xx, ohne erfundene Bewertung. Das Fehlen ist ein neutraler
-Abwesenheitszustand, keine Scope-Verletzung.
-
-**AC-5 (Kein Urteil — A3, E1):** API und Oberfläche stellen Dateilisten und
-Scope-Text lediglich nebeneinander. Es gibt kein Feld und keine Markierung für
-„im Scope", „außerhalb", „Verletzung", Konformität oder Contract-Qualität, keine
-Zuordnung eines Dateipfads zu einem `x-adw-*`-Eintrag und keine Warnung, Wertung
-oder daraus abgeleitete Laufentscheidung.
-
-**AC-6 (Lane ohne verwertbaren Diff — A4):** Hat eine beobachtete Lane (AC-1)
-keinen oder nur genau einen gültigen Snapshot, enthält ihr Eintrag
-`diff_available: false` und `files: null` — kanonisch genau diese Form, nicht
-ein weggelassenes Feld und nicht `[]`; `files: []` ist ausschließlich dem
-verfügbaren Diff ohne geänderte Dateien (AC-7) vorbehalten. Die Ansicht zeigt
-für diese Lane klar „kein Diff verfügbar" statt einer leeren Tabelle. Das gilt
-insbesondere für eine nur über ihren `lane`-Span beobachtete Lane ganz ohne
-gültige Snapshots — ihr Eintrag entfällt nicht, sondern ist mit
-`diff_available: false` vorhanden. (Ein Diff eines einzelnen Snapshots gegen
-sich selbst wäre garantiert leer und würde fälschlich „keine Änderungen"
-behaupten — er wird nicht dargestellt.) Nicht verfügbare Diffs einer Lane
-verhindern nicht die Darstellung verfügbarer Diffs anderer Lanes.
-
-**AC-7 (Kein Lauf-Diff insgesamt und echte Leerergebnisse — A4):** Hat keine
-Lane ein verwertbares Snapshot-Paar, entfällt die Tabellenansicht mit einer
-klaren Aussage („kein Lauf-Diff verfügbar"); der Contract-Scope-Teil (AC-3/AC-4)
-bleibt davon unberührt darstellbar. Ergibt ein verfügbarer Vergleich keine
-geänderten Dateien, bleibt das von „nicht verfügbar" unterscheidbar: der
-Eintrag trägt `diff_available: true` mit `files: []`, und die Ansicht sagt klar,
-dass keine geänderten Dateien gefunden wurden — nie eine leere Tabelle ohne
-Erklärung.
-
-**AC-8 (Robustheit gegen Git-Fehler — A4, E5):** Schlägt der Diff einer Lane
-trotz vorhandenem Snapshot-Paar fehl (z. B. fehlendes Snapshot-Objekt, Timeout),
-wird diese Lane wie in AC-6 als „kein Diff verfügbar" behandelt — in derselben
-kanonischen Form `diff_available: false` mit `files: null`, nicht als
-erfolgreicher leerer Diff (`files: []`). Die Antwort `GET /api/runs/{repo}/{run_id}` bleibt
-ein gültiger 200-Response; nie ein 5xx, nie ein einseitiger/erfundener Diff.
-
-**AC-9 (Additiv, read-only — E6):** Der Änderungsumfang-Block ist eine reine
-Projektion bereits geladener Events und Artefakte: keine neue Route, kein
-Schreibzugriff, kein neuer Zustand, keine Aktion, die Lauf oder Repository
-verändert. Bestehende Felder der Run-Detail-Antwort (`run`, `phases`, `tree`,
-`raw`, `problems`, `latest_context`, ggf. `recovery`/`plan_skeleton`) bleiben
-unverändert. Im Run-Detail sind je Datei Pfad und `+/-`-Zahlen sichtbar; `null`
-bei Binärdateien wird verständlich als „nicht numerisch verfügbar" dargestellt.
+### `--no-approval`
+- **AC14** — `--no-approval` (`skip_approval`, auch wenn über einen `--gates`-Modus
+  gesetzt) überspringt AUCH die Haltepunkte: ein Lauf mit diesem Schalter hält an
+  keinem konfigurierten Breakpoint an. Es ist EIN Schalter für „keine menschliche
+  Freigabe in diesem Lauf", nicht zwei getrennte. Das Überspringen überlebt
+  Crash+Resume (wie das bestehende `skip_approval` im State gepinnt). (A4)
 
 ## Definition of Done
-- AC-1 … AC-9 sind erfüllt und durch Tests unter `tests/` als `test_gui_*.py`
-  abgedeckt; Git-Aufrufe laufen gegen temporäre Repos nach dem Muster von
-  `tests/test_gui_diff_endpoint.py` / `tests/test_gui_diff_pairing.py`.
-- Abgedeckt sind mindestens: mehrere Dateien mit numerischen `+/-`-Werten;
-  Binärdatei → `null`; erster-gegen-letzter Snapshot; Trennung der Lanes; genau
-  ein Snapshot; keine Snapshots; nur über den `lane`-Span beobachtete Lane ohne
-  gültige Snapshots (Eintrag vorhanden, `diff_available: false`, `files:
-  null`); nur über gültige Snapshots beobachtete Lane; strukturell ungültige
-  Snapshot-Events tragen nichts bei; mehrfache Beobachtung desselben
-  Lane-Namens → genau ein Eintrag; nicht lieferbarer Snapshot-Diff (`files:
-  null`, nicht `[]`); kein Lauf-Diff insgesamt; verfügbarer Diff ohne geänderte
-  Dateien (`diff_available: true`, `files: []`); vorhandene uneinheitliche
-  `x-adw-*`-Blöcke; fehlender Scope-Block; fehlendes/unlesbares `contract.yaml`;
-  keine Scope-Markierung.
-- Richtwert ~14 neue Tests (Bestand: 978); mehr als ~22 ist Scope-Drift.
-- Gates grün: `uv run ruff check .` und `uv run pytest -x -q`.
-- Doku aktualisiert: `docs/GUI-SPEC.md` + `docs/GUI-SPEC.de.md` (§7.2, inkl.
-  additivem API-Feld, fehlender automatischer Bewertung und Fallback-Zuständen)
-  und `CHANGELOG.md` + `CHANGELOG.de.md` (`Unreleased`).
-- Keine Änderung an `contract.yaml`, `adw/phases.py`, der Diff-Route,
-  `_git_diff`/`_parse_numstat`, Timeline/Raw/Trace/Diff-Tab/SSE oder an
-  Persistenz-Zuständen; keine neue Dependency (YAML über das vorhandene
-  `yaml`-Modul).
+- Alle Akzeptanzkriterien sind durch Tests unter `tests/` abgedeckt; das
+  Orchestrator-Pausen-/Fortsetzungsverhalten wird wie bisher gegen den Mock-Runner
+  geprüft (Muster: `tests/test_e2e_dry_run.py`). Richtwert ~20 neue Tests, deutlich
+  über ~30 wäre Scope-Drift.
+- Beide Gates sind grün: `uv run ruff check .` und `uv run pytest -x -q`.
+- Der bestehende Bestand (978 Tests) bleibt grün; das heutige Verhalten ohne
+  `breakpoints:` ist unverändert (Regressionsnachweis für AC2).
+- Doku aktualisiert: `docs/SPEC.md` + `docs/SPEC.de.md` (Approval-/Kontrollfluss),
+  `docs/GUI-SPEC.md` + `docs/GUI-SPEC.de.md` nur dort, wo die Anzeige betroffen ist,
+  das Handbuch (`docs/handbuch/ADW-USER-HANDBUCH*.md`), `examples/config.yaml`
+  (zeigt den `breakpoints:`-Block mit den zwei erlaubten Werten) sowie
+  `CHANGELOG.md` + `CHANGELOG.de.md` (Abschnitt `Unreleased`).
 
 ## Deferred (bewusst nicht gebaut)
-Die folgenden Ideen sind defensibel, aber für diese Aufgabe unverhältnismäßig.
-Sie sind keine Akzeptanzkriterien und werden auch im Codex-/Fix-Zyklus **nicht**
-nachgebaut:
-- Strukturierter Datei-Scope (`x-adw-scope.files` bzw. Pfadmuster) in der
-  Contract-Erzeugung (Orchestrator-Änderung).
-- Eine darauf aufbauende echte Scope-Verletzungsprüfung, die Dateien gegen
-  deklarierte Pfadmuster abgleicht und als „im Scope"/„außerhalb" markiert.
-- Scope-Check je Fix-Runde bzw. je Schritt; Historie über mehrere Vergleiche.
-- Scope-Verletzung als Gate, Laufabbruch oder andere Durchsetzung.
-- Contract-Schema-Prüfung, OpenAPI-Validierung, Bewertung der Contract-Qualität.
-- Historisierung oder Persistenz von Scope-Bewertungen; Cross-Run-Auswertungen,
-  Trends oder Vergleiche des Änderungsumfangs.
+Die folgenden Ideen sind nachvollziehbar, aber für diese Anforderung
+unverhältnismäßig. Sie gehören NICHT in die Akzeptanzkriterien und werden auch im
+Codex-/Fix-Zyklus nicht nachgebaut:
+
+- **Bedingte Haltepunkte** (Ausdruckssprache, Bedingungen, `after_round:N` o. Ä.).
+- **Haltepunkte je Lane oder je Runde** sowie Haltepunkte innerhalb einer Lane.
+- **Freigabe aus der GUI** / jeglicher Schreibpfad aus dem Browser.
+- **Step-Into in den Review-Loop**, Einzelschritt-Modus, „ab Knoten weiterlaufen",
+  Rücksprung, Abbruch-Kommando.
+- **Laufzeit-Änderung von Breakpoints** (Umkonfigurieren eines laufenden Runs) —
+  einschließlich eines eigenen Mechanismus, der die Breakpoint-Konfiguration gegen
+  spätere Config-Edits im Run-State pinnt.
