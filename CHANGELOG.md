@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [Unreleased]
+## [0.9.0] — 2026-08-26
 
 ### Added
 - **The Run Inspector tells "working" from "waiting" from "waiting on a human".**
@@ -358,6 +358,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.9.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.5.1...v0.6.0
