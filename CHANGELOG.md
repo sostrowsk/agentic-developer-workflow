@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [Unreleased]
+## [0.12.0] — 2026-08-26
 
 ### Added
 - **Node → Raw-log jump and prompt diff in the Run Inspector.** Every span node in
@@ -417,6 +417,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.12.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.8.0...v0.9.0

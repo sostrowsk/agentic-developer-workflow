@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [Unreleased]
+## [0.12.0] — 2026-08-26
 
 ### Hinzugefügt
 - **Absprung vom Knoten in den Raw-Log und Prompt-Diff im Run-Inspector.** Jeder
@@ -452,6 +452,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.12.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.8.0...v0.9.0
