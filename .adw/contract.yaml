@@ -1,39 +1,42 @@
 # Interface contract — Single-Lane project (`backend`).
 #
 # This delta contract pins ONLY the externally observable additions for the
-# "plan skeleton in the trace" feature:
-#   1. One additive, purely DERIVED `plan_skeleton` array on the JSON response of
-#      GET /api/runs/{repo}/{run_id}. It is PRESENT exactly when the run's
-#      `plan.md` yields at least one `## Workstream:` section with at least one
-#      `###` task, and ABSENT otherwise — an empty list is never forced. It is a
-#      pure projection of the run's `plan.md` — which the implementation MAY
-#      newly read while constructing the run detail, but only through the
-#      existing whitelist- and boundary-enforced artifact resolution (no new
-#      route, no new filesystem-access mechanism) — and of the already-loaded
-#      event stream (for the coarse lane status); no new event, no new
-#      persistence.
-#   2. The two observable PARSE RULES that derive the skeleton from `plan.md`.
-#   3. The observable FALLBACK behavior when `plan.md` is missing/empty/unreadable
-#      or carries no matching section.
+# "make a run's change scope visible" feature:
+#   1. One additive, purely DERIVED `change_scope` object on the JSON response of
+#      GET /api/runs/{repo}/{run_id}: `lanes` (the actually-changed files per
+#      observed lane, with +/- counts) and `declared_scope` (a readable,
+#      semantically equivalent YAML serialization of the contract's `x-adw-*`
+#      blocks, or null).
+#   2. The observable rules for the lane set, its order, and the canonical
+#      per-lane shapes (available vs. empty vs. unavailable diff).
+#   3. The observable content and fallback of `declared_scope`.
+#   4. That NO judgement is made (no in-scope/out-of-scope/violation field).
+#   5. The observable read-only rendering and fallback texts of the change-scope
+#      block on the existing HTML run-detail page.
 #
-# It does NOT pin internal helper signatures, internal dictionary keys of other
-# fields, internal module layout, unchanged response fields, concrete markup, or
-# CSS. No route or event is added or removed. The recovery projection, the
-# artifacts route, the events route GET /api/runs/{repo}/{run_id}/events, the SSE
-# surface, Timeline, Artifacts and the snapshot Diff tab are unchanged.
+# It does NOT pin internal helper signatures, module layout, dependency or
+# artifact-resolution choices, git invocation details, concrete markup, or CSS.
+# Implementation constraints (reuse of the existing snapshot/diff/numstat logic,
+# the untouched diff route, `adw/phases.py`, no new dependency, and so on) live
+# in `.adw/plan.md` and its Definition of Done, not here. No route or event is
+# added or removed; the `change_scope` key is the only observable addition.
 
 openapi: 3.1.0
 info:
-  title: ADW Run Inspector — plan skeleton in the trace (delta only)
-  version: 1.2.0
+  title: ADW Run Inspector — change scope in the run detail (delta only)
+  version: 1.3.1
 
 paths:
   /api/runs/{repo}/{run_id}:
     get:
       summary: >
         Existing run-detail route — unchanged except one additive derived
-        `plan_skeleton` array, present only when `plan.md` yields a matching
-        section with at least one task.
+        `change_scope` object (per-lane changed files with +/- counts, plus the
+        declared contract scope as readable YAML text or null). On an otherwise
+        successful run-detail request, change-scope derivation never causes a
+        5xx and never yields an invented or one-sided diff; the route's existing
+        status behavior (e.g. for an unknown repository or run) is unchanged and
+        not redefined by this delta.
       parameters:
         - name: repo
           in: path
@@ -49,17 +52,14 @@ paths:
       responses:
         "200":
           description: >
-            Existing run-detail object. It carries a `plan_skeleton` array exactly
-            when the run's `plan.md` yields at least one `## Workstream:` section
-            with at least one `###` task (S1_presence); otherwise the key is
-            absent — an empty list is never forced (S4_fallback). A missing,
-            empty, unreadable or boundary-escaping `plan.md` never yields a 5xx and
-            never invents values. All other response fields keep their current
-            shape and meaning.
+            Existing run-detail object, plus one additive top-level
+            `change_scope` object. All other response fields (`run`, `phases`,
+            `tree`, `latest_context`, `problems`, `raw`, and the existing optional
+            `recovery`/`plan_skeleton`) keep their current shape and meaning.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunDetailPlanSkeletonAddition"
+                $ref: "#/components/schemas/RunDetailChangeScopeAddition"
 
   /runs/{repo}/{run_id}:
     get:
@@ -79,174 +79,242 @@ paths:
       responses:
         "200":
           description: >
-            Existing HTML run-detail page. When `plan_skeleton` is present it
-            renders, per workstream, a READ-ONLY task list beside/above the trace
-            of the lane with the same name (S5_render), with a coarse
-            pending/done marker. The list is NOT bound to an existing lane trace
-            node: a not-yet-started lane still shows its `pending` skeleton without
-            creating an empty or artificial trace node. No `plan_skeleton` → no
-            list. The trace tree, its node structure and the other detail areas
-            keep their behavior. Task texts are content and are not translated;
-            markup and CSS are not part of the contract.
+            Existing HTML run-detail page. It renders the change-scope block
+            READ-ONLY beside the rest of the detail (S6_render): per lane the
+            changed files with path and +/- counts (binary → "not numerically
+            available"); a lane without a usable diff shows "no diff available"
+            (not an empty table); when no lane has a usable diff pair the table
+            view is dropped with a clear statement, while the declared-scope part
+            still renders. The declared contract scope shows as readable YAML
+            text, or "no declared scope" when absent. No
+            in-scope/out-of-scope/violation marker is shown. Markup and CSS are
+            not part of the contract.
           content:
             text/html: {}
 
 components:
   schemas:
-    PlanSkeletonEntry:
+    ChangeScopeFile:
+      type: object
+      additionalProperties: false
+      required:
+        - path
+        - additions
+        - deletions
+      description: >
+        One changed file of a lane's diff, in the order git's numstat reports it
+        (S2_lane_diff). Exactly these keys — no judgement or annotation field
+        exists (S5_no_judgement).
+      properties:
+        path:
+          type: string
+        additions:
+          type: [integer, "null"]
+          minimum: 0
+          description: Added lines; null for a binary file (mirrors numstat `-`).
+        deletions:
+          type: [integer, "null"]
+          minimum: 0
+          description: Deleted lines; null for a binary file (mirrors numstat `-`).
+
+    ChangeScopeLane:
+      type: object
+      additionalProperties: false
+      required:
+        - lane
+        - diff_available
+        - files
+      description: >
+        One observed lane (S1_lanes). Carries the lane name, whether a usable
+        diff exists, and either the changed files or null. Exactly these keys —
+        no judgement or annotation field exists (S5_no_judgement).
+      properties:
+        lane:
+          type: string
+          minLength: 1
+          description: >
+            The lane name. In this single-lane project this is `backend`; the
+            field is not constrained to that value.
+        diff_available:
+          type: boolean
+          description: >
+            true exactly when the lane has at least two valid snapshots AND the
+            diff between its lowest-seq and highest-seq snapshot was produced
+            successfully; false otherwise (S3_shapes).
+        files:
+          type: [array, "null"]
+          description: >
+            When `diff_available` is true: the changed files (possibly `[]` for a
+            successful diff with no changed files). When `diff_available` is
+            false: canonically `null` — never `[]`, never an omitted field
+            (S3_shapes).
+          items:
+            $ref: "#/components/schemas/ChangeScopeFile"
+
+    ChangeScope:
+      type: object
+      additionalProperties: false
+      required:
+        - lanes
+        - declared_scope
+      description: >
+        The additive change-scope projection. Facts sit side by side; no
+        judgement (S5_no_judgement). Exactly these two keys.
+      properties:
+        lanes:
+          type: array
+          description: >
+            One entry per observed lane, ordered by first observation in the
+            event log (S1_lanes). Empty when no lane is observed.
+          items:
+            $ref: "#/components/schemas/ChangeScopeLane"
+        declared_scope:
+          type: [string, "null"]
+          description: >
+            The contract's declared scope as readable YAML text — a semantically
+            equivalent serialization of the `x-adw-*` entries — or null
+            (S4_declared_scope).
+
+    RunDetailChangeScopeAddition:
       type: object
       additionalProperties: true
       required:
-        - workstream
-        - status
-        - tasks
-      description: >
-        One workstream section of `plan.md` that has at least one `###` task,
-        derived by the two parse rules of S2_parse. A section without a `###`
-        task produces no entry.
-      properties:
-        workstream:
-          type: string
-          description: >
-            The `<name>` verbatim from the `## Workstream: <name>` line — the text
-            after the exact prefix `## Workstream: ` (S2_parse). In this
-            single-lane project this is `backend`; the field is not constrained to
-            that value.
-        status:
-          type: string
-          enum: [pending, done]
-          description: >
-            The coarse LANE-LEVEL status (S3_status). `done` exactly when the
-            `lane` span whose name equals `workstream` has a `lane` end with
-            `completed: true`; otherwise `pending` — including a `lane` end
-            without `completed: true` (`false` or missing) and a not-yet-started
-            lane. There is no per-task and no per-node status.
-        tasks:
-          type: array
-          minItems: 1
-          description: >
-            The task texts in document order (S2_parse). Each is the text after
-            the exact `### ` prefix — the marker and exactly one separator space
-            removed, otherwise VERBATIM: no split into identifier and title, no
-            further trimming, no filtering of the heterogeneous forms
-            (`### B1 — …`, `### 1. …`, `### A.1 — …`, `### Aufgabe A — …`,
-            `### Aufgabe B1 — …`).
-          items:
-            type: string
-
-    RunDetailPlanSkeletonAddition:
-      type: object
-      additionalProperties: true
+        - change_scope
       description: >
         Existing run-detail object. This schema pins only the additive
-        `plan_skeleton` projection; every other property (`run`, `phases`,
-        `tree`, `latest_context`, `problems`, `raw`, and the existing optional
-        `recovery`) keeps its current shape and meaning. The `plan_skeleton` key
-        is present EXACTLY when `plan.md` yields at least one matching section
-        with a task (S1_presence) and ABSENT otherwise — never an empty list.
+        `change_scope` object; every other property (`run`, `phases`, `tree`,
+        `latest_context`, `problems`, `raw`, and the existing optional
+        `recovery`/`plan_skeleton`) keeps its current shape and meaning. The
+        `change_scope` key is ALWAYS present.
       properties:
-        plan_skeleton:
-          type: array
-          minItems: 1
-          description: >
-            One entry per `## Workstream:` section with at least one `###` task,
-            in `plan.md` document order.
-          items:
-            $ref: "#/components/schemas/PlanSkeletonEntry"
+        change_scope:
+          $ref: "#/components/schemas/ChangeScope"
       examples:
-        - plan_skeleton:
-            - workstream: backend
-              status: pending
-              tasks:
-                - "B1 — Parser: Skelett aus plan.md"
-                - "1. Additives Feld in der Detail-Antwort"
-        - plan_skeleton:
-            - workstream: backend
-              status: done
-              tasks:
-                - "Aufgabe A — Anzeige neben dem Trace"
+        - change_scope:
+            lanes:
+              - lane: backend
+                diff_available: true
+                files:
+                  - path: adw/gui/app.py
+                    additions: 42
+                    deletions: 3
+                  - path: assets/logo.png
+                    additions: null
+                    deletions: null
+            declared_scope: |
+              x-adw-surfaces:
+                - GET /api/runs/{repo}/{run_id}
+              x-adw-invariants:
+                - read-only
+        - change_scope:
+            lanes:
+              - lane: backend
+                diff_available: false
+                files: null
+            declared_scope: null
+        - change_scope:
+            lanes:
+              - lane: backend
+                diff_available: true
+                files: []
+            declared_scope: null
 
-x-behavior:
-  S1_presence:
-    surface: "GET /api/runs/{repo}/{run_id} — derived plan_skeleton projection"
+x-adw-behavior:
+  S1_lanes:
+    surface: "GET /api/runs/{repo}/{run_id} — change_scope.lanes"
     rule: >
-      The response carries a `plan_skeleton` array EXACTLY when the run's
-      `plan.md` — read only through the existing whitelist artifact path — yields
-      at least one `## Workstream: <name>` section containing at least one `###`
-      task. The array is ordered by `plan.md` document order, one entry per such
-      section. A section with no `###` task contributes no entry. When no such
-      section exists the key is ABSENT; an empty list is never forced. All other
-      response fields keep their semantics; this addition is purely additive.
+      `change_scope.lanes` has exactly one entry per OBSERVED lane. A lane is
+      observed exactly when the run's event log (a) contains a `lane` span with a
+      non-empty name (`payload.name`) or (b) contains a snapshot event that
+      passes the existing structural validation (ref form
+      `refs/adw/<run_id>/<seq>`) declaring that lane. Snapshot events that fail
+      this validation contribute neither to the lane set nor to snapshot pairs.
+      A lane observed only via valid snapshots (no `lane` span) appears with its
+      diff; multiple observations of the same lane name yield exactly one entry.
+      The list order is the order of first observation in the event log
+      (smallest seq across both sources), deterministically derivable from the
+      run's events. When no lane is observed, `lanes` is `[]`.
 
-  S2_parse:
+  S2_lane_diff:
     rule: >
-      The skeleton is derived by EXACTLY TWO rules, observable as a promise (no
-      Markdown parser, no new dependency, no identifier pattern):
-        (1) A workstream section starts at a line `## Workstream: <name>` and ends
-            at the next `##` heading (any line starting with `##` that is not
-            `###`) or at end of file. `<name>` is the text after the exact prefix
-            `## Workstream: `.
-        (2) A task line is every line within that section that starts with the
-            exact prefix `### ` (the `###` marker followed by one space). The
-            task text is the text after that prefix, VERBATIM — the marker and
-            exactly one separator space are removed, nothing else; no split into
-            identifier and title, no further trimming. A line that is exactly
-            `###` with no following text yields no task. The heterogeneous forms
-            (`### B1 — …`, `### 1. …`, `### A.1 — …`, `### Aufgabe A — …`,
-            `### Aufgabe B1 — …`) are NOT filtered; each yields exactly one task
-            with its full heading text.
-      `###` lines outside any `## Workstream:` section, and `###` lines after the
-      closing `##` heading, do not count.
+      When an observed lane has at least two valid snapshots, its entry carries
+      the diff between the snapshot with the LOWEST and the one with the HIGHEST
+      seq of that lane — exactly one comparison per lane. Files appear in the
+      order git's numstat reports them; each file carries `path`, `additions`,
+      `deletions`, and a binary file's `additions`/`deletions` are `null`.
+      Snapshots of other lanes are never included.
 
-  S3_status:
+  S3_shapes:
     rule: >
-      Each entry carries exactly one coarse LANE-LEVEL status. `done` when the
-      `lane` span whose name equals the entry's `workstream` has a `lane` end with
-      `completed: true`; otherwise `pending` — including a `lane` end without
-      `completed: true` (`false` or missing) and a lane that has not started
-      (no lane node). There is no per-task status, no per-trace-node status, and
-      no guessed task-to-node mapping (E1). The status is derived from the run's
-      already-loaded event stream; no new event or reader.
+      The per-lane shape is canonical and distinguishes three cases:
+        (1) Available diff: `diff_available: true`, `files` is an array. An
+            available comparison that finds NO changed files is `files: []`
+            (never null) — the view says clearly that no changed files were
+            found, never an unexplained empty table.
+        (2) No usable diff: an observed lane with no or exactly ONE valid
+            snapshot (a self-diff of a single snapshot would be guaranteed empty
+            and falsely claim "no changes", so it is not shown) has
+            `diff_available: false` and `files: null` — exactly this form, never
+            an omitted field and never `[]`. This includes a lane observed only
+            via its `lane` span with no valid snapshot at all: its entry is NOT
+            dropped.
+        (3) Diff failure: if a lane's diff fails despite a snapshot pair
+            (missing snapshot object, timeout, one-sided failure), the lane is
+            treated exactly as case (2) — `diff_available: false`,
+            `files: null`, never a successful empty diff (`files: []`). A failed
+            diff of one lane never prevents rendering available diffs of other
+            lanes.
+      On an otherwise successful run-detail request, none of these cases changes
+      the status: change-scope derivation failures never cause a 5xx and never
+      yield a one-sided or invented diff. The route's pre-existing status
+      behavior outside change-scope derivation is not redefined here.
 
-  S4_fallback:
+  S4_declared_scope:
     rule: >
-      A `plan.md` that is missing, empty, unreadable, or absent per the artifact
-      path (not present, or a symlink escaping the run-directory boundary), or
-      that contains no `## Workstream:` section with at least one `###` task,
-      yields NO skeleton: `plan_skeleton` is absent (not an empty list), no error
-      and no 5xx, no empty box, and the rest of the detail response and the
-      existing run-detail view are unchanged.
+      `change_scope.declared_scope` is either readable YAML text or `null`. When
+      the run's `contract.yaml` artifact is readable and is a YAML mapping, the
+      text is a readable, SEMANTICALLY EQUIVALENT YAML serialization of ALL
+      top-level entries whose key has the prefix `x-adw-` — preserving the
+      selected keys' document order, their values and nesting, with no rename,
+      merge, normalization or interpretation of content. Textual details of the
+      source (comments, quoting, scalar styles, anchors, formatting) are NOT
+      preserved and are not promised. Other top-level entries of the contract do
+      not appear. When `contract.yaml` is missing, unreadable, not a YAML
+      mapping, not safely loadable or serializable, or contains no top-level key
+      with prefix `x-adw-`, `declared_scope` is `null` and the view says clearly
+      "no declared scope" — no error, no invented judgement. Absence is a
+      neutral state, not a scope violation.
 
-  S5_render:
+  S5_no_judgement:
+    rule: >
+      The API and the view merely place file lists and scope text side by side.
+      There is no field and no marker for "in scope", "out of scope",
+      "violation", conformance or contract quality, no mapping of a file path to
+      an `x-adw-*` entry, and no warning, rating or run decision derived from
+      them (A3, E1). The `change_scope`, lane and file objects carry exactly the
+      schema-listed keys (`additionalProperties: false`). No violation check
+      exists; a finding "the violation check is missing" is out of scope,
+      including in the review loop.
+
+  S6_render:
     surface: "GET /runs/{repo}/{run_id} (HTML run detail)"
     rule: >
-      When `plan_skeleton` is present the run detail renders, per entry, a
-      read-only task list beside/above the trace of the lane with the same name
-      (mapping workstream → lane by equal name, currently `backend`), so that
-      "done" (trace) and "planned" (skeleton) sit in one view without a tab
-      switch, with a coarse pending/done marker (S3_status). The list is NOT bound
-      to an existing lane trace node: a lane with no trace node yet still shows its
-      `pending` skeleton, WITHOUT creating an empty or artificial trace node. No
-      `plan_skeleton` → no list; no empty box. The trace tree and its node
-      structure are unchanged. Chrome labels follow the GUI language; the task
-      texts are content and are not translated. Markup and CSS are not part of the
-      contract.
+      The change-scope block renders read-only in the run detail: per lane the
+      changed files with path and +/- counts, where `null` (binary) is shown
+      understandably as "not numerically available". A lane with no usable diff
+      shows clearly "no diff available" instead of an empty table. When no lane
+      has a usable snapshot pair, the table view is dropped with a clear "no run
+      diff available" statement, while the declared-scope part still renders.
+      The declared scope shows as readable YAML text (S4_declared_scope), or
+      "no declared scope" when absent. Chrome labels follow the GUI language;
+      scope text and file paths are content and are not translated. Markup and
+      CSS are not part of the contract.
 
-  S6_readonly:
+  S7_additive_readonly:
     rule: >
-      The skeleton is pure display: no checking off, no editing, no write route,
-      no new persistence. `plan.md` is read only through the existing whitelist-
-      and boundary-enforced artifact access behavior — no new route, no new
-      filesystem-access mechanism, and URL segments are never used as a
-      filesystem path. Deriving and rendering the skeleton mutates nothing:
-      neither state nor run artifacts nor events are created or changed (E5).
-
-  unchanged_surfaces:
-    rule: >
-      No route or event is added or removed. The recovery projection, the
-      artifacts route and its whitelist, the events route
-      GET /api/runs/{repo}/{run_id}/events, the SSE surface, Timeline, Artifacts
-      and the snapshot Diff tab keep their content and behavior. The orchestrator,
-      event schema and instrumentation are unchanged (E2); no per-task
-      instrumentation is added. Internal helper signatures, internal module layout
-      and concrete markup/CSS are not part of this contract.
+      The change-scope block is a pure derived projection: no new route or
+      event, no write, no new state, no action that changes the run or the
+      repository (E6). No route or event is added or removed; all pre-existing
+      response fields of the run-detail route and the request/response behavior
+      of all other routes are unchanged — the `change_scope` key is the only
+      observable addition.
