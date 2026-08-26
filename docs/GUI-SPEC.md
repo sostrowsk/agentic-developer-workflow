@@ -414,6 +414,36 @@ are translated.
    - **Raw**: the event log as a filterable JSON list — the fallback that always
      works, even for event types the GUI does not know yet.
 
+5. **Run-context panel** (beside the detail pane): a read-only field list showing
+   the run state **at the seq of the selected node** — answering *why* a node went
+   the way it did without clicking up and down the tree or switching to Raw. It is
+   a purely derived projection of the same event stream the detail response already
+   loads (no new event, reader, route, persistence or state-schema change); every
+   node carries its own six-field context in the render, so selection only
+   re-projects it — no client-side re-derivation. The six fixed fields are:
+   `phase`, `round` (`{loop, n, cap}` of the enclosing loop, if any), `limit_hits`,
+   `circuit_breakers`, `cost_usd` (cumulative, via the existing cost logic), and
+   `followups`.
+   - **Cutoff / time travel**: a node's cutoff is its own `seq` (point event) or
+     its exposed `end_seq` (span — the subtree maximum, so a finished/running span
+     includes qualifying events *inside* it after its start). Only events with
+     `seq ≤ cutoff` count, so an earlier node never reflects a later event.
+     Selecting another node shows that node's historical state.
+   - **No selection / live**: with no node selected the panel shows
+     `latest_context`, derived through the greatest observed `seq` — the live view.
+     It refreshes through the existing mechanisms; the SSE protocol is unchanged.
+   - **Empty semantics**: every absent datum is **empty** — `null`, never a
+     fabricated `0`. Counts and cost are `null` until their first occurrence; a
+     phase with no valid observation, and a node outside any round, are `null`. A
+     run without a trace has no per-node context and no top-level `context` field —
+     only a `latest_context` with all six fields null — and never an error.
+   - `phase` is derived from exactly two existing sources — a non-empty `name` in a
+     `phase` span start and a non-empty `phase` in a `state.saved` payload — with
+     the greatest-`seq` valid observation at or before the cutoff winning
+     (`state.saved` is read only as its existing `{seq, phase}` payload, never
+     extended). The panel is a plain field list — no chart, no history curve — and
+     offers no configurable field set and no selection persistence.
+
 ### 7.3 Live update
 
 - `GET /api/runs/{repo}/{run_id}/stream` — SSE. Server tails `events.jsonl` by

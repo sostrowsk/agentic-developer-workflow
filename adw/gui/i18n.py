@@ -85,6 +85,15 @@ _EN: dict[str, str] = {
     "tl_duration": "duration",
     "tl_cost": "cost",
     "tl_tokens": "tokens",
+    # Labels for the read-only run-context panel (§7.2): the run state at the seq of
+    # the selected node (or the latest event when nothing is selected).
+    "ctx_title": "Run context",
+    "ctx_phase": "Phase",
+    "ctx_round": "Round",
+    "ctx_limit_hits": "Limit hits",
+    "ctx_circuit_breakers": "Circuit breakers",
+    "ctx_cost": "Cost",
+    "ctx_followups": "Follow-ups",
     # Hints the CLIENT injects into the Diff / Tools / Artifacts panels. They are
     # chrome, not content — "hint_no_changes" in particular is the PERMANENT result
     # of an empty diff, not a transient state. Delivered with the page as data
@@ -157,6 +166,13 @@ _DE: dict[str, str] = {
     "tl_duration": "Dauer",
     "tl_cost": "Kosten",
     "tl_tokens": "Tokens",
+    "ctx_title": "Lauf-Zustand",
+    "ctx_phase": "Phase",
+    "ctx_round": "Runde",
+    "ctx_limit_hits": "Limit-Treffer",
+    "ctx_circuit_breakers": "Circuit-Breaker",
+    "ctx_cost": "Kosten",
+    "ctx_followups": "Follow-ups",
     "hint_loading": "Wird geladen…",
     "hint_no_changes": "Keine Änderungen in diesem Schritt.",
     "hint_diff_failed": "(Diff konnte nicht geladen werden — Diff-Reiter erneut öffnen)",

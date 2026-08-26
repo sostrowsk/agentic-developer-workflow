@@ -12,6 +12,27 @@
     {% if node.duration is not none %}<span class="dur">{{ node.duration | fmt_duration }}</span>{% endif %}
     {% if node.type == "round" and node.n is defined %}<span class="round">{{ node.n }}/{{ node.cap }}</span>{% endif %}
 {% endmacro %}
+{# The read-only run-context panel (§7.2): the six-field run state AT the selected
+   node's seq — a plain field list, no chart. Each value is EMPTY when null (never a
+   fabricated 0). Rendered here with `latest_context` (the no-selection / live view);
+   app.js re-projects the selected node's own `context` on selection (time travel).
+   The formatting matches app.js so the value reads the same before and after a
+   click. #}
+{% macro ctx_round_text(r) %}{% if r %}{% if r.loop %}{{ r.loop }} {% endif %}{% if r.n is not none or r.cap is not none %}{{ r.n if r.n is not none else "" }}/{{ r.cap if r.cap is not none else "" }}{% endif %}{% endif %}{% endmacro %}
+{% macro ctx_num(v) %}{% if v is not none %}{{ v | round(6) }}{% endif %}{% endmacro %}
+{% macro context_panel(ctx) %}
+  <aside class="run-context" aria-label="{{ t.ctx_title }}">
+    <h3>{{ t.ctx_title }}</h3>
+    <dl class="ctx-list">
+      <div class="ctx-row"><dt>{{ t.ctx_phase }}</dt><dd class="ctx-value" data-context-field="phase">{{ ctx.phase if ctx.phase is not none else "" }}</dd></div>
+      <div class="ctx-row"><dt>{{ t.ctx_round }}</dt><dd class="ctx-value" data-context-field="round">{{ ctx_round_text(ctx.round) | trim }}</dd></div>
+      <div class="ctx-row"><dt>{{ t.ctx_limit_hits }}</dt><dd class="ctx-value" data-context-field="limit_hits">{{ ctx.limit_hits if ctx.limit_hits is not none else "" }}</dd></div>
+      <div class="ctx-row"><dt>{{ t.ctx_circuit_breakers }}</dt><dd class="ctx-value" data-context-field="circuit_breakers">{{ ctx.circuit_breakers if ctx.circuit_breakers is not none else "" }}</dd></div>
+      <div class="ctx-row"><dt>{{ t.ctx_cost }}</dt><dd class="ctx-value" data-context-field="cost_usd">{{ ctx_num(ctx.cost_usd) | trim }}</dd></div>
+      <div class="ctx-row"><dt>{{ t.ctx_followups }}</dt><dd class="ctx-value" data-context-field="followups">{{ ctx.followups if ctx.followups is not none else "" }}</dd></div>
+    </dl>
+  </aside>
+{% endmacro %}
 {# A bounded MOVING window over an entry collection (Aufgabe A): a plain
    server-rendered ?offset link reaches the previous / next bounded slice, so every
    entry is reachable without ever growing the DOM past the cap (a growing ?limit
@@ -191,6 +212,7 @@
     them in the language the server decided on. Fixed attributes on <body> — no
     per-entry markup, so the bounded entry-node budget is untouched. -#}
 <body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}"{% if focus_seq is not none %} data-focus="{{ focus_seq }}"{% endif %}
+      data-latest-context='{{ detail.latest_context | compact_context | tojson }}'
       data-hint-loading="{{ t.hint_loading }}"
       data-hint-payload-missing="{{ t.hint_payload_missing }}"
       data-hint-load-failed-expand="{{ t.hint_load_failed_expand }}"
@@ -226,7 +248,8 @@
                ?offset slides the window so every entry stays reachable. #}
             <ul class="trace-list">
               {% for row in tree_window.rows %}
-              <li class="node node-{{ row.node.status }}" data-seq="{{ row.node.seq }}" data-tree-entry style="--depth:{{ row.depth }}">
+              <li class="node node-{{ row.node.status }}" data-seq="{{ row.node.seq }}" data-tree-entry
+                  data-context='{{ row.node.context | compact_context | tojson }}' style="--depth:{{ row.depth }}">
                 {{ tree_row(row.node) }}
               </li>
               {% endfor %}
@@ -237,6 +260,10 @@
           <section class="panes">
             {% for node in pane_nodes %}{{ pane(node, tool_window) }}{% endfor %}
           </section>
+
+          {# The run-context panel sits beside the detail panes; it is fed by the
+             selected node's context (or latest_context when nothing is selected). #}
+          {{ context_panel(detail.latest_context) }}
         </div>
 
         <section class="problems">

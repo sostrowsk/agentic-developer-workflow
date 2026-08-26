@@ -9,6 +9,7 @@ exposes no write route. The read data layer (``reader``, ``model``, ``registry``
 is only consumed here, never modified.
 """
 
+import bisect
 import json
 import os
 import re
@@ -225,9 +226,29 @@ def _fmt_ts(ts) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _compact_context(ctx):
+    """A context dict for embedding as a data attribute with every null-valued key
+    DROPPED (recursively for ``round``). The client reads a missing key exactly as a
+    null one (empty display), and the compact form keeps the literal ``null`` out of
+    the rendered markup (the polish 'no None/null' rule). Serialised via ``tojson``
+    afterwards, so HTML/attribute escaping is unchanged."""
+    if not isinstance(ctx, dict):
+        return {}
+    out = {}
+    for k, v in ctx.items():
+        if v is None:
+            continue
+        if k == "round" and isinstance(v, dict):
+            out[k] = {rk: rv for rk, rv in v.items() if rv is not None}
+        else:
+            out[k] = v
+    return out
+
+
 _TEMPLATES.env.filters["fmt_duration"] = _fmt_duration
 _TEMPLATES.env.filters["fmt_cost"] = _fmt_cost
 _TEMPLATES.env.filters["fmt_ts"] = _fmt_ts
+_TEMPLATES.env.filters["compact_context"] = _compact_context
 
 # The seven workflow phases in order (contract PhaseStatus enum / GUI-SPEC §7.2).
 PHASES = ["spec", "plan", "build", "integration", "codex_review", "final_review", "ci"]
@@ -767,17 +788,20 @@ def _subtree_seq_range(node, own_ranges, children) -> tuple:
     return lo, hi
 
 
-def _serialize(node, tool_names=None, *, lane=None, own_ranges=None, snaps=None) -> dict:
+def _serialize(node, tool_names=None, *, lane=None, own_ranges=None, snaps=None,
+               context_at=None) -> dict:
     tool_names = tool_names or {}
     own_ranges = own_ranges or {}
     snaps = snaps or {}
+    context_at = context_at or (lambda _cutoff: _empty_context())
     if _is_span(node):
         payload = node.start_payload if node.start_payload is not None else node.end_payload
         node_lane = lane
         if node.type == "lane" and isinstance(payload, dict) and payload.get("name"):
             node_lane = payload["name"]
         children = [
-            _serialize(c, tool_names, lane=node_lane, own_ranges=own_ranges, snaps=snaps)
+            _serialize(c, tool_names, lane=node_lane, own_ranges=own_ranges, snaps=snaps,
+                       context_at=context_at)
             for c in node.children
         ]
         lo, hi = _subtree_seq_range(node, own_ranges, children)
@@ -800,6 +824,9 @@ def _serialize(node, tool_names=None, *, lane=None, own_ranges=None, snaps=None)
             # node is not bracketed (AC-B6: no Diff tab is offered then).
             "diff_from": diff_from,
             "diff_to": diff_to,
+            # Run state at this span's cutoff — its end_seq (subtree maximum), so a
+            # finished/running span includes qualifying events after its start (C1).
+            "context": context_at(hi),
             "children": children,
         }
         if node.type == "round" and isinstance(node.start_payload, dict):
@@ -822,6 +849,8 @@ def _serialize(node, tool_names=None, *, lane=None, own_ranges=None, snaps=None)
         "payload": node.payload,
         "diff_from": None,
         "diff_to": None,
+        # A point event's cutoff is its own seq (C1).
+        "context": context_at(node.seq),
         "children": [],
     }
 
@@ -901,6 +930,120 @@ def _events_cost(events):
             if isinstance(cost, (int, float)) and not isinstance(cost, bool):
                 total = (total or 0.0) + float(cost)
     return total
+
+
+# --- node-time run context (GUI-SPEC §7.2) -------------------------------------
+# A purely DERIVED, read-only projection of the SAME event stream the detail view
+# already loaded (no new reader/route/event/persistence): the run state AT the seq
+# of a node. A node's cutoff is its own seq (point) or its exposed end_seq (span,
+# the subtree maximum); only events with seq <= cutoff participate, so an earlier
+# node never sees a later event (time travel). Every absent datum is null, never a
+# fabricated 0 (E4): counts start at None and become a number only on the first
+# occurrence, and the cost reuses the single _events_cost rule over the cut list.
+
+_CONTEXT_FIELDS = (
+    "phase", "round", "limit_hits", "circuit_breakers", "cost_usd", "followups",
+)
+
+
+def _empty_context() -> dict:
+    """The six-field context with every field null — a run/section with nothing yet
+    observed (a run without a trace, or a cutoff before any relevant event)."""
+    return {k: None for k in _CONTEXT_FIELDS}
+
+
+def _phase_observation(e):
+    """The phase this event observes, or None. Exactly two existing sources count
+    (C3): a non-empty ``name`` in a ``phase`` span start, and a non-empty ``phase``
+    in a ``state.saved`` payload. Empty/absent values are not observations."""
+    payload = e.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    name = None
+    if e.get("type") == "phase" and e.get("kind") == "start":
+        name = payload.get("name")
+    elif e.get("type") == "state.saved":
+        name = payload.get("phase")
+    return name if isinstance(name, str) and name else None
+
+
+def _context_deriver(events, own_ranges):
+    """Return ``context_at(cutoff)`` deriving the six-field context at any seq. The
+    prefix scans are computed ONCE (sorted by the unique seq) so per-node lookups
+    stay cheap on a large tree; the round containment scans the (few) round spans."""
+    seq_events = sorted(
+        (e for e in events if isinstance(e.get("seq"), int)),
+        key=lambda e: e["seq"],
+    )
+    seqs = [e["seq"] for e in seq_events]
+    n = len(seq_events)
+    pre_limit = [0] * (n + 1)
+    pre_cb = [0] * (n + 1)
+    pre_fu = [0] * (n + 1)
+    pre_cost = [None] * (n + 1)
+    pre_phase = [None] * (n + 1)
+    cost = None
+    phase = None
+    for i, e in enumerate(seq_events, start=1):
+        t = e.get("type")
+        pre_limit[i] = pre_limit[i - 1] + (1 if t == "limit.hit" else 0)
+        pre_cb[i] = pre_cb[i - 1] + (1 if t == "circuit_breaker" else 0)
+        pre_fu[i] = pre_fu[i - 1] + (1 if t == "followup" else 0)
+        if t == "agent.run" and e.get("kind") == "end":
+            c = (e.get("payload") or {}).get("cost_usd")
+            if isinstance(c, (int, float)) and not isinstance(c, bool):
+                cost = (cost or 0.0) + float(c)
+        pre_cost[i] = cost
+        obs = _phase_observation(e)
+        if obs is not None:
+            phase = obs
+        pre_phase[i] = phase
+
+    rounds = []  # (lo, hi, {loop, n, cap}) for each recorded round span
+    for e in seq_events:
+        if e.get("type") == "round" and e.get("kind") == "start":
+            rng = own_ranges.get(e.get("span"))
+            if not rng:
+                continue
+            lo, hi = rng
+            if lo is None or hi is None:
+                continue
+            p = e.get("payload") if isinstance(e.get("payload"), dict) else {}
+            rounds.append(
+                (lo, hi, {"loop": p.get("loop"), "n": p.get("n"), "cap": p.get("cap")})
+            )
+
+    def context_at(cutoff) -> dict:
+        if not isinstance(cutoff, int):
+            return _empty_context()
+        i = bisect.bisect_right(seqs, cutoff)
+        # The innermost enclosing round is the latest-starting one still containing
+        # the cutoff; its start and end events count as contained (C4).
+        rnd = None
+        best_lo = None
+        for lo, hi, payload in rounds:
+            if lo <= cutoff <= hi and (best_lo is None or lo > best_lo):
+                best_lo, rnd = lo, payload
+        cost = pre_cost[i]
+        return {
+            "phase": pre_phase[i],
+            "round": rnd,
+            "limit_hits": pre_limit[i] or None,
+            "circuit_breakers": pre_cb[i] or None,
+            # The same _events_cost sum, rounded for display so no raw float noise
+            # leaks into the rendered attribute (the polish formatting rule).
+            "cost_usd": round(cost, 6) if cost is not None else None,
+            "followups": pre_fu[i] or None,
+        }
+
+    return context_at
+
+
+def _latest_cutoff(events):
+    """The greatest observed seq — the cutoff for ``latest_context`` — or None when
+    the run has no events (then the context is all null)."""
+    seqs = [e.get("seq") for e in events if isinstance(e.get("seq"), int)]
+    return max(seqs) if seqs else None
 
 
 # The event types whose spans are pure WAITING (time passes without work): CI
@@ -1116,13 +1259,19 @@ def _run_detail(
     tool_names = _tool_names_by_use_id(events)
     own_ranges = _span_seq_ranges(events)
     snaps = _snapshots_by_lane(events, run_id)
+    # The node-time run context is a pure projection of THESE already-loaded events
+    # (no new reader/route/event): every node carries its own context, and the
+    # top-level `latest_context` is the no-selection (live) view at the greatest seq.
+    context_at = _context_deriver(events, own_ranges)
     return {
         "run": _summary(ref.slug, run_id, events, state),
         "phases": _phase_bar(events, state.phase if state is not None else None),
         "tree": [
-            _serialize(n, tool_names, own_ranges=own_ranges, snaps=snaps)
+            _serialize(n, tool_names, own_ranges=own_ranges, snaps=snaps,
+                       context_at=context_at)
             for n in build_tree(events)
         ],
+        "latest_context": context_at(_latest_cutoff(events)),
         "problems": [asdict(p) for p in problems],
         "raw": _raw_view(events, limit, q=raw_q, type_filter=raw_type),
     }

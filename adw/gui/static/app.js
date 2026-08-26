@@ -95,6 +95,11 @@
   // that was outside it (e.g. a Timeline bar target) and renders both its tree
   // entry and its pane; the client then opens on exactly that node.
   var selectedSeq = body.getAttribute("data-focus") || null;
+  // Whether the user has explicitly chosen a node: only then does the context panel
+  // follow the selection. Absent an explicit choice the panel shows latest_context
+  // (the live / no-selection view, GUI-SPEC §7.2), even though the detail pane
+  // auto-opens the first node. A ?focus navigation is itself an explicit choice.
+  var contextPinned = !!body.getAttribute("data-focus");
 
   // Aufgabe B (latest-interaction-wins): a monotonically increasing generation
   // token captured when a selection starts. A selection's asynchronous work — the
@@ -102,6 +107,54 @@
   // generation is still the current one, so a superseded selection's late fetch
   // never writes the wrong node into the pane and never produces a measure.
   var selectionGen = 0;
+
+  // --- read-only run-context panel (GUI-SPEC §7.2): the six-field run state at the
+  // selected node's seq. The data travels in the render — each node carries its own
+  // `data-context`, the no-selection fallback is the body's `data-latest-context` —
+  // so this only PROJECTS the chosen node's context onto the fixed field list (no
+  // client-side re-derivation). A null field is shown empty, never as 0. Round is a
+  // {loop, n, cap} object; every other field is a scalar.
+  var CONTEXT_FIELDS = ["phase", "round", "limit_hits", "circuit_breakers", "cost_usd", "followups"];
+
+  function parseContext(raw) {
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
+
+  function formatContextValue(field, value) {
+    if (value === null || value === undefined) return "";
+    if (field === "round") {
+      if (typeof value !== "object") return "";
+      var loop = (value.loop === null || value.loop === undefined) ? "" : value.loop + " ";
+      var n = (value.n === null || value.n === undefined) ? "" : value.n;
+      var cap = (value.cap === null || value.cap === undefined) ? "" : value.cap;
+      return (n === "" && cap === "") ? loop.trim() : (loop + n + "/" + cap).trim();
+    }
+    if (field === "cost_usd" && typeof value === "number") {
+      return "" + (Math.round(value * 1e6) / 1e6);  // trim float noise, keep the value
+    }
+    return "" + value;
+  }
+
+  // The context to display for the current selection: the selected node's own
+  // `data-context`, or `data-latest-context` (live / no selection).
+  function contextForSelection() {
+    if (contextPinned && selectedSeq) {
+      var node = document.querySelector('.node[data-seq="' + selectedSeq + '"][data-context]');
+      var ctx = node && parseContext(node.getAttribute("data-context"));
+      if (ctx) return ctx;
+    }
+    return parseContext(body.getAttribute("data-latest-context"));
+  }
+
+  function updateContextPanel() {
+    var ctx = contextForSelection();
+    CONTEXT_FIELDS.forEach(function (field) {
+      var slot = document.querySelector('[data-context-field="' + field + '"]');
+      if (!slot) return;
+      slot.textContent = ctx ? formatContextValue(field, ctx[field]) : "";
+    });
+  }
 
   function applySelection() {
     var haveSelected =
@@ -162,6 +215,9 @@
     } else {
       selectedSeq = node.getAttribute("data-seq");
     }
+    // The chosen node now drives the read-only context panel (time travel).
+    contextPinned = true;
+    updateContextPanel();
     // Complete the measure only after the (possibly fetched) detail pane content is
     // rendered — applySelection returns the tool-body load promise when the
     // selected node lazy-loads its payload (C1) — and only if this selection is
@@ -472,10 +528,12 @@
     // (Aufgabe B / P1): a fetch whose node is no longer selected writes nothing.
     ++selectionGen;
     applySelection();
+    updateContextPanel();  // re-project the context onto the swapped-in panel
   }
 
   ++selectionGen;
   applySelection(); // initial: select the root node's pane
+  updateContextPanel(); // initial: latest_context (no explicit selection yet)
 
   function refresh() {
     if (inFlight) { repeat = true; return; }

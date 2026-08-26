@@ -81,11 +81,23 @@ tr.missing-repo { color: var(--muted); opacity: 0.55; font-style: italic; }
 
 main.detail { display: block; }
 /* Trace view: the two-column trace tree | detail panes layout. */
-.trace-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+/* Trace tree · detail panes · read-only run-context panel (§7.2). The context
+   panel is a narrow field list beside the panes; it shrinks first on narrow
+   viewports (minmax) but never below a legible width. */
+.trace-layout { display: grid; grid-template-columns: 1fr 1.4fr minmax(9rem, 0.7fr); gap: 1rem; }
 /* Aufgabe F: grid/flex children need a shrink limit (min-width: 0), otherwise a
    wide descendant (a long prompt line, tool output, a table) forces the whole
    column — and the page — to grow horizontally. */
-.trace-layout > section { min-width: 0; }
+.trace-layout > section, .trace-layout > .run-context { min-width: 0; }
+
+/* The read-only run-context panel: a plain field list, no chart (E5). Null fields
+   render empty, never a fabricated 0. */
+.run-context { border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; align-self: start; }
+.run-context h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+.run-context .ctx-list { margin: 0; }
+.run-context .ctx-row { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.15rem 0; }
+.run-context dt { color: var(--muted); font-size: 0.85rem; }
+.run-context dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
 .tabs, .tabs .tab, .pane, .panes { min-width: 0; }
 /* Aufgabe A: the windowed-tree overflow pointer to the paging affordance. */
 .node-more { color: var(--muted); font-style: italic; list-style: none; }

@@ -13,6 +13,27 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Kontext-Panel „Lauf-Zustand" im Run-Inspector.** Neben dem Run-Detail-Pane
+  zeigt eine read-only Feldliste den Lauf-Zustand **zum Stand des ausgewählten
+  Knotens** — `phase`, die umgebende `round` (`{loop, n, cap}`), die Anzahl bis
+  hier getroffener `limit.hit`- und `circuit_breaker`-Ereignisse, die kumulierten
+  `cost_usd` und die Anzahl der `followup`-Einträge — sodass sichtbar wird, *warum*
+  ein Knoten so ausging, ohne den Baum hoch- und runterzuklicken oder in den
+  Raw-Reiter zu wechseln. Rein abgeleitet aus den Events, die die Detail-Antwort
+  ohnehin lädt: `GET /api/runs/{repo}/{run_id}` liefert jetzt pro Trace-Knoten ein
+  sechsfeldriges `context` und auf oberster Ebene ein `latest_context`. Der Cutoff
+  eines Knotens ist seine eigene `seq` (Punkt) bzw. sein `end_seq` (Span, das
+  Subtree-Maximum); es zählen nur Ereignisse bis einschließlich Cutoff, sodass die
+  Knotenauswahl eine Zeitreise ist. Ohne Auswahl zeigt das Panel `latest_context`
+  (die Live-Ansicht). Jeder fehlende Wert bleibt leer — `null`, nie ein erfundenes
+  `0` — und ein Lauf ohne Trace liefert nur ein `latest_context` mit sechs
+  `null`-Feldern, niemals einen Fehler. Kein neues Event, kein neuer Reader, keine
+  neue Route, keine Persistenz, keine Laufzeit-Dependency, keine SSE-Änderung;
+  `state.saved` bleibt unverändert.
+
 ## [0.10.0] — 2026-08-26
 
 ### Hinzugefügt

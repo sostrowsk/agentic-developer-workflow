@@ -427,6 +427,41 @@ sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werd
    - **Raw**: das Event-Log als filterbare JSON-Liste — der Fallback, der immer
      funktioniert, auch für Event-Typen, die die GUI noch nicht kennt.
 
+5. **Kontext-Panel „Lauf-Zustand"** (neben dem Detail-Pane): eine read-only
+   Feldliste, die den Lauf-Zustand **zum Stand des ausgewählten Knotens** zeigt —
+   sie beantwortet, *warum* ein Knoten so ausging, ohne den Baum hoch- und
+   runterzuklicken oder in den Raw-Reiter zu wechseln. Rein abgeleitet aus dem
+   Event-Strom, den die Detail-Antwort ohnehin lädt (kein neues Event, kein neuer
+   Reader, keine neue Route, keine Persistenz, keine Änderung am State-Schema);
+   jeder Knoten trägt seinen sechsfeldrigen Kontext im Render mit, die Auswahl
+   projiziert ihn nur — keine clientseitige Neu-Ableitung. Die sechs festen Felder:
+   `phase`, `round` (`{loop, n, cap}` der umgebenden Schleife, falls vorhanden),
+   `limit_hits`, `circuit_breakers`, `cost_usd` (kumuliert, über die bestehende
+   Kostenlogik) und `followups`.
+   - **Cutoff / Zeitreise**: der Cutoff eines Knotens ist seine eigene `seq`
+     (Punkt-Ereignis) bzw. sein exponiertes `end_seq` (Span — das Subtree-Maximum,
+     sodass ein abgeschlossener/laufender Span passende Ereignisse *innerhalb* nach
+     seinem Start einschließt). Es zählen nur Ereignisse mit `seq ≤ Cutoff`, daher
+     spiegelt ein früherer Knoten nie ein späteres Ereignis. Die Auswahl eines
+     anderen Knotens zeigt dessen historischen Zustand.
+   - **Ohne Auswahl / live**: ohne Knotenauswahl zeigt das Panel `latest_context`,
+     abgeleitet bis zur höchsten beobachteten `seq` — die Live-Ansicht. Sie
+     aktualisiert sich über die bestehenden Mechanismen; das SSE-Protokoll bleibt
+     unverändert.
+   - **Leer-Semantik**: jeder fehlende Wert bleibt **leer** — `null`, nie ein
+     erfundenes `0`. Zähl- und Kostenfelder sind bis zum ersten Vorkommen `null`;
+     eine Phase ohne gültige Beobachtung und ein Knoten außerhalb jeder Runde sind
+     `null`. Ein Lauf ohne Trace hat keinen Knoten-Kontext und kein top-level
+     `context`-Feld — nur ein `latest_context` mit sechs `null`-Feldern — und
+     niemals einen Fehler.
+   - `phase` stammt aus genau zwei bestehenden Quellen — einem nichtleeren `name`
+     eines `phase`-Span-Starts und einem nichtleeren `phase` eines
+     `state.saved`-Payloads — wobei die gültige Beobachtung mit der höchsten `seq`
+     bis einschließlich Cutoff gewinnt (`state.saved` wird nur gemäß seinem
+     bestehenden `{seq, phase}`-Payload gelesen, nie erweitert). Das Panel ist eine
+     einfache Feldliste — kein Diagramm, keine Verlaufskurve — ohne konfigurierbares
+     Feld-Set und ohne Persistenz der Auswahl.
+
 ### 7.3 Live-Update
 
 - `GET /api/runs/{repo}/{run_id}/stream` — SSE. Der Server tailt `events.jsonl`

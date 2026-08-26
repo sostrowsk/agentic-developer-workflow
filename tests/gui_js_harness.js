@@ -605,6 +605,61 @@ async function runArtifact() {
   return { ok: true, afterDispatch, afterResponse, afterRaf, afterTimer };
 }
 
+// The read-only run-context panel (node-time run state). The panel is a fixed
+// six-field list keyed by [data-context-field]; the six-field context of every
+// node travels in the render as the node's `data-context` (JSON), and the
+// no-selection fallback is the body's `data-latest-context` (JSON). Selecting a
+// node must project THAT node's context onto the panel fields (time travel);
+// a null field renders empty (never "0"). The panel starts unpopulated so the
+// scenario proves the CLIENT projection, not a server pre-render.
+function contextPanelDom() {
+  var latest = { phase: "ci", round: null, limit_hits: 3, circuit_breakers: 1,
+    cost_usd: 1.5, followups: 2 };
+  var ctxA = { phase: "build", round: { loop: "gates", n: 2, cap: 5 },
+    limit_hits: 1, circuit_breakers: null, cost_usd: 0.4, followups: null };
+  var ctxB = { phase: "plan", round: null, limit_hits: null,
+    circuit_breakers: null, cost_usd: null, followups: null };
+  var body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111",
+    "data-latest-context": JSON.stringify(latest) } });
+  var nodeA = el("div", { classes: ["node"],
+    attrs: { "data-seq": "10", "data-context": JSON.stringify(ctxA) } });
+  var nodeB = el("div", { classes: ["node"],
+    attrs: { "data-seq": "20", "data-context": JSON.stringify(ctxB) } });
+  var trace = el("div", { classes: ["trace"], children: [nodeA, nodeB] });
+  var paneA = el("div", { classes: ["pane"], attrs: { "data-seq": "10" } });
+  var paneB = el("div", { classes: ["pane"], attrs: { "data-seq": "20" } });
+  var panes = el("div", { classes: ["panes"], children: [paneA, paneB] });
+  var fields = ["phase", "round", "limit_hits", "circuit_breakers", "cost_usd", "followups"]
+    .map(function (f) {
+      return el("span", { classes: ["ctx-value"], attrs: { "data-context-field": f } });
+    });
+  var panel = el("aside", { classes: ["run-context"], children: fields });
+  body.append(trace, panes, panel);
+  return { body: body, nodeA: nodeA, nodeB: nodeB };
+}
+
+async function runContextPanel() {
+  var dom = contextPanelDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+
+  function readPanel() {
+    var out = {};
+    ["phase", "limit_hits", "circuit_breakers", "cost_usd", "followups"].forEach(function (f) {
+      var e = document.querySelector('[data-context-field="' + f + '"]');
+      out[f] = e ? e.textContent : null;
+    });
+    return out;
+  }
+
+  dispatch("click", { target: dom.nodeA }); await settle();
+  var afterA = readPanel();
+  dispatch("click", { target: dom.nodeB }); await settle();  // time travel to B
+  var afterB = readPanel();
+
+  return { ok: true, afterA: afterA, afterB: afterB };
+}
+
 // ---------------------------------------------------------------------------
 const APP = process.argv[2];
 const SCENARIO = process.argv[3];
@@ -620,6 +675,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "openstate-swap") result = await runOpenStateSwap();
   else if (SCENARIO === "refresh-window") result = await runRefreshWindow(ARG || "");
   else if (SCENARIO === "timeline-focus") result = await runTimelineFocus();
+  else if (SCENARIO === "context-panel") result = await runContextPanel();
   else if (SCENARIO === "artifact") result = await runArtifact();
   else throw new Error("unknown scenario: " + SCENARIO);
   process.stdout.write(JSON.stringify(result));

@@ -12,6 +12,25 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Added
+- **Run-context panel in the Run Inspector.** Beside the run-detail pane a
+  read-only field list shows the run state **at the seq of the selected node** —
+  `phase`, the enclosing `round` (`{loop, n, cap}`), the number of `limit.hit` and
+  `circuit_breaker` events so far, the cumulative `cost_usd` and the number of
+  `followup` entries — so you can see *why* a node went the way it did without
+  clicking up and down the tree or switching to Raw. It is a purely derived
+  projection of the events the detail response already loads: `GET /api/runs/{repo}/{run_id}`
+  now carries a six-field `context` on every trace node and a top-level
+  `latest_context`. A node's cutoff is its own `seq` (point) or its `end_seq`
+  (span, the subtree maximum), and only events at or before the cutoff count, so
+  selecting a node is time travel; with nothing selected the panel shows
+  `latest_context` (the live view). Every absent datum is empty — `null`, never a
+  fabricated `0` — and a run without a trace yields only a `latest_context` with
+  all six fields null, never an error. No new event, reader, route, persistence,
+  runtime dependency or SSE change; `state.saved` is unchanged.
+
 ## [0.10.0] — 2026-08-26
 
 ### Added
