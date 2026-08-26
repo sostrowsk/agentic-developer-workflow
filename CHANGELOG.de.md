@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [Unreleased]
+## [0.15.0] — 2026-08-26
 
 ### Hinzugefügt
 - **Änderungsumfang eines Laufs im Run Inspector.** Das Run-Detail zeigt jetzt
@@ -515,6 +515,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.15.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.11.0...v0.12.0
