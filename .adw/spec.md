@@ -1,237 +1,153 @@
-# Spec: Eskalation als Recovery-Karte am verursachenden Knoten
+# Spezifikation: Plan-Skelett im Trace-Baum — was noch kommt, nicht nur was war
 
-## Ziel (Goal)
+## Ziel
+Ist für einen Lauf `plan.md` vorhanden, zeigt das Run-Detail je Workstream ein
+read-only **Skelett** der geplanten Aufgaben — die Liste der `###`-Überschriften
+unter dem jeweiligen `## Workstream: <name>`-Abschnitt. So liegen im Run-Detail
+„geleistet" (Trace-Baum) und „geplant" (Skelett) in einer Ansicht. Der Status ist
+grob auf Lane-Ebene: `pending`, solange die Lane läuft oder noch nicht gestartet
+ist; `done`, sobald die Lane abgeschlossen ist. Fehlt oder passt `plan.md` nicht,
+entfällt das Skelett ersatzlos, ohne jede Änderung am bisherigen Verhalten.
 
-Braucht ein Lauf menschliches Eingreifen, führt das Run-Detail den Nutzer von
-der bloßen Zustandsanzeige zum konkreten nächsten Schritt: eine Recovery-Karte
-nennt genau EIN passendes nächstes Kommando als kopierbaren, shell-sicheren
-Text — mit echtem Repo-Pfad aus der Registry und echter `run_id`. Im
-Eskalationsfall ist die Karte am `escalation`-Knoten verankert und zeigt
-zusätzlich Grund, betroffene Phase und die unmittelbar vorausgehenden
-Abbruch-Ereignisse (`limit.hit`/`circuit_breaker`). Damit entfällt das
-Zusammensuchen von Kommando und Repo-Pfad aus dem Handbuch. Die Karte ist eine
-rein abgeleitete Projektion des bereits geladenen Zustands (`state.phase`, die
-bestehende Status-Ableitung des Run-Spans, Event-Strom, aufgelöste `RepoRef`);
-kein neues Event, kein neuer Reader, keine neue Route, keine Persistenz. Der
-ausführliche Bericht bleibt `escalation.md` im bestehenden Artifacts-Tab. Die
-GUI bleibt strikt read-only: Kommandos werden ANGEZEIGT, niemals ausgeführt.
+## Umfang (Scope)
+- Ableitung des Skeletts aus dem für den Lauf vorhandenen `plan.md`, gelesen
+  ausschließlich über den bestehenden whitelist-basierten Artefakt-Pfad.
+- Ein neues, additives Skelett-Feld in der Antwort von
+  `GET /api/runs/{repo}/{run_id}` (Contract: Single-Lane `backend`).
+- Anzeige der Aufgabenliste je Lane neben bzw. über dem Trace-Baum derselben Lane
+  im Run-Detail; Zuordnung Workstream → Lane über den gleichen Namen.
+- Grober Lane-Status (`pending`/`done`) je Aufgabenliste.
+- Doku: `docs/GUI-SPEC.md`/`docs/GUI-SPEC.de.md` (§7.2) und
+  `CHANGELOG.md`/`CHANGELOG.de.md` (`Unreleased`).
 
-Lebenszyklus-Grundlage (im Code geprüft): `escalate()` setzt `state.phase`
-final auf `escalated` und emittiert erst dann das `escalation`-Event mit der
-Ursprungs-Phase. Ein Lauf mit `escalation`-Event ist also IMMER endgültig
-eskaliert; Approval-Pausen (`state.phase` = `awaiting_*`) und
-Abbrüche/Crashes (Arbeitsphase bleibt erhalten, z. B. `AgentRunError` in
-`adw/cli.py`) erzeugen KEIN `escalation`-Event. Die Karte triggert deshalb auf
-den Handlungsbedarf des Laufs (`state.phase` + bestehende Status-Ableitung),
-nicht auf das `escalation`-Event; das Event liefert im Eskalationsfall Anker
-und Kontext.
+### Bindende Randbedingungen
+- **Parser mit genau zwei Regeln** (E3): Abschnittsbeginn ist eine Zeile
+  `## Workstream: <name>`, Abschnittsende die nächste `##`-Überschrift (oder das
+  Dateiende); Aufgabe ist jede `###`-Zeile innerhalb des Abschnitts. Kein Muster
+  für Kennungen (`B1`, `1.`, `A.1`, `Aufgabe A` …), kein Markdown-Parser, keine
+  neue Dependency.
+- **Artefakt-Pfad** (E4): `plan.md` wird über den bestehenden, whitelist-basierten
+  Artefakt-Pfad gelesen (`_resolve_artifact`): kein neuer Dateizugriff, keine neue
+  Route, keine Pfadkonstruktion aus URL-Bestandteilen.
+- **Read-only** (E5): reine Anzeige, kein Abhaken, keine Bearbeitung, keine neue
+  Persistenz; es werden weder Artefakte noch Events noch Run-State erzeugt oder
+  verändert.
+- Keine Änderung an Orchestrator, Event-Schema oder Instrumentierung (E2).
 
-## Scope
+## Nicht-Ziele
+- **Keine Zuordnung einzelner Trace-Knoten, Agent-Läufe, Runden oder Gates zu
+  einzelnen Plan-Aufgaben** (E1). Es gibt im Log kein Aufgaben-Feld; jede
+  Zuordnung wäre geraten. Status ausschließlich `pending`/`done` auf Lane-Ebene,
+  keine Zwischenzustände je Einzelaufgabe.
+- Keine Zerlegung des Überschriftentextes in Kennung und Titel.
+- Keine Fortschrittsprozente, kein Fortschrittsbalken, keine Restzeitschätzung,
+  kein Gantt.
+- Kein neues Tab, kein neuer Persistenz-Zustand.
+- Keine Änderung an Timeline/Artifacts/Raw/Diff/SSE.
+- Keine Änderung am Trace-Baum, seiner Knotenstruktur oder den übrigen Feldern
+  der Detail-Antwort.
 
-- Single-Lane: `backend`.
-- Genau eine Recovery-Karte pro Run-Detail (E5), wenn der Lauf menschliches
-  Eingreifen braucht:
-  - endgültig eskaliert (`state.phase` = `escalated`) → verankert am Knoten
-    des letzten `escalation`-Ereignisses, mit Grund (`reason`), betroffener
-    Phase (`phase` aus dem Event = Ursprungs-Phase) und den zu dieser
-    Eskalation gehörenden `limit.hit`/`circuit_breaker`-Ereignissen; KEIN
-    Fortsetzungskommando, sondern der klare Hinweis, dass ein NEUER Lauf
-    nötig ist. (A1, A2)
-  - pausiert am Approval-Gate (`state.phase` = `awaiting_spec_approval` oder
-    `awaiting_approval`) → Karte mit `adw approve`-Kommando. (A2)
-  - abgebrochen/gecrasht (Arbeitsphase, aber laut bestehender
-    Status-Ableitung nicht mehr `running`) → Karte mit `adw resume`-Kommando.
-    (A2)
-- Kommandotext als kopierbarer, POSIX-shell-sicherer Klartext mit echtem
-  Repo-Pfad aus der Registry (`RepoRef.path`, `_resolve_repos`) und echter
-  `run_id`. (A2)
-- Verlinkung auf `escalation.md` im Artifacts-Tab statt Duplikat seines
-  Inhalts (Eskalationsfall). (A3)
-- Neue, rein abgeleitete Recovery-Felder in der Antwort von
-  `GET /api/runs/{repo}/{run_id}` (Contract-Fläche): Kommando-Kind nach der
-  Auswahlregel, fertiger Kommandotext (bzw. dessen Abwesenheit plus
-  Neu-Lauf-Kennzeichen), im Eskalationsfall Grund, betroffene Phase, die
-  zugehörigen `limit.hit`/`circuit_breaker`-Ereignisse und der Verweis auf
-  `escalation.md`. (Contract)
-- Labels beidsprachig in `adw/gui/i18n.py`; die Kommandozeile selbst wird
-  nicht übersetzt. (A4)
-- Doku: `docs/GUI-SPEC.md` + `docs/GUI-SPEC.de.md` (§7.2) sowie
-  `CHANGELOG.md` + `CHANGELOG.de.md` (`Unreleased`).
+## Akzeptanzkriterien
 
-## Non-Goals / Scope-Deckel
+### AC1 — Parser: Abschnitte und Aufgaben (A1, E3)
+Aus `plan.md` wird das Skelett nach genau zwei Regeln abgeleitet:
+- Ein Workstream-Abschnitt beginnt bei einer Zeile `## Workstream: <name>` und
+  endet bei der nächsten `##`-Überschrift (oder am Dateiende). `<name>` ist der
+  Text nach `## Workstream: `.
+- Aufgabe ist jede `###`-Zeile innerhalb des Abschnitts. Der Aufgabentext ist der
+  Überschriftentext unverändert (führende `###`-Markierung entfernt, sonst
+  wortgetreu; keine Zerlegung in Kennung und Titel).
 
-- Keine Ausführung, kein Subprozess, kein „Retry“-Button, kein Schreibpfad in
-  State, Run-Artefakte oder Repo. Kommandos werden nur angezeigt. Die GUI
-  bleibt read-only (GUI-SPEC §2, „Control from the GUI“). (E1)
-- Keine Zwischenablage-Integration; „kopierbar“ bedeutet auswählbarer,
-  vollständig sichtbarer Text.
-- Der Repo-Pfad erscheint ausschließlich im Text der Karte, nie in einer URL;
-  die Slug-Regel aus §7.4 bleibt unangetastet. (E2)
-- Keine Heuristik über den Eskalationsgrund, keine Vorschlagsliste mehrerer
-  Kommandos, keine Fehlerklassifikation, keine Ursachen- oder
-  Behebungsvorschläge. (E3)
-- Keine neue Prozess-/Liveness-Erkennung: ob ein Lauf noch läuft, entscheidet
-  ausschließlich die bestehende Status-Ableitung des Run-Detail (offener
-  Run-Span = `running`). Ein Crash, den diese Ableitung nicht erkennt, zeigt
-  auch keine Karte — bewusst kein neuer Mechanismus.
-- Keine Änderung an `escalate()` in `adw/phases.py`, am `escalation`-Event, an
-  `limit.hit`/`circuit_breaker` oder am Format von `escalation.md`. (E4)
-- Höchstens eine Karte pro Lauf; keine Historie mehrerer Eskalationen. (E5)
-- Keine Cross-Run-Statistik über Eskalationsgründe, kein neuer persistenter
-  Zustand, kein neues Event, kein neuer Reader, keine neue Route.
-- Interne Helper-Signaturen sowie konkretes Markup/CSS sind nicht Teil des
-  externen Vertrags.
+Die über die Läufe hinweg uneinheitlichen Formen werden nicht gefiltert:
+`### B1 — …`, `### 1. …`, `### A.1 — …`, `### Aufgabe A — …` und
+`### Aufgabe B1 — …` ergeben jeweils genau eine Aufgabe mit dem vollständigen
+Überschriftentext. `###`-Zeilen außerhalb jedes `## Workstream:`-Abschnitts
+zählen nicht; `###`-Zeilen nach der abschließenden `##`-Überschrift werden dem
+Workstream nicht mehr zugerechnet.
 
-## Akzeptanzkriterien (Acceptance Criteria)
+### AC2 — Skelett-Feld in der Detail-Antwort (A2, Contract)
+Die Antwort von `GET /api/runs/{repo}/{run_id}` trägt zusätzlich ein additives
+Top-Level-Feld `plan_skeleton`: eine geordnete Liste, ein Eintrag je
+Workstream-Abschnitt mit mindestens einer Aufgabe, in der Reihenfolge des
+`plan.md`. Jeder Eintrag enthält:
+- `workstream`: der Name aus `## Workstream: <name>`;
+- `status`: `pending` oder `done` (Lane-Ebene, AC4);
+- `tasks`: die Aufgabentexte in Dokumentreihenfolge, wortgetreu.
 
-1. Die Antwort von `GET /api/runs/{repo}/{run_id}` trägt genau dann genau
-   eine Recovery-Struktur, wenn der Lauf menschliches Eingreifen braucht,
-   bestimmt aus `state.phase` und der bestehenden Status-Ableitung:
-   - `state.phase` = `escalated` → Kommando-Kind `none` (neuer Lauf nötig).
-   - `state.phase` = `awaiting_spec_approval` oder `awaiting_approval` →
-     Kommando-Kind `approve`.
-   - `state.phase` ist eine Arbeitsphase (`spec`, `plan`, `build`,
-     `integration`, `codex_review`, `final_review`, `ci`) UND der abgeleitete
-     Run-Status ist nicht `running` → Kommando-Kind `resume`
-     (abgebrochen/gecrasht).
-   - `state.phase` = `done`, Arbeitsphase mit Status `running`, oder kein
-     ladbarer State → keine Recovery-Struktur (kein leeres Objekt erzwungen).
-   Jeder Zweig hat einen realen Erzeuger im heutigen Lebenszyklus:
-   `escalate()` → `none`; Approval-Pause (Exit 2) → `approve`; transienter
-   Agent-Abbruch (Arbeitsphase bleibt, Run-Span endet nicht `done`) bzw.
-   Crash mit geschlossenem Span → `resume`. Der Rest der Antwort behält seine
-   bisherige Semantik. (A2, E3; Review-P1)
+Ein Workstream-Abschnitt ohne `###`-Aufgabe erzeugt keinen Eintrag. Das Feld ist
+ausschließlich additiv; die bestehenden Felder der Antwort und die Knoten des
+Trace-Baums (Hierarchie, Reihenfolge, Status, Payloads) bleiben unverändert.
 
-2. Die Auswahl folgt ausschließlich der Regel aus AC 1, ausgewertet auf
-   `state.phase` — NICHT auf dem `phase`-Feld des `escalation`-Events, das
-   stets die Ursprungs-Phase trägt und nie `escalated` sein kann. Der
-   Eskalationsgrund, `limit.hit` und `circuit_breaker` beeinflussen die
-   Auswahl nicht; es gibt nie mehrere Kommandovorschläge. Für einen
-   `escalated`-Lauf wird niemals `adw resume` oder `adw approve`
-   vorgeschlagen — konsistent damit, dass `adw resume` einen eskalierten Lauf
-   selbst verweigert und auf einen neuen Lauf verweist. (A2, E3)
+### AC3 — Anzeige neben dem Trace (A2)
+Im Run-Detail steht die Skelett-Aufgabenliste je Lane neben bzw. über dem
+Trace-Baum derselben Lane (Zuordnung über den gleichen Namen, aktuell `backend`),
+so dass „geleistet" (Trace) und „geplant" (Skelett) ohne Tab-Wechsel in einer
+Ansicht liegen. Die Anzeige darf nicht an einen existierenden Lane-Knoten im
+Trace gebunden sein: Hat die Lane noch keinen Trace-Knoten erzeugt (Lane noch
+nicht gestartet), wird das zugehörige Skelett trotzdem sichtbar dargestellt
+(`pending`, AC4) — ohne dafür einen leeren oder künstlichen Trace-Knoten zu
+erzeugen. Der Trace-Baum selbst und seine Knotenstruktur bleiben unverändert.
 
-3. Ergibt die Regel `approve` oder `resume`, enthält die Recovery-Struktur
-   den fertigen, kopierbaren Kommandotext in der bestehenden CLI-Signatur —
-   `adw approve <run_id> --repo <pfad>` bzw. `adw resume <run_id> --repo
-   <pfad>` — mit der echten `run_id` des Laufs und dem echten, serverseitig
-   aufgelösten Repo-Pfad aus der Registry (`RepoRef.path`), nicht dem Slug.
-   Ergibt die Regel `none`, enthält die Struktur keinen Kommandotext, sondern
-   das maschinenlesbare Kennzeichen, dass ein neuer Lauf nötig ist. (A2, E2)
+### AC4 — Grober Status auf Lane-Ebene (A3, E1)
+Jede Aufgabenliste trägt genau einen Status auf Lane-Ebene:
+- `done`, sobald die zum Workstream gehörende Lane (die `lane`-Span, deren Name
+  dem Workstream-Namen gleicht) mit einem `lane`-Ende und `completed: true`
+  abgeschlossen ist; die Liste gilt dann als abgearbeitet und wird entsprechend
+  dargestellt.
+- Sonst `pending` — auch bei einem `lane`-Ende ohne `completed: true`
+  (einschließlich `completed: false` oder fehlendem Wert) und wenn die Lane noch
+  nicht gestartet ist.
 
-4. Der Kommandotext ist POSIX-shell-sicher: `run_id` und Repo-Pfad werden
-   deterministisch nach `shlex.quote`-Semantik dargestellt (Werte ohne
-   Sonderzeichen unverändert; andernfalls einfach gequotet, eingebettete
-   einfache Anführungszeichen als `'\''`). Beim Parsen durch eine
-   POSIX-Shell ergibt der angezeigte Text exakt die intendierten Argumente —
-   der Pfad bleibt EIN `--repo`-Argument, auch mit Leerzeichen, einfachen
-   Anführungszeichen oder Shell-Metazeichen — und führt zu keinem
-   zusätzlichen Kommando. Die Kommandozeile wird unabhängig von der
-   GUI-Sprache nicht übersetzt. (A2, A4; Review-P2)
+Kein Status je Einzelaufgabe, kein Status je Trace-Knoten, keine geratene
+Aufgabe↔Knoten-Zuordnung.
 
-5. Im Eskalationsfall (Kind `none`) nennt die Recovery-Struktur den Grund
-   (`reason`) und die betroffene Phase (`phase`) unverändert aus dem Payload
-   des `escalation`-Ereignisses mit der größten `seq` (E5). Es wird nichts
-   umgeschrieben, klassifiziert oder interpretiert. (A1, E3, E4)
+### AC5 — Robustheit / Fallback (A4)
+Fehlt `plan.md`, ist es leer oder unlesbar, oder enthält es keinen
+`## Workstream:`-Abschnitt mit mindestens einer `###`-Aufgabe, so entfällt das
+Skelett ersatzlos: `plan_skeleton` ist in der Antwort abwesend (keine leere Liste
+erzwungen), es entsteht kein Fehler und kein leerer Kasten, und die übrige
+Detail-Antwort sowie die bisherige Run-Detail-Ansicht bleiben unverändert. Ein
+`plan.md`, das über den Artefakt-Pfad als abwesend gilt (nicht vorhanden oder ein
+aus der Run-Verzeichnisgrenze ausbrechender Symlink), zählt hier als fehlend.
 
-6. Im Eskalationsfall führt die Recovery-Struktur die zu dieser Eskalation
-   gehörenden `limit.hit`- und `circuit_breaker`-Ereignisse desselben Laufs
-   auf: genau die mit `seq` kleiner als die des maßgeblichen
-   `escalation`-Ereignisses und größer als die `seq` eines etwaigen
-   vorherigen `escalation`-Ereignisses (die unmittelbar vorausgehenden). Ihre
-   Payloads (`{limit, value, cap}` bzw. `{keys, scope}`) werden unverändert
-   übernommen. Gibt es keine solchen Ereignisse, ist die Liste leer. (A1, E4)
+### AC6 — Contract-Fläche (Contract-Hinweis)
+Extern beobachtbar zugesagt sind ausschließlich: (a) die Gestalt des
+`plan_skeleton`-Felds in der Antwort von `GET /api/runs/{repo}/{run_id}` (AC2),
+(b) die beiden Parse-Regeln aus AC1 als beobachtbare Zusage und (c) das
+Fallback-Verhalten aus AC5 bei fehlendem/unpassendem `plan.md`. Single-Lane
+(`backend`). Interne Helper-Signaturen und Markup/CSS sind nicht Teil des
+Contracts; kein weiteres Endpoint, Tab oder Feld ändert sich.
 
-7. Fehlende oder unerwartete Daten — ein eskalierter Lauf ohne Event-Log,
-   fehlende oder untypische Payload-Felder von `escalation`, `limit.hit`
-   oder `circuit_breaker` — verursachen weder einen 5xx-Fehler noch erfundene
-   Ersatzwerte; die übrigen verwertbaren Recovery-Daten (insbesondere
-   Kommando-Kind und Neu-Lauf-Hinweis) bleiben sichtbar. (A1; bestehender
-   Event-Log als Backstop)
-
-8. Der Repo-Pfad erscheint ausschließlich im Kommandotext der
-   Recovery-Struktur bzw. -Karte. Keine bestehende oder neue URL/Route trägt
-   den realen Pfad; die Slug-Regel aus §7.4 bleibt unverändert. (E2)
-
-9. Im Eskalationsfall verweist die Recovery-Struktur auf `escalation.md` als
-   Artefakt des Artifacts-Tabs (Verweis/Kennung, kein eingebetteter Inhalt);
-   der Inhalt wird nicht dupliziert. Fehlt das Artefakt wider Erwarten,
-   bleibt das bestehende „fehlend“-Verhalten des Artifacts-Tabs maßgeblich
-   und das Run-Detail bleibt nutzbar. (A3, E4)
-
-10. Das Run-Detail rendert genau eine Recovery-Karte: im Eskalationsfall
-    verankert am Knoten des letzten `escalation`-Ereignisses, mit Grund,
-    betroffener Phase, den zugehörigen Abbruch-Ereignissen, dem
-    Neu-Lauf-Hinweis und dem Link auf `escalation.md`; im `approve`-/
-    `resume`-Fall (es existiert kein `escalation`-Knoten) auf Run-Ebene des
-    Detail-Panes, mit `state.phase` und dem Kommandotext. Ohne
-    Recovery-Struktur erscheint keine Karte. Übrige Detail-Pane-Bereiche
-    behalten ihr bisheriges Verhalten. (A1, A2, A3, E5)
-
-11. Die GUI führt kein Kommando aus: die Recovery-Funktion löst keinen
-    Subprozess aus und schreibt weder in State noch in Run-Artefakte noch in
-    das Repo. Der Kommandotext ist reine Anzeige. Diese Zusage ist Teil der
-    beobachtbaren Vertragsfläche. (E1)
-
-12. Alle Labels der Recovery-Karte sind beidsprachig in `adw/gui/i18n.py`
-    hinterlegt (EN/DE); die Kommandozeile selbst sowie Eventwerte, `run_id`
-    und Repo-Pfad werden nicht übersetzt. (A4)
-
-13. `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md` dokumentieren in §7.2 die
-    Recovery-Karte: die Trigger- und Auswahlregel aus AC 1/2 (inkl. der
-    Lebenszyklus-Begründung, dass ein `escalation`-Event immer endgültige
-    Eskalation bedeutet), die Shell-Quoting-Zusage aus AC 4, Verankerung und
-    Felder des Eskalationsfalls, den read-only-Charakter (nur Anzeige,
-    echter Pfad nur im Text) und den Verweis auf `escalation.md`.
-    `CHANGELOG.md` und `CHANGELOG.de.md` führen die Änderung unter
-    `Unreleased`. (Doku)
-
-## Deferred (bewusst nicht gebaut)
-
-Nachvollziehbar, aber für die Ausgangslage unverhältnismäßig. KEINE
-Akzeptanzkriterien — und bindend auch für den Review-/Codex-/Fix-Zyklus: was
-hier steht, wird dort nicht nachgebaut.
-
-- Geführter Recovery-Assistent (Schritt-für-Schritt statt einzeiligem
-  Kommando).
-- Eskalationsgrund-Taxonomie / Klassifikation von Abbruchgründen.
-- Verlinkung ähnlicher früherer Läufe oder Cross-Run-Statistik über
-  Eskalationsgründe.
-- Historie und Vergleich mehrerer Eskalationen desselben Laufs.
-- Neue Prozess-/Liveness-Erkennung für Crash-Läufe jenseits der bestehenden
-  Status-Ableitung (PID-Prüfung, Heartbeats, Timeouts).
-- Ausführung/„Retry“ aus der GUI, Zwischenablage-Integration, Vorschlagsliste
-  mehrerer Kommandos, automatische Validierung der angezeigten Kommandos.
-- Zusätzliche Recovery-Persistenz, Recovery-Events oder serverseitig
-  gespeicherte Handlungsempfehlungen.
+### AC7 — Read-only (E5)
+Das Skelett ist reine Anzeige: kein Abhaken, keine Bearbeitung, keine neue
+Schreibroute, keine neue Persistenz. `plan.md` wird über den bestehenden,
+whitelist-basierten Artefakt-Pfad gelesen; es entsteht kein neuer
+Dateizugriffspfad, und URL-Bestandteile werden nicht als Dateipfad verwendet.
 
 ## Definition of Done
+- Alle Gates grün: `uv run ruff check .` und `uv run pytest -x -q`.
+- AC1–AC7 durch Tests unter `tests/` (`test_gui_*.py`) abgedeckt, darunter
+  mindestens ein Test, der die uneinheitlichen Überschriftenformen belegt
+  (`### B1 — …` und `### 1. …` ergeben je eine Aufgabe mit unverändertem Text),
+  und mindestens ein Test für einen Lauf mit gültigem `backend`-Workstream in
+  `plan.md`, aber ohne jedes `backend`-Lane-Event: die `pending`-Aufgabenliste
+  ist sichtbar, ohne dass ein leerer oder künstlicher Trace-Knoten entsteht
+  (AC3). Richtwert: ~16 neue Tests (Bestand 953); mehr als ~26 ist Scope-Drift.
+- Keine neue Laufzeit-Dependency (kein Markdown-Paket), kein CDN.
+- Doku aktualisiert: `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md` (§7.2 —
+  Anzeige, Parse-Muster, API-Feld, Fallback) sowie `CHANGELOG.md` und
+  `CHANGELOG.de.md` (Abschnitt `Unreleased`).
 
-- Alle Akzeptanzkriterien erfüllt und durch Tests unter `tests/` als
-  `test_gui_*.py` abgedeckt; die Tests decken mindestens ab: alle vier
-  Presence-Zweige aus AC 1 mit je einer real erzeugbaren Zustandslage
-  (eskaliert → `none`; `awaiting_*` → `approve`; Arbeitsphase mit
-  nicht-`running`-Status → `resume`; `done`/`running` → keine Struktur);
-  unveränderte Übernahme von `reason` und `phase` aus dem letzten
-  `escalation`-Event; Zuordnung der `limit.hit`/`circuit_breaker`-Ereignisse
-  zur maßgeblichen Eskalation (inkl. Abgrenzung gegen eine frühere Eskalation
-  und leerer Liste); Robustheit bei fehlendem Event-Log bzw. fehlenden
-  Payload-Feldern (kein 5xx); exakter Kommandotext mit echter `run_id` und
-  echtem Registry-Pfad; Shell-Quoting für Pfade mit Leerzeichen, einfachem
-  Anführungszeichen und Shell-Metazeichen (parametrisierbar; der Text parst
-  als EIN `--repo`-Argument ohne Zusatzkommando); kein realer Pfad in einer
-  URL; Verweis auf `escalation.md` ohne Inhaltsduplikat; EN/DE-Labels bei
-  unveränderter Kommandozeile. Clientseitiges Rendern der Karte wird, soweit
-  erforderlich, mit dem vorhandenen Plain-Node-Harness
-  `tests/gui_js_harness.js` + `tests/gui_js_harness.py` geprüft.
-- Richtwert ~10 neue Tests (Bestand: 953); mehr als ~16 gilt als Scope-Drift
-  (Quoting-Fälle als EIN parametrisierter Test zählen einfach).
-- Gates grün: `uv run ruff check .` und `uv run pytest -x -q`.
-- Keine Änderung an `escalate()`, am `escalation`-Event, an
-  `limit.hit`/`circuit_breaker` oder am Format von `escalation.md` (E4);
-  keine neue Route, kein neues Event, keine Persistenz, keine neue
-  Liveness-Erkennung, keine Kommandoausführung.
-- GUI führt kein Kommando aus (E1); Repo-Pfad nur im Kartentext, nie in einer
-  URL (E2).
-- Doku aktualisiert: `docs/GUI-SPEC.md`/`docs/GUI-SPEC.de.md` (§7.2) und
-  `CHANGELOG.md`/`CHANGELOG.de.md` (`Unreleased`).
+## Deferred (bewusst nicht gebaut)
+Die folgenden Ideen sind defensibel, aber für diese Aufgabe unverhältnismäßig.
+Sie gehören nicht in die Akzeptanzkriterien und werden **auch im
+Codex-/Fix-Zyklus nicht nachgebaut**:
+- Eine Aufgaben-ID im `lane`-/`round`-/`agent.run`-Event mitschreiben, um echten
+  Aufgabenfortschritt (Status je Einzelaufgabe statt grob je Lane) zu zeigen —
+  das verlangte eine Änderung an Instrumentierung/Event-Schema (E2).
+- Zuordnung einzelner Trace-Knoten zu einzelnen Plan-Aufgaben (E1).
+- Plan-Skelett schon vor dem Build aus dem Spec-Gate ableiten.
+- Fortschrittsbalken, Prozentanzeige, Restzeitschätzung, Gantt.
+- Persistierte oder interaktiv veränderbare Aufgabenstände.
+- Ein Muster für Aufgaben-Kennungen (`B1`, `1.`, `A.1`, `Aufgabe A` …) oder ein
+  echter Markdown-Parser.

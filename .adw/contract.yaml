@@ -1,35 +1,39 @@
 # Interface contract — Single-Lane project (`backend`).
 #
-# This delta contract pins ONLY the externally observable additions to the
-# existing run-detail surface:
-#   1. One additive, purely DERIVED `recovery` object on the JSON response of
-#      GET /api/runs/{repo}/{run_id}. It is present EXACTLY when the run needs
-#      human intervention (per the selection rule), and ABSENT otherwise — never
-#      an empty object is forced. It projects the already-loaded run state
-#      (`state.phase`), the existing run-status derivation, the event stream and
-#      the server-resolved repository path; no new event, route, or persistence.
-#   2. The observable rendering / read-only behavior on the run-detail page:
-#      exactly one recovery card, its anchoring, the shell-safe command text, and
-#      the promise that no command is ever executed.
+# This delta contract pins ONLY the externally observable additions for the
+# "plan skeleton in the trace" feature:
+#   1. One additive, purely DERIVED `plan_skeleton` array on the JSON response of
+#      GET /api/runs/{repo}/{run_id}. It is PRESENT exactly when the run's
+#      `plan.md` yields at least one `## Workstream:` section with at least one
+#      `###` task, and ABSENT otherwise — an empty list is never forced. It is a
+#      pure projection of the run's `plan.md` — which the implementation MAY
+#      newly read while constructing the run detail, but only through the
+#      existing whitelist- and boundary-enforced artifact resolution (no new
+#      route, no new filesystem-access mechanism) — and of the already-loaded
+#      event stream (for the coarse lane status); no new event, no new
+#      persistence.
+#   2. The two observable PARSE RULES that derive the skeleton from `plan.md`.
+#   3. The observable FALLBACK behavior when `plan.md` is missing/empty/unreadable
+#      or carries no matching section.
 #
-# It does NOT pin internal helper signatures, internal dictionary keys, internal
-# module layout, unchanged response fields, concrete markup, or CSS. No route or
-# event is added or removed. The `escalation` event, `limit.hit`,
-# `circuit_breaker` and the format of `escalation.md` are unchanged (E4). The
-# events route GET /api/runs/{repo}/{run_id}/events is not touched and therefore
-# not represented here (see x-behavior.unchanged_surfaces).
+# It does NOT pin internal helper signatures, internal dictionary keys of other
+# fields, internal module layout, unchanged response fields, concrete markup, or
+# CSS. No route or event is added or removed. The recovery projection, the
+# artifacts route, the events route GET /api/runs/{repo}/{run_id}/events, the SSE
+# surface, Timeline, Artifacts and the snapshot Diff tab are unchanged.
 
 openapi: 3.1.0
 info:
-  title: ADW Run Inspector — recovery card at the causing node (delta only)
-  version: 1.1.0
+  title: ADW Run Inspector — plan skeleton in the trace (delta only)
+  version: 1.2.0
 
 paths:
   /api/runs/{repo}/{run_id}:
     get:
       summary: >
         Existing run-detail route — unchanged except one additive derived
-        `recovery` object, present only when the run needs human intervention.
+        `plan_skeleton` array, present only when `plan.md` yields a matching
+        section with at least one task.
       parameters:
         - name: repo
           in: path
@@ -45,15 +49,17 @@ paths:
       responses:
         "200":
           description: >
-            Existing run-detail object. It carries a `recovery` object exactly
-            when the run needs human intervention (P1_presence); otherwise the
-            key is absent. Missing or untypical event/payload data never yields a
-            5xx and never invents substitute values (P7_robust). All other
-            response fields keep their current shape and meaning.
+            Existing run-detail object. It carries a `plan_skeleton` array exactly
+            when the run's `plan.md` yields at least one `## Workstream:` section
+            with at least one `###` task (S1_presence); otherwise the key is
+            absent — an empty list is never forced (S4_fallback). A missing,
+            empty, unreadable or boundary-escaping `plan.md` never yields a 5xx and
+            never invents values. All other response fields keep their current
+            shape and meaning.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunDetailRecoveryAddition"
+                $ref: "#/components/schemas/RunDetailPlanSkeletonAddition"
 
   /runs/{repo}/{run_id}:
     get:
@@ -73,346 +79,174 @@ paths:
       responses:
         "200":
           description: >
-            Existing HTML run-detail page. It renders AT MOST one recovery card,
-            following the `recovery` object (P10_render): in the escalation case
-            anchored at the node of the governing `escalation` event with reason,
-            affected phase, the associated abort events, the new-run hint and the
-            link to `escalation.md`; in the approve/resume case at run level with
-            `state.phase` and the command text. No recovery object → no card. The
-            card never executes anything (P11_readonly); the real repo path
-            appears only in the card's command text, never in a URL (P8_no_path).
-            Markup and CSS are not part of the contract.
+            Existing HTML run-detail page. When `plan_skeleton` is present it
+            renders, per workstream, a READ-ONLY task list beside/above the trace
+            of the lane with the same name (S5_render), with a coarse
+            pending/done marker. The list is NOT bound to an existing lane trace
+            node: a not-yet-started lane still shows its `pending` skeleton without
+            creating an empty or artificial trace node. No `plan_skeleton` → no
+            list. The trace tree, its node structure and the other detail areas
+            keep their behavior. Task texts are content and are not translated;
+            markup and CSS are not part of the contract.
           content:
             text/html: {}
 
 components:
   schemas:
-    RecoveryAbortEvent:
+    PlanSkeletonEntry:
       type: object
       additionalProperties: true
       required:
-        - type
-        - payload
+        - workstream
+        - status
+        - tasks
       description: >
-        One `limit.hit` or `circuit_breaker` event associated with the governing
-        escalation (P6_aborts). Its `payload` is carried VERBATIM — never
-        rewritten, classified or interpreted (E3/E4).
+        One workstream section of `plan.md` that has at least one `###` task,
+        derived by the two parse rules of S2_parse. A section without a `###`
+        task produces no entry.
       properties:
-        type:
-          type: string
-          enum: [limit.hit, circuit_breaker]
-        seq:
-          type: integer
-        payload:
-          type: object
-          additionalProperties: true
-          description: >
-            The event payload unchanged — `{limit, value, cap}` for `limit.hit`,
-            `{keys, scope}` for `circuit_breaker`. Untypical/missing fields are
-            passed through as-is, never filled with invented values (P7_robust).
-
-    Recovery:
-      description: >
-        The derived recovery projection — exactly one of three variants, selected
-        by `kind` per the rule of P1_presence/P2_selection evaluated on
-        `state.phase` (never on the `escalation` event's `phase`). The variant
-        shapes are structurally enforced: `approve`/`resume` MUST carry the
-        finished, shell-safe `command`; `none` carries no command but the
-        machine-readable new-run flag plus the escalation context.
-      oneOf:
-        - $ref: "#/components/schemas/ApproveRecovery"
-        - $ref: "#/components/schemas/ResumeRecovery"
-        - $ref: "#/components/schemas/EscalatedRecovery"
-      discriminator:
-        propertyName: kind
-        mapping:
-          approve: "#/components/schemas/ApproveRecovery"
-          resume: "#/components/schemas/ResumeRecovery"
-          none: "#/components/schemas/EscalatedRecovery"
-
-    ApproveRecovery:
-      type: object
-      additionalProperties: true
-      required:
-        - kind
-        - needs_new_run
-        - command
-      description: >
-        Run paused at an approval gate
-        (`awaiting_spec_approval`/`awaiting_approval`).
-      properties:
-        kind:
-          type: string
-          const: approve
-        needs_new_run:
-          type: boolean
-          const: false
-        command:
+        workstream:
           type: string
           description: >
-            The finished, copyable command in the existing CLI signature —
-            `adw approve <run_id> --repo <path>` — with the run's real `run_id`
-            and the real, server-resolved repository path from the registry, NOT
-            the slug. Both values are rendered POSIX-shell-safely per
-            `shlex.quote` semantics (P4_shell_safe). The command line is not
-            translated.
-
-    ResumeRecovery:
-      type: object
-      additionalProperties: true
-      required:
-        - kind
-        - needs_new_run
-        - command
-      description: >
-        Run aborted/crashed in a work phase (derived run-status not `running`).
-      properties:
-        kind:
+            The `<name>` verbatim from the `## Workstream: <name>` line — the text
+            after the exact prefix `## Workstream: ` (S2_parse). In this
+            single-lane project this is `backend`; the field is not constrained to
+            that value.
+        status:
           type: string
-          const: resume
-        needs_new_run:
-          type: boolean
-          const: false
-        command:
-          type: string
+          enum: [pending, done]
           description: >
-            The finished, copyable command in the existing CLI signature —
-            `adw resume <run_id> --repo <path>` — with the run's real `run_id`
-            and the real, server-resolved repository path from the registry, NOT
-            the slug. Both values are rendered POSIX-shell-safely per
-            `shlex.quote` semantics (P4_shell_safe). The command line is not
-            translated.
-
-    EscalatedRecovery:
-      type: object
-      additionalProperties: true
-      required:
-        - kind
-        - needs_new_run
-        - command
-        - anchor_seq
-        - reason
-        - phase
-        - aborts
-        - escalation_artifact
-      description: >
-        Run finally escalated (`state.phase == escalated`) — a NEW run is
-        required, no continuation command is offered. The escalation-context
-        fields are required; where the event log lacks usable data they are
-        `null` (or an empty list), never invented (P7_robust).
-      properties:
-        kind:
-          type: string
-          const: none
-        needs_new_run:
-          type: boolean
-          const: true
-        command:
-          type: "null"
-          description: >
-            Always `null` — no continuation command exists for a finally
-            escalated run (P3_new_run_flag).
-        anchor_seq:
-          type:
-            - integer
-            - "null"
-          description: >
-            The integer `seq` of the governing `escalation` event (the one with
-            the greatest `seq`, E5) at whose node the card is anchored
-            (P10_render). `null` when the escalated run carries no usable
-            `escalation` event (missing event log, P7_robust); the card then
-            falls back to run level, never hidden.
-        reason:
-          type:
-            - string
-            - "null"
-          description: >
-            The `reason` verbatim from the payload of the governing `escalation`
-            event (P5). Unchanged, unclassified. `null` when the payload lacks a
-            usable reason (P7_robust).
-        phase:
-          type:
-            - string
-            - "null"
-          description: >
-            The affected/origin `phase` verbatim from the governing `escalation`
-            event's payload (P5) — NOT `state.phase`, and never `escalated`.
-            `null` when absent (P7_robust).
-        aborts:
+            The coarse LANE-LEVEL status (S3_status). `done` exactly when the
+            `lane` span whose name equals `workstream` has a `lane` end with
+            `completed: true`; otherwise `pending` — including a `lane` end
+            without `completed: true` (`false` or missing) and a not-yet-started
+            lane. There is no per-task and no per-node status.
+        tasks:
           type: array
+          minItems: 1
           description: >
-            The `limit.hit`/`circuit_breaker` events of THIS run that belong to
-            the governing escalation — those with `seq` less than the governing
-            `escalation` event's `seq` and greater than the `seq` of any prior
-            `escalation` event (the immediately preceding ones, P6), listed in
-            event order. An empty list when there are none.
+            The task texts in document order (S2_parse). Each is the text after
+            the exact `### ` prefix — the marker and exactly one separator space
+            removed, otherwise VERBATIM: no split into identifier and title, no
+            further trimming, no filtering of the heterogeneous forms
+            (`### B1 — …`, `### 1. …`, `### A.1 — …`, `### Aufgabe A — …`,
+            `### Aufgabe B1 — …`).
           items:
-            $ref: "#/components/schemas/RecoveryAbortEvent"
-        escalation_artifact:
-          type: string
-          description: >
-            A reference/identifier of the `escalation.md` artifact in the
-            existing Artifacts tab (P9) — NOT its embedded content and no
-            assertion that the file exists. If the artifact is unexpectedly
-            absent, the Artifacts tab's existing "missing" behavior stays
-            authoritative and the run detail stays usable.
+            type: string
 
-    RunDetailRecoveryAddition:
+    RunDetailPlanSkeletonAddition:
       type: object
       additionalProperties: true
       description: >
-        Existing run-detail object. This schema pins only the additive `recovery`
-        projection; every other property (`run`, `phases`, `tree`,
-        `latest_context`, `problems`, `raw`) keeps its current shape and meaning.
-        The `recovery` key is present EXACTLY when the run needs human
-        intervention (P1_presence) and ABSENT otherwise — never an empty object.
+        Existing run-detail object. This schema pins only the additive
+        `plan_skeleton` projection; every other property (`run`, `phases`,
+        `tree`, `latest_context`, `problems`, `raw`, and the existing optional
+        `recovery`) keeps its current shape and meaning. The `plan_skeleton` key
+        is present EXACTLY when `plan.md` yields at least one matching section
+        with a task (S1_presence) and ABSENT otherwise — never an empty list.
       properties:
-        recovery:
-          $ref: "#/components/schemas/Recovery"
+        plan_skeleton:
+          type: array
+          minItems: 1
+          description: >
+            One entry per `## Workstream:` section with at least one `###` task,
+            in `plan.md` document order.
+          items:
+            $ref: "#/components/schemas/PlanSkeletonEntry"
       examples:
-        - recovery:
-            kind: none
-            needs_new_run: true
-            command: null
-            anchor_seq: 128
-            reason: "Lane backend: Gate-Fix-Iteration hat nichts verändert — Circuit-Breaker."
-            phase: build
-            aborts:
-              - type: circuit_breaker
-                seq: 127
-                payload:
-                  keys: ["ruff|1|…"]
-                  scope: "lane:backend"
-            escalation_artifact: escalation.md
-        - recovery:
-            kind: resume
-            needs_new_run: false
-            command: "adw resume 20260826-abcd1234 --repo '/home/me/proj dir'"
+        - plan_skeleton:
+            - workstream: backend
+              status: pending
+              tasks:
+                - "B1 — Parser: Skelett aus plan.md"
+                - "1. Additives Feld in der Detail-Antwort"
+        - plan_skeleton:
+            - workstream: backend
+              status: done
+              tasks:
+                - "Aufgabe A — Anzeige neben dem Trace"
 
 x-behavior:
-  P1_presence:
-    surface: "GET /api/runs/{repo}/{run_id} — derived recovery projection"
+  S1_presence:
+    surface: "GET /api/runs/{repo}/{run_id} — derived plan_skeleton projection"
     rule: >
-      The response carries a `recovery` object EXACTLY when the run needs human
-      intervention, decided from `state.phase` and the existing run-status
-      derivation of the run detail (open run span == running):
-        - `state.phase == escalated`               → kind `none` (new run needed).
-        - `state.phase` in {awaiting_spec_approval,
-          awaiting_approval}                        → kind `approve`.
-        - `state.phase` is a work phase (spec, plan, build, integration,
-          codex_review, final_review, ci) AND the derived run-status is NOT
-          `running`                                 → kind `resume`.
-        - `state.phase == done`, a work phase with status `running`, or no
-          loadable state                            → NO recovery object (the key
-          is absent; an empty object is never forced).
-      The `escalated` check strictly precedes all other branches. Each branch has
-      a real producer in today's lifecycle: final escalation → `none`; an
-      approval pause → `approve`; a transient agent abort / crash with a
-      non-`running` derived status in a work phase → `resume`. The rest of the
-      response keeps its semantics.
+      The response carries a `plan_skeleton` array EXACTLY when the run's
+      `plan.md` — read only through the existing whitelist artifact path — yields
+      at least one `## Workstream: <name>` section containing at least one `###`
+      task. The array is ordered by `plan.md` document order, one entry per such
+      section. A section with no `###` task contributes no entry. When no such
+      section exists the key is ABSENT; an empty list is never forced. All other
+      response fields keep their semantics; this addition is purely additive.
 
-  P2_selection:
+  S2_parse:
     rule: >
-      The selection follows the P1 rule ONLY, evaluated on `state.phase` — never
-      on the `escalation` event's `phase` field (which is always the origin phase
-      and can never be `escalated`). The escalation reason, `limit.hit` and
-      `circuit_breaker` do not influence the selection; there is never more than
-      one command proposal. For an `escalated` run neither `adw resume` nor
-      `adw approve` is ever proposed — consistent with `adw resume` itself
-      refusing an escalated run and pointing to a new run.
+      The skeleton is derived by EXACTLY TWO rules, observable as a promise (no
+      Markdown parser, no new dependency, no identifier pattern):
+        (1) A workstream section starts at a line `## Workstream: <name>` and ends
+            at the next `##` heading (any line starting with `##` that is not
+            `###`) or at end of file. `<name>` is the text after the exact prefix
+            `## Workstream: `.
+        (2) A task line is every line within that section that starts with the
+            exact prefix `### ` (the `###` marker followed by one space). The
+            task text is the text after that prefix, VERBATIM — the marker and
+            exactly one separator space are removed, nothing else; no split into
+            identifier and title, no further trimming. A line that is exactly
+            `###` with no following text yields no task. The heterogeneous forms
+            (`### B1 — …`, `### 1. …`, `### A.1 — …`, `### Aufgabe A — …`,
+            `### Aufgabe B1 — …`) are NOT filtered; each yields exactly one task
+            with its full heading text.
+      `###` lines outside any `## Workstream:` section, and `###` lines after the
+      closing `##` heading, do not count.
 
-  P3_new_run_flag:
+  S3_status:
     rule: >
-      When the rule yields `none`, `recovery.command` is `null` and
-      `recovery.needs_new_run` is `true` — the machine-readable signal that a new
-      run is required. When it yields `approve`/`resume`, `needs_new_run` is
-      `false` and `command` is the finished command text (P4_shell_safe). These
-      combinations are structurally enforced by the schema variants; no other
-      combination is schema-valid.
+      Each entry carries exactly one coarse LANE-LEVEL status. `done` when the
+      `lane` span whose name equals the entry's `workstream` has a `lane` end with
+      `completed: true`; otherwise `pending` — including a `lane` end without
+      `completed: true` (`false` or missing) and a lane that has not started
+      (no lane node). There is no per-task status, no per-trace-node status, and
+      no guessed task-to-node mapping (E1). The status is derived from the run's
+      already-loaded event stream; no new event or reader.
 
-  P4_shell_safe:
+  S4_fallback:
     rule: >
-      For `approve`/`resume`, `command` is the finished, copyable text in the
-      existing CLI signature — `adw approve <run_id> --repo <path>` resp.
-      `adw resume <run_id> --repo <path>` — with the real `run_id` and the real,
-      server-resolved repository path from the registry, not the slug. `run_id`
-      and path are rendered deterministically per `shlex.quote` semantics (values
-      without special characters unchanged; otherwise single-quoted, embedded
-      single quotes as `'\''`). Parsed by a POSIX shell, the text yields exactly
-      the intended arguments — the path stays ONE `--repo` argument even with
-      spaces, single quotes or shell metacharacters — and produces no extra
-      command. The command line is not translated, independent of GUI language.
+      A `plan.md` that is missing, empty, unreadable, or absent per the artifact
+      path (not present, or a symlink escaping the run-directory boundary), or
+      that contains no `## Workstream:` section with at least one `###` task,
+      yields NO skeleton: `plan_skeleton` is absent (not an empty list), no error
+      and no 5xx, no empty box, and the rest of the detail response and the
+      existing run-detail view are unchanged.
 
-  P5_escalation_context:
-    rule: >
-      In the escalation case (`none`), `recovery.reason` and `recovery.phase` are
-      taken VERBATIM from the payload of the `escalation` event with the greatest
-      `seq` (E5). Nothing is rewritten, classified or interpreted. `phase` is the
-      origin phase from the event, never `state.phase`.
-
-  P6_aborts:
-    rule: >
-      In the escalation case, `recovery.aborts` lists the `limit.hit` and
-      `circuit_breaker` events of the SAME run belonging to this escalation:
-      exactly those with `seq` less than the governing `escalation` event's `seq`
-      and greater than the `seq` of any earlier `escalation` event (the
-      immediately preceding aborts), in event order. Their payloads
-      (`{limit, value, cap}` resp. `{keys, scope}`) are carried unchanged. When
-      there are none, the list is empty.
-
-  P7_robust:
-    rule: >
-      Missing or unexpected data — an escalated run without an event log, missing
-      or untypical payload fields of `escalation`, `limit.hit` or
-      `circuit_breaker` — yields neither a 5xx nor invented substitute values; the
-      remaining usable recovery data (in particular `kind` and `needs_new_run`)
-      stays visible. The existing event log is the backstop.
-
-  P8_no_path:
-    rule: >
-      The real repo path appears ONLY in `recovery.command` (and thus the card's
-      command text). No existing or new URL/route carries the real path; the slug
-      rule of §7.4 is unchanged.
-
-  P9_artifact_link:
-    rule: >
-      In the escalation case, `recovery.escalation_artifact` references
-      `escalation.md` as an artifact of the Artifacts tab (reference/identifier,
-      no embedded content, no assertion that the file exists); the content is not
-      duplicated. If the artifact is unexpectedly missing, the Artifacts tab's
-      existing "missing" behavior stays authoritative and the run detail stays
-      usable.
-
-  P10_render:
+  S5_render:
     surface: "GET /runs/{repo}/{run_id} (HTML run detail)"
     rule: >
-      The run detail renders EXACTLY one recovery card: in the escalation case
-      anchored at the node of the governing `escalation` event (`anchor_seq`),
-      with reason, affected phase, the associated abort events, the new-run hint
-      and the link to `escalation.md`; in the `approve`/`resume` case (no
-      `escalation` node exists) at run level of the detail pane, with
-      `state.phase` and the command text. If, despite an escalated state, no
-      anchorable `escalation` node exists (`anchor_seq == null`, missing event
-      log), the still-usable card is rendered at run level — never hidden and
-      never duplicated. Without a `recovery` object no card appears. The other
-      detail-pane areas keep their behavior. All card labels are available in
-      both English and German, following the GUI language; the command line,
-      event values, `run_id` and repo path are not translated.
+      When `plan_skeleton` is present the run detail renders, per entry, a
+      read-only task list beside/above the trace of the lane with the same name
+      (mapping workstream → lane by equal name, currently `backend`), so that
+      "done" (trace) and "planned" (skeleton) sit in one view without a tab
+      switch, with a coarse pending/done marker (S3_status). The list is NOT bound
+      to an existing lane trace node: a lane with no trace node yet still shows its
+      `pending` skeleton, WITHOUT creating an empty or artificial trace node. No
+      `plan_skeleton` → no list; no empty box. The trace tree and its node
+      structure are unchanged. Chrome labels follow the GUI language; the task
+      texts are content and are not translated. Markup and CSS are not part of the
+      contract.
 
-  P11_readonly:
+  S6_readonly:
     rule: >
-      The GUI executes no command: rendering the recovery data spawns no
-      subprocess and writes neither to state nor run artifacts nor the repo. The
-      command text is pure display. This promise is part of the observable
-      contract surface (E1).
+      The skeleton is pure display: no checking off, no editing, no write route,
+      no new persistence. `plan.md` is read only through the existing whitelist-
+      and boundary-enforced artifact access behavior — no new route, no new
+      filesystem-access mechanism, and URL segments are never used as a
+      filesystem path. Deriving and rendering the skeleton mutates nothing:
+      neither state nor run artifacts nor events are created or changed (E5).
 
   unchanged_surfaces:
     rule: >
-      The `escalation` event, `limit.hit`, `circuit_breaker` and the format of
-      `escalation.md` are unchanged (E4). No route or event is added or removed;
-      the events route GET /api/runs/{repo}/{run_id}/events, the SSE surface,
-      Timeline, Artifacts and the snapshot Diff tab keep their content and
-      behavior. No new persistence is introduced, and run liveness stays decided
-      by the existing observable status derivation (a crash it does not recognise
-      shows no card). Internal helper signatures, internal module layout and
-      concrete markup/CSS are not part of this contract.
+      No route or event is added or removed. The recovery projection, the
+      artifacts route and its whitelist, the events route
+      GET /api/runs/{repo}/{run_id}/events, the SSE surface, Timeline, Artifacts
+      and the snapshot Diff tab keep their content and behavior. The orchestrator,
+      event schema and instrumentation are unchanged (E2); no per-task
+      instrumentation is added. Internal helper signatures, internal module layout
+      and concrete markup/CSS are not part of this contract.
