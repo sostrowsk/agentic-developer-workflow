@@ -288,20 +288,22 @@
     </div>
   </header>
 
-  {#- Recovery card placement: an escalation card (kind `none`) is anchored at the
-      governing escalation tree node inside the Trace tab (below). It is rendered
-      here at RUN LEVEL only as a fallback — for `approve`/`resume` (no escalation
-      node exists) and for an escalated run whose anchor node is not in the current
-      trace window (or has no usable anchor at all). `anchor_in_window` decides. -#}
-  {% set rc_ns = namespace(anchor_in_window=false) %}
-  {% if detail.recovery is defined and detail.recovery.kind == 'none' and detail.recovery.anchor_seq is not none %}
-    {% for row in tree_window.rows %}{% if row.node.seq == detail.recovery.anchor_seq %}{% set rc_ns.anchor_in_window = true %}{% endif %}{% endfor %}
-  {% endif %}
-  {% if detail.recovery is defined and not (detail.recovery.kind == 'none' and rc_ns.anchor_in_window) %}
-  {{ recovery_card() }}
-  {% endif %}
-
   <main class="detail">
+    {#- Recovery card placement: an escalation card (kind `none`) is anchored at the
+        governing escalation tree node inside the Trace tab (below). It is rendered
+        here at RUN LEVEL only as a fallback — for `approve`/`resume` (no escalation
+        node exists) and for an escalated run whose anchor node is not in the current
+        trace window (or has no usable anchor at all). `anchor_in_window` decides.
+        The card lives INSIDE `main.detail` — a live-refresh region (REGIONS in
+        app.js) — so an SSE-driven swap adds it when a run enters an approval gate /
+        becomes resumable and removes it again when the run moves on. -#}
+    {% set rc_ns = namespace(anchor_in_window=false) %}
+    {% if detail.recovery is defined and detail.recovery.kind == 'none' and detail.recovery.anchor_seq is not none %}
+      {% for row in tree_window.rows %}{% if row.node.seq == detail.recovery.anchor_seq %}{% set rc_ns.anchor_in_window = true %}{% endif %}{% endfor %}
+    {% endif %}
+    {% if detail.recovery is defined and not (detail.recovery.kind == 'none' and rc_ns.anchor_in_window) %}
+    {{ recovery_card() }}
+    {% endif %}
     {# An active Raw seq range means the user jumped here from a span node, so the
        Raw tab opens active instead of Trace (R5) — a plain server-render choice,
        no second Raw widget. #}

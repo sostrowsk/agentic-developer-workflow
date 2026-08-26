@@ -771,6 +771,62 @@ async function runRecoveryLink() {
   };
 }
 
+function recoveryLiveMain(withCard, kind) {
+  // A `main.detail` region (a live-refresh REGION) with a dummy node/pane so the
+  // initial/refresh applySelection selects without a fetch, optionally carrying the
+  // run-level recovery card as its first child.
+  var children = [];
+  if (withCard) {
+    var cmd = el("code", { classes: ["recovery-command"] });
+    children.push(el("section", { classes: ["recovery-card"],
+      attrs: { "data-recovery-card": "", "data-recovery-kind": kind || "approve" },
+      children: [cmd] }));
+  }
+  var trace = el("div", { classes: ["trace"],
+    children: [el("div", { classes: ["node"], attrs: { "data-seq": "1" } })] });
+  var panes = el("div", { classes: ["panes"],
+    children: [el("div", { classes: ["pane"], attrs: { "data-seq": "1" } })] });
+  children.push(trace, panes);
+  return el("main", { classes: ["detail"], children: children });
+}
+
+function recoveryLiveBody(withCard, kind) {
+  return el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" },
+    children: [el("header", { classes: ["run-header"] }), recoveryLiveMain(withCard, kind)] });
+}
+
+async function refreshWith(freshBody) {
+  // Drive one SSE-triggered live refresh whose fetched document is `freshBody`.
+  nextParsedDoc = el("html", { children: [freshBody] });
+  eventSource.onmessage({ data: JSON.stringify({ type: "phase", kind: "point" }) });
+  await drain(); flushTimers(); await drain();          // scheduleRefresh -> refresh -> GET detail
+  resolveDetailFetch("<html></html>"); await drain();   // -> swapRegions
+}
+
+async function runRecoveryLive() {
+  // The run-level recovery card must live inside a swapped region so a live refresh
+  // ADDS it when the run needs a human step and REMOVES it when it no longer does.
+  var body = recoveryLiveBody(false);
+  installGlobals(el("html", { children: [body] }), body);
+  loadAppJs(APP);
+
+  var cardKind = function () {
+    var c = document.querySelector("[data-recovery-card]");
+    return c ? c.getAttribute("data-recovery-kind") : null;
+  };
+
+  var initial = cardKind();                              // running: no card
+  await refreshWith(recoveryLiveBody(true, "approve"));  // enters an approval gate
+  var afterApprove = cardKind();
+  await refreshWith(recoveryLiveBody(true, "resume"));   // aborts -> resumable
+  var afterResume = cardKind();
+  await refreshWith(recoveryLiveBody(false));            // moves on: card removed
+  var afterClear = cardKind();
+
+  return { ok: true, initial: initial, afterApprove: afterApprove,
+    afterResume: afterResume, afterClear: afterClear };
+}
+
 // ---------------------------------------------------------------------------
 const APP = process.argv[2];
 const SCENARIO = process.argv[3];
@@ -790,6 +846,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "context-live-swap") result = await runContextLiveSwap();
   else if (SCENARIO === "artifact") result = await runArtifact();
   else if (SCENARIO === "recovery-link") result = await runRecoveryLink();
+  else if (SCENARIO === "recovery-live") result = await runRecoveryLive();
   else throw new Error("unknown scenario: " + SCENARIO);
   process.stdout.write(JSON.stringify(result));
 })().catch((err) => {

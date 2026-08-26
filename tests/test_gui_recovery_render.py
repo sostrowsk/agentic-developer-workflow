@@ -126,15 +126,17 @@ def test_escalated_card_lists_the_abort_events(home, tmp_path):  # noqa: F811
 
 
 def test_approve_card_is_run_level_with_command_and_is_display_only(home, tmp_path):  # noqa: F811
-    """AC 10/11: the approve/resume card sits at run level (before the tab
-    container, not inside a tree entry) and shows the command as plain, selectable
-    text; it triggers nothing (no form/button)."""
+    """AC 10/11: the approve/resume card sits at run level — INSIDE the
+    ``main.detail`` live-refresh region (so an SSE swap can add/remove it) and
+    before the tab container, not nested in a tree entry — and shows the command as
+    plain, selectable text; it triggers nothing (no form/button)."""
     client, slug, path = _client(tmp_path, state_only=True, phase="awaiting_approval")
     html = client.get(f"/runs/{slug}/{RUN_ID}").text
 
     assert html.count("data-recovery-card") == 1
-    # Run-level placement: the card precedes the Trace tab (it is not nested in a
-    # tree entry <li>).
+    # Run-level placement WITHIN the swapped region: after the <main class="detail">
+    # open tag and before the Trace tab (not nested in a tree entry <li>).
+    assert html.index('<main class="detail"') < html.index("data-recovery-card")
     assert html.index("data-recovery-card") < html.index('data-tab-panel="trace"')
     card = _card(html)
     assert 'data-recovery-kind="approve"' in card
@@ -188,3 +190,17 @@ def test_recovery_link_opens_artifacts_tab_and_reveals_escalation_md(tmp_path):
     assert obs["trace_active"] is False              # ... and the Trace tab deactivated
     assert obs["details_open"] is True               # the escalation.md entry is revealed
     assert obs["fetch_escalation"] >= 1              # ... and its content loads on demand
+
+
+def test_recovery_card_is_added_and_removed_by_live_refresh(tmp_path):
+    """AC 10 (live monitoring): the run-level card lives inside a swapped region, so
+    an SSE-driven refresh ADDS it when a running run enters an approval gate /
+    becomes resumable and REMOVES it again when the run moves on — never a stale
+    card. Executed against the SERVED app.js via the plain-node harness."""
+    from tests.gui_js_harness import run_scenario
+
+    obs = run_scenario(tmp_path, "recovery-live")
+    assert obs["initial"] is None                    # running: no card
+    assert obs["afterApprove"] == "approve"          # entered an approval gate
+    assert obs["afterResume"] == "resume"            # aborted -> resumable (card updated)
+    assert obs["afterClear"] is None                 # moved on: card removed
