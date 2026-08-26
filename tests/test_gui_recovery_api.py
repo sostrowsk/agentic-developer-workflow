@@ -252,9 +252,10 @@ def test_non_mapping_escalation_payload_does_not_500(home, tmp_path, bad_payload
 
 
 def test_abort_payloads_are_carried_verbatim(home, tmp_path):  # noqa: F811
-    """AC 6/7: abort payloads are carried VERBATIM with no truthiness coercion — a
-    present null/empty-list/populated payload survives unchanged; only a genuinely
-    ABSENT payload key falls back to the documented empty object."""
+    """AC 6/7 (P7_robust): abort payloads are carried VERBATIM with no truthiness
+    coercion — a present null/empty-list/populated payload survives unchanged. A
+    genuinely ABSENT payload is represented as ``null`` (no value), NEVER a
+    fabricated empty object."""
     null_ab = rec(3, "limit.hit", "point", "B", sec=2, payload={})
     null_ab["payload"] = None                            # present null
     list_ab = rec(4, "circuit_breaker", "point", "B", sec=3, payload={})
@@ -273,8 +274,9 @@ def test_abort_payloads_are_carried_verbatim(home, tmp_path):  # noqa: F811
     client, slug, _p, run_id = _client(tmp_path, lines=lines, phase="escalated")
     rc = _detail(client, slug, run_id)["recovery"]
 
+    # The absent payload (last) is `null`, not `{}`; present values are verbatim.
     assert [a["payload"] for a in rc["aborts"]] == [
-        None, [], {"limit": "fix_cycles", "value": 3, "cap": 3}, {},
+        None, [], {"limit": "fix_cycles", "value": 3, "cap": 3}, None,
     ]
 
 

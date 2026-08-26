@@ -1481,11 +1481,11 @@ def _escalated_recovery(events) -> dict:
                 continue
             if seq < anchor_seq and (prior_seq is None or seq > prior_seq):
                 # The payload is carried VERBATIM (no truthiness coercion): a present
-                # null/empty/list payload survives unchanged (AC 6/7); only a
-                # genuinely ABSENT payload key falls back to the documented empty
-                # object.
-                ab_payload = e["payload"] if "payload" in e else {}
-                aborts.append({"type": e["type"], "seq": seq, "payload": ab_payload})
+                # null/empty/list/populated payload survives unchanged (AC 6/7). A
+                # genuinely ABSENT payload is represented as `null` — the same
+                # "no value" the context panel uses — never a fabricated `{}`
+                # (P7_robust: missing/atypical data is never given a substitute).
+                aborts.append({"type": e["type"], "seq": seq, "payload": e.get("payload")})
         aborts.sort(key=lambda a: a["seq"])
     return {
         "kind": "none",
