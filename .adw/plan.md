@@ -1,256 +1,266 @@
-# Plan: Vom Knoten in den Raw-Log springen + Prompt-Diff gegen die Vorrunde
+# Plan: Eskalation als Recovery-Karte am verursachenden Knoten
 
 Single-Lane-Projekt: Es gibt nur den Workstream **backend**, keinen separaten
-Frontend-Lane. Die GUI ist eine FastAPI-+-Jinja-+-Vanilla-JS-App; Template-
-und Client-Verhaltensanpassungen gehören deshalb zum Backend-Workstream.
-Sowohl die JSON-Route `GET /api/runs/{repo}/{run_id}` als auch die HTML-Seite
+Frontend-Lane. Die GUI ist eine FastAPI-+-Jinja-+-Vanilla-JS-App; Template- und
+Client-Verhaltensanpassungen gehören deshalb zum Backend-Workstream. Sowohl die
+JSON-Route `GET /api/runs/{repo}/{run_id}` als auch die HTML-Seite
 `GET /runs/{repo}/{run_id}` konsumieren dasselbe `_run_detail(...)`-Dict — eine
 einzige Ableitung speist beide Flächen.
 
-Gebaut wird strikt gegen `.adw/contract.yaml`. Beide Funktionen sind rein
-abgeleitete Projektionen des bereits geladenen Event-Stroms: kein neuer Reader,
-keine neue Route, kein neues Event, keine Persistenz, keine neue Dependency
-(`difflib` ist Standardbibliothek). Der Contract pinnt nur die extern
-beobachtbare Fläche: das Seq-Bereichsfilter-Verhalten des Raw-Tabs samt
-Komposition mit `q`/`type`/`limit` und Verhalten bei ungültigen Werten, die
-neuen abgeleiteten Antwortfelder `prompt_diff`/`previous_prompt_seq` an
-serialisierten `agent.run`-Knoten in `GET /api/runs/{repo}/{run_id}`, sowie das
-beobachtbare Verhalten von Absprung, Bereichsanzeige/-aufhebung und
-Prompt-Diff-Anzeige auf der bestehenden Run-Detail-Seite. Die Events-Route
-`GET /api/runs/{repo}/{run_id}/events` wird NICHT angefasst (E1). Interne
-Helper-Signaturen, interne Dictionary-Schlüssel und konkretes Markup/CSS sind
-nicht Teil des Contracts.
+Gebaut wird strikt gegen `.adw/contract.yaml`. Die Recovery-Karte ist eine rein
+abgeleitete Projektion des bereits geladenen Zustands (`state.phase`, die
+bestehende Status-Ableitung des Run-Spans, der Event-Strom, die aufgelöste
+`RepoRef`): kein neuer Reader, keine neue Route, kein neues Event, keine
+Persistenz, keine neue Dependency (`shlex` ist Standardbibliothek). Der Contract
+pinnt nur die extern beobachtbare Fläche: das additive, abgeleitete
+`recovery`-Objekt in der Antwort von `GET /api/runs/{repo}/{run_id}` (nur
+vorhanden, wenn der Lauf menschliches Eingreifen braucht), seinen shell-sicheren
+Kommandotext und das beobachtbare Render-/Read-only-Verhalten der Karte. Die
+Events-Route wird NICHT angefasst (E1). Interne Helper-Signaturen, interne
+Dictionary-Schlüssel und konkretes Markup/CSS sind nicht Teil des Contracts.
 
 ## Grounding (im Code verifiziert)
 
-- Der Raw-Tab wird von `_raw_view(events, limit, *, q=None, type_filter=None)`
-  (`adw/gui/app.py:870`) gebaut: er filtert serverseitig über den vollständig
-  serialisierten Payload (`q`) und den Ereignistyp (`type`), fenstert über
-  `limit` und meldet `total` als Größe der VOLLSTÄNDIGEN Treffermenge vor der
-  Fensterung. `types` ist die volle Typmenge des Logs, unabhängig von den
-  aktiven Filtern. Einen Seq-Bereichsfilter hat er nicht.
-- `_raw_view` wird aus `_run_detail(...)` (`adw/gui/app.py:1289`) mit `raw_q`,
-  `raw_type`, `limit` aufgerufen. Die HTML-Seite `run_detail_page`
-  (`adw/gui/app.py:1622`) liest `raw_q`/`raw_type` aus den Query-Parametern
-  (`app.py:1640`); die JSON-Route `api_run_detail` (`app.py:1538`) ruft
-  `_run_detail` ohne Raw-Filter auf — der Seq-Bereich betrifft daher nur die
-  HTML-Seite.
-- `_parse_limit` (`app.py:55`) und `_parse_offset` (`app.py:74`) definieren die
-  bestehende Toleranz für Raw-Parameter: nicht-numerische Werte fallen still
-  auf einen Default zurück, kein 5xx. Die Seq-Grenzen folgen exakt dieser
-  Konvention (E4, AC 4).
-- Die Bereichsinformation je Knoten existiert bereits: `_span_seq_ranges()`
-  (`app.py:715`) und `_subtree_seq_range()` (`app.py:781`); jeder serialisierte
-  Span-Knoten exponiert sein Subtree-Maximum bereits als `end_seq`
-  (`_serialize`, `app.py:796`). Der Absprungbereich `[seq, end_seq]` ist damit
-  ohne neue Ableitung verfügbar (AC 5).
-- `_serialize` (`app.py:796`) erhält beim rekursiven Abstieg die aktuelle
-  `lane` (aus dem umschließenden `lane`-Span mit `payload.name`). Der
-  `agent`-String und der `prompt` eines `agent.run` liegen im Start-Payload
-  (der Prompt-Tab zeigt `payload.prompt`). Lane und Prompt eines `agent.run`
-  sind damit während der Serialisierung bekannt.
-- Die HTML-Seite rendert die Knoten serverseitig; `static/app.js` schaltet die
-  Detail-Pane-Tabs und die `.selected`-Auswahl. Der bestehende Raw-Tab ist ein
-  Tab dieses Panes — der Absprung ist ein Wechsel dorthin, kein zweites Widget
-  (E5). Clientseitiges Verhalten ist über den JS-Harness
-  (`tests/gui_js_harness.js` + `tests/gui_js_harness.py`, plain `node`) testbar.
+- `escalate()` (`adw/phases.py:243`) setzt `ctx.state.phase` final auf
+  `escalated` (Z. 264) und emittiert ERST DANACH das `escalation`-Event mit
+  `{"reason": reason, "phase": origin_phase}` (Z. 268–270), wobei `origin_phase`
+  VOR dem Markieren erfasst wird (Z. 249). Ein Lauf mit `escalation`-Event ist
+  also IMMER endgültig `escalated`; die Karte triggert auf `state.phase` +
+  bestehende Status-Ableitung, nicht auf das Event (E4, AC 1/2). KEINE Änderung
+  an dieser Funktion.
+- `limit.hit`-Payload ist `{"limit", "value", "cap"}` (`phases.py:1392`),
+  `circuit_breaker`-Payload ist `{"keys", "scope"}` (`phases.py:1445` u. a.).
+  Unverändert übernommen (AC 6, E4).
+- Die bestehende Status-Ableitung sitzt in `_summary(...)` (`adw/gui/app.py:458`):
+  ein geschlossener Run-Span trägt seinen terminalen `status`
+  (`done`/`escalated`/`awaiting_approval`), ein OFFENER Span ist `running` (bzw.
+  `awaiting_approval` bei aktiver Approval-Pause), kein Span → `status = None`.
+  `state.phase` liegt im selben Dict als `phase`. Genau diese Ableitung
+  entscheidet über die Karte — KEINE neue Liveness-Erkennung (AC 1, Non-Goal).
+- `state.phase` ist im Detail über `state` (aus `_load_state`) verfügbar; ist
+  kein State ladbar, ist `phase` `None` → keine Karte (AC 1).
+- `RepoRef` (`app.py:278`) trägt `slug`, `path`, `exists`; `_resolve_repos`
+  (`app.py:287`) füllt `path` aus der Registry bzw. den `--repo`-Angaben. `ref`
+  ist an `_run_detail(...)` (`app.py:1406`) bereits durchgereicht — der echte
+  Registry-Pfad steht damit für den Kommandotext bereit (AC 3, E2).
+- Die CLI-Signaturen sind `adw resume <run_id> --repo <path>` (`adw/cli.py:414`)
+  und `adw approve <run_id> --repo <path>` (`adw/cli.py:447`); `resume`
+  verweigert einen `escalated`-Lauf und verweist auf einen neuen Lauf
+  (`cli.py:423`) — konsistent mit Kind `none` (AC 2). Signaturen im Contract
+  fixiert.
+- `escalation.md` ist bereits ein whitelisteter Top-Level-Artefaktname
+  (`_ARTIFACT_TOP_LEVEL`, `app.py:1345`) im bestehenden Artifacts-Tab. Der
+  Verweis nutzt genau diese Kennung — kein neues Artefakt-Handling (AC 9, E4).
+- `_run_detail(...)` liefert bereits `run` (aus `_summary`) und `tree` (aus
+  `_serialize`, `app.py:881`); jeder serialisierte Knoten trägt `seq` und
+  `span_id`. Das `escalation`-Event trägt ebenfalls `seq` — der Anker
+  `anchor_seq` ist damit ohne neue Ableitung verfügbar (AC 10). Das
+  `recovery`-Objekt wird an genau dieses Dict gehängt.
+- `_phase_bar` (`app.py:514`) liest bereits `escalation`-Events und deren
+  `phase`-Payload; die Recovery-Ableitung nutzt dieselbe, bereits geladene
+  Event-Liste. Kein zweiter Durchlauf über neue Daten.
+- i18n-Katalog `adw/gui/i18n.py` trägt EN- (ab Z. 90) und DE-Block (ab Z. 175);
+  Chrome-Labels laufen ausschließlich hierüber. Die HTML-Seite rendert Knoten
+  serverseitig; `static/app.js` schaltet Tabs/Auswahl. Clientseitiges Verhalten
+  ist über den Plain-Node-Harness (`tests/gui_js_harness.js` +
+  `tests/gui_js_harness.py`) testbar.
 
 ## Workstream: backend
 
-### B1 — Seq-Grenzen parsen und durchreichen (AC 1, 4; E4)
+### B1 — Auswahlregel: Kind aus `state.phase` + Status-Ableitung (AC 1, 2; E3)
 
-- Die HTML-Detail-Route liest die zwei neuen optionalen Query-Parameter
-  `raw_from_seq` und `raw_to_seq` (Namen im Contract fixiert), tolerant nach
-  dem Muster von `_parse_limit`/`_parse_offset`: eine fehlende ODER
-  nicht-numerische Grenze ist eine inaktive Grenze (einseitig oder gar kein
-  Bereich), nie ein Fehler, nie ein 5xx.
-- Die geparsten Grenzen an `_run_detail`/`_raw_view` durchreichen, analog zu
-  `raw_q`/`raw_type`. Die JSON-Route und die Events-Route bleiben unberührt.
+- Eine rein abgeleitete Funktion bestimmt aus `state.phase` und dem bereits in
+  `_summary` berechneten Run-`status` das Kommando-Kind — ausschließlich nach der
+  Regel aus AC 1, ausgewertet auf `state.phase`, NIE auf dem `phase`-Feld des
+  `escalation`-Events:
+  - `state.phase == escalated` → Kind `none` (neuer Lauf nötig).
+  - `state.phase` in `{awaiting_spec_approval, awaiting_approval}` → Kind
+    `approve`.
+  - `state.phase` ist Arbeitsphase (`spec`, `plan`, `build`, `integration`,
+    `codex_review`, `final_review`, `ci`) UND abgeleiteter `status` ist nicht
+    `running` → Kind `resume`.
+  - `state.phase == done`, Arbeitsphase mit `status == running`, oder kein
+    ladbarer State → KEIN `recovery`-Objekt (Schlüssel fehlt; kein leeres Objekt
+    erzwungen).
+- Die Prüfreihenfolge hält `escalated` strikt vor allen anderen Fällen. Grund,
+  `limit.hit` und `circuit_breaker` beeinflussen die Auswahl nicht; es gibt nie
+  mehrere Kommandovorschläge (AC 2, E3). Für `escalated` wird niemals
+  `resume`/`approve` vorgeschlagen (AC 2).
 
-### B2 — Seq-Bereichsfilter im Raw-Tab (AC 1, 2, 3, 4; E4)
+### B2 — Kommandotext, shell-sicher (AC 3, 4; E2)
 
-- `_raw_view` um den inklusiven Seq-Bereichsfilter erweitern: ein Event bleibt
-  in der Treffermenge nur, wenn seine ganzzahlige `seq` — sofern eine Grenze
-  aktiv ist — `untere Grenze ≤ seq ≤ obere Grenze` erfüllt. Bei aktivem Bereich
-  erfüllt ein Event OHNE ganzzahlige `seq` den Filter nicht.
-- Der Bereich wird MIT den bestehenden Filtern komponiert (logisches UND): ein
-  Event erscheint nur, wenn es zugleich Bereich, `q` (weiterhin über den
-  vollständigen Payload) und `type` erfüllt. Die `limit`-Fensterung wird erst
-  auf die vollständig gefilterte Menge angewandt; `total` bleibt die Größe der
-  Treffermenge VOR der Fensterung.
-- `types` bleibt unverändert die volle Typmenge des Logs, auch bei aktivem
-  Bereich (AC 3). Vollständige Payloads bleiben über die Events-Route
-  erreichbar (AC 2).
-- Ist nur eine Grenze gesetzt, filtert sie einseitig. Ist die obere Grenze
-  kleiner als die untere, ergibt sich eine definierte leere Treffermenge mit
-  `total` 0 — kein Sonderfall-Code, natürliche Folge des Prädikats (AC 4).
-- Ohne Bereichsangabe verhält sich `_raw_view` byte-identisch wie bisher.
+- Für Kind `approve`/`resume`: `recovery.command` = der fertige Text in der
+  bestehenden CLI-Signatur — `adw approve <run_id> --repo <pfad>` bzw.
+  `adw resume <run_id> --repo <pfad>` — mit der echten `run_id` des Laufs und dem
+  echten, serverseitig aufgelösten Registry-Pfad (`RepoRef.path`), NICHT dem Slug
+  (AC 3, E2).
+- `run_id` und Pfad werden über `shlex.quote` (Standardbibliothek) dargestellt:
+  Werte ohne Sonderzeichen unverändert, andernfalls einfach gequotet, eingebettete
+  einfache Anführungszeichen als `'\''`. Beim Parsen durch eine POSIX-Shell ergibt
+  der Text exakt die intendierten Argumente — der Pfad bleibt EIN
+  `--repo`-Argument, auch mit Leerzeichen, einfachem Anführungszeichen oder
+  Shell-Metazeichen — und führt zu keinem Zusatzkommando (AC 4).
+- Die Kommandozeile wird nie übersetzt (AC 4, AC 12). Kein Subprozess, kein
+  Ausführungspfad (E1) — nur String-Erzeugung.
+- Für Kind `none`: kein `command` (`null`), stattdessen `needs_new_run == true`
+  als maschinenlesbares Neu-Lauf-Kennzeichen (AC 3).
 
-### B3 — Absprung, Bereichsanzeige und -aufhebung im Raw-Tab (AC 5, 6, 7; E5)
+### B3 — Eskalationskontext: Grund, Phase, Abbruch-Ereignisse, Artefakt (AC 5, 6, 9; E4)
 
-- Jeder Span-Knoten im Trace-Baum bekommt eine Bedienmöglichkeit, die in den
-  bestehenden Raw-Tab wechselt und dessen Seq-Bereich auf die bereits
-  exponierten Knotenwerte `[seq, end_seq]` setzt. Es entsteht kein zweites
-  Raw-Widget; der bestehende Raw-Tab wird aktiviert. Der Filter ist ein reiner
-  Seq-Bereichsfilter — keine strukturelle Teilbaum-Zugehörigkeitsprüfung;
-  Events verschränkter/paralleler Spans innerhalb des Intervalls werden nicht
-  ausgeschlossen (AC 5).
-- Beim Absprung bleiben vorhandene `q`-/`type`-/`limit`-Werte erhalten; nur der
-  Seq-Bereich wird zusätzlich gesetzt (AC 6). Umgesetzt über die bestehende
-  query-parameter-getriebene Render-Mechanik der Seite (Absprung-Ziel trägt die
-  bestehenden Raw-Parameter mit den zusätzlichen Seq-Grenzen).
-- Die aktiven Grenzen werden beim Rendern des bestehenden Raw-Filterformulars
-  und des bestehenden „mehr laden"-Mechanismus mitgeführt, sodass eine Änderung
-  an `q`, `type` oder `limit` den aktiven Bereich nicht unbeabsichtigt
-  entfernt — nur das explizite Aufheben entfernt ihn (AC 7).
-- Ein aktiver Seq-Bereich wird im Raw-Tab mit seinen aktiven Grenzen sichtbar
-  angezeigt (einseitige Bereiche entsprechend einseitig), samt einer
-  Bedienmöglichkeit zum Aufheben. Das Aufheben entfernt ausschließlich die
-  Seq-Grenzen; `q`, `type` und `limit` behalten ihre Werte (AC 7). Ohne
-  aktiven Bereich wird kein Bereichszustand behauptet.
-- Feld-/Steuerbeschriftungen laufen wie alle Chrome-Texte über den bestehenden
-  i18n-Katalog (`adw/gui/i18n.py`) — bestehende Konvention, kein neuer
-  Mechanismus.
+- Nur im Fall `none`: das `escalation`-Event mit der GRÖSSTEN `seq` bestimmen
+  (E5). Aus dessen Payload `reason` und `phase` UNVERÄNDERT übernehmen —
+  `recovery.reason`/`recovery.phase`; nichts umschreiben, klassifizieren oder
+  interpretieren (AC 5). `phase` ist die Ursprungs-Phase aus dem Event, nie
+  `state.phase`.
+- `recovery.aborts`: die `limit.hit`/`circuit_breaker`-Ereignisse desselben Laufs
+  mit `seq` kleiner als die des maßgeblichen `escalation`-Events und größer als
+  die `seq` eines etwaigen VORHERIGEN `escalation`-Events (die unmittelbar
+  vorausgehenden), in Event-Reihenfolge. Payloads (`{limit, value, cap}` bzw.
+  `{keys, scope}`) unverändert übernommen. Gibt es keine solchen Ereignisse, ist
+  die Liste leer (AC 6).
+- `recovery.escalation_artifact`: Verweis/Kennung auf `escalation.md` im
+  bestehenden Artifacts-Tab (bestehende Whitelist-Kennung), KEIN eingebetteter
+  Inhalt und keine Existenz-Zusage für die Datei (AC 9). Fehlt das Artefakt
+  wider Erwarten, bleibt das bestehende „fehlend"-Verhalten des Artifacts-Tabs
+  maßgeblich; das Run-Detail bleibt nutzbar.
+- `recovery.anchor_seq`: die `seq` des maßgeblichen `escalation`-Events als Anker
+  der Karte (AC 10); `null`, wenn ein eskalierter Lauf kein verwertbares
+  `escalation`-Event trägt (fehlendes Event-Log, AC 7). Die Eskalationsfelder
+  (`anchor_seq`, `reason`, `phase`, `aborts`, `escalation_artifact`) existieren
+  NUR in der `none`-Variante; `approve`/`resume` tragen sie nicht (Verankerung
+  auf Run-Ebene, kein `escalation`-Knoten). Der Contract erzwingt die
+  Varianten-Formen strukturell (oneOf nach `kind`).
+- KEINE Änderung an `escalate()`, am `escalation`-Event, an
+  `limit.hit`/`circuit_breaker` oder am Format von `escalation.md` (E4).
 
-### B4 — Vorgänger-Ermittlung des `agent.run` (AC 8, 9; E3)
+### B4 — Robustheit bei fehlenden/untypischen Daten (AC 7)
 
-- Aus dem bereits geladenen Baum/Event-Strom einen Index aller `agent.run`-
-  Starts bilden, jeweils mit `seq`, `agent`-String, serialisierungszeitlicher
-  Lane und `prompt`. Die Lane stammt aus dem umschließenden `lane`-Span (wie in
-  `_serialize` bereits geführt), NICHT aus einer neuen Quelle.
-- Der Vorgänger eines betrachteten `agent.run` wird rein STRUKTURELL bestimmt,
-  BEVOR Prompt-Verwertbarkeit eine Rolle spielt: unter den früheren
-  `agent.run`-Starts DESSELBEN Laufs mit demselben `agent`-String und derselben
-  Lane ist der Vorgänger der mit der größten `seq` kleiner als die des
-  betrachteten Knotens. Andere Läufe, Agenten oder Lanes werden nie als
-  Vorgänger verwendet (E3).
-- Die Prompt-Verwertbarkeit filtert die Kandidaten NICHT: ein unmittelbarer
-  Vorgänger mit fehlendem oder nicht-String-`prompt` wird nicht übersprungen,
-  ein älterer gültiger Lauf nie als Ersatz verwendet (AC 8; gezielter Test).
-- Hat der betrachtete `agent.run` selbst keinen verwertbaren String für
-  `agent` oder `prompt`, existiert kein Kandidat, oder hat der so bestimmte
-  unmittelbare Vorgänger keinen verwertbaren String-`prompt`, dann gilt der
-  Normalfall „kein Vorgänger": `prompt_diff: null` und
-  `previous_prompt_seq: null` — insbesondere wird die `seq` eines unbrauchbaren
-  unmittelbaren Vorgängers nie als „verwendet" ausgewiesen. Nie ein geratener
-  Ersatz, nie ein Fehler (AC 9).
+- Ein eskalierter Lauf ohne Event-Log, fehlende oder untypische Payload-Felder
+  von `escalation`, `limit.hit` oder `circuit_breaker` verursachen weder einen
+  5xx-Fehler noch erfundene Ersatzwerte: `reason`/`phase` fehlen dann als `null`,
+  `anchor_seq` ist `null`, `aborts` bleibt leer/unvollständig, aber die
+  verwertbaren Recovery-Daten — insbesondere `kind` und `needs_new_run` —
+  bleiben sichtbar (AC 7). Der bestehende Event-Log ist Backstop.
 
-### B5 — Diff-Erzeugung und Antwortfelder (AC 10, 11, 13; E2, E6)
+### B5 — `recovery`-Objekt in `_run_detail` einhängen (Contract, AC 1, 8; E2)
 
-- Existiert ein verwertbarer Vorgänger, `previous_prompt_seq` = dessen
-  ganzzahlige `seq` und `prompt_diff` = der serverseitig erzeugte Diff-String;
-  `previous_prompt_seq` bleibt auch bei leerem Diff gesetzt.
-- Der Diff wird byte-genau nach fixiertem Format erzeugt: beide Prompts via
-  `splitlines()` (ohne Zeilenenden) zerlegt; `difflib.unified_diff` mit dem
-  Vorgänger-Prompt als erstem und dem aktuellen Prompt als zweitem Argument,
-  `n=3`, `lineterm=""` und den Standardwerten für Dateinamen/Zeitstempel; die
-  Zeilen mit `"\n"` verbunden. Ein identischer Prompt ergibt `prompt_diff: ""`
-  (nicht `null`); ein Unterschied allein im abschließenden Zeilenumbruch gilt
-  als identisch (leerer Diff) (AC 10, 11; E6).
-- Nur `difflib` aus der Standardbibliothek; keine Diff-Bibliothek, kein
-  Syntax-Highlighter, kein Frontend-Paket (E2).
-- In `_serialize` jedem `agent.run`-Knoten `prompt_diff` und
-  `previous_prompt_seq` als rein abgeleitete Felder anhängen; die Ableitung so
-  durchreichen, wie `own_ranges`/`snaps` bereits durchgereicht werden — keine
-  Modelländerung. Andere Knotentypen erhalten die Felder nicht. Bestehende
-  Felder behalten ihre Semantik. Die Ermittlung nutzt ausschließlich den
-  bereits geladenen Event-Strom (AC 13).
+- Das aus B1–B4 abgeleitete `recovery`-Objekt an das von `_run_detail(...)`
+  zurückgegebene Dict hängen — GENAU DANN, wenn der Lauf menschliches Eingreifen
+  braucht (Kind bestimmt); andernfalls fehlt der Schlüssel (kein leeres Objekt,
+  AC 1). Die Ableitung nutzt ausschließlich `state`, das bereits berechnete
+  `run`-Summary und die bereits geladene Event-Liste — keine Modelländerung, kein
+  neuer Reader (E-Grounding).
+- Der reale Repo-Pfad erscheint ausschließlich in `recovery.command`, nie in
+  einer URL/Route; die Slug-Regel aus §7.4 bleibt unverändert (AC 8, E2).
+- Übrige Antwortfelder (`run`, `phases`, `tree`, `latest_context`, `problems`,
+  `raw`) behalten Form und Semantik unverändert.
 
-### B6 — Prompt-Diff-Anzeige im Prompt-Tab (AC 10, 12; Nicht-Ziele)
+### B6 — Recovery-Karte im Run-Detail rendern (AC 10, 11, 12; E1, E5)
 
-- Der bestehende Prompt-Tab zeigt weiterhin den vollständigen Prompt
-  (`payload.prompt`, unverändert) und ergänzt zusätzlich den Diff bzw. genau
-  einen der drei unterscheidbaren Zustände:
-  - „kein Vorgänger" (`prompt_diff: null`, `previous_prompt_seq: null`) —
-    klare Aussage, dass kein Vorgänger verfügbar ist, kein Fehler, kein
-    geratener Ersatz;
-  - „identischer Prompt" (`prompt_diff: ""` mit ganzzahliger
-    `previous_prompt_seq`) — als eigener, vom vorigen unterscheidbarer
-    Leerzustand;
-  - „Unterschied" (nichtleerer `prompt_diff` mit ganzzahliger
-    `previous_prompt_seq`) — der Diff-String.
-- Die übrigen Detail-Pane-Tabs (Timeline, Artifacts, Raw als Struktur, Diff,
-  Kontext) behalten ihr bisheriges Verhalten. Kein neues Tab, kein
-  Prompt-Editor, kein Zwischenablage-Subsystem, keine Persistenz.
-- Client-Verdrahtung über den bestehenden Auswahl-/Tab-Mechanismus in
-  `static/app.js`; keine clientseitige Neu-Ableitung, keine SSE-Erweiterung.
-  Neue sichtbare Texte über den bestehenden EN/DE-i18n-Katalog. Konkretes
-  Markup/CSS bleibt Implementierungsdetail.
+- Das Run-Detail rendert GENAU EINE Recovery-Karte, geführt vom
+  `recovery`-Objekt:
+  - Fall `none`: verankert am Knoten des maßgeblichen `escalation`-Events
+    (`anchor_seq`), mit Grund, betroffener Phase, den zugehörigen
+    Abbruch-Ereignissen, dem Neu-Lauf-Hinweis und dem Link auf `escalation.md`.
+    Fehlt trotz eskaliertem State ein verankerbarer `escalation`-Knoten
+    (`anchor_seq == null`), erscheint die weiterhin verwertbare Karte auf
+    Run-Ebene — sie wird wegen unvollständiger Logs weder ausgeblendet noch
+    dupliziert (AC 7, E5).
+  - Fall `approve`/`resume`: auf Run-Ebene des Detail-Panes (kein
+    `escalation`-Knoten), mit `state.phase` und dem Kommandotext.
+  - Ohne `recovery`-Objekt: keine Karte. Übrige Detail-Pane-Bereiche behalten ihr
+    Verhalten (AC 10).
+- Die GUI führt kein Kommando aus: kein Subprozess, kein Schreibpfad in State,
+  Run-Artefakte oder Repo; der Kommandotext ist reine Anzeige (AC 11, E1). „Kopierbar"
+  = auswählbarer, vollständig sichtbarer Text; keine Zwischenablage-Integration
+  (Non-Goal).
+- Alle Kartenlabels beidsprachig über den bestehenden EN/DE-i18n-Katalog
+  (`adw/gui/i18n.py`), als identische Key-Menge in beiden Sprachblöcken; kein
+  zweiter i18n-Mechanismus. Kommandozeile, Eventwerte, `run_id` und Repo-Pfad
+  werden nicht übersetzt (AC 12). Client-Verdrahtung über den bestehenden
+  Auswahl-/Tab-/Render-Mechanismus in `static/app.js`; keine SSE-Erweiterung,
+  keine clientseitige Neu-Ableitung. Konkretes Markup/CSS bleibt
+  Implementierungsdetail.
 
-### B7 — Dokumentation und Changelog (AC 14)
+### B7 — Dokumentation und Changelog (AC 13)
 
-- `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md` synchron in §7.2: der
-  Seq-Bereichsfilter (Komposition mit `q`/`type`/`limit`, Aufhebung), der
-  Absprung vom Span-Knoten auf `[seq, end_seq]` sowie Vorgängerauswahl,
-  fixiertes Ausgabeformat und die drei Leer-/Diff-Zustände des Prompt-Diffs.
+- `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md` synchron in §7.2: die Trigger- und
+  Auswahlregel aus AC 1/2 (inkl. Lebenszyklus-Begründung, dass ein
+  `escalation`-Event immer endgültige Eskalation bedeutet), die Shell-Quoting-Zusage
+  aus AC 4, Verankerung und Felder des Eskalationsfalls, der read-only-Charakter
+  (nur Anzeige, echter Pfad nur im Text) und der Verweis auf `escalation.md`.
 - `CHANGELOG.md` und `CHANGELOG.de.md` synchron unter `Unreleased`.
 
 ## Tests (unter `tests/` als `test_gui_*.py`)
 
-Richtwert ~14 neue Tests (Bestand: 936); mehr als ~22 gilt als Scope-Drift.
+Richtwert ~10 neue Tests (Bestand: 953); mehr als ~16 gilt als Scope-Drift
+(Quoting-Fälle als EIN parametrisierter Test zählen einfach).
 
-Serverseitige Semantik (über die gerenderte Raw-Ansicht bzw. `_raw_view`/
-`_run_detail`):
+Presence-/Auswahl-Semantik (über die JSON-Antwort von
+`GET /api/runs/{repo}/{run_id}` bzw. `_run_detail`), je mit einer real
+erzeugbaren Zustandslage:
 
-- Inklusive beidseitige Seq-Grenzen sowie jeweils einseitige untere und obere
-  Grenze.
-- Komposition des Bereichs mit `q`, `type` und `limit`, samt `total` als Größe
-  der Treffermenge VOR der `limit`-Fensterung; `types` bleibt die volle
-  Typmenge auch bei aktivem Bereich.
-- Nicht-numerische Grenze wird als inaktiv behandelt (verhält sich wie keine
-  Grenze); widersprüchlicher Bereich (obere < untere) ergibt eine definierte
-  leere Menge mit `total` 0 — kein 5xx; gleichzeitig gesetzte
-  `q`/`type`/`limit` bleiben wirksam.
-- Events ohne ganzzahlige `seq` erfüllen einen aktiven Bereichsfilter nicht.
+- Eskaliert (`state.phase == escalated`) → Kind `none`, `needs_new_run == true`,
+  kein `command`.
+- `awaiting_spec_approval`/`awaiting_approval` → Kind `approve`.
+- Arbeitsphase mit nicht-`running`-Status → Kind `resume`.
+- `state.phase == done` bzw. Arbeitsphase mit `status == running` → KEIN
+  `recovery`-Objekt (Schlüssel fehlt, kein leeres Objekt).
+- Für `escalated` wird nie `resume`/`approve` vorgeschlagen; die Auswahl folgt
+  `state.phase`, nicht dem `phase`-Feld des `escalation`-Events.
 
-Vorgänger und Prompt-Diff (über die JSON-Antwort von
-`GET /api/runs/{repo}/{run_id}` bzw. `_run_detail`):
+Kommandotext:
 
-- Vorgängerauswahl nach `agent`-String, Lane und größter kleinerer `seq`;
-  andere Läufe/Agenten/Lanes werden nie als Vorgänger verwendet.
-- „kein Vorgänger" (`prompt_diff: null`, `previous_prompt_seq: null`) bei
-  fehlenden oder nicht-String-Daten für `agent`/`prompt` bzw. fehlendem
-  Kandidaten.
-- Gezielter Test: ein unmittelbarer Vorgänger mit unverwertbarem `prompt`
-  ergibt `prompt_diff: null` — KEIN älterer gültiger `agent.run` wird als
-  Ersatz gegen N−2 verwendet.
-- `prompt_diff: ""` bei identischem Prompt (mit gesetzter
-  `previous_prompt_seq`), unterscheidbar vom Fall „kein Vorgänger".
-- Die Felder `prompt_diff`/`previous_prompt_seq` erscheinen ausschließlich an
-  `agent.run`-Knoten, an keinem anderen Knotentyp (AC 13; Assertion innerhalb
-  der obigen Serialisierungs-Tests, kein eigener zusätzlicher Test).
-- Byte-genaues Unified-Diff-Format (`splitlines()`, `unified_diff` mit `n=3`,
-  `lineterm=""`, Join mit `"\n"`), einschließlich Gleichheit bei
-  ausschließlich abweichendem abschließendem Zeilenumbruch.
+- Exakter Text mit echter `run_id` und echtem Registry-Pfad (`RepoRef.path`),
+  nicht dem Slug, in der jeweiligen CLI-Signatur.
+- Shell-Quoting (parametrisierbar, zählt EINFACH): Pfade mit Leerzeichen,
+  einfachem Anführungszeichen und Shell-Metazeichen — der Text parst als EIN
+  `--repo`-Argument ohne Zusatzkommando (`shlex.split`-basierte Assertion).
+
+Eskalationskontext (Kind `none`):
+
+- `reason`/`phase` unverändert aus dem `escalation`-Event mit der größten `seq`.
+- Zuordnung der `limit.hit`/`circuit_breaker`-Ereignisse zur maßgeblichen
+  Eskalation — inkl. Abgrenzung gegen eine FRÜHERE Eskalation und leerer Liste,
+  wenn keine vorliegen.
+- Verweis auf `escalation.md` ohne Inhaltsduplikat.
+
+Robustheit:
+
+- Eskalierter Lauf ohne Event-Log bzw. fehlende Payload-Felder von
+  `escalation`/`limit.hit`/`circuit_breaker` → kein 5xx; `kind` und
+  `needs_new_run` bleiben sichtbar, keine erfundenen Ersatzwerte (die Karte
+  fällt dann auf Run-Ebene zurück, wird nicht ausgeblendet).
+
+Kein realer Pfad in einer URL: Assertion, dass der reale Pfad ausschließlich im
+Kartentext/`recovery.command` erscheint, in keiner URL/Route (AC 8).
 
 Beobachtbares Client-/Markup-Verhalten:
 
 - Markup-Ebene über die gerenderte HTML-Seite (`GET /runs/{repo}/{run_id}`):
-  Absprung eines Span-Knotens setzt den Bereich auf `[seq, end_seq]` (die Tests
-  prüfen die Intervallgrenzen und fordern KEINEN Ausschluss verschränkter
-  Events innerhalb des Intervalls); der aktive Bereich ist mit seinen Grenzen
-  sichtbar; die Bereichsaufhebung entfernt nur die Grenzen und erhält
-  `q`/`type`/`limit`; es entsteht kein zweites Raw-Widget.
+  genau eine Karte; im Eskalationsfall am `escalation`-Knoten (`anchor_seq`)
+  verankert mit Grund/Phase/Abbrüchen/Neu-Lauf-Hinweis/Link; im
+  `approve`/`resume`-Fall auf Run-Ebene mit Kommandotext; ohne `recovery`-Objekt
+  keine Karte.
 - Verhaltens-Ebene, soweit erforderlich AUSFÜHRBAR clientseitig über den
   bestehenden JS-Harness (`tests/gui_js_harness.js`, gefahren aus pytest via
   `run_scenario` in `tests/gui_js_harness.py`, plain `node`, keine neue
-  Dependency): Absprung aktiviert den Raw-Tab mit gesetztem Bereich unter
-  Erhalt der übrigen Filter; die Prompt-Anzeige unterscheidet die drei
-  Zustände „kein Vorgänger", „identischer Prompt" und „Unterschied".
+  Dependency): die Karte ist reine Anzeige und löst keine Ausführung aus;
+  EN/DE-Labels bei unveränderter Kommandozeile.
 
 ## Gates (Definition of Done)
 
-- Alle Akzeptanzkriterien durch die beschriebenen Tests und den
-  Änderungsumfang abgedeckt.
+- Alle Akzeptanzkriterien durch die beschriebenen Tests und den Änderungsumfang
+  abgedeckt.
 - `uv run ruff check .` grün.
 - `uv run pytest -x -q` grün.
 - EN/DE-Dokumentation und Changelog-Einträge synchron.
-- `GET /api/runs/{repo}/{run_id}/events` unverändert und weiterhin nur über
-  `from_seq`/`to_seq` filterbar (E1).
-- Keine neue Dependency (E2, nur `difflib`), keine Persistenz, kein neues Tab,
-  kein neuer Reader, keine neue Route, kein neues Event, keine
-  SSE-Protokolländerung.
-- Timeline, Artifacts, Diff-Tab und SSE unverändert.
+- Keine Änderung an `escalate()`, am `escalation`-Event, an
+  `limit.hit`/`circuit_breaker` oder am Format von `escalation.md` (E4); keine
+  neue Route, kein neues Event, keine Persistenz, keine neue Liveness-Erkennung,
+  keine Kommandoausführung.
+- GUI führt kein Kommando aus (E1); Repo-Pfad nur im Kartentext, nie in einer URL
+  (E2).
 - Kein unter „Deferred (bewusst nicht gebaut)" genannter Mechanismus ist
   Bestandteil der Änderung.
 
@@ -260,8 +270,14 @@ Nachvollziehbar, aber für die Ausgangslage unverhältnismäßig. KEINE
 Akzeptanzkriterien — und bindend auch für den Review-/Codex-/Fix-Zyklus: was
 hier steht, wird dort nicht nachgebaut.
 
-- Diff zwischen beliebig gewählten Trace-Knoten oder Prompts.
-- Wort- oder Zeichen-Level-Diff.
-- Prompt-Vorlagen-Extraktion (Trennung stabiler Rahmen vom variablen
-  Findings-Block).
-- Syntax-Highlighting des Diffs.
+- Geführter Recovery-Assistent (Schritt-für-Schritt statt einzeiligem Kommando).
+- Eskalationsgrund-Taxonomie / Klassifikation von Abbruchgründen.
+- Verlinkung ähnlicher früherer Läufe oder Cross-Run-Statistik über
+  Eskalationsgründe.
+- Historie und Vergleich mehrerer Eskalationen desselben Laufs.
+- Neue Prozess-/Liveness-Erkennung für Crash-Läufe jenseits der bestehenden
+  Status-Ableitung (PID-Prüfung, Heartbeats, Timeouts).
+- Ausführung/„Retry" aus der GUI, Zwischenablage-Integration, Vorschlagsliste
+  mehrerer Kommandos, automatische Validierung der angezeigten Kommandos.
+- Zusätzliche Recovery-Persistenz, Recovery-Events oder serverseitig
+  gespeicherte Handlungsempfehlungen.
