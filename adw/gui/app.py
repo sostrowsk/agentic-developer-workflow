@@ -230,8 +230,10 @@ def _compact_context(ctx):
     """A context dict for embedding as a data attribute with every null-valued key
     DROPPED (recursively for ``round``). The client reads a missing key exactly as a
     null one (empty display), and the compact form keeps the literal ``null`` out of
-    the rendered markup (the polish 'no None/null' rule). Serialised via ``tojson``
-    afterwards, so HTML/attribute escaping is unchanged."""
+    the rendered markup (the polish 'no None/null' rule). ``cost_usd`` is rounded
+    HERE (presentation only — the JSON API value stays exact) so no raw float noise
+    leaks into the attribute. Serialised via ``tojson`` afterwards, so
+    HTML/attribute escaping is unchanged."""
     if not isinstance(ctx, dict):
         return {}
     out = {}
@@ -240,6 +242,8 @@ def _compact_context(ctx):
             continue
         if k == "round" and isinstance(v, dict):
             out[k] = {rk: rv for rk, rv in v.items() if rv is not None}
+        elif k == "cost_usd" and isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[k] = round(v, 6)
         else:
             out[k] = v
     return out
@@ -661,7 +665,8 @@ def _subtree_cost(node):
     total = None
     if _is_span(node):
         if node.type == "agent.run":
-            cost = (node.end_payload or {}).get("cost_usd")
+            ep = node.end_payload
+            cost = ep.get("cost_usd") if isinstance(ep, dict) else None
             if isinstance(cost, (int, float)) and not isinstance(cost, bool):
                 total = float(cost)
         for child in node.children:
@@ -926,7 +931,8 @@ def _events_cost(events):
     total = None
     for e in events:
         if e.get("type") == "agent.run" and e.get("kind") == "end":
-            cost = (e.get("payload") or {}).get("cost_usd")
+            payload = e.get("payload")
+            cost = payload.get("cost_usd") if isinstance(payload, dict) else None
             if isinstance(cost, (int, float)) and not isinstance(cost, bool):
                 total = (total or 0.0) + float(cost)
     return total
@@ -940,6 +946,8 @@ def _events_cost(events):
 # node never sees a later event (time travel). Every absent datum is null, never a
 # fabricated 0 (E4): counts start at None and become a number only on the first
 # occurrence, and the cost reuses the single _events_cost rule over the cut list.
+# The API value is exact — rounding is a presentation concern only (see
+# `_compact_context` / app.js).
 
 _CONTEXT_FIELDS = (
     "phase", "round", "limit_hits", "circuit_breakers", "cost_usd", "followups",
@@ -967,10 +975,46 @@ def _phase_observation(e):
     return name if isinstance(name, str) and name else None
 
 
-def _context_deriver(events, own_ranges):
+def _round_subtree_ranges(roots, own_ranges):
+    """For every recorded ``round`` span, its FULL subtree seq range
+    ``(lo, hi, {loop, n, cap})`` — the same subtree-range semantics the serialized
+    tree exposes as ``end_seq``. A round's own events (``_span_seq_ranges``) cover
+    only its own span id; an OPEN round whose newest events belong to a nested
+    agent/child span would otherwise end at its start event, wrongly excluding the
+    cutoff. Combining descendant ranges through the built tree fixes that (one
+    post-order pass, memo-free but linear)."""
+    rounds = []
+
+    def walk(node):
+        if not _is_span(node):
+            s = node.seq
+            return (s, s) if isinstance(s, int) else (None, None)
+        lo, hi = own_ranges.get(node.span_id, (None, None))
+        if not isinstance(lo, int):
+            lo = hi = node.seq if isinstance(node.seq, int) else None
+        for child in node.children:
+            clo, chi = walk(child)
+            if isinstance(clo, int):
+                lo = clo if not isinstance(lo, int) else min(lo, clo)
+            if isinstance(chi, int):
+                hi = chi if not isinstance(hi, int) else max(hi, chi)
+        if node.type == "round":
+            p = node.start_payload if isinstance(node.start_payload, dict) else {}
+            rounds.append(
+                (lo, hi, {"loop": p.get("loop"), "n": p.get("n"), "cap": p.get("cap")})
+            )
+        return (lo, hi)
+
+    for root in roots:
+        walk(root)
+    return rounds
+
+
+def _context_deriver(events, round_ranges):
     """Return ``context_at(cutoff)`` deriving the six-field context at any seq. The
     prefix scans are computed ONCE (sorted by the unique seq) so per-node lookups
-    stay cheap on a large tree; the round containment scans the (few) round spans."""
+    stay cheap on a large tree; the round containment scans the (few) round spans
+    by their FULL subtree ranges (``round_ranges``)."""
     seq_events = sorted(
         (e for e in events if isinstance(e.get("seq"), int)),
         key=lambda e: e["seq"],
@@ -990,7 +1034,8 @@ def _context_deriver(events, own_ranges):
         pre_cb[i] = pre_cb[i - 1] + (1 if t == "circuit_breaker" else 0)
         pre_fu[i] = pre_fu[i - 1] + (1 if t == "followup" else 0)
         if t == "agent.run" and e.get("kind") == "end":
-            c = (e.get("payload") or {}).get("cost_usd")
+            payload = e.get("payload")
+            c = payload.get("cost_usd") if isinstance(payload, dict) else None
             if isinstance(c, (int, float)) and not isinstance(c, bool):
                 cost = (cost or 0.0) + float(c)
         pre_cost[i] = cost
@@ -999,19 +1044,11 @@ def _context_deriver(events, own_ranges):
             phase = obs
         pre_phase[i] = phase
 
-    rounds = []  # (lo, hi, {loop, n, cap}) for each recorded round span
-    for e in seq_events:
-        if e.get("type") == "round" and e.get("kind") == "start":
-            rng = own_ranges.get(e.get("span"))
-            if not rng:
-                continue
-            lo, hi = rng
-            if lo is None or hi is None:
-                continue
-            p = e.get("payload") if isinstance(e.get("payload"), dict) else {}
-            rounds.append(
-                (lo, hi, {"loop": p.get("loop"), "n": p.get("n"), "cap": p.get("cap")})
-            )
+    # Only rounds with a usable subtree range participate in containment.
+    rounds = [
+        (lo, hi, payload) for lo, hi, payload in round_ranges
+        if isinstance(lo, int) and isinstance(hi, int)
+    ]
 
     def context_at(cutoff) -> dict:
         if not isinstance(cutoff, int):
@@ -1024,15 +1061,14 @@ def _context_deriver(events, own_ranges):
         for lo, hi, payload in rounds:
             if lo <= cutoff <= hi and (best_lo is None or lo > best_lo):
                 best_lo, rnd = lo, payload
-        cost = pre_cost[i]
         return {
             "phase": pre_phase[i],
             "round": rnd,
             "limit_hits": pre_limit[i] or None,
             "circuit_breakers": pre_cb[i] or None,
-            # The same _events_cost sum, rounded for display so no raw float noise
-            # leaks into the rendered attribute (the polish formatting rule).
-            "cost_usd": round(cost, 6) if cost is not None else None,
+            # The exact cumulative cost (the shared _events_cost semantics); the API
+            # value is not rounded — presentation rounds it (compact_context/app.js).
+            "cost_usd": pre_cost[i],
             "followups": pre_fu[i] or None,
         }
 
@@ -1262,14 +1298,19 @@ def _run_detail(
     # The node-time run context is a pure projection of THESE already-loaded events
     # (no new reader/route/event): every node carries its own context, and the
     # top-level `latest_context` is the no-selection (live) view at the greatest seq.
-    context_at = _context_deriver(events, own_ranges)
+    # Round containment uses each round's FULL subtree seq range (so an open round
+    # whose newest events live in a nested span is still recognised); the tree is
+    # built once and reused for both the range map and serialization.
+    roots = build_tree(events)
+    round_ranges = _round_subtree_ranges(roots, own_ranges)
+    context_at = _context_deriver(events, round_ranges)
     return {
         "run": _summary(ref.slug, run_id, events, state),
         "phases": _phase_bar(events, state.phase if state is not None else None),
         "tree": [
             _serialize(n, tool_names, own_ranges=own_ranges, snaps=snaps,
                        context_at=context_at)
-            for n in build_tree(events)
+            for n in roots
         ],
         "latest_context": context_at(_latest_cutoff(events)),
         "problems": [asdict(p) for p in problems],

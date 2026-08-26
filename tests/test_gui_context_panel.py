@@ -136,3 +136,15 @@ def test_selecting_a_node_projects_its_context_onto_the_panel(tmp_path):
     assert after_b["limit_hits"] == ""            # this node's null count stays empty
     assert after_b["cost_usd"] == ""
     assert after_b["followups"] == ""
+
+
+def test_live_refresh_updates_the_unselected_panel(tmp_path):
+    """P1 (client): a live-region swap must refresh the panel when no node is
+    selected. `data-latest-context` lives on <body>, which is not swapped, so the
+    swap has to copy it from the fetched document — otherwise the unselected panel
+    would freeze at the value the page opened with."""
+    r = run_scenario(tmp_path, "context-live-swap")
+
+    assert r["before"]["phase"] == "spec"          # initial latest_context
+    assert r["after"]["phase"] == "build"          # refreshed latest_context wins
+    assert r["after"]["limit_hits"] == "2"

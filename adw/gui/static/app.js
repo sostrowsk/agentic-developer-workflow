@@ -517,6 +517,15 @@
     var openState = captureOpenState();
     var doc = new DOMParser().parseFromString(html, "text/html");
     reapplyOpenState(doc, openState); // preserve collapse choices before swapping
+    // The context panel's no-selection fallback (`data-latest-context`) lives on
+    // <body>, which is NOT one of the swapped regions — so refresh it from the
+    // fetched document, otherwise an unselected live panel would freeze at the
+    // value the page was first opened with.
+    var freshBody = doc.querySelector && doc.querySelector("body");
+    if (freshBody && freshBody.getAttribute) {
+      var latest = freshBody.getAttribute("data-latest-context");
+      if (latest !== null) body.setAttribute("data-latest-context", latest);
+    }
     REGIONS.forEach(function (selector) {
       var next = doc.querySelector(selector);
       var current = document.querySelector(selector);

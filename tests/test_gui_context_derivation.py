@@ -282,6 +282,37 @@ def test_latest_context_round_inside_a_running_round(home, tmp_path):  # noqa: F
     assert latest["limit_hits"] == 1
 
 
+def _open_round_nested_span_lines():
+    """An OPEN round whose newest events belong to a NESTED agent/tool span, not to
+    the round's own span id. The round span itself carries only its start event, so
+    its own seq range ends at that start — the containment must use the round's FULL
+    subtree range (through the nested span) or the nested contexts and
+    ``latest_context.round`` wrongly collapse to null."""
+    return [
+        rec(1, "run", "start", "R", None, sec=1, payload=run_start_payload("Open nested round")),
+        rec(2, "phase", "start", "P", "R", sec=2, payload={"name": "build", "from_phase": "build"}),
+        rec(3, "round", "start", "RD", "P", sec=3, payload={"loop": "gates", "n": 1, "cap": 3}),
+        rec(4, "agent.run", "start", "A", "RD", sec=4,
+            payload={"agent": "build_agent", "prompt": "p", "system_append": ""}),
+        # The newest event carries only the CHILD span id (A), never RD.
+        rec(5, "agent.tool.call", "point", "A", sec=5,
+            payload={"tool": "Bash", "tool_use_id": "t1", "input": {"command": "go"}}),
+    ]
+
+
+def test_open_round_containing_a_nested_active_span(home, tmp_path):  # noqa: F811
+    """AC 5 / C4 (regression): a round is recognised for a cutoff inside its SUBTREE,
+    even when the round's own span carries only its start event and the newest
+    events belong to a nested span. Both the nested node contexts and
+    ``latest_context.round`` reflect the enclosing round."""
+    detail = _detail(tmp_path, "0d0d0d0d", _open_round_nested_span_lines()).json()
+    expected = {"loop": "gates", "n": 1, "cap": 3}
+
+    assert detail["latest_context"]["round"] == expected     # newest event is nested
+    assert _ctx_by_seq(detail["tree"], 5)["round"] == expected  # the nested tool point
+    assert _ctx_by_seq(detail["tree"], 4)["round"] == expected  # the nested agent.run span
+
+
 # --- counts & cost (C5): null, never a fabricated 0 ----------------------------
 
 
@@ -328,6 +359,56 @@ def test_malformed_or_incomplete_payloads_yield_null_not_error(home, tmp_path): 
     assert ctx["cost_usd"] is None       # the invalid cost is not counted
     assert ctx["limit_hits"] == 1        # the valid limit.hit still counts
     assert detail["latest_context"]["cost_usd"] is None
+
+
+def _non_dict_agentrun_payload_lines():
+    """A completed ``agent.run`` whose end payload is NOT a mapping (a list here) —
+    the kind a crafted or corrupt log can carry. The cost read must treat it as no
+    cost, not call ``.get`` on it (which would 5xx). The agent.run sits under a
+    ``phase`` so the aggregate ``_subtree_cost`` path is exercised as well."""
+    return [
+        rec(1, "run", "start", "R", None, sec=1, payload=run_start_payload("Non-dict payload")),
+        rec(2, "phase", "start", "P", "R", sec=2, payload={"name": "build", "from_phase": "build"}),
+        rec(3, "agent.run", "start", "A", "P", sec=3,
+            payload={"agent": "a", "prompt": "p", "system_append": ""}),
+        rec(4, "agent.run", "end", "A", "P", sec=4, payload=["not", "a", "dict"]),
+        rec(5, "phase", "end", "P", "R", sec=5, payload={"name": "build", "to_phase": "done"}),
+        rec(6, "run", "end", "R", None, sec=6, payload=run_end_payload("done")),
+    ]
+
+
+def test_non_dict_agent_run_payload_does_not_5xx(home, tmp_path):  # noqa: F811
+    """AC 10 / C6: a non-mapping ``agent.run`` end payload leaves ``cost_usd`` null
+    and never raises a 5xx (defensive malformed-payload requirement)."""
+    resp = _detail(tmp_path, "12ab34cd", _non_dict_agentrun_payload_lines())
+    assert resp.status_code == 200
+    detail = resp.json()
+
+    assert detail["latest_context"]["cost_usd"] is None
+    assert node_by_seq(detail["tree"], 3)["context"]["cost_usd"] is None  # the agent.run span
+
+
+def _precise_cost_lines(cost):
+    return [
+        rec(1, "run", "start", "R", None, sec=1, payload=run_start_payload("Precise cost")),
+        rec(2, "agent.run", "start", "A", "R", sec=2,
+            payload={"agent": "a", "prompt": "p", "system_append": ""}),
+        rec(3, "agent.run", "end", "A", "R", sec=3,
+            payload={"result_text": "ok", "cost_usd": cost, "is_error": False}),
+        rec(4, "run", "end", "R", None, sec=4, payload=run_end_payload("done")),
+    ]
+
+
+def test_api_cost_usd_is_exact_not_rounded(home, tmp_path):  # noqa: F811
+    """AC 7 / E4: the JSON API returns the EXACT cumulative cost (the shared
+    ``_events_cost`` semantics); rounding is presentation-only and must not alter the
+    API value."""
+    cost = 5.795072500000001  # more than six decimals: display rounding would change it
+    detail = _detail(tmp_path, "cafe0001", _precise_cost_lines(cost)).json()
+
+    assert detail["latest_context"]["cost_usd"] == cost           # exact, unrounded
+    assert node_by_seq(detail["tree"], 2)["context"]["cost_usd"] == cost
+    assert detail["latest_context"]["cost_usd"] != round(cost, 6)  # rounding would differ
 
 
 def test_run_without_a_trace_has_only_latest_context_all_null(home, tmp_path):  # noqa: F811

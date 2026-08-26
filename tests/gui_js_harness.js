@@ -660,6 +660,58 @@ async function runContextPanel() {
   return { ok: true, afterA: afterA, afterB: afterB };
 }
 
+function contextSwapMain() {
+  // A `main.detail` region with a dummy node/pane (so applySelection selects it
+  // without a fetch) and the run-context panel (empty value slots).
+  var node = el("div", { classes: ["node"], attrs: { "data-seq": "1" } });
+  var trace = el("div", { classes: ["trace"], children: [node] });
+  var pane = el("div", { classes: ["pane"], attrs: { "data-seq": "1" } });
+  var panes = el("div", { classes: ["panes"], children: [pane] });
+  var fields = ["phase", "round", "limit_hits", "circuit_breakers", "cost_usd", "followups"]
+    .map(function (f) {
+      return el("span", { classes: ["ctx-value"], attrs: { "data-context-field": f } });
+    });
+  var panel = el("aside", { classes: ["run-context"], children: fields });
+  var layout = el("div", { classes: ["trace-layout"], children: [trace, panes, panel] });
+  return el("main", { classes: ["detail"], children: [layout] });
+}
+
+async function runContextLiveSwap() {
+  // P1: a live-region swap must refresh the UNSELECTED context panel. The panel's
+  // no-selection fallback (`data-latest-context`) lives on <body>, which is not one
+  // of the swapped regions, so the swap must copy it from the fetched document —
+  // otherwise the panel freezes at the value the page opened with.
+  var L1 = { phase: "spec", round: null, limit_hits: null, circuit_breakers: null,
+    cost_usd: null, followups: null };
+  var L2 = { phase: "build", round: null, limit_hits: 2, circuit_breakers: null,
+    cost_usd: null, followups: null };
+
+  var body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111",
+    "data-latest-context": JSON.stringify(L1) },
+    children: [el("header", { classes: ["run-header"] }), contextSwapMain()] });
+  installGlobals(el("html", { children: [body] }), body);
+  loadAppJs(APP);
+
+  function readField(f) {
+    var e = document.querySelector('[data-context-field="' + f + '"]');
+    return e ? e.textContent : null;
+  }
+  var before = { phase: readField("phase"), limit_hits: readField("limit_hits") };
+
+  // The fetched refresh document carries an UPDATED latest_context on its body.
+  var freshRoot = el("html", { children: [el("body", {
+    attrs: { "data-latest-context": JSON.stringify(L2) },
+    children: [el("header", { classes: ["run-header"] }), contextSwapMain()] })] });
+  nextParsedDoc = freshRoot;
+
+  eventSource.onmessage({ data: JSON.stringify({ type: "phase", kind: "point" }) });
+  await drain(); flushTimers(); await drain();          // scheduleRefresh -> refresh -> GET detail
+  resolveDetailFetch("<html></html>"); await drain();   // -> swapRegions -> updateContextPanel
+
+  var after = { phase: readField("phase"), limit_hits: readField("limit_hits") };
+  return { ok: true, before: before, after: after };
+}
+
 // ---------------------------------------------------------------------------
 const APP = process.argv[2];
 const SCENARIO = process.argv[3];
@@ -676,6 +728,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "refresh-window") result = await runRefreshWindow(ARG || "");
   else if (SCENARIO === "timeline-focus") result = await runTimelineFocus();
   else if (SCENARIO === "context-panel") result = await runContextPanel();
+  else if (SCENARIO === "context-live-swap") result = await runContextLiveSwap();
   else if (SCENARIO === "artifact") result = await runArtifact();
   else throw new Error("unknown scenario: " + SCENARIO);
   process.stdout.write(JSON.stringify(result));
