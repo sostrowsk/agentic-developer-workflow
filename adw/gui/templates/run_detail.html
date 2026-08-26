@@ -257,6 +257,36 @@
     </div>
   </header>
 
+  {#- Recovery card (§7.2): the next step for a run that needs human intervention.
+      Rendered ONLY when the derived `recovery` object is present. Pure display —
+      the command is selectable text, never executed (E1). In the escalation case
+      it is anchored at the governing escalation node (data-anchor-seq) and links to
+      escalation.md in the Artifacts tab instead of duplicating its content. -#}
+  {% if detail.recovery is defined %}
+  {%- set rc = detail.recovery %}
+  <section class="recovery-card recovery-{{ rc.kind }}" data-recovery-card data-recovery-kind="{{ rc.kind }}"{% if rc.kind == 'none' and rc.anchor_seq is not none %} data-anchor-seq="{{ rc.anchor_seq }}"{% endif %}>
+    <h2 class="recovery-title">{{ t.recovery_title }}</h2>
+    {% if rc.kind == 'none' %}
+    <p class="recovery-new-run">{{ t.recovery_new_run }}</p>
+    {% if rc.reason is not none %}<p class="recovery-reason"><span class="recovery-label">{{ t.recovery_reason }}:</span> {{ rc.reason }}</p>{% endif %}
+    {% if rc.phase is not none %}<p class="recovery-phase"><span class="recovery-label">{{ t.recovery_phase }}:</span> {{ rc.phase }}</p>{% endif %}
+    {% if rc.aborts %}
+    <div class="recovery-aborts"><span class="recovery-label">{{ t.recovery_aborts }}:</span>
+      <ul class="recovery-abort-list">
+        {% for a in rc.aborts %}
+        <li class="recovery-abort" data-seq="{{ a.seq }}">{{ a.type }}: <code>{{ a.payload | tojson }}</code></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    <a class="recovery-artifact" href="#artifacts" data-recovery-artifact="{{ rc.escalation_artifact }}">{{ t.recovery_report }}</a>
+    {% else %}
+    <p class="recovery-phase"><span class="recovery-label">{{ t.recovery_phase }}:</span> {{ detail.run.phase }}</p>
+    <p class="recovery-command-line"><span class="recovery-label">{{ t.recovery_command }}:</span> <code class="recovery-command">{{ rc.command }}</code></p>
+    {% endif %}
+  </section>
+  {% endif %}
+
   <main class="detail">
     {# An active Raw seq range means the user jumped here from a span node, so the
        Raw tab opens active instead of Trace (R5) — a plain server-render choice,

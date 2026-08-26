@@ -474,6 +474,49 @@ are translated.
      extended). The panel is a plain field list — no chart, no history curve — and
      offers no configurable field set and no selection persistence.
 
+6. **Recovery card** (when the run needs a human step): the run detail shows exactly
+   one card that leads from the mere state display to the concrete next step. It is a
+   purely derived projection of the already-loaded state (`state.phase`), the
+   existing run-status derivation, the event stream and the server-resolved
+   repository path (`RepoRef.path`) — no new event, reader, route, persistence or
+   liveness detection. Observable as an additive `recovery` object on
+   `GET /api/runs/{repo}/{run_id}`, present **exactly** when the run needs
+   intervention and **absent** otherwise (never an empty object).
+   - **Trigger and selection** follow *only* `state.phase` (never the `escalation`
+     event's `phase`, which is always the origin phase and can never be
+     `escalated`). Lifecycle basis (verified in code): `escalate()` sets
+     `state.phase` to `escalated` and only *then* emits the `escalation` event, so a
+     run carrying an `escalation` event is *always* finally escalated — approval
+     pauses and transient aborts/crashes emit no such event. Hence:
+     `escalated` → kind `none` (a NEW run is required, no continuation command);
+     `awaiting_spec_approval`/`awaiting_approval` → kind `approve`; a work phase
+     (`spec`, `plan`, `build`, `integration`, `codex_review`, `final_review`, `ci`)
+     whose derived run-status is not `running` → kind `resume`; `done`, a running
+     work phase, or no loadable state → no card. The `escalated` check strictly
+     precedes all others, so an escalated run is never offered `resume`/`approve` —
+     consistent with `adw resume` itself refusing an escalated run.
+   - **Command** (kinds `approve`/`resume`): the finished, copyable text in the
+     existing CLI signature — `adw approve <run_id> --repo <path>` resp.
+     `adw resume <run_id> --repo <path>` — with the real `run_id` and the real,
+     server-resolved registry path, **not** the slug. `run_id` and path are rendered
+     POSIX-shell-safely per `shlex.quote` semantics, so a path with spaces, single
+     quotes or shell metacharacters stays exactly one `--repo` argument and yields no
+     extra command. Kind `none` carries no command but the machine-readable
+     `needs_new_run` flag.
+   - **Escalation context** (kind `none`): `reason` and the affected `phase` verbatim
+     from the `escalation` event with the greatest `seq`; the associated
+     `limit.hit`/`circuit_breaker` abort events (those between the immediately prior
+     escalation and the governing one, payloads unchanged); and a reference to
+     `escalation.md` in the Artifacts tab — the card links to it instead of
+     duplicating its content. The card is anchored at the governing escalation node
+     (`anchor_seq`); where an escalated run lacks a usable event log the context is
+     `null`/empty (never invented) and the still-usable card falls back to run level.
+   - **Read-only** (E1/§2): the command is displayed, never executed — rendering
+     spawns no subprocess and writes nothing. The real repo path appears *only* in
+     the command text, never in a URL (the slug rule of §7.4 is unchanged). All card
+     labels are bilingual (`adw/gui/i18n.py`); the command line, event values,
+     `run_id` and repo path are not translated.
+
 ### 7.3 Live update
 
 - `GET /api/runs/{repo}/{run_id}/stream` — SSE. Server tails `events.jsonl` by

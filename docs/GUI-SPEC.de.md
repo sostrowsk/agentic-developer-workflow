@@ -497,6 +497,52 @@ sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werd
      einfache Feldliste — kein Diagramm, keine Verlaufskurve — ohne konfigurierbares
      Feld-Set und ohne Persistenz der Auswahl.
 
+6. **Recovery-Karte** (wenn der Lauf menschliches Eingreifen braucht): das
+   Run-Detail zeigt genau eine Karte, die von der bloßen Zustandsanzeige zum
+   konkreten nächsten Schritt führt. Sie ist eine rein abgeleitete Projektion des
+   bereits geladenen Zustands (`state.phase`), der bestehenden Status-Ableitung, des
+   Event-Stroms und des serverseitig aufgelösten Repo-Pfads (`RepoRef.path`) — kein
+   neues Event, kein neuer Reader, keine neue Route, keine Persistenz, keine neue
+   Liveness-Erkennung. Beobachtbar als additives `recovery`-Objekt in
+   `GET /api/runs/{repo}/{run_id}`, vorhanden **genau dann**, wenn der Lauf
+   Eingreifen braucht, sonst **abwesend** (nie ein leeres Objekt).
+   - **Trigger und Auswahl** folgen *nur* `state.phase` (nie dem `phase`-Feld des
+     `escalation`-Events, das stets die Ursprungs-Phase trägt und nie `escalated`
+     sein kann). Lebenszyklus-Grundlage (im Code geprüft): `escalate()` setzt
+     `state.phase` auf `escalated` und emittiert *erst dann* das `escalation`-Event;
+     ein Lauf mit `escalation`-Event ist also *immer* endgültig eskaliert —
+     Approval-Pausen und transiente Abbrüche/Crashes erzeugen kein solches Event.
+     Daher: `escalated` → Kind `none` (ein NEUER Lauf nötig, kein
+     Fortsetzungskommando); `awaiting_spec_approval`/`awaiting_approval` → Kind
+     `approve`; eine Arbeitsphase (`spec`, `plan`, `build`, `integration`,
+     `codex_review`, `final_review`, `ci`), deren abgeleiteter Run-Status nicht
+     `running` ist → Kind `resume`; `done`, eine laufende Arbeitsphase oder kein
+     ladbarer State → keine Karte. Die `escalated`-Prüfung geht strikt allen anderen
+     voraus, sodass einem eskalierten Lauf nie `resume`/`approve` angeboten wird —
+     konsistent damit, dass `adw resume` einen eskalierten Lauf selbst verweigert.
+   - **Kommando** (Kind `approve`/`resume`): der fertige, kopierbare Text in der
+     bestehenden CLI-Signatur — `adw approve <run_id> --repo <pfad>` bzw.
+     `adw resume <run_id> --repo <pfad>` — mit der echten `run_id` und dem echten,
+     serverseitig aufgelösten Registry-Pfad, **nicht** dem Slug. `run_id` und Pfad
+     werden POSIX-shell-sicher nach `shlex.quote`-Semantik dargestellt, sodass ein
+     Pfad mit Leerzeichen, einfachen Anführungszeichen oder Shell-Metazeichen genau
+     EIN `--repo`-Argument bleibt und kein Zusatzkommando ergibt. Kind `none` trägt
+     kein Kommando, aber das maschinenlesbare `needs_new_run`-Kennzeichen.
+   - **Eskalationskontext** (Kind `none`): `reason` und die betroffene `phase`
+     unverändert aus dem `escalation`-Event mit der größten `seq`; die zugehörigen
+     `limit.hit`/`circuit_breaker`-Abbruch-Ereignisse (die zwischen einer etwaigen
+     vorherigen Eskalation und der maßgeblichen liegen, Payloads unverändert); und
+     ein Verweis auf `escalation.md` im Artefakte-Reiter — die Karte verlinkt darauf,
+     statt dessen Inhalt zu duplizieren. Die Karte ist am maßgeblichen
+     Eskalationsknoten verankert (`anchor_seq`); fehlt einem eskalierten Lauf ein
+     verwertbares Event-Log, ist der Kontext `null`/leer (nie erfunden) und die
+     weiterhin verwertbare Karte fällt auf Run-Ebene zurück.
+   - **Read-only** (E1/§2): das Kommando wird angezeigt, nie ausgeführt — das Rendern
+     startet keinen Subprozess und schreibt nichts. Der echte Repo-Pfad erscheint
+     *nur* im Kommandotext, nie in einer URL (die Slug-Regel aus §7.4 bleibt
+     unangetastet). Alle Kartenlabels sind beidsprachig (`adw/gui/i18n.py`); die
+     Kommandozeile, Eventwerte, `run_id` und Repo-Pfad werden nicht übersetzt.
+
 ### 7.3 Live-Update
 
 - `GET /api/runs/{repo}/{run_id}/stream` — SSE. Der Server tailt `events.jsonl`

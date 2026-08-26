@@ -13,6 +13,25 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Recovery-Karte am verursachenden Knoten im Run-Inspector.** Braucht ein Lauf
+  menschliches Eingreifen, leitet das Run-Detail nun genau eine Recovery-Karte ab,
+  die das eine passende nächste Kommando als kopierbaren, POSIX-shell-sicheren Text
+  nennt — mit dem echten Repo-Pfad aus der Registry und der echten `run_id` (nie dem
+  URL-Slug). Das Kommando folgt strikt `state.phase`: Pause am Approval-Gate →
+  `adw approve`, abgebrochene/gecrashte Arbeitsphase → `adw resume`, endgültig
+  eskalierter Lauf → kein Fortsetzungskommando, sondern der klare Hinweis, dass ein
+  NEUER Lauf nötig ist. Im Eskalationsfall ist die Karte am maßgeblichen
+  `escalation`-Knoten verankert und zeigt Grund, betroffene Phase und die unmittelbar
+  vorausgehenden `limit.hit`/`circuit_breaker`-Ereignisse; sie verlinkt auf
+  `escalation.md` im Artefakte-Reiter, statt dessen Inhalt zu duplizieren. Die GUI
+  bleibt strikt read-only: das Kommando wird angezeigt, niemals ausgeführt.
+  Kartenlabels beidsprachig (`adw/gui/i18n.py`); Kommandozeile, Eventwerte, `run_id`
+  und Repo-Pfad werden nicht übersetzt. Beobachtbar als additives, abgeleitetes
+  `recovery`-Objekt in `GET /api/runs/{repo}/{run_id}` (GUI-SPEC §7.2).
+
 ## [0.12.0] — 2026-08-26
 
 ### Hinzugefügt

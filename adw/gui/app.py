@@ -14,6 +14,7 @@ import difflib
 import json
 import os
 import re
+import shlex
 import subprocess
 import time
 from dataclasses import asdict, dataclass
@@ -1403,6 +1404,85 @@ def _artifacts_listing(run_dir: Path) -> list[dict]:
     return items
 
 
+# --- recovery card: the derived next-step projection (Aufgabe backend) ----------
+# A pure projection of the already-loaded run state (`state.phase`), the existing
+# run-status derivation, the event stream and the server-resolved `RepoRef.path`.
+# It is PRESENT exactly when the run needs human intervention and ABSENT otherwise
+# (never an empty object). No new event, route, reader or persistence (E4).
+
+# The abort events (`limit.hit`/`circuit_breaker`) that surround an escalation.
+_ABORT_TYPES = ("limit.hit", "circuit_breaker")
+# The approval-gate phases (kind `approve`) and the work phases (kind `resume`).
+_APPROVAL_PHASES = ("awaiting_spec_approval", "awaiting_approval")
+
+
+def _recovery(ref: RepoRef, run_id: str, state, run_summary, events) -> dict | None:
+    """The recovery projection, or None when the run needs no human step.
+
+    The kind follows ONLY the selection rule, evaluated on ``state.phase`` (never
+    on the escalation event's ``phase``): ``escalated`` -> ``none`` (a new run is
+    required); an approval gate -> ``approve``; a work phase whose derived
+    run-status is not ``running`` -> ``resume``. ``done``, a running work phase, or
+    no loadable state -> None."""
+    phase = state.phase if state is not None else None
+    if phase is None:
+        return None
+    if phase == "escalated":  # strictly precedes every other branch (E5, AC 1/2)
+        return _escalated_recovery(events)
+    if phase in _APPROVAL_PHASES:
+        return {"kind": "approve", "needs_new_run": False,
+                "command": _recovery_command("approve", ref, run_id)}
+    if phase in PHASES and run_summary.get("status") != "running":
+        return {"kind": "resume", "needs_new_run": False,
+                "command": _recovery_command("resume", ref, run_id)}
+    return None
+
+
+def _recovery_command(kind: str, ref: RepoRef, run_id: str) -> str:
+    """The finished, copyable CLI command with the real run_id and the real,
+    server-resolved registry path — both rendered POSIX-shell-safely so the path
+    stays ONE ``--repo`` argument (AC 3/4). The command line is never translated."""
+    return f"adw {kind} {shlex.quote(run_id)} --repo {shlex.quote(ref.path or '')}"
+
+
+def _escalated_recovery(events) -> dict:
+    """The ``none`` variant: no continuation command, the new-run flag, and the
+    escalation context anchored at the governing (greatest-``seq``) ``escalation``
+    event. Missing/untypical data is null/empty, never invented (AC 5/6/7/9)."""
+    escalations = sorted(
+        (e for e in events if e.get("type") == "escalation" and isinstance(e.get("seq"), int)),
+        key=lambda e: e["seq"],
+    )
+    reason = phase = anchor_seq = None
+    aborts: list[dict] = []
+    if escalations:
+        governing = escalations[-1]
+        anchor_seq = governing["seq"]
+        payload = governing.get("payload") or {}
+        reason = payload.get("reason")
+        phase = payload.get("phase")
+        # The aborts of THIS escalation: between the immediately prior escalation
+        # (exclusive) and the governing one (exclusive), in event order.
+        prior_seq = escalations[-2]["seq"] if len(escalations) >= 2 else None
+        for e in events:
+            seq = e.get("seq")
+            if e.get("type") not in _ABORT_TYPES or not isinstance(seq, int):
+                continue
+            if seq < anchor_seq and (prior_seq is None or seq > prior_seq):
+                aborts.append({"type": e["type"], "seq": seq, "payload": e.get("payload") or {}})
+        aborts.sort(key=lambda a: a["seq"])
+    return {
+        "kind": "none",
+        "needs_new_run": True,
+        "command": None,
+        "anchor_seq": anchor_seq,
+        "reason": reason,
+        "phase": phase,
+        "aborts": aborts,
+        "escalation_artifact": "escalation.md",
+    }
+
+
 def _run_detail(
     ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path, *,
     limit=_DISPLAY_WINDOW, raw_q=None, raw_type=None, raw_from_seq=None, raw_to_seq=None,
@@ -1422,8 +1502,9 @@ def _run_detail(
     round_ranges = _round_subtree_ranges(roots, own_ranges)
     context_at = _context_deriver(events, round_ranges)
     prompt_diffs = _prompt_diffs(roots)
-    return {
-        "run": _summary(ref.slug, run_id, events, state),
+    run_summary = _summary(ref.slug, run_id, events, state)
+    detail = {
+        "run": run_summary,
         "phases": _phase_bar(events, state.phase if state is not None else None),
         "tree": [
             _serialize(n, tool_names, own_ranges=own_ranges, snaps=snaps,
@@ -1435,6 +1516,12 @@ def _run_detail(
         "raw": _raw_view(events, limit, q=raw_q, type_filter=raw_type,
                          from_seq=raw_from_seq, to_seq=raw_to_seq),
     }
+    # The recovery projection is added ONLY when the run needs human intervention
+    # (kind determined); otherwise the key is absent (no empty object forced).
+    recovery = _recovery(ref, run_id, state, run_summary, events)
+    if recovery is not None:
+        detail["recovery"] = recovery
+    return detail
 
 
 # --- read-only snapshot diff (Aufgabe B, AC-B1/B2/B4) ---------------------------

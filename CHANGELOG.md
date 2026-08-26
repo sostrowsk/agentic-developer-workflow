@@ -12,6 +12,25 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Added
+- **Recovery card at the causing node in the Run Inspector.** When a run needs a
+  human step, the run detail now derives one recovery card that names the single
+  next command as copyable, POSIX-shell-safe text — with the real repository path
+  from the registry and the real `run_id` (never the URL slug). The command is
+  chosen strictly from `state.phase`: an approval-gate pause → `adw approve`, an
+  aborted/crashed work phase → `adw resume`, a finally escalated run → no
+  continuation command but the clear hint that a NEW run is required. In the
+  escalation case the card is anchored at the governing `escalation` node and shows
+  the reason, the affected phase and the immediately preceding
+  `limit.hit`/`circuit_breaker` events, and it links to `escalation.md` in the
+  Artifacts tab rather than duplicating its content. The GUI stays strictly
+  read-only: the command is displayed, never executed. Card labels are bilingual
+  (`adw/gui/i18n.py`); the command line, event values, `run_id` and repo path are
+  not translated. Observable as an additive, derived `recovery` object on
+  `GET /api/runs/{repo}/{run_id}` (GUI-SPEC §7.2).
+
 ## [0.12.0] — 2026-08-26
 
 ### Added

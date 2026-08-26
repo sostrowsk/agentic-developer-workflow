@@ -110,6 +110,16 @@ _EN: dict[str, str] = {
     "hint_payload_missing": "(payload not found)",
     "hint_load_failed_expand": "(failed to load — expand again to retry)",
     "hint_load_failed_open": "(failed to load — open again to retry)",
+    # Labels for the recovery card (§7.2): the next step a run that needs human
+    # intervention points to. The command line itself, event values, run_id and repo
+    # path are CONTENT and stay untranslated — only these chrome labels switch.
+    "recovery_title": "Recovery",
+    "recovery_reason": "Reason",
+    "recovery_phase": "Affected phase",
+    "recovery_aborts": "Abort events",
+    "recovery_command": "Next command",
+    "recovery_new_run": "This run has escalated — a new run is required.",
+    "recovery_report": "Escalation report",
 }
 
 _DE: dict[str, str] = {
@@ -191,6 +201,13 @@ _DE: dict[str, str] = {
     "hint_payload_missing": "(kein Inhalt gefunden)",
     "hint_load_failed_expand": "(Laden fehlgeschlagen — erneut aufklappen)",
     "hint_load_failed_open": "(Laden fehlgeschlagen — erneut öffnen)",
+    "recovery_title": "Recovery",
+    "recovery_reason": "Grund",
+    "recovery_phase": "Betroffene Phase",
+    "recovery_aborts": "Abbruch-Ereignisse",
+    "recovery_command": "Nächstes Kommando",
+    "recovery_new_run": "Dieser Lauf ist eskaliert — ein neuer Lauf ist nötig.",
+    "recovery_report": "Eskalationsbericht",
 }
 
 CATALOG: dict[str, dict[str, str]] = {"en": _EN, "de": _DE}
