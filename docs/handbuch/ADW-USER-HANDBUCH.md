@@ -135,8 +135,9 @@ Complete config reference (all keys)
 | `ci.timeout`              | optional (2700) | Total budget for waiting on CI (45 min default).                                                                                                                            |
 | `ci.staging_job`          | optional        | Name of a job (e.g. `deploy-staging`) that additionally has to be green.                                                                                                    |
 | `ci.provider`             | optional        | `gitlab` or `github`. If not set, ADW detects the hosting from the origin remote URL; for an unknown host (e.g. self-hosted with a custom domain name) the key is required. |
+| `breakpoints[]`           | optional ([])   | Extra approval holds before the expensive, hard-to-reverse steps. A list of `before_integration` (after all build Lanes are green, before integration/review) and/or `before_push` (after the final review, before push/CI). Any other value is a config error. Empty/absent = no extra holds (section 6). |
 
-A missing or broken config (unknown keys, Lane without Gates, Gate without timeout, duplicate keys) aborts **immediately** with a clear message — no defaults are guessed, apart from the two documented ones (`poll_interval`, `timeout`).
+A missing or broken config (unknown keys, Lane without Gates, Gate without timeout, duplicate keys, an unknown `breakpoints` value) aborts **immediately** with a clear message — no defaults are guessed, apart from the two documented ones (`poll_interval`, `timeout`).
 
 </div>
 
@@ -257,6 +258,14 @@ Start with the summary: it states in a few lines what is to be built and why, wh
 The approval Gate is the cheapest place to stop wrong directions: a corrected assumption at plan level costs nothing; at code level it costs build, review and fix cycles. For small, low-risk tasks: `--no-approval`.
 
 </div>
+
+**Configurable breakpoints (optional).** Beyond the plan approval you can add up to two holds before the expensive, hard-to-reverse steps — set `breakpoints:` in `.adw/config.yaml`:
+
+    breakpoints:
+      - before_integration   # after all build Lanes are green, before integration/review
+      - before_push          # after the final review, before push/CI
+
+At an active breakpoint the run pauses exactly like the plan Gate (exit 2), and you continue with `adw approve <run_id> --repo <path>` — the CLI names the waiting breakpoint. A granted breakpoint never holds again (even after crash + `resume`); `adw approve` on a run that is not waiting is a clean error. `--no-approval` (or `--gates none`) skips the breakpoints too. Default (no key): today's behavior, no extra holds.
 
 ## 7. Artifacts, reports & run directory
 

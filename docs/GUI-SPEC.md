@@ -216,7 +216,7 @@ Point events:
 | `limit.hit` | `limit`, `value`, `cap` |
 | `circuit_breaker` | `keys[]`, `scope` |
 | `escalation` | `reason`, `phase` |
-| `approval` | `gate` (`spec`\|`plan`), `event` (`awaited`\|`granted`) |
+| `approval` | `gate` (`spec`\|`plan`\|`before_integration`\|`before_push`), `event` (`awaited`\|`granted`) |
 | `artifact` | `name`, `path`, `bytes`, `sha256` |
 | `followup` | `finding_key`, `text` |
 | `state.saved` | `seq` (RunState.seq), `phase` |
@@ -348,7 +348,11 @@ trace, the state phase is the fallback — `awaiting_approval` / `awaiting_spec_
 → `awaiting_approval`. `awaiting_approval` is the one state that needs a person to
 act and is emphasised the strongest of all states. The JSON status values stay
 language-neutral (`waiting`, `awaiting`, `awaiting_approval`); only their labels
-are translated.
+are translated. A run paused at a configurable **breakpoint** (`gate`
+`before_integration`/`before_push`) is shown exactly like the spec/plan gates:
+the same `awaiting_approval` status and the same read-only recovery hint
+`adw approve <run_id> --repo <path>` — no new write path and no new phase value;
+the GUI stays read-only.
 
 **B — Run detail (`/runs/{repo}/{run_id}`)** — the main view:
 

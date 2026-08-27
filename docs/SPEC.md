@@ -124,6 +124,26 @@ documented known limitations.
 **nothing** → abort immediately) ends the run with exit code ≠ 0 and an
 escalation report (`.adw/runs/<run_id>/escalation.md`): what was achieved, what is open, why.
 
+**Configurable breakpoints:** Beyond the two fixed authoring approvals (after spec, after
+plan), an optional `breakpoints:` list in `.adw/config.yaml` activates up to two additional
+holds before the expensive, hard-to-reverse steps. Exactly two values are allowed:
+`before_integration` (after all build lanes are green, before any integration/merge or
+subsequent review work — in single-lane operation: after the build lane, before
+`codex_review`) and `before_push` (after the final review, before ANY CI-phase work: no
+push, no CI/E2E preparation, no polling). A run reaching an active breakpoint pauses via the
+**existing** approval path — persisted phase `awaiting_approval`, exit code 2, continued with
+`adw approve <run_id> --repo <path>` — and records which breakpoint waits in a dedicated state
+field `pending_breakpoint` (`before_integration`/`before_push`/null). The `Phase` set of
+values is **not** extended (no new phase literal); the phase bar, retention and the recovery
+card stay unchanged. Each hold is an `approval` event (`gate` = breakpoint name, `event` =
+`awaited` on entry, `granted` on release), so GUI and timeline render it with no special case;
+per actual entry exactly one `awaited` ends up in the log, caught up idempotently over a crash
+between the state save and the event write. A granted breakpoint never holds again — not even
+after crash + `resume`; a `resume` at a not-yet-granted breakpoint stays waiting; `adw approve`
+on a run that is not waiting is a clean error. `--no-approval` (`skip_approval`, also via
+`--gates none`) skips the breakpoints too — one switch for "no human approval in this run".
+Default (no key or empty list): today's behavior, unchanged.
+
 ## 5. Interfaces
 
 ### CLI

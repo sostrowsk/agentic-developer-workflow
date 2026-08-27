@@ -12,6 +12,25 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Added
+- **Configurable breakpoints as a generalized approval.** A new optional
+  `breakpoints:` list in `.adw/config.yaml` activates up to two holds before the
+  expensive, hard-to-reverse steps: `before_integration` (after all build lanes
+  are green, before integration/merge or review work) and `before_push` (after
+  the final review, before any push/CI work). A run pauses at an active
+  breakpoint exactly as at the existing spec/plan approval gates — persisted
+  phase `awaiting_approval`, process exit code 2, continued with
+  `adw approve <run_id> --repo <path>`. Which breakpoint waits is recorded in a
+  new state field `pending_breakpoint`, not a new phase value; the `Phase` set,
+  the phase bar and retention are unchanged. Each breakpoint is logged as an
+  `approval` event (`gate` = breakpoint name, `event` = awaited/granted) so the
+  GUI and timeline render it with no special case, and holds are idempotent
+  across crash + `resume`. `--no-approval` (also via `--gates none`) skips the
+  breakpoints too — one switch for "no human approval in this run". Default (no
+  key or empty list): today's behavior, unchanged.
+
 ## [0.15.0] — 2026-08-26
 
 ### Added

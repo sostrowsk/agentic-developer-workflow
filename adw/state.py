@@ -11,6 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from adw.config import BreakpointName
 from adw.findings import Finding
 
 RUN_ID_RE = re.compile(r"^[0-9a-f]{8}$")
@@ -102,6 +103,12 @@ class RunState(BaseModel):
     # Plan. Beim Run-Start gepinnt, damit ein Resume/Approve das Gate kennt.
     spec_approval: bool = False
     spec_approval_granted: bool = False
+    # Welcher konfigurierte Haltepunkt gerade wartet (before_integration/
+    # before_push) oder None. Gesetzt ausschließlich während der Lauf an einem
+    # Breakpoint pausiert (mit phase == "awaiting_approval"); von approve
+    # geleert. KEIN neuer Phase-Wert (E3b). Alt-States ohne das Feld laden als
+    # None. Überlebt Crash + resume + approve wie skip_approval.
+    pending_breakpoint: BreakpointName | None = None
     # Runden-Zähler der Integration/E2E-Phase — persistiert, damit ein Crash
     # das 10-Runden-Limit nicht zurücksetzt. last_failures ist die
     # Circuit-Breaker-Basis (wird erst NACH dem Fix-Dispatch fortgeschrieben).

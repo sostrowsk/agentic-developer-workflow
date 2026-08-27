@@ -13,6 +13,27 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Konfigurierbare Haltepunkte als verallgemeinerte Approval.** Eine neue
+  optionale Liste `breakpoints:` in `.adw/config.yaml` aktiviert bis zu zwei
+  Halte vor den teuren, schwer umkehrbaren Schritten: `before_integration` (nach
+  Abschluss aller Build-Lanes, vor Integrations-/Merge- oder Review-Arbeit) und
+  `before_push` (nach dem finalen Review, vor jeglicher Push-/CI-Arbeit). An
+  einem aktiven Haltepunkt pausiert der Lauf exakt wie an den bestehenden
+  Spec-/Plan-Approval-Gates — persistierte Phase `awaiting_approval`,
+  Prozess-Exit-Code 2, Fortsetzung mit `adw approve <run_id> --repo <pfad>`.
+  Welcher Haltepunkt wartet, steht im neuen State-Feld `pending_breakpoint`,
+  NICHT in einem neuen Phasenwert; das `Phase`-Modell, die Phasenleiste und die
+  Retention bleiben unverändert. Jeder Haltepunkt wird als `approval`-Event
+  geloggt (`gate` = Haltepunktname, `event` = awaited/granted), sodass GUI und
+  Timeline ihn ohne Sonderfall darstellen; die Halte sind idempotent über
+  Crash + `resume`. `--no-approval` (auch über `--gates none`) überspringt auch
+  die Haltepunkte — EIN Schalter für „keine menschliche Freigabe in diesem
+  Lauf". Default (kein Schlüssel oder leere Liste): heutiges Verhalten,
+  unverändert.
+
 ## [0.15.0] — 2026-08-26
 
 ### Hinzugefügt

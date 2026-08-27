@@ -271,6 +271,27 @@ def escalate(ctx: RunContext, reason: str, span_id: str | None = None) -> Escala
     return EscalationError(reason)
 
 
+def _breakpoint_gate(ctx: RunContext, name: str) -> None:
+    """Pause at a configured breakpoint via the EXISTING approval path (E3).
+
+    No-op unless ``name`` is an active breakpoint and human approval is not
+    skipped (AC14). Otherwise it records the waiting breakpoint, switches the
+    phase to the existing ``awaiting_approval`` (NO new Phase literal — E3b) and
+    raises :class:`AwaitingApproval`. It deliberately emits NO event itself:
+    state save and event append are separate writes, so the ``awaited`` event is
+    emitted log-checked at the single choke point in ``cli._execute`` (B8),
+    which keeps it crash-safe and duplicate-free (AC12)."""
+    if name not in ctx.config.breakpoints:
+        return
+    if ctx.skip_approval or ctx.state.skip_approval:
+        return
+    with ctx.state_lock:
+        ctx.state.pending_breakpoint = name
+        ctx.state.phase = "awaiting_approval"
+        ctx.save()
+    raise AwaitingApproval(ctx.state.run_id)
+
+
 def _phase_span(name: str):
     """Wrap a single-phase orchestrator function in a ``phase`` span — only when
     the function actually runs its phase (its own guard returns immediately for
@@ -347,6 +368,14 @@ def run_spec_and_plan(ctx: RunContext) -> None:
     config_path = ctx.repo / ".adw" / "config.yaml"
     config_snapshot = config_path.read_bytes() if config_path.is_file() else None
     if ctx.state.phase == "awaiting_approval":
+        if ctx.state.pending_breakpoint is not None:
+            # An einem Breakpoint wartend (NICHT am Plan-Gate): approval_granted
+            # ist hier bereits True (der Plan wurde früher freigegeben) — deshalb
+            # NICHT die Plan-Gate-Deutung ausführen und NICHT nach build übergehen.
+            # Der Lauf bleibt wartend, bis `adw approve` den Breakpoint freigibt
+            # und die Phase über die Grenze fortschaltet (B6/AC9). Das erneute
+            # awaited-Event entscheidet log-geprüft cli._execute (B8/AC12).
+            raise AwaitingApproval(ctx.state.run_id)
         if ctx.state.approval_granted or skip:
             ctx.state.phase = "build"
             ctx.save()
@@ -1304,6 +1333,9 @@ def run_build_phase(ctx: RunContext) -> None:
     else:
         for lane in lanes:
             _run_lane(ctx, lane, lanes)
+    # Grenze Build → Integration/Review: alle Build-Lanes sind grün, es hat weder
+    # Integrations-/Merge- noch Review-Arbeit begonnen (AC4).
+    _breakpoint_gate(ctx, "before_integration")
     ctx.state.phase = "integration" if ctx.state.parallel else "codex_review"
     ctx.save()
 
@@ -2434,6 +2466,12 @@ def run_final_review_phase(ctx: RunContext) -> None:
             previous = failures
     with ctx.state_lock:
         ctx.state.final_review_last_failures = []
+        ctx.save()
+    # Grenze Final-Review → CI: VOR dem Eintritt in run_ci_phase halten, damit bei
+    # einem Halt noch KEINE CI-Arbeit lief (kein Push, keine Integrations-/E2E-
+    # Vorbereitung, kein Polling) — Single-Lane wie Parallel (AC5).
+    _breakpoint_gate(ctx, "before_push")
+    with ctx.state_lock:
         ctx.state.phase = "ci"
         ctx.save()
 

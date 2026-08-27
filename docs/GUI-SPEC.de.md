@@ -224,7 +224,7 @@ Punkt-Events:
 | `limit.hit` | `limit`, `value`, `cap` |
 | `circuit_breaker` | `keys[]`, `scope` |
 | `escalation` | `reason`, `phase` |
-| `approval` | `gate` (`spec`\|`plan`), `event` (`awaited`\|`granted`) |
+| `approval` | `gate` (`spec`\|`plan`\|`before_integration`\|`before_push`), `event` (`awaited`\|`granted`) |
 | `artifact` | `name`, `path`, `bytes`, `sha256` |
 | `followup` | `finding_key`, `text` |
 | `state.saved` | `seq` (RunState.seq), `phase` |
@@ -359,7 +359,11 @@ Fallback — `awaiting_approval` / `awaiting_spec_approval` → `awaiting_approv
 `awaiting_approval` ist der einzige Zustand, in dem ein Mensch handeln muss, und
 wird optisch am stärksten hervorgehoben. Die JSON-Statuswerte bleiben
 sprachneutral (`waiting`, `awaiting`, `awaiting_approval`); nur ihre Labels werden
-übersetzt.
+übersetzt. Ein Lauf, der an einem konfigurierbaren **Haltepunkt** pausiert (`gate`
+`before_integration`/`before_push`), wird exakt wie die Spec-/Plan-Gates
+dargestellt: derselbe `awaiting_approval`-Status und derselbe nur-lesende
+Recovery-Hinweis `adw approve <run_id> --repo <pfad>` — keine neue Schreibroute
+und kein neuer Phasenwert; die GUI bleibt read-only.
 
 **B — Run-Detail (`/runs/{repo}/{run_id}`)** — die Hauptansicht:
 

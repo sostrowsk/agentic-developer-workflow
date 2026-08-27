@@ -135,6 +135,7 @@ Vollständige Config-Referenz (alle Schlüssel)
 | `ci.timeout`              | optional (2700) | Gesamtbudget fürs CI-Warten (45 min Default).                                                                                                                               |
 | `ci.staging_job`          | optional        | Name eines Jobs (z. B. `deploy-staging`), der zusätzlich grün sein muss.                                                                                                    |
 | `ci.provider`             | optional        | `gitlab` oder `github`. Ohne Angabe erkennt ADW das Hosting an der origin-Remote-URL; bei unbekanntem Host (z. B. Self-Hosted mit eigenem Domainnamen) ist der Key Pflicht. |
+| `breakpoints[]`           | optional ([])   | Zusätzliche Approval-Halte vor den teuren, schwer umkehrbaren Schritten. Eine Liste aus `before_integration` (nach Abschluss aller Build-Lanes, vor Integration/Review) und/oder `before_push` (nach dem finalen Review, vor Push/CI). Jeder andere Wert ist ein Config-Fehler. Leer/fehlend = keine zusätzlichen Halte (Abschnitt 6). |
 
 Fehlende oder kaputte Config (unbekannte Schlüssel, Lane ohne Gates, Gate ohne Timeout, doppelte Schlüssel) bricht **sofort** mit einer klaren Meldung ab — es werden keine Defaults geraten, außer den beiden dokumentierten (`poll_interval`, `timeout`).
 
@@ -257,6 +258,14 @@ Fang mit der Zusammenfassung an: Sie sagt in wenigen Zeilen, was warum gebaut we
 Das Approval-Gate ist der billigste Ort, um falsche Richtungen zu stoppen: Eine korrigierte Annahme auf Plan-Ebene kostet nichts, auf Code-Ebene kostet sie Build-, Review- und Fix-Zyklen. Für kleine, risikoarme Aufgaben: `--no-approval`.
 
 </div>
+
+**Konfigurierbare Haltepunkte (optional).** Über das Plan-Approval hinaus kannst du bis zu zwei Halte vor den teuren, schwer umkehrbaren Schritten setzen — per `breakpoints:` in `.adw/config.yaml`:
+
+    breakpoints:
+      - before_integration   # nach Abschluss aller Build-Lanes, vor Integration/Review
+      - before_push          # nach dem finalen Review, vor Push/CI
+
+An einem aktiven Haltepunkt pausiert der Lauf exakt wie am Plan-Gate (Exit 2), und du setzt mit `adw approve <run_id> --repo <pfad>` fort — die CLI nennt den wartenden Haltepunkt. Ein freigegebener Haltepunkt hält kein zweites Mal (auch nicht nach Crash + `resume`); `adw approve` auf einen nicht wartenden Lauf ist ein sauberer Fehler. `--no-approval` (oder `--gates none`) überspringt auch die Haltepunkte. Default (kein Schlüssel): heutiges Verhalten, keine zusätzlichen Halte.
 
 ## 7. Artefakte, Reports & Run-Verzeichnis
 

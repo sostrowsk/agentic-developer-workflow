@@ -127,6 +127,28 @@ Known Limitations akzeptiert.
 **nichts** auf → sofort abbrechen) beendet den Run mit Exit-Code ≠ 0 und einem
 Eskalations-Report (`.adw/runs/<run_id>/escalation.md`): was erreicht, was offen, warum.
 
+**Konfigurierbare Haltepunkte:** Neben den zwei fest verdrahteten Authoring-Approvals (nach
+Spec, nach Plan) aktiviert eine optionale Liste `breakpoints:` in `.adw/config.yaml` bis zu
+zwei zusätzliche Halte vor den teuren, schwer umkehrbaren Schritten. Genau zwei Werte sind
+zulässig: `before_integration` (nach Abschluss aller Build-Lanes, bevor Integrations-/Merge-
+oder nachfolgende Review-Arbeit beginnt — im Single-Lane-Betrieb: nach der Build-Lane, vor
+`codex_review`) und `before_push` (nach dem finalen Review, bevor JEGLICHE CI-Phasen-Arbeit
+beginnt: kein Push, keine CI-/E2E-Vorbereitung, kein Polling). Erreicht der Lauf einen aktiven
+Haltepunkt, pausiert er über den **bestehenden** Approval-Pfad — persistierte Phase
+`awaiting_approval`, Exit-Code 2, Fortsetzung mit `adw approve <run_id> --repo <pfad>` — und
+hält im eigenen State-Feld `pending_breakpoint` (`before_integration`/`before_push`/null) fest,
+welcher Haltepunkt wartet. Das `Phase`-Literal wird **nicht** erweitert (kein neuer
+Phasenwert); Phasenleiste, Retention und Recovery-Karte bleiben unverändert. Jeder Halt ist ein
+`approval`-Event (`gate` = Haltepunktname, `event` = `awaited` beim Eintreten, `granted` bei
+der Freigabe), sodass GUI und Timeline ihn ohne Sonderfall darstellen; je tatsächlichem
+Eintreten steht genau ein `awaited` im Log, idempotent nachgeholt auch über einen Crash
+zwischen State-Save und Event-Write. Ein freigegebener Haltepunkt hält kein zweites Mal — auch
+nicht nach Crash + `resume`; ein `resume` an einem noch nicht freigegebenen Haltepunkt bleibt
+wartend; `adw approve` auf einen nicht wartenden Lauf ist ein sauberer Fehler. `--no-approval`
+(`skip_approval`, auch über `--gates none`) überspringt auch die Haltepunkte — EIN Schalter für
+„keine menschliche Freigabe in diesem Lauf". Default (kein Schlüssel oder leere Liste):
+heutiges Verhalten, unverändert.
+
 ## 5. Schnittstellen
 
 ### CLI

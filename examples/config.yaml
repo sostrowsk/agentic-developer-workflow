@@ -26,3 +26,12 @@ ci:
   poll_interval: 60 # Sekunden zwischen glab-Polls (Default 60)
   timeout: 2700 # Gesamt-Budget fürs CI-Warten (Default 2700 = 45 min)
   staging_job: deploy-staging # Job, der zusätzlich grün sein muss (optional)
+
+# breakpoints: optionale, konfigurierbare Haltepunkte VOR den teuren, schwer
+# umkehrbaren Schritten. Der Lauf pausiert dort wie an den Spec-/Plan-Approvals
+# (State-Phase awaiting_approval, Exit-Code 2), Fortsetzung mit
+# `adw approve <run_id> --repo <pfad>`. Default: leere Liste = kein Halt.
+# Genau zwei Werte sind zulässig; --no-approval überspringt auch sie.
+# breakpoints:
+#   - before_integration   # nach allen Build-Lanes, vor Integration/Review
+#   - before_push          # nach dem finalen Review, vor Push/CI

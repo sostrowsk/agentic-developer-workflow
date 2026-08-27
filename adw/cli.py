@@ -464,11 +464,21 @@ def approve(
     # Arbeitsbaum-Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung
     # lässt die Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
     _preflight_worktree(repo)
-    gate = "spec" if state.phase == "awaiting_spec_approval" else "plan"
+    if state.pending_breakpoint is not None:
+        gate = state.pending_breakpoint
+    else:
+        gate = "spec" if state.phase == "awaiting_spec_approval" else "plan"
     emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
     run_totals = RunTotals()
     with _run_span(emitter, state, config, repo, run_totals) as run_handle:
-        if state.phase == "awaiting_spec_approval":
+        if state.pending_breakpoint is not None:
+            # Breakpoint freigeben: die Phase über die Grenze fortschalten UND
+            # pending_breakpoint im SELBEN Save leeren — der freigegebene
+            # Haltepunkt wird danach nie wieder erreicht (AC7/AC8). Der Plan-/
+            # Spec-Approval-Pfad bleibt unberührt (Regressions-Pin AC2).
+            state.phase = _breakpoint_resume_phase(state)
+            state.pending_breakpoint = None
+        elif state.phase == "awaiting_spec_approval":
             # Spec approven: in die Plan-Phase übergehen. Der Lauf pausiert danach
             # regulär beim Plan-Approval, sofern der Run nicht mit --no-approval lief.
             state.spec_approval_granted = True
@@ -705,6 +715,41 @@ def _maybe_auto_prune(repo: Path, config: AdwConfig, state: RunState) -> None:
 # --- interne Verdrahtung ------------------------------------------------------
 
 
+def _breakpoint_resume_phase(state: RunState) -> str:
+    """The phase a run continues in once its waiting breakpoint is granted (B7):
+    ``before_integration`` -> ``integration`` (parallel) / ``codex_review``
+    (single-lane); ``before_push`` -> ``ci``."""
+    if state.pending_breakpoint == "before_integration":
+        return "integration" if state.parallel else "codex_review"
+    return "ci"  # before_push
+
+
+def _has_awaited_event(repo: Path, run_id: str, gate: str) -> bool:
+    """Whether the run's event log already carries an ``approval``/``awaited``
+    event for this gate — the log-checked dedup key (B8). A gate is unique per
+    run because each breakpoint holds at most once (AC8)."""
+    path = repo / RUNS_RELPATH / run_id / "events.jsonl"
+    if not path.is_file():
+        return False
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    for line in content.splitlines():
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("type") != "approval":
+            continue
+        payload = record.get("payload") or {}
+        if payload.get("gate") == gate and payload.get("event") == "awaited":
+            return True
+    return False
+
+
 def _execute(ctx: RunContext) -> None:
     """All phases in order — each function checks for itself whether it is up."""
     try:
@@ -715,6 +760,24 @@ def _execute(ctx: RunContext) -> None:
         run_final_review_phase(ctx)
         run_ci_phase(ctx)
     except AwaitingApproval:
+        if ctx.state.pending_breakpoint is not None:
+            # Breakpoint-Halt: `gate` ist der Haltepunktname. Log-geprüfte Emission
+            # (crash-sicher, duplikatfrei — AC12): nur emittieren, wenn noch kein
+            # awaited mit diesem Gate im Log steht. Nach einem Crash zwischen
+            # State-Save (B3) und Log-Write holt der nächste resume es genau
+            # einmal nach; ein wiederholter resume hängt nichts an.
+            gate = ctx.state.pending_breakpoint
+            if not _has_awaited_event(ctx.repo, ctx.state.run_id, gate):
+                ctx.emitter.emit(
+                    "approval",
+                    {"gate": gate, "event": "awaited"},
+                    span=_current_span_id(ctx.emitter),
+                )
+            typer.echo(
+                f"Breakpoint '{gate}' erreicht — Run {ctx.state.run_id} pausiert. "
+                f"Freigeben mit `adw approve {ctx.state.run_id} --repo <pfad>`"
+            )
+            raise typer.Exit(EXIT_AWAITING_APPROVAL) from None
         # awaited: ein tatsächlich eingetretenes Warten am Gate (AC 9).
         gate = "spec" if ctx.state.phase == "awaiting_spec_approval" else "plan"
         ctx.emitter.emit(

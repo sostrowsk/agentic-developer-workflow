@@ -48,6 +48,11 @@ CONFIG_RELPATH = Path(".adw") / "config.yaml"
 
 LaneName = Literal["backend", "frontend"]
 
+# Die geschlossene, enumerierte Menge der Haltepunkte. Genau diese zwei Werte
+# sind überall zulässig, wo ein Breakpoint benannt wird: die Config-Liste, das
+# State-Feld pending_breakpoint und der approval-Event-`gate`.
+BreakpointName = Literal["before_integration", "before_push"]
+
 
 class ConfigError(Exception):
     """Config is missing or invalid — the run must not even start."""
@@ -116,6 +121,11 @@ class AdwConfig(BaseModel):
     ci: CiConfig = Field(default_factory=CiConfig)
     codex: CodexConfig = Field(default_factory=CodexConfig)
     trace: TraceConfig = Field(default_factory=TraceConfig)
+    # Aktive Haltepunkte (leer = heutiges Verhalten). Jedes Element ist ein
+    # BreakpointName — ein unbekannter Wert/Typ ist über das Literal ein
+    # ValidationError und wird von load() als ConfigError gehoben. Reihenfolge
+    # und Mehrfachnennung sind bedeutungslos: die Haltepunkte wirken als Menge.
+    breakpoints: list[BreakpointName] = Field(default_factory=list)
 
     @property
     def is_parallel_capable(self) -> bool:
