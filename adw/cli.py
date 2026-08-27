@@ -398,17 +398,25 @@ def run(
     # berühren.
     emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
     run_totals = RunTotals()
-    with _run_span(emitter, state, config, repo, run_totals) as run_handle:
-        state.save(repo, emitter=emitter, span_id=run_handle.id)
-        ctx = _build_context(
-            repo, config, state, skip_approval=skip_approval, spec_approval=spec_approval,
-            emitter=emitter, run_totals=run_totals,
-        )
-        typer.echo(f"Run {state.run_id} gestartet (Phase: {state.phase}, Gates: {gate_mode})")
-        _execute(ctx)
+    # Denselben per-run Execution-Lock wie resume/approve halten, sobald der Run
+    # persistiert (und damit per `adw resume <run_id>` erreichbar) wird — über die
+    # GESAMTE Ausführung (P1): ein gleichzeitiger resume/approve darf den frisch
+    # angelegten Run nicht parallel weiterführen (doppelte CI-Vorbereitung/Push,
+    # sich überschreibende State-Snapshots). Die run_id ist frisch/zufällig, also
+    # gibt es beim Erwerb keine Konkurrenz; gehalten schließt sie jeden zweiten
+    # Executor aus, bis der Run fertig ist. state.json entsteht erst im Lock.
+    with _run_execution_lock(repo, state.run_id):
+        with _run_span(emitter, state, config, repo, run_totals) as run_handle:
+            state.save(repo, emitter=emitter, span_id=run_handle.id)
+            ctx = _build_context(
+                repo, config, state, skip_approval=skip_approval, spec_approval=spec_approval,
+                emitter=emitter, run_totals=run_totals,
+            )
+            typer.echo(f"Run {state.run_id} gestartet (Phase: {state.phase}, Gates: {gate_mode})")
+            _execute(ctx)
     # Nach erfolgreichem Abschluss (done): automatisches Pruning (D3). Eine
     # Eskalation/Approval-Pause hätte oben eine typer.Exit geworfen und käme hier
-    # nicht an.
+    # nicht an. Pruning läuft NACH dem Freigeben des Execution-Locks.
     _maybe_auto_prune(repo, config, state)
 
 

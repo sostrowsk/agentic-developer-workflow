@@ -636,6 +636,91 @@ def test_concurrent_approvals_release_once_and_execute_once(target_repo):
     assert approval_pairs(target_repo, sid).count(("before_push", "granted")) == 1
 
 
+def test_run_and_concurrent_resume_execute_the_run_only_once(target_repo, monkeypatch):
+    """P1: once an initial `adw run` has persisted its state, a concurrent
+    `adw resume <run_id>` must NOT execute the same run in parallel. `run` holds
+    the per-run execution lock across its whole execution, so the racing `resume`
+    blocks until `run` finishes and then finds nothing left to do — exactly one
+    downstream execution (one CI wait span, no double push)."""
+    import threading
+    import time
+
+    import typer as typer_mod
+
+    import adw.cli as cli_mod
+    from adw.phases import run_spec_and_plan as real_spec_and_plan
+
+    setup_config(target_repo)  # single lane, no breakpoints
+
+    started = threading.Event()
+    proceed = threading.Event()
+    pause = {"first": True}
+    guard = threading.Lock()
+
+    def pausing_spec_and_plan(ctx):
+        with guard:
+            first, pause["first"] = pause["first"], False
+        if first:
+            # The initial `run` has now persisted state.json and holds the
+            # execution lock: make its run_id discoverable, then hold it HERE
+            # (inside the lock) until the test has launched the racing resume.
+            started.set()
+            assert proceed.wait(30), "test never released the paused run"
+        return real_spec_and_plan(ctx)
+
+    monkeypatch.setattr(cli_mod, "run_spec_and_plan", pausing_spec_and_plan)
+
+    results: dict[str, object] = {}
+
+    def run_worker():
+        try:
+            cli_mod.run(repo=target_repo, issue="Race", dry_run=True, no_approval=True)
+            results["run"] = 0
+        except typer_mod.Exit as exc:
+            results["run"] = exc.exit_code
+        except BaseException as exc:  # noqa: BLE001 — surface as a clear failure
+            results["run"] = ("raised", repr(exc))
+
+    run_thread = threading.Thread(target=run_worker)
+    run_thread.start()
+    assert started.wait(30), "the initial run never reached the paused phase"
+
+    sid = latest_id(target_repo)  # persisted while `run` holds the execution lock
+
+    def resume_worker():
+        try:
+            cli_mod.resume(sid, repo=target_repo, base_branch=None)
+            results["resume"] = 0
+        except typer_mod.Exit as exc:
+            results["resume"] = exc.exit_code
+        except BaseException as exc:  # noqa: BLE001
+            results["resume"] = ("raised", repr(exc))
+
+    resume_thread = threading.Thread(target=resume_worker)
+    resume_thread.start()
+    # Give the resume a moment to reach (and, under the fix, block on) the lock.
+    time.sleep(0.5)
+    proceed.set()  # release `run`; it finishes under the lock, THEN resume unblocks.
+
+    run_thread.join(timeout=60)
+    resume_thread.join(timeout=60)
+    assert not run_thread.is_alive() and not resume_thread.is_alive(), "a thread hung"
+
+    assert results["run"] == 0, results
+    assert results["resume"] == 0, results  # resume on the finished run is a clean no-op
+
+    final = RunState.load(target_repo, sid)
+    assert final.phase == "done"
+    # Exactly one downstream execution: the run executed the CI phase once; the
+    # racing resume found the run already done and executed no phase again.
+    ci_waits = [
+        e
+        for e in read_events(target_repo, sid)
+        if e.get("type") == "ci.wait" and e.get("kind") == "start"
+    ]
+    assert len(ci_waits) == 1, ci_waits
+
+
 # --- AC13: read-only GUI renders a breakpoint hold like the existing gates -----
 
 
