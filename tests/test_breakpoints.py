@@ -576,6 +576,66 @@ def test_no_approval_breakpoint_skip_survives_crash_and_resume(target_repo, monk
     assert all(gate != "before_integration" for gate, _ in pairs)
 
 
+# --- P1: concurrent continuations of one run must not double-execute -----------
+
+
+def test_concurrent_approvals_release_once_and_execute_once(target_repo):
+    """P1: two simultaneous `adw approve` on the same run held at `before_push`
+    must produce exactly ONE release and ONE downstream execution — no double
+    CI/push. The per-run execution lock serializes the check/release/execute
+    sequence; the loser reloads the state under the lock, sees the breakpoint
+    already released, and rejects cleanly (exit 1) without executing again."""
+    import threading
+
+    import typer as typer_mod
+
+    from adw.cli import approve as approve_cmd
+
+    setup_config(target_repo, "before_push")
+    assert cli_run(target_repo).exit_code == 2  # plan gate
+    sid = latest_id(target_repo)
+    assert approve(target_repo, sid).exit_code == 2  # now holding at before_push
+    assert RunState.load(target_repo, sid).pending_breakpoint == "before_push"
+
+    barrier = threading.Barrier(2)
+    results: dict[str, object] = {}
+
+    def worker(name):
+        # Call the command function directly (not the CliRunner) so two threads do
+        # not clobber each other's captured stdout; the barrier maximizes overlap.
+        barrier.wait()
+        try:
+            approve_cmd(sid, repo=target_repo, base_branch=None)
+            results[name] = 0
+        except typer_mod.Exit as exc:
+            results[name] = exc.exit_code
+        except BaseException as exc:  # surface an unexpected raise as a clear failure
+            results[name] = ("raised", repr(exc))
+
+    threads = [threading.Thread(target=worker, args=(name,)) for name in ("a", "b")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    assert all(not thread.is_alive() for thread in threads), "an approval thread hung"
+
+    codes = [results["a"], results["b"]]
+    assert codes.count(0) == 1, codes  # exactly one release ran through to done
+    assert codes.count(1) == 1, codes  # the other rejected cleanly, no execution
+
+    final = RunState.load(target_repo, sid)
+    assert final.phase == "done"
+    assert final.pending_breakpoint is None
+    # Exactly one downstream execution: one CI wait span and one granted event.
+    ci_waits = [
+        e
+        for e in read_events(target_repo, sid)
+        if e.get("type") == "ci.wait" and e.get("kind") == "start"
+    ]
+    assert len(ci_waits) == 1, ci_waits
+    assert approval_pairs(target_repo, sid).count(("before_push", "granted")) == 1
+
+
 # --- AC13: read-only GUI renders a breakpoint hold like the existing gates -----
 
 

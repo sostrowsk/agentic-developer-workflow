@@ -5,6 +5,7 @@ Exit codes: 0 = done, 2 = awaiting_approval (plan-approval pause),
 """
 
 import contextlib
+import fcntl
 import json
 import re
 import subprocess
@@ -419,26 +420,31 @@ def resume(
 ) -> None:
     """Continue a run in the same phase after a crash or approval pause."""
     repo = repo.resolve()
-    state = _load_state(repo, run_id)
-    if state.phase == "escalated":
-        raise _fail(
-            f"Run {run_id} ist eskaliert — Report unter .adw/runs/{run_id}/escalation.md "
-            f"lesen und einen neuen Run starten"
-        )
-    config, rebased = _config_for_continuation(repo, state, base_branch)
-    # Arbeitsbaum-Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save):
-    # eine Verweigerung lässt den Run-State unverändert und resumierbar (B1).
-    _preflight_worktree(repo)
-    emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
-    run_totals = RunTotals()
-    with _run_span(emitter, state, config, repo, run_totals) as run_handle:
-        if rebased:
-            # First persistence of this command — inside the run span (E1), so
-            # its state.saved event is emitted within the span.
-            state.save(repo, emitter=emitter, span_id=run_handle.id)
-        ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
-        typer.echo(f"Run {state.run_id} wird fortgesetzt (Phase: {state.phase})")
-        _execute(ctx)
+    _load_state(repo, run_id)  # existence check OUTSIDE the lock — no lock file for a missing run
+    # Same per-run execution lock as `approve` (P1): a `resume` racing an `approve`
+    # (or another `resume`) on the same run must not double-execute the downstream
+    # phases. Both commands take THIS lock, so continuations of one run serialize.
+    with _run_execution_lock(repo, run_id):
+        state = _load_state(repo, run_id)  # reload under the lock
+        if state.phase == "escalated":
+            raise _fail(
+                f"Run {run_id} ist eskaliert — Report unter .adw/runs/{run_id}/escalation.md "
+                f"lesen und einen neuen Run starten"
+            )
+        config, rebased = _config_for_continuation(repo, state, base_branch)
+        # Arbeitsbaum-Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save):
+        # eine Verweigerung lässt den Run-State unverändert und resumierbar (B1).
+        _preflight_worktree(repo)
+        emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
+        run_totals = RunTotals()
+        with _run_span(emitter, state, config, repo, run_totals) as run_handle:
+            if rebased:
+                # First persistence of this command — inside the run span (E1), so
+                # its state.saved event is emitted within the span.
+                state.save(repo, emitter=emitter, span_id=run_handle.id)
+            ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
+            typer.echo(f"Run {state.run_id} wird fortgesetzt (Phase: {state.phase})")
+            _execute(ctx)
     # Reaching done through `resume` is a normal successful completion → same
     # automatic pruning as `run` (D3). An escalation/pause raised above and skips it.
     _maybe_auto_prune(repo, config, state)
@@ -452,57 +458,66 @@ def approve(
 ) -> None:
     """Grant a pending approval (spec or plan) and continue the run."""
     repo = repo.resolve()
-    state = _load_state(repo, run_id)
-    if state.phase not in ("awaiting_approval", "awaiting_spec_approval"):
-        raise _fail(
-            f"Run {run_id} wartet nicht auf Approval (Phase: {state.phase}) — "
-            f"für Crash-Fortsetzung `adw resume` benutzen"
-        )
-    # A re-pinned base branch is only mutated in memory here; approve's own save
-    # below (inside the run span) persists it together with the approval grant.
-    config, _rebased = _config_for_continuation(repo, state, base_branch)
-    # Arbeitsbaum-Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung
-    # lässt die Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
-    _preflight_worktree(repo)
-    if state.pending_breakpoint is not None:
-        gate = state.pending_breakpoint
-    else:
-        gate = "spec" if state.phase == "awaiting_spec_approval" else "plan"
-    emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
-    run_totals = RunTotals()
-    with _run_span(emitter, state, config, repo, run_totals) as run_handle:
-        breakpoint_release = state.pending_breakpoint is not None
-        if breakpoint_release:
-            # Breakpoint freigeben: die Phase über die Grenze fortschalten UND
-            # pending_breakpoint im SELBEN atomaren Save leeren — der freigegebene
-            # Haltepunkt wird danach nie wieder erreicht (AC7/AC8). Das granted-
-            # Event NICHT hier emittieren: es entsteht log-geprüft in _execute
-            # (_catch_up_granted_breakpoints) allein aus dem awaited-Event und
-            # pending_breakpoint — so überlebt die Freigabe das Crash-Fenster
-            # zwischen diesem Save und dem Event-Append (AC12), OHNE ein
-            # zusätzliches State-Feld (Contract: pending_breakpoint ist die
-            # einzige State-Ergänzung; Plan B2). Der Plan-/Spec-Approval-Pfad
-            # bleibt unberührt (Regressions-Pin AC2).
-            state.phase = _breakpoint_resume_phase(state)
-            state.pending_breakpoint = None
-        elif state.phase == "awaiting_spec_approval":
-            # Spec approven: in die Plan-Phase übergehen. Der Lauf pausiert danach
-            # regulär beim Plan-Approval, sofern der Run nicht mit --no-approval lief.
-            state.spec_approval_granted = True
-            state.phase = "plan"
+    _load_state(repo, run_id)  # existence check OUTSIDE the lock — no lock file for a missing run
+    # The whole check/release/execute runs under the per-run execution lock (P1):
+    # two concurrent approvals must not both release the same pending gate and each
+    # run the downstream phases (a double push at `before_push`).
+    with _run_execution_lock(repo, run_id):
+        # Reload UNDER the lock and revalidate: a concurrent approve/resume that
+        # won the lock first may already have released the gate and advanced the
+        # phase — this loser then rejects cleanly, without a second execution.
+        state = _load_state(repo, run_id)
+        if state.phase not in ("awaiting_approval", "awaiting_spec_approval"):
+            raise _fail(
+                f"Run {run_id} wartet nicht auf Approval (Phase: {state.phase}) — "
+                f"für Crash-Fortsetzung `adw resume` benutzen"
+            )
+        # A re-pinned base branch is only mutated in memory here; approve's own save
+        # below (inside the run span) persists it together with the approval grant.
+        config, _rebased = _config_for_continuation(repo, state, base_branch)
+        # Arbeitsbaum-Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung
+        # lässt die Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
+        _preflight_worktree(repo)
+        if state.pending_breakpoint is not None:
+            gate = state.pending_breakpoint
         else:
-            state.approval_granted = True
-        state.save(repo, emitter=emitter, span_id=run_handle.id)
-        if not breakpoint_release:
-            # spec/plan-Gate: granted wie bisher direkt (der Übergang schließt
-            # innerhalb von approve ab, kein Crash-Fenster). granted: ein
-            # tatsächlich eingetretener Produktzustand (AC 9).
-            emitter.emit("approval", {"gate": gate, "event": "granted"}, span=run_handle.id)
-        ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
-        typer.echo(f"Approval erteilt — Run {state.run_id} läuft weiter")
-        _execute(ctx)
+            gate = "spec" if state.phase == "awaiting_spec_approval" else "plan"
+        emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
+        run_totals = RunTotals()
+        with _run_span(emitter, state, config, repo, run_totals) as run_handle:
+            breakpoint_release = state.pending_breakpoint is not None
+            if breakpoint_release:
+                # Breakpoint freigeben: die Phase über die Grenze fortschalten UND
+                # pending_breakpoint im SELBEN atomaren Save leeren — der freigegebene
+                # Haltepunkt wird danach nie wieder erreicht (AC7/AC8). Das granted-
+                # Event NICHT hier emittieren: es entsteht log-geprüft in _execute
+                # (_catch_up_granted_breakpoints) allein aus dem awaited-Event und
+                # pending_breakpoint — so überlebt die Freigabe das Crash-Fenster
+                # zwischen diesem Save und dem Event-Append (AC12), OHNE ein
+                # zusätzliches State-Feld (Contract: pending_breakpoint ist die
+                # einzige State-Ergänzung; Plan B2). Der Plan-/Spec-Approval-Pfad
+                # bleibt unberührt (Regressions-Pin AC2).
+                state.phase = _breakpoint_resume_phase(state)
+                state.pending_breakpoint = None
+            elif state.phase == "awaiting_spec_approval":
+                # Spec approven: in die Plan-Phase übergehen. Der Lauf pausiert danach
+                # regulär beim Plan-Approval, sofern der Run nicht mit --no-approval lief.
+                state.spec_approval_granted = True
+                state.phase = "plan"
+            else:
+                state.approval_granted = True
+            state.save(repo, emitter=emitter, span_id=run_handle.id)
+            if not breakpoint_release:
+                # spec/plan-Gate: granted wie bisher direkt (der Übergang schließt
+                # innerhalb von approve ab, kein Crash-Fenster). granted: ein
+                # tatsächlich eingetretener Produktzustand (AC 9).
+                emitter.emit("approval", {"gate": gate, "event": "granted"}, span=run_handle.id)
+            ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
+            typer.echo(f"Approval erteilt — Run {state.run_id} läuft weiter")
+            _execute(ctx)
     # Reaching done through `approve` is a normal successful completion → same
     # automatic pruning as `run` (D3). A further pause/escalation raised above.
+    # Pruning runs AFTER releasing the execution lock (it only touches other runs).
     _maybe_auto_prune(repo, config, state)
 
 
@@ -930,6 +945,37 @@ def _load_state(repo: Path, run_id: str) -> RunState:
         return RunState.load(repo, run_id)
     except StateNotFoundError as exc:
         raise _fail(str(exc)) from exc
+
+
+@contextlib.contextmanager
+def _run_execution_lock(repo: Path, run_id: str):
+    """Exclusive interprocess lock for the whole load→revalidate→execute sequence
+    of ONE run.
+
+    The repo-wide state lock only serializes individual snapshot writes; it does
+    NOT make a continuation's check/release/execute atomic. Without this lock two
+    concurrent ``adw approve``/``adw resume`` on the same run could both pass the
+    phase check, both release the pending breakpoint and each run the downstream
+    phases — at ``before_push`` that pushes twice (P1). This flock is held for the
+    whole continuation, so the second caller blocks, then reloads the (now
+    advanced) state under the lock and rejects cleanly — exactly one release, one
+    downstream execution.
+
+    A dedicated per-run lock file kept as a sibling of ``.seq`` (never inside the
+    run dir, and not matching ``RUN_ID_RE``): it stays out of ``find_latest`` and
+    retention enumeration, and — being a separate file — never deadlocks against
+    the ``.seq`` state lock that ``state.save`` acquires transiently inside. The
+    empty lock file is intentionally NOT unlinked (like ``.seq``): removing a lock
+    file races a concurrent waiter, which would then open a fresh inode and lose
+    mutual exclusion."""
+    runs_dir = repo / RUNS_RELPATH
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    with open(runs_dir / f".lock-{run_id}", "a+", encoding="utf-8") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def _fetch_github_issue(repo: Path, issue_number: int) -> str:
