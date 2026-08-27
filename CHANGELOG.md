@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [Unreleased]
+## [0.16.0] — 2026-08-27
 
 ### Added
 - **Configurable breakpoints as a generalized approval.** A new optional
@@ -496,6 +496,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.16.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.12.0...v0.13.0
