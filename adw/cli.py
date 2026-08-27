@@ -11,7 +11,7 @@ import subprocess
 import time
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, get_args
 
 import typer
 from pydantic import ValidationError
@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from adw import ci, github, retention
 from adw.agents import AgentRunError, RunTotals, SdkAgentRunner
 from adw.codex import CodexRunner
-from adw.config import AdwConfig, ConfigError
+from adw.config import AdwConfig, BreakpointName, ConfigError
 from adw.env import safe_env
 from adw.events import EventEmitter
 from adw.findings import Finding, ReviewResult
@@ -473,17 +473,16 @@ def approve(
     with _run_span(emitter, state, config, repo, run_totals) as run_handle:
         breakpoint_release = state.pending_breakpoint is not None
         if breakpoint_release:
-            # Breakpoint freigeben: die Freigabe crash-sicher im State vermerken
-            # (granted_breakpoints), die Phase über die Grenze fortschalten UND
+            # Breakpoint freigeben: die Phase über die Grenze fortschalten UND
             # pending_breakpoint im SELBEN atomaren Save leeren — der freigegebene
             # Haltepunkt wird danach nie wieder erreicht (AC7/AC8). Das granted-
             # Event NICHT hier emittieren: es entsteht log-geprüft in _execute
-            # (_catch_up_granted_breakpoints), damit es auch dann genau einmal im
-            # Log landet, wenn der Prozess zwischen diesem Save und dem Event-
-            # Append abstürzt (AC12). Der Plan-/Spec-Approval-Pfad bleibt unberührt
-            # (Regressions-Pin AC2).
-            if gate not in state.granted_breakpoints:
-                state.granted_breakpoints.append(gate)
+            # (_catch_up_granted_breakpoints) allein aus dem awaited-Event und
+            # pending_breakpoint — so überlebt die Freigabe das Crash-Fenster
+            # zwischen diesem Save und dem Event-Append (AC12), OHNE ein
+            # zusätzliches State-Feld (Contract: pending_breakpoint ist die
+            # einzige State-Ergänzung; Plan B2). Der Plan-/Spec-Approval-Pfad
+            # bleibt unberührt (Regressions-Pin AC2).
             state.phase = _breakpoint_resume_phase(state)
             state.pending_breakpoint = None
         elif state.phase == "awaiting_spec_approval":
@@ -735,17 +734,21 @@ def _breakpoint_resume_phase(state: RunState) -> str:
     return "ci"  # before_push
 
 
-def _has_approval_event(repo: Path, run_id: str, gate: str, event: str) -> bool:
-    """Whether the run's event log already carries an ``approval`` event with this
-    ``gate`` and ``event`` — the log-checked dedup key (B8). A gate is unique per
-    run because each breakpoint holds and is granted at most once (AC8)."""
+_BREAKPOINT_GATES: tuple[str, ...] = get_args(BreakpointName)
+
+
+def _logged_approval_events(repo: Path, run_id: str) -> set[tuple[str, str]]:
+    """The ``(gate, event)`` pairs already present in the run's ``approval`` event
+    log — the log-checked dedup basis (B8). Empty when there is no (readable) log
+    (e.g. trace disabled), which keeps every catch-up a harmless no-op."""
     path = repo / RUNS_RELPATH / run_id / "events.jsonl"
+    pairs: set[tuple[str, str]] = set()
     if not path.is_file():
-        return False
+        return pairs
     try:
         content = path.read_text(encoding="utf-8")
     except OSError:
-        return False
+        return pairs
     for line in content.splitlines():
         if not line:
             continue
@@ -756,27 +759,40 @@ def _has_approval_event(repo: Path, run_id: str, gate: str, event: str) -> bool:
         if record.get("type") != "approval":
             continue
         payload = record.get("payload") or {}
-        if payload.get("gate") == gate and payload.get("event") == event:
-            return True
-    return False
+        gate, event = payload.get("gate"), payload.get("event")
+        if isinstance(gate, str) and isinstance(event, str):
+            pairs.add((gate, event))
+    return pairs
+
+
+def _has_approval_event(repo: Path, run_id: str, gate: str, event: str) -> bool:
+    """Whether the run's event log already carries this ``approval`` ``(gate,
+    event)``. A gate is unique per run because each breakpoint holds and is
+    granted at most once (AC8)."""
+    return (gate, event) in _logged_approval_events(repo, run_id)
 
 
 def _catch_up_granted_breakpoints(ctx: RunContext) -> None:
-    """Emit any ``approval``/``granted`` event for an already-granted breakpoint
-    that is missing from the log — the crash-safe symmetry to the ``awaited``
-    catch-up (B8/AC12).
+    """Emit a missing ``approval``/``granted`` event for a breakpoint that was
+    granted (the run advanced past it) but whose event a crash prevented from
+    being logged — the crash-safe symmetry to the ``awaited`` catch-up (B8/AC12).
 
-    ``approve`` records the grant in ``state.granted_breakpoints`` and advances
-    the phase over the boundary in ONE atomic save, but the event append is a
-    separate write. If the process crashes between them, the next resume/approve
-    lands here and appends the missing ``granted`` exactly once (log-checked
-    dedup); the normal, crash-free path finds it already logged and appends
-    nothing. This is the SINGLE emission site for breakpoint ``granted`` events —
-    ``approve`` itself no longer emits them, so a grant survives the crash window
-    (whereas the spec/plan gates, which finish inside ``approve``, still emit
-    directly)."""
-    for gate in ctx.state.granted_breakpoints:
-        if not _has_approval_event(ctx.repo, ctx.state.run_id, gate, "granted"):
+    Uses NO extra persisted state (the contract pins ``pending_breakpoint`` as the
+    only state addition; plan B2 forbids a separate grant-proof field): the fact
+    of a grant is derived from the event log itself. A breakpoint whose
+    ``awaited`` is logged but whose ``granted`` is NOT, and at which the run is no
+    longer waiting (``pending_breakpoint`` is not that gate), was released — its
+    ``granted`` is appended exactly once (log-checked, so a crash-free run that
+    already logged it appends nothing). This is the SINGLE emission site for
+    breakpoint ``granted`` events: ``approve`` performs the release in its atomic
+    phase transition but leaves the event to this catch-up, so a crash between the
+    state save and the event append cannot lose it. (The spec/plan gates, which
+    finish inside ``approve``, still emit directly — they have no crash window.)"""
+    logged = _logged_approval_events(ctx.repo, ctx.state.run_id)
+    for gate in _BREAKPOINT_GATES:
+        if ctx.state.pending_breakpoint == gate:
+            continue  # still waiting at this breakpoint — not granted
+        if (gate, "awaited") in logged and (gate, "granted") not in logged:
             ctx.emitter.emit(
                 "approval",
                 {"gate": gate, "event": "granted"},

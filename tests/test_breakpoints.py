@@ -260,6 +260,20 @@ def test_pending_breakpoint_rejects_unknown_values(bad):
         )
 
 
+def test_pending_breakpoint_is_the_only_persisted_breakpoint_state_field():
+    """C4_state / plan B2: the persisted state delta for breakpoints is EXACTLY the
+    one field `pending_breakpoint` — no separate grant-proof field (e.g.
+    `granted_breakpoints`) sneaks into the `extra="forbid"` schema. Crash-safe
+    grant recovery must be derived from the event log, not from extra state."""
+    fields = RunState.model_fields
+    assert "pending_breakpoint" in fields
+    assert "granted_breakpoints" not in fields
+    assert [name for name in fields if "breakpoint" in name.lower()] == ["pending_breakpoint"]
+    # And the persisted snapshot carries no other breakpoint key either.
+    dumped = json.loads(RunState.new(issue="x", parallel=False).model_dump_json())
+    assert [key for key in dumped if "breakpoint" in key.lower()] == ["pending_breakpoint"]
+
+
 def test_phase_literal_is_not_extended():
     """E3b/C4_state: the Phase set of values stays exactly the eleven it had."""
     values = typing.get_args(Phase)

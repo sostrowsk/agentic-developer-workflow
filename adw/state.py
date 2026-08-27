@@ -109,12 +109,6 @@ class RunState(BaseModel):
     # geleert. KEIN neuer Phase-Wert (E3b). Alt-States ohne das Feld laden als
     # None. Überlebt Crash + resume + approve wie skip_approval.
     pending_breakpoint: BreakpointName | None = None
-    # Breakpoints, deren Freigabe bereits erteilt wurde (approve). Crash-sichere
-    # Quelle für das granted-Event: der State-Save der Freigabe (Phase über die
-    # Grenze, pending_breakpoint geleert) und der Event-Append sind getrennte
-    # Schreibvorgänge; ein Crash dazwischen wird beim nächsten resume/approve
-    # über diese Liste log-geprüft genau einmal nachgeholt. Alt-States laden [].
-    granted_breakpoints: list[BreakpointName] = Field(default_factory=list)
     # Runden-Zähler der Integration/E2E-Phase — persistiert, damit ein Crash
     # das 10-Runden-Limit nicht zurücksetzt. last_failures ist die
     # Circuit-Breaker-Basis (wird erst NACH dem Fix-Dispatch fortgeschrieben).
