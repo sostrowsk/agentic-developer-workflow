@@ -140,9 +140,9 @@ hält im eigenen State-Feld `pending_breakpoint` (`before_integration`/`before_p
 welcher Haltepunkt wartet. Das `Phase`-Literal wird **nicht** erweitert (kein neuer
 Phasenwert); Phasenleiste, Retention und Recovery-Karte bleiben unverändert. Jeder Halt ist ein
 `approval`-Event (`gate` = Haltepunktname, `event` = `awaited` beim Eintreten, `granted` bei
-der Freigabe), sodass GUI und Timeline ihn ohne Sonderfall darstellen; je tatsächlichem
-Eintreten steht genau ein `awaited` im Log, idempotent nachgeholt auch über einen Crash
-zwischen State-Save und Event-Write. Ein freigegebener Haltepunkt hält kein zweites Mal — auch
+der Freigabe), sodass GUI und Timeline ihn ohne Sonderfall darstellen; jedes Event steht genau
+einmal im Log, idempotent nachgeholt auch über einen Crash zwischen State-Save und Event-Write
+— sowohl das `awaited` beim Eintreten als auch das `granted` bei der Freigabe. Ein freigegebener Haltepunkt hält kein zweites Mal — auch
 nicht nach Crash + `resume`; ein `resume` an einem noch nicht freigegebenen Haltepunkt bleibt
 wartend; `adw approve` auf einen nicht wartenden Lauf ist ein sauberer Fehler. `--no-approval`
 (`skip_approval`, auch über `--gates none`) überspringt auch die Haltepunkte — EIN Schalter für

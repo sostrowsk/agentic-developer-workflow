@@ -137,8 +137,8 @@ field `pending_breakpoint` (`before_integration`/`before_push`/null). The `Phase
 values is **not** extended (no new phase literal); the phase bar, retention and the recovery
 card stay unchanged. Each hold is an `approval` event (`gate` = breakpoint name, `event` =
 `awaited` on entry, `granted` on release), so GUI and timeline render it with no special case;
-per actual entry exactly one `awaited` ends up in the log, caught up idempotently over a crash
-between the state save and the event write. A granted breakpoint never holds again — not even
+each event ends up in the log exactly once, caught up idempotently over a crash between the
+state save and the event write — both the `awaited` on entry and the `granted` on release. A granted breakpoint never holds again — not even
 after crash + `resume`; a `resume` at a not-yet-granted breakpoint stays waiting; `adw approve`
 on a run that is not waiting is a clean error. `--no-approval` (`skip_approval`, also via
 `--gates none`) skips the breakpoints too — one switch for "no human approval in this run".

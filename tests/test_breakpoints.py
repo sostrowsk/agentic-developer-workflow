@@ -474,6 +474,35 @@ def test_missing_awaited_event_is_caught_up_on_resume(target_repo):
     assert RunState.load(target_repo, sid).pending_breakpoint == "before_integration"
 
 
+def test_missing_granted_event_is_caught_up_on_resume(target_repo, monkeypatch):
+    """AC12 (crash window, release side): the grant is persisted (the phase is
+    advanced past the breakpoint) but the `granted` event never reached the log —
+    a crash between the approval state save and the event append. The next
+    `resume` catches it up exactly once and runs the release through, so the log
+    keeps exactly ONE `granted` for the breakpoint."""
+    setup_config(target_repo, "before_integration")
+
+    assert cli_run(target_repo).exit_code == 2  # plan gate
+    sid = latest_id(target_repo)
+    assert approve(target_repo, sid).exit_code == 2  # before_integration hold
+
+    # Grant the breakpoint, but crash in final_review — past the boundary.
+    with crash_agent(monkeypatch, "final_reviewer"):
+        crashed = approve(target_repo, sid)
+    assert crashed.exit_code != 0
+    mid = RunState.load(target_repo, sid)
+    assert mid.pending_breakpoint is None  # the grant was persisted
+    assert mid.phase == "final_review"
+
+    # Simulate the crash landing BEFORE the granted event was appended.
+    _strip_events(target_repo, sid, gate="before_integration", event="granted")
+    assert approval_pairs(target_repo, sid).count(("before_integration", "granted")) == 0
+
+    assert resume(target_repo, sid).exit_code == 0
+    assert approval_pairs(target_repo, sid).count(("before_integration", "granted")) == 1
+    assert RunState.load(target_repo, sid).phase == "done"
+
+
 # --- AC10: approve on a run that is not waiting --------------------------------
 
 
