@@ -12,6 +12,19 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.16.1] — 2026-08-29
+
+### Added
+- **Release notes for the Run Inspector series 0.9.0 – 0.16.0**
+  ([`docs/RELEASE-NOTES.md`](docs/RELEASE-NOTES.md), German:
+  [`docs/RELEASE-NOTES.de.md`](docs/RELEASE-NOTES.de.md)). The changelog records
+  what changed; the release notes frame the eight releases and give the
+  reasoning behind the non-obvious decisions — why the plan skeleton parses no
+  identifier pattern, why the change footprint passes no scope verdict, why the
+  recovery card keys off `state.phase` rather than the escalation event, and why
+  the context derivation is a single prefix pass. Includes the known limitation
+  of 0.16.0 and the CI state of each release.
+
 ## [0.16.0] — 2026-08-27
 
 ### Added
@@ -496,6 +509,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.16.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.13.0...v0.14.0

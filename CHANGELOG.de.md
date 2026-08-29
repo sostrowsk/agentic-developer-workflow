@@ -13,6 +13,19 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.16.1] — 2026-08-29
+
+### Hinzugefügt
+- **Release Notes zur Run-Inspector-Serie 0.9.0 – 0.16.0**
+  ([`docs/RELEASE-NOTES.de.md`](docs/RELEASE-NOTES.de.md), englisch:
+  [`docs/RELEASE-NOTES.md`](docs/RELEASE-NOTES.md)). Das Changelog hält fest,
+  was sich geändert hat; die Release Notes ordnen die acht Releases ein und
+  begründen die nicht offensichtlichen Entscheidungen — warum das Plan-Skelett
+  kein Kennungsmuster parst, warum der Änderungsumfang kein Scope-Urteil fällt,
+  warum die Recovery-Karte auf `state.phase` statt auf das Eskalations-Ereignis
+  triggert und warum die Kontextableitung ein einzelner Präfix-Durchlauf ist.
+  Enthält die bekannte Einschränkung von 0.16.0 und den CI-Stand je Release.
+
 ## [0.16.0] — 2026-08-27
 
 ### Hinzugefügt
@@ -536,6 +549,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.16.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.13.0...v0.14.0
