@@ -12,6 +12,15 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.16.2] — 2026-09-01
+
+### Added
+- **Handout on the ADW flow, walked through a real run**
+  ([`docs/adw-flow-handout.de.md`](docs/adw-flow-handout.de.md), German only).
+  Ten chapters from the overall flow through the phases of run `b65f5d75` to the
+  telemetry model, worktree isolation and crash safety, with figures taken from
+  that run's event log (wall clock, cost, tokens, event distribution).
+
 ## [0.16.1] — 2026-08-29
 
 ### Added
@@ -509,6 +518,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.16.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.14.0...v0.15.0

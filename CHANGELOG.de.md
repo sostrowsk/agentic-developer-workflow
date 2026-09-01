@@ -13,6 +13,15 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.16.2] — 2026-09-01
+
+### Hinzugefügt
+- **Handout zum ADW-Flow am Beispiel eines realen Laufs**
+  ([`docs/adw-flow-handout.de.md`](docs/adw-flow-handout.de.md), nur deutsch).
+  Zehn Kapitel vom Gesamt-Flow über die Phasen des Laufs `b65f5d75` bis zu
+  Telemetrie-Modell, Worktree-Isolation und Crash-Sicherheit, mit Kennzahlen aus
+  dem Event-Log dieses Laufs (Wall-Clock, Kosten, Token, Event-Verteilung).
+
 ## [0.16.1] — 2026-08-29
 
 ### Hinzugefügt
@@ -549,6 +558,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.16.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.14.0...v0.15.0
