@@ -279,6 +279,9 @@
   // depth is greater than the phase's, up to the next same-or-shallower row; those
   // are shown/hidden together. Phases whose subtree begins before the loaded page
   // simply have no rows to fold and stay visible (E3).
+  function parentOf(n) {
+    return n.parentElement || n.parentNode || n.parent || null;
+  }
   function directRows(list) {
     var out = [];
     for (var i = 0; i < list.children.length; i++) {
@@ -287,9 +290,10 @@
     return out;
   }
   function rowDepth(li) {
-    var raw = li.style && li.style.getPropertyValue("--depth");
-    var n = parseInt(raw, 10);
-    return isNaN(n) ? 0 : n;
+    // Read --depth from the inline style STRING (works in a real browser and in the
+    // test harness, neither of which is assumed to expose a CSSOM style object here).
+    var m = (li.getAttribute("style") || "").match(/--depth:\s*(\d+)/);
+    return m ? parseInt(m[1], 10) : 0;
   }
   function phaseEnd(rows, idx, depth) {
     var k = idx + 1;
@@ -305,24 +309,43 @@
     if (caret) caret.setAttribute("aria-expanded", open ? "true" : "false");
     for (var k = idx + 1; k < end; k++) rows[k].classList.toggle("fold-hidden", !open);
   }
+  // A5: make a ?focus target visible by opening EVERY fold ancestor on the loaded
+  // page — its enclosing group and/or repetition <details> (found recursively, not
+  // only among the phase's direct rows) and the phase whose range contains it — so a
+  // node nested inside a collapsed phase, group and repetition is never left hidden.
+  function openFocusPath(list, rows) {
+    var focusSeq = body.getAttribute("data-focus");
+    if (!focusSeq) return;
+    var elem = document.querySelector('.trace-list [data-seq="' + focusSeq + '"]');
+    if (!elem) return;
+    // Open each collapsible <details> ancestor (group / repetition).
+    var n = elem;
+    while (n && n !== list) {
+      if (n.tagName === "DETAILS" && n.classList.contains("trace-collapse")) n.open = true;
+      n = parentOf(n);
+    }
+    // The direct trace-list row on the target's ancestor chain, and the phase whose
+    // range contains it — open that phase (its rows may start before this page, in
+    // which case there is simply no governing phase row to open).
+    var row = elem;
+    while (row && parentOf(row) !== list) row = parentOf(row);
+    var ri = row ? rows.indexOf(row) : -1;
+    if (ri === -1) return;
+    for (var p = 0; p <= ri; p++) {
+      if (rows[p].getAttribute("data-node-type") !== "phase") continue;
+      if (ri < phaseEnd(rows, p, rowDepth(rows[p]))) { setPhaseOpen(rows, p, true); break; }
+    }
+  }
   function initTreeFold() {
     var list = document.querySelector(".trace-list");
     if (!list) return;
     var openSeq = list.getAttribute("data-default-phase");
-    var focusSeq = body.getAttribute("data-focus");
     var rows = directRows(list);
     for (var i = 0; i < rows.length; i++) {
       if (rows[i].getAttribute("data-node-type") !== "phase") continue;
-      var depth = rowDepth(rows[i]);
-      var end = phaseEnd(rows, i, depth);
-      var open = rows[i].getAttribute("data-seq") === openSeq;
-      if (!open && focusSeq) {
-        for (var k = i; k < end; k++) {
-          if (rows[k].getAttribute("data-seq") === focusSeq) { open = true; break; }
-        }
-      }
-      setPhaseOpen(rows, i, open);
+      setPhaseOpen(rows, i, rows[i].getAttribute("data-seq") === openSeq);
     }
+    openFocusPath(list, rows);  // reveal a ?focus target through every fold ancestor
   }
   document.addEventListener("click", function (event) {
     var caret = event.target.closest ? event.target.closest("[data-fold-toggle]") : null;

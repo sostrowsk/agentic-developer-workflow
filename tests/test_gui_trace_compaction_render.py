@@ -33,6 +33,7 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     run_start_payload,
     write_run,
 )
+from tests.gui_js_harness import run_scenario
 
 RUN_ID = "aaaa1111"
 
@@ -103,8 +104,11 @@ def test_a4_paths_are_repo_relative_in_text_and_full_in_title(home, tmp_path):  
     assert inside_abs not in visible
     # The full path survives in a title attribute (the tooltip keeps it reachable).
     assert f'title="{inside_abs}"' in trace or f"title='{inside_abs}'" in trace
-    # A path OUTSIDE the repo is left exactly as it is.
+    # A path OUTSIDE the repo is left exactly as it is in the visible text ...
     assert "/etc/hosts" in visible
+    # ... yet a PATH argument always keeps its full path in the title, whether or not
+    # the visible text was relativised (A4 — the tooltip stays present for it too).
+    assert 'title="/etc/hosts"' in trace or "title='/etc/hosts'" in trace
 
 
 # --- A5: ?focus on a folded result redirects to its call node -------------------
@@ -135,6 +139,21 @@ def test_focus_on_folded_result_redirects_to_the_call_node(home, tmp_path):  # n
     assert re.search(rf'class="pane[^"]*"\s+data-seq="{call_seq}"', _panes_section(focused))
     # ... and the folded result is NOT its own selectable tree entry.
     assert f'data-seq="{result_seq}"' not in trace
+
+
+def test_focus_opens_every_fold_ancestor_of_a_deeply_nested_node(tmp_path):
+    """A5 (client): ``?focus`` on a call nested inside BOTH a group and a repetition
+    in a NON-default phase opens every fold ancestor — the phase and both enclosing
+    ``details.trace-collapse`` — so the focused node is revealed, not left hidden
+    behind a closed phase/group/repetition. Driven through the served app.js in the
+    JS harness (no browser automation)."""
+    r = run_scenario(tmp_path, "trace-focus-fold")
+
+    assert r["target_phase_open"] is True    # the non-default phase is opened ...
+    assert r["group_open"] is True           # ... its enclosing group <details> ...
+    assert r["repeat_open"] is True          # ... and the inner repetition <details>
+    assert r["group_row_hidden"] is False    # the phase's subtree row is revealed
+    assert r["focused_hidden"] is False      # the focused node is not fold-hidden
 
 
 # --- Contract: the JSON ``tree`` is structurally unchanged ----------------------

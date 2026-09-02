@@ -827,6 +827,59 @@ async function runRecoveryLive() {
     afterResume: afterResume, afterClear: afterClear };
 }
 
+function traceFocusFoldDom() {
+  // A trace-list with a default-open phase (seq 2) and a NON-default target phase
+  // (seq 8) whose subtree is a group wrapper holding a repetition wrapper holding the
+  // ?focus target call (seq 99), nested two <details> deep. On load the target phase
+  // is collapsed by default; ?focus=99 must open the phase AND both enclosing
+  // <details> so the deep call is revealed (A5). Depth rides in the inline style, as
+  // the server renders it.
+  var body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111",
+    "data-focus": "99" } });
+  var phaseDefault = el("li", { classes: ["node"],
+    attrs: { "data-seq": "2", "data-node-type": "phase", "style": "--depth:1" } });
+  var phaseTarget = el("li", { classes: ["node"],
+    attrs: { "data-seq": "8", "data-node-type": "phase", "style": "--depth:1" } });
+  var focusedCall = el("li", { classes: ["node"],
+    attrs: { "data-seq": "99", "data-node-type": "agent.tool.call", "style": "--depth:3" } });
+  var repeatDetails = el("details", { classes: ["trace-collapse"], children: [
+    el("summary", { classes: ["trace-summary"] }),
+    el("ul", { classes: ["trace-sublist"], children: [focusedCall] })] });
+  var repeatLi = el("li", { classes: ["trace-wrap", "trace-repeat"],
+    attrs: { "style": "--depth:3" }, children: [repeatDetails] });
+  var groupDetails = el("details", { classes: ["trace-collapse"], children: [
+    el("summary", { classes: ["trace-summary"] }),
+    el("ul", { classes: ["trace-sublist"], children: [repeatLi] })] });
+  var groupLi = el("li", { classes: ["trace-wrap", "trace-group"],
+    attrs: { "style": "--depth:3" }, children: [groupDetails] });
+  var list = el("ul", { classes: ["trace-list"], attrs: { "data-default-phase": "2" },
+    children: [phaseDefault, phaseTarget, groupLi] });
+  var trace = el("div", { classes: ["trace"], children: [list] });
+  var panes = el("div", { classes: ["panes"],
+    children: [el("div", { classes: ["pane"], attrs: { "data-seq": "99" } })] });
+  body.append(trace, panes);
+  return { body: body, phaseDefault: phaseDefault, phaseTarget: phaseTarget,
+    groupLi: groupLi, groupDetails: groupDetails, repeatDetails: repeatDetails,
+    focusedCall: focusedCall };
+}
+
+async function runTraceFocusFold() {
+  var dom = traceFocusFoldDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();  // the IIFE runs initTreeFold() on load
+
+  return {
+    ok: true,
+    default_phase_open: dom.phaseDefault.classes.has("phase-open"),
+    target_phase_open: dom.phaseTarget.classes.has("phase-open"),
+    group_row_hidden: dom.groupLi.classes.has("fold-hidden"),
+    group_open: dom.groupDetails.open,
+    repeat_open: dom.repeatDetails.open,
+    focused_hidden: dom.focusedCall.classes.has("fold-hidden"),
+  };
+}
+
 // ---------------------------------------------------------------------------
 const APP = process.argv[2];
 const SCENARIO = process.argv[3];
@@ -842,6 +895,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "openstate-swap") result = await runOpenStateSwap();
   else if (SCENARIO === "refresh-window") result = await runRefreshWindow(ARG || "");
   else if (SCENARIO === "timeline-focus") result = await runTimelineFocus();
+  else if (SCENARIO === "trace-focus-fold") result = await runTraceFocusFold();
   else if (SCENARIO === "context-panel") result = await runContextPanel();
   else if (SCENARIO === "context-live-swap") result = await runContextLiveSwap();
   else if (SCENARIO === "artifact") result = await runArtifact();

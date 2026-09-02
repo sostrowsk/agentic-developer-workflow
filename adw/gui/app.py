@@ -428,16 +428,20 @@ def _default_open_phase(tree):
     return phases[-1].get("seq")
 
 
+# The main-argument keys that hold a filesystem PATH (A4): their full path is always
+# kept in the ``title``, whether or not the visible text was shortened.
+_PATH_ARG_KEYS = ("file_path", "path", "file")
+
+
 def _raw_main_arg(tool, inp):
-    """Like ``_tool_main_arg`` but UNtruncated — the full raw value, for the A4
-    ``title`` (the tooltip must keep the complete path)."""
-    if not isinstance(inp, dict):
-        return None
-    for key in _TOOL_ARG_PRIORITY.get(tool, ()) + _TOOL_ARG_FALLBACK:
-        value = inp.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return None
+    """The ``(value, key)`` of a tool call's UNtruncated main argument (the key so a
+    path argument can be told from a non-path one), or ``(None, None)``."""
+    if isinstance(inp, dict):
+        for key in _TOOL_ARG_PRIORITY.get(tool, ()) + _TOOL_ARG_FALLBACK:
+            value = inp.get(key)
+            if isinstance(value, str) and value:
+                return value, key
+    return None, None
 
 
 def _repo_relative(value, repo_root):
@@ -460,15 +464,16 @@ def _display_label(node, repo_root):
     tool = p.get("tool")
     if not tool:
         return node.get("label"), None
-    raw = _raw_main_arg(tool, p.get("input"))
+    raw, key = _raw_main_arg(tool, p.get("input"))
     if raw is None:
         return str(tool), None
     rel = _repo_relative(raw, repo_root)
     shown = rel if len(rel) <= _TOOL_ARG_MAX else rel[:_TOOL_ARG_MAX] + "…"
-    # The title keeps the full raw value ONLY when the visible text was actually
-    # shortened (repo-relativised or truncated) — so a value shown in full (e.g. a
-    # Bash command) is not duplicated into a redundant tooltip.
-    title = raw if shown != raw else None
+    # A4: a PATH argument always keeps its complete path in the title — including an
+    # outside-repo path shown unchanged — so the full path stays reachable. A
+    # non-path argument (e.g. a Bash command) gets a title only when the visible text
+    # was actually shortened, so a value shown in full is not duplicated redundantly.
+    title = raw if (key in _PATH_ARG_KEYS or shown != raw) else None
     return f"{tool} {shown}", title
 
 
