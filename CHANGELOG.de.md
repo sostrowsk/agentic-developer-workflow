@@ -13,6 +13,27 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.18.0] — 2026-09-02
+
+### Geändert
+- **Die Trace-Baum-Spalte blättert nicht mehr.** Die linke `section.trace` rendert
+  jeden Knoten eines Laufs auf einmal — das bewegliche Fenster (`?offset`, 100 Knoten
+  pro Seite) und seine Navigation entfallen. Die Verdichtung greift damit über den
+  ganzen Lauf statt an der Seitengrenze zu enden: eine ununterbrochene
+  Lese-/Suchfolge wird zu einer einzigen Gruppe. `?offset` wird angenommen und
+  ignoriert, damit ein gemerkter Link aus der Blätter-Zeit weiterhin den vollen Baum
+  zeigt. Die Werkzeug-Einträge in den Detail-Panes behalten ihr eigenes Fenster
+  (`?tools_offset`), das JSON-`tree` bleibt unverändert.
+- **Punkt-Knoten bekommen keine eigene Detail-Pane mehr.** Werkzeugaufrufe/-ergebnisse,
+  Nachrichten und Snapshots teilen sich eine serverseitig gerenderte Pane-Hülle, die
+  der Client bei der Auswahl umhängt und aus der Events-Route füllt; nur Span-Knoten
+  (Phase, Lane, Runde, `agent.run`, Gate, Review) behalten ihre eigene Pane. Ohne das
+  stellte die ungeblätterte Spalte genau den DOM-Knotenzahl-Engpass wieder her, gegen
+  den die Darstellungsgrenzen existieren: bei Lauf `7fe9d702` (1 296 Events) ≈ 11 600
+  Elemente, jetzt ≈ 6 400.
+- **Der Roh-Payload-Block in der Pane wird eingerückt ausgegeben** — mehrzeiliges,
+  lesbares JSON statt einer einzigen Zeile.
+
 ## [0.17.0] — 2026-09-02
 
 ### Hinzugefügt
@@ -587,6 +608,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.18.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.3...v0.17.0
 [0.16.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.2...v0.16.3
 [0.16.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.1...v0.16.2

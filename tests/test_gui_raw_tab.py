@@ -102,14 +102,15 @@ def test_reader_problems_are_visible_in_raw(home, tmp_path):  # noqa: F811
 
 
 def test_raw_initial_render_is_windowed_for_a_large_log(home, tmp_path):  # noqa: F811
-    """AC-C4: for a >= 3000-event log the initial page does not materialise every
-    event — a late event's unique marker is absent from the server-rendered page,
-    while an early one is present (the observable effect of the windowing)."""
+    """AC-C4: for a >= 3000-event log the initial Raw panel does not materialise
+    every event — a late event's unique marker is absent from it, while an early one
+    is present (the observable effect of the windowing). Scoped to the Raw panel:
+    the trace column renders every node and legitimately echoes late labels."""
     client, slug = _raw_client(tmp_path)
-    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+    panel = _raw_panel(client.get(f"/runs/{slug}/{RUN_ID}").text)
 
-    assert raw_event_mark(4) in html          # early event materialised
-    assert raw_event_mark(COUNT) not in html  # a late event is not inlined
+    assert raw_event_mark(4) in panel          # early event materialised
+    assert raw_event_mark(COUNT) not in panel  # a late event is not inlined
 
 
 def test_raw_free_text_search_covers_full_payload_beyond_preview(home, tmp_path):  # noqa: F811

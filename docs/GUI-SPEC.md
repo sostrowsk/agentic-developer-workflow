@@ -394,10 +394,10 @@ the GUI stays read-only.
    same span the Timeline draws as waiting reads `waiting` here too. A closed
    `gate`/`ci.wait` span keeps its result (`passed`/`failed`, else `done`).
 
-   **Compacted tree column (tool-noise folding).** The tree *column* is a
-   page-local presentation layer over the current (windowed) node list — it never
-   changes the JSON `tree` (see §API) and never crosses the paging window; every
-   fold/group ends at the page boundary and joins only direct neighbours.
+   **Compacted tree column (tool-noise folding).** The tree *column* renders EVERY
+   node of the run — it is not paged and has no entry cap. What keeps it readable is
+   the compaction below, a presentation layer that never changes the JSON `tree`
+   (see §API) and joins only direct neighbours.
    - **Results fold into their call (A1).** An `agent.tool.result` whose
      `tool_use_id` equals that of the immediately preceding `agent.tool.call` is not
      a row of its own; its outcome (from the existing result label — `ok`/`error`,
@@ -428,12 +428,17 @@ the GUI stays read-only.
      folded result is redirected to its call node (same `tool_use_id`) — that call's
      `seq` is selected and its pane shown, the result content stays reachable through
      the Tools tab.
-   - **Line balance (A6).** Below the tree, beside the unchanged paging navigation,
-     a per-page balance of two numbers: rows (display entries outside any collector)
-     and events folded (window events minus the entries that are themselves an
-     original event — so attached results and every collector member count once).
-3. **Detail pane** (right): depends on the selected node. For `agent.run` four
-   tabs:
+   - **Line balance (A6).** Below the tree, a balance over the whole run of two
+     numbers: rows (display entries outside any collector) and events folded (all
+     nodes minus the entries that are themselves an original event — so attached
+     results and every collector member count once).
+3. **Detail pane** (right): depends on the selected node. A **span** node (phase,
+   lane, round, `agent.run`, gate, review, …) has its own server-rendered pane. A
+   **point** node (tool call/result, message, snapshot, …) has none — the many of
+   them would put thousands of hidden elements into the unpaged column; they share
+   ONE server-rendered shell that the client re-points at the selected node and fills
+   from the read-only events route (heading from the tree row, payload as indented
+   JSON). No DOM is constructed in JS (§7.3). For `agent.run` four tabs:
    - **Prompt** — the full task string plus system append, monospace, copyable
      (the prompt-optimization lever). Additionally a **unified diff** of this
      prompt against the prompt of the *previous* `agent.run` of the **same agent

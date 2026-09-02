@@ -173,7 +173,7 @@
         <div class="agg-outcome">{{ t.agg_outcome }} {{ node.outcome if node.outcome is not none else "" }}</div>
       </div>
     {% else %}
-      <pre class="raw">{{ node.payload | tojson }}</pre>
+      <pre class="raw">{{ node.payload | tojson(indent=2) }}</pre>
     {% endif %}
 {% endmacro %}
 {% macro pane(node, tool_window) %}
@@ -430,24 +430,32 @@
             {% if not detail.run.has_trace %}
             <p class="no-trace-hint">{{ t.no_trace_line }}</p>
             {% endif %}
-            {# The trace tree is a BOUNDED, MOVING window over the pre-order entry
-               list (Aufgabe A): one global budget of at most 200 entries, each
-               carrying exactly one ``data-tree-entry`` marker, indented by depth.
-               ?offset slides the window so every entry stays reachable. The column
-               is compacted PAGE-LOCALLY (Trace-Baum verdichten): results fold into
-               their call, repeated/adjacent Read/Grep/Glob operations collapse into
-               synthetic wrappers, paths are repo-relative. `data-default-phase` names
-               the phase the client opens by default (A5). #}
+            {# The trace tree renders COMPLETELY — no paging, no entry cap: every
+               node carries exactly one ``data-tree-entry`` marker, indented by depth.
+               What keeps the column readable is the compaction (Trace-Baum
+               verdichten): results fold into their call, repeated/adjacent
+               Read/Grep/Glob operations collapse into synthetic wrappers, paths are
+               repo-relative. `data-default-phase` names the phase the client opens by
+               default (A5). #}
             <ul class="trace-list"{% if compact.default_phase is not none %} data-default-phase="{{ compact.default_phase }}"{% endif %}>
               {{ trace_entries(compact.entries) }}
             </ul>
-            {# A6: the per-page line balance beside the unchanged blätter navigation. #}
+            {# A6: the line balance over the whole tree — visible rows vs. events folded. #}
             <p class="trace-balance">{{ compact.rows }} {{ t.fold_row if compact.rows == 1 else t.fold_rows }} &middot; {{ compact.folded }} {{ t.fold_event_folded_one if compact.folded == 1 else t.fold_event_folded_many }}</p>
-            {{ window_nav(tree_window, "offset") }}
           </section>
 
           <section class="panes">
             {% for node in pane_nodes %}{{ pane(node, tool_window) }}{% endfor %}
+            {# The shared pane for POINT nodes (tool calls/results, messages, …):
+               one shell instead of one pane per node, so the unpaged tree column does
+               not put thousands of hidden elements into the DOM. app.js points its
+               `data-load-seq` at the selected node and fills heading and payload from
+               the read-only events route — the same lazy load the tool bodies use, and
+               no DOM constructed in JS (GUI-SPEC §7.3). #}
+            <div class="pane pane-generic" data-generic-pane>
+              <h3><span data-generic-label></span> <small class="type" data-generic-type></small></h3>
+              <pre class="raw tool-body" data-load-seq></pre>
+            </div>
           </section>
 
           {# The run-context panel sits beside the detail panes; it is fed by the

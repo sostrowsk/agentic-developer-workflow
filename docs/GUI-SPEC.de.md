@@ -407,11 +407,10 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
    als wartend zeichnet, liest auch hier `waiting`. Ein beendeter
    `gate`/`ci.wait`-Span behält sein Ergebnis (`passed`/`failed`, sonst `done`).
 
-   **Verdichtete Baum-Spalte (Werkzeug-Rauschen falten).** Die Baum-*Spalte* ist
-   eine seitenlokale Darstellungsschicht über der aktuellen (gefensterten)
-   Knotenliste — sie ändert das JSON-`tree` nicht (siehe §API) und greift nie über
-   die Seitengrenze; jede Faltung/Gruppe endet an der Seitengrenze und verbindet nur
-   direkte Nachbarn.
+   **Verdichtete Baum-Spalte (Werkzeug-Rauschen falten).** Die Baum-*Spalte* zeigt
+   JEDEN Knoten des Laufs — sie blättert nicht und hat keine Knoten-Obergrenze.
+   Lesbar hält sie die Verdichtung unten: eine Darstellungsschicht, die das
+   JSON-`tree` nicht ändert (siehe §API) und nur direkte Nachbarn verbindet.
    - **Ergebnisse falten (A1).** Ein `agent.tool.result`, dessen `tool_use_id` der
      des unmittelbar vorangehenden `agent.tool.call` gleicht, ist keine eigene Zeile;
      sein Ausgang (aus dem vorhandenen Ergebnis-Label — `ok`/`error`, ein
@@ -444,12 +443,19 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
      gefaltetes Ergebnis wird auf dessen Aufruf-Knoten (gleiche `tool_use_id`)
      umgelenkt — dessen `seq` wird ausgewählt und dessen Pane gezeigt, der
      Ergebnis-Inhalt bleibt über den Tools-Reiter erreichbar.
-   - **Zeilenbilanz (A6).** Unter dem Baum, neben der unveränderten Blätternavigation,
-     eine Bilanz je Seite aus zwei Zahlen: Zeilen (Darstellungseinträge außerhalb
-     jedes Sammelknotens) und eingefaltete Events (Seiten-Events minus der Einträge,
-     die selbst ein Original-Event sind — angehängte Ergebnisse und jedes
-     Sammel-Mitglied zählen je einmal).
-3. **Detail-Pane** (rechts): abhängig vom gewählten Knoten. Für `agent.run` vier
+   - **Zeilenbilanz (A6).** Unter dem Baum eine Bilanz über den ganzen Lauf aus zwei
+     Zahlen: Zeilen (Darstellungseinträge außerhalb jedes Sammelknotens) und
+     eingefaltete Events (alle Knoten minus der Einträge, die selbst ein
+     Original-Event sind — angehängte Ergebnisse und jedes Sammel-Mitglied zählen je
+     einmal).
+3. **Detail-Pane** (rechts): abhängig vom gewählten Knoten. Ein **Span**-Knoten
+   (Phase, Lane, Runde, `agent.run`, Gate, Review, …) hat eine eigene, serverseitig
+   gerenderte Pane. Ein **Punkt**-Knoten (Werkzeugaufruf/-ergebnis, Nachricht,
+   Snapshot, …) hat keine — davon gibt es so viele, dass sie in der ungeblätterten
+   Spalte tausende versteckte Elemente ergäben; sie teilen sich EINE serverseitig
+   gerenderte Hülle, die der Client auf den gewählten Knoten umhängt und aus der
+   Read-only-Events-Route füllt (Überschrift aus der Baumzeile, Payload als
+   eingerücktes JSON). Kein DOM wird in JS gebaut (§7.3). Für `agent.run` vier
    Reiter:
    - **Prompt** — der vollständige Task-String plus System-Append, Monospace,
      kopierbar (der Hebel für Prompt-Optimierung). Zusätzlich ein **Unified Diff**

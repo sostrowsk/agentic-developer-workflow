@@ -121,31 +121,17 @@ def _tree_node_count(lines) -> int:
 # --- A1: bounded initial DOM, global budget per collection ----------------------
 
 
-def test_trace_tree_entry_markers_bounded_across_sizes(home, tmp_path):  # noqa: F811
-    """A1: for DEEPLY NESTED trace trees of 200 / 2 000 / 20 000 entries, the count
-    of the trace-entry marker over the COMPLETE initial document is at least one and
-    at most 200 — independent of the total. Per-sibling-group slicing would multiply
-    the budget at every nesting level (the fixture's groups are each well under the
-    cap, so a recursive ``children[:limit]`` would materialise the whole tree); only
-    one global budget passes."""
+def test_nested_tree_renders_completely_at_every_size(home, tmp_path):  # noqa: F811
+    """The trace column is NOT bounded any more: for DEEPLY NESTED trees of
+    200 / 2 000 / 20 000 entries every node is rendered, head and tail together.
+    The cap that used to apply here was removed on request — the column is kept
+    readable by compaction (folded results, repeat/group nodes, collapsed phases),
+    which hides nothing, instead of by a window, which cut."""
     for total in (200, 2000, 20000):
         client, slug = _client(tmp_path, nested_tree_lines(total))
-        html = _detail_html(client, slug)
-        count = html.count(TREE_ENTRY_MARKER)
-        assert 1 <= count <= CAP, f"total={total}: {count} trace-entry markers (cap {CAP})"
-        assert count < total  # far below the total — the whole point
-
-
-def test_nested_tree_bounds_initial_render_but_keeps_the_head(home, tmp_path):  # noqa: F811
-    """A1/A3: the bounded initial render still shows the first entries in order (the
-    head sentinel is present) while an entry far beyond the bound is NOT inlined
-    initially — a bounded display, not a loss of content."""
-    total = 2000
-    client, slug = _client(tmp_path, nested_tree_lines(total))
-    html = _detail_html(client, slug)
-    tree = _trace_section(html)
-    assert nested_leaf_token(0) in tree                 # the head is rendered
-    assert nested_leaf_token(total - 1) not in tree     # a far entry is windowed out
+        tree = _trace_section(_detail_html(client, slug))
+        assert nested_leaf_token(0) in tree              # the head ...
+        assert nested_leaf_token(total - 1) in tree      # ... and the tail
 
 
 def test_tool_entry_markers_bounded_across_sizes(home, tmp_path):  # noqa: F811
@@ -177,32 +163,6 @@ def test_exactly_one_marker_per_rendered_entry(home, tmp_path):  # noqa: F811
 
 
 # --- A2: reachability through a MOVING window (not a growing prefix) -------------
-
-
-def test_trace_tree_moving_window_reaches_every_entry(home, tmp_path):  # noqa: F811
-    """A2: with the trace tree windowed, ``?offset`` moves the bounded window so a
-    late trace entry is reached WITHOUT materialising all preceding ones — reaching
-    the tail drops the head from the DOM (a moving window, not a growing prefix), and
-    the bound holds after every transition."""
-    pairs = 600  # 600 unique call tokens (toolstep-00000 .. toolstep-00599)
-    client, slug = _client(tmp_path, many_tool_entries_lines(pairs))
-
-    head, mid, tail = tool_entry_command(0), tool_entry_command(300), tool_entry_command(pairs - 1)
-
-    initial = _trace_section(_detail_html(client, slug))
-    assert head in initial                               # the head is materialised
-    assert tail not in initial                           # the tail is not, initially
-    assert 1 <= _detail_html(client, slug).count(TREE_ENTRY_MARKER) <= CAP
-
-    at_tail = _detail_html(client, slug, **{OFFSET: 100000})
-    assert tail in _trace_section(at_tail)               # the tail is now reachable
-    assert head not in _trace_section(at_tail)           # WITHOUT re-materialising the head
-    assert 1 <= at_tail.count(TREE_ENTRY_MARKER) <= CAP  # the bound still holds
-
-    at_mid = _detail_html(client, slug, **{OFFSET: 550})
-    assert mid in _trace_section(at_mid)                 # a middle entry is reachable too
-    assert head not in _trace_section(at_mid)
-    assert 1 <= at_mid.count(TREE_ENTRY_MARKER) <= CAP
 
 
 def test_tools_moving_window_reaches_every_entry(home, tmp_path):  # noqa: F811

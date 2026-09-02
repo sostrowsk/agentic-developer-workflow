@@ -40,7 +40,7 @@ from adw.gui.app import (
     _repo_relative,
     _serialize,
     _tool_names_by_use_id,
-    _tree_window,
+    _tree_rows,
 )
 from adw.gui.model import build_tree
 from tests.gui_app_helpers import rec, run_start_payload
@@ -384,15 +384,15 @@ def test_a4_display_label_keeps_escaping_path_unchanged_with_full_title():
     assert title == "/repo/root/../outside/x.py"        # full raw path in the title
 
 
-# --- E3: compaction is page-local; a run split across the boundary never joins ---
+# --- the column is not paged: compaction spans the WHOLE run -------------------
 
 
-def _pipeline_rows(lines, offset, size):
+def _pipeline_rows(lines):
     events = [e for e in lines if isinstance(e, dict)]
     tool_names = _tool_names_by_use_id(events)
     tree = [_serialize(r, tool_names) for r in build_tree(events)]
-    win = _tree_window(tree, offset, size)
-    return win, _compact_rows(win["rows"])
+    rows = _tree_rows(tree)
+    return rows, _compact_rows(rows["rows"])
 
 
 def _six_read_run():
@@ -417,27 +417,22 @@ def _six_read_run():
     return lines
 
 
-def test_e3_group_never_spans_the_loaded_page_boundary():
+def test_a_group_spans_the_whole_run_now_that_the_column_is_not_paged():
+    """The trace column renders every node, so an uninterrupted read run collapses
+    into ONE group over all six calls — the old page boundary that used to cut a
+    group in half is gone."""
     lines = _six_read_run()
     total = len(_flatten_tree(
         [_serialize(r, {}) for r in build_tree([e for e in lines if isinstance(e, dict)])]))
 
-    # Two adjacent, non-overlapping pages of the 14-row flat list (run, agent.run,
-    # then 6 read call/result pairs): [0:7] and [7:14].
-    win1, out1 = _pipeline_rows(lines, 0, 7)
-    win2, out2 = _pipeline_rows(lines, 7, 7)
+    rows, out = _pipeline_rows(lines)
 
-    # The blätter window (size, offset semantics, total) is unchanged by compaction.
-    assert win1["total"] == total and win2["total"] == total
-    assert win1["offset"] == 0 and win2["offset"] == 7
+    assert rows["total"] == total
+    assert len(rows["rows"]) == total          # every node is rendered, nothing cut
 
-    grp1 = next(e for e in out1["entries"] if e["kind"] == "group")
-    grp2 = next(e for e in out2["entries"] if e["kind"] == "group")
-    seqs1 = set(_node_seqs(grp1["children"]))
-    seqs2 = set(_node_seqs(grp2["children"]))
-    # Each page groups only its own reads; a group never reaches into the next page.
-    assert len(seqs1) == 3 and len(seqs2) == 3
-    assert seqs1.isdisjoint(seqs2)
+    groups = [e for e in out["entries"] if e["kind"] == "group"]
+    assert len(groups) == 1                    # one group, not one per page
+    assert len(set(_node_seqs(groups[0]["children"]))) == 6
 
 
 # --- A5: the server names the phase opened by default ---------------------------

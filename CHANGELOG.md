@@ -12,6 +12,25 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.18.0] — 2026-09-02
+
+### Changed
+- **The Trace tree column is no longer paged.** The left `section.trace` renders
+  every node of a run at once — the bounded moving window (`?offset`, 100 nodes per
+  page) and its navigation are gone. Compaction now spans the whole run instead of
+  stopping at a page boundary, so an uninterrupted read/search run collapses into a
+  single group. `?offset` is accepted and ignored, so a bookmarked URL from the paged
+  era still renders the full tree. The Tools entries inside the detail panes keep
+  their own window (`?tools_offset`), and the JSON `tree` is unchanged.
+- **Point nodes no longer get a detail pane each.** Tool calls/results, messages and
+  snapshots share one server-rendered pane shell that the client re-points and fills
+  from the events route on selection; only span nodes (phase, lane, round,
+  `agent.run`, gate, review) keep their own pane. Without this the unpaged column
+  reinstated the DOM-node-count bottleneck the display bounds exist for: on run
+  `7fe9d702` (1 296 events) ≈ 11 600 elements, now ≈ 6 400.
+- **The pane's raw payload block is pretty-printed** — indented JSON over several
+  lines instead of one unreadable line.
+
 ## [0.17.0] — 2026-09-02
 
 ### Added
@@ -545,6 +564,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.18.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.3...v0.17.0
 [0.16.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.2...v0.16.3
 [0.16.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.1...v0.16.2

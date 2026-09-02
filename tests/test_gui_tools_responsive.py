@@ -58,17 +58,32 @@ def test_fixture_has_at_least_1500_tool_entries(home, tmp_path):  # noqa: F811
     assert max(len(r["payload"].get("content", "")) for r in results) < 1024
 
 
-def test_initial_page_does_not_materialise_every_tool_entry(home, tmp_path):  # noqa: F811
-    """AC-A1/A3: the initial server-rendered detail page materialises a BOUNDED
-    slice — the first call's marker may appear, but a late call's marker does not.
-    This covers both the Tools pane and the trace tree, which both otherwise inline
-    every entry's label (the ~35 s / node-count freeze)."""
-    client, slug = _tools_client(tmp_path)
-    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+def _tools_panels(html: str) -> str:
+    """Every ``Tools`` tab panel of the detail HTML concatenated, each scoped to its
+    own closing ``</section>`` — so an assertion targets the windowed Tools entries
+    and not the trace column, which renders every node by design."""
+    key, close = 'data-tab-panel="tools"', "</section>"
+    out, start = [], 0
+    while True:
+        i = html.find(key, start)
+        if i == -1:
+            return "".join(out)
+        end = html.find(close, i)
+        out.append(html[i:end] if end != -1 else html[i:])
+        start = (end + len(close)) if end != -1 else (i + len(key))
 
-    assert tool_entry_command(PAIRS - 1) not in html  # a late entry is not inlined
-    # And the whole page stays far below "one summary line per entry".
-    assert html.count("toolstep-") < PAIRS
+
+def test_initial_page_does_not_materialise_every_tool_entry(home, tmp_path):  # noqa: F811
+    """AC-A1/A3 (E8): the initial server-rendered Tools panes materialise a BOUNDED
+    slice — the first call's marker may appear, but a late call's marker does not,
+    and the panes stay far below "one summary line per entry" (the ~35 s /
+    node-count freeze). The trace column is deliberately exempt: it renders every
+    node and is kept readable by compaction, not by a window."""
+    client, slug = _tools_client(tmp_path)
+    panels = _tools_panels(client.get(f"/runs/{slug}/{RUN_ID}").text)
+
+    assert tool_entry_command(PAIRS - 1) not in panels  # a late entry is not inlined
+    assert panels.count("toolstep-") < PAIRS
 
 
 def test_every_tool_entry_stays_reachable_with_full_content(home, tmp_path):  # noqa: F811

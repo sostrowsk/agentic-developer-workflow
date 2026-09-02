@@ -66,21 +66,20 @@ def _ci_wait_seq(client, slug) -> int:
                if e.get("type") == "ci.wait" and e.get("kind") == "start")
 
 
-def test_focus_brings_an_out_of_window_timeline_node_into_view(home, tmp_path):  # noqa: F811
-    """P2 (server): a ``ci.wait`` strand sits beyond the initial trace window — it is
-    a Timeline bar target yet has no tree entry and no pane at offset 0. ``?focus``
-    positions the bounded window on it so its tree entry AND its detail pane become
-    visible, without materialising the whole tree."""
+def test_focus_keeps_a_late_timeline_node_selectable(home, tmp_path):  # noqa: F811
+    """P2 (server): a late ``ci.wait`` strand is a Timeline bar target. Since the
+    trace column is no longer paged it already has a tree entry and a pane, and
+    ``?focus`` must keep both — the deep link stays valid for every node of the run,
+    not just for the ones a window happened to cover."""
     client, slug = _client(tmp_path)
     ci_seq = _ci_wait_seq(client, slug)
 
     base = client.get(f"/runs/{slug}/{RUN_ID}").text
     seq_attr = f'data-seq="{ci_seq}"'
-    # It IS a timeline bar target ...
+    # It IS a timeline bar target, and it is reachable in the trace column already.
     assert seq_attr in tab_panel(base, "timeline")
-    # ... but out of the initial trace window: no tree entry, no pane.
-    assert seq_attr not in _trace_section(base)
-    assert seq_attr not in _panes_section(base)
+    assert seq_attr in _trace_section(base)
+    assert re.search(rf'class="pane[^"]*"\s+data-seq="{ci_seq}"', _panes_section(base))
 
     focused = client.get(f"/runs/{slug}/{RUN_ID}", params={"focus": ci_seq}).text
     tsec = _trace_section(focused)

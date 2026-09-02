@@ -168,28 +168,28 @@ def test_a4_repeat_summary_shows_relative_path_with_full_title(home, tmp_path): 
 
 
 def test_focus_on_folded_result_redirects_to_the_call_node(home, tmp_path):  # noqa: F811
-    """The late tool pairs sit far beyond the initial trace window. ``?focus`` on a
-    late RESULT must position the window on its CALL (so the pair folds together)
-    and materialise the call's tree entry + pane; the result is not a tree entry."""
+    """``?focus`` on a RESULT is redirected to its CALL (same ``tool_use_id``): the
+    call is the selectable tree entry and gets the pane, the folded result never is
+    one. The trace column renders every node, so what this pins is the redirect —
+    not that a window had to be moved."""
     client, slug, _repo = _client(tmp_path, late_timeline_strand_lines(300))
     events = client.get(f"/api/runs/{slug}/{RUN_ID}/events").json()
     results = [e for e in events if e.get("type") == "agent.tool.result"]
-    # A result in the MIDDLE of the run: focusing it clamps to no tail window, so a
-    # naive offset==result-index would push the call just before the window edge.
-    # Only the A5 redirect (offset the CALL) keeps the pair together on the page.
     result_seq = results[len(results) // 2]["seq"]
     call_seq = result_seq - 1                 # its call immediately precedes it
 
+    # Even unfocused the result is already folded away into its call.
     base = _trace_section(client.get(f"/runs/{slug}/{RUN_ID}").text)
-    assert f'data-seq="{call_seq}"' not in base   # out of the initial window
+    assert f'data-seq="{call_seq}"' in base
+    assert f'data-seq="{result_seq}"' not in base
 
     focused = client.get(f"/runs/{slug}/{RUN_ID}", params={"focus": result_seq}).text
     trace = _trace_section(focused)
-    # The CALL is now a visible, selectable tree entry ...
+    # The CALL is the visible, selectable tree entry ...
     assert f'data-seq="{call_seq}"' in trace
     assert "data-tree-entry" in trace
-    # ... its pane is materialised ...
-    assert re.search(rf'class="pane[^"]*"\s+data-seq="{call_seq}"', _panes_section(focused))
+    # ... shown through the shared pane (a point node has none of its own) ...
+    assert "data-generic-pane" in _panes_section(focused)
     # ... and the folded result is NOT its own selectable tree entry.
     assert f'data-seq="{result_seq}"' not in trace
 

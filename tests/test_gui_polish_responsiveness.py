@@ -88,18 +88,19 @@ def test_full_tool_result_stays_reachable(home, tmp_path):  # noqa: F811
 
 def test_tool_node_pane_carries_load_anchor_and_loads_on_selection(home, tmp_path):  # noqa: F811
     """B2 (regression): selecting a tool node directly must not show a permanently
-    empty box. Its own pane carries a standalone load anchor (data-load-seq, not
-    inside <details>), and the client loads that anchor on selection."""
+    empty box. A tool node is a POINT node and has no pane of its own any more — it
+    is shown through the SHARED pane shell, which carries a standalone load anchor
+    (data-load-seq, not inside <details>) that the client loads on selection."""
     client, slug = _big_client(tmp_path)
 
     html = client.get(f"/runs/{slug}/{RUN_ID}").text
-    assert 'class="tool-detail"' in html  # the tool node's own pane
+    assert "data-generic-pane" in html    # the shared pane for point nodes
     assert "data-load-seq" in html        # with a load anchor
 
     js = client.get("/static/app.js").text
     assert "loadToolBody" in js
-    # The selection path targets the standalone tool pane (not only <details>).
-    assert "tool-detail" in js
+    # The selection path re-points and loads the shared shell.
+    assert "data-generic-pane" in js
 
 
 def test_single_record_events_query_returns_only_that_record(home, tmp_path):  # noqa: F811

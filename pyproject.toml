@@ -1,6 +1,6 @@
 [project]
 name = "adw"
-version = "0.17.0"
+version = "0.18.0"
 description = "Agentic Developer Workflow — 7-Phasen-Orchestrator: Claude Agent SDK + Codex + deterministische Gates"
 requires-python = ">=3.12"
 dependencies = [

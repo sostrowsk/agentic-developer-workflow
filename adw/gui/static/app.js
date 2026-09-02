@@ -156,27 +156,61 @@
     });
   }
 
+  // A node's OWN pane, or null. Point nodes have none — the trace column is unpaged,
+  // so one pane per node would be thousands of hidden elements; they share the
+  // server-rendered generic shell instead.
+  function ownPaneFor(seq) {
+    return seq ? document.querySelector('.panes .pane[data-seq="' + seq + '"]') : null;
+  }
+
+  function treeRowFor(seq) {
+    return seq ? document.querySelector('.node[data-seq="' + seq + '"]') : null;
+  }
+
   function applySelection() {
-    var haveSelected =
-      selectedSeq && document.querySelector('.pane[data-seq="' + selectedSeq + '"]');
-    if (!haveSelected) {
+    var pane = ownPaneFor(selectedSeq);
+    var row = treeRowFor(selectedSeq);
+    // Neither a pane nor a tree row: a stale seq — fall back to the first node.
+    if (!pane && !row) {
       var first = document.querySelector(".node[data-seq]");
       selectedSeq = first ? first.getAttribute("data-seq") : null;
+      pane = ownPaneFor(selectedSeq);
+      row = treeRowFor(selectedSeq);
     }
-    document.querySelectorAll(".panes .pane").forEach(function (pane) {
-      pane.classList.toggle("selected", pane.getAttribute("data-seq") === selectedSeq);
+    document.querySelectorAll(".panes .pane[data-seq]").forEach(function (p) {
+      p.classList.toggle("selected", p.getAttribute("data-seq") === selectedSeq);
     });
     document.querySelectorAll(".node[data-seq]").forEach(function (node) {
       node.classList.toggle("selected", node.getAttribute("data-seq") === selectedSeq);
     });
+    var generic = document.querySelector("[data-generic-pane]");
+    var useGeneric = !!(selectedSeq && !pane && row);
+    if (generic) generic.classList.toggle("selected", useGeneric);
+    // The shared pane is RE-POINTED at the selected node: heading from the tree row
+    // (no re-derivation), payload from the read-only events route through the same
+    // guarded lazy load the tool bodies use. Nothing is constructed in JS.
+    if (useGeneric && generic) {
+      var labelSlot = generic.querySelector("[data-generic-label]");
+      var typeSlot = generic.querySelector("[data-generic-type]");
+      var rowLabel = row.querySelector(".label");
+      if (labelSlot) labelSlot.textContent = rowLabel ? rowLabel.textContent : "";
+      if (typeSlot) typeSlot.textContent = row.getAttribute("data-node-type") || "";
+      var shared = generic.querySelector("pre[data-load-seq]");
+      if (shared && shared.getAttribute("data-load-seq") !== String(selectedSeq)) {
+        shared.setAttribute("data-load-seq", selectedSeq);
+        shared.removeAttribute("data-loaded");   // a different node -> load afresh
+        shared._loadPromise = null;
+        shared.textContent = "";
+      }
+      if (shared) return loadToolBody(shared, true);
+    }
     // A tool-node's own pane holds a standalone (not inside <details>) load anchor;
     // the toggle-based lazy load never fires for it, so load it on selection —
     // otherwise selecting a tool node directly would show a permanently empty box.
     // Return the load promise so a caller (the adw:select measure) can complete
     // only once the fetched pane content is inserted, not when the box is empty.
-    if (selectedSeq) {
-      var selectedPane = document.querySelector('.pane[data-seq="' + selectedSeq + '"]');
-      var pre = selectedPane && selectedPane.querySelector(".tool-detail pre[data-load-seq]");
+    if (pane) {
+      var pre = pane.querySelector(".tool-detail pre[data-load-seq]");
       if (pre) return loadToolBody(pre, true);  // selection-triggered -> guarded
     }
     return Promise.resolve();
@@ -196,13 +230,14 @@
     var bar = target.closest(".tl-bar[data-seq]");
     var node = target.closest(".node[data-seq]");
     if (!bar && !node) return;
-    // P2: a Timeline bar may target a node outside the current bounded window, so it
-    // has no pane here. Selecting it in place would silently fall back to the first
-    // visible node (the WRONG node). Instead navigate the server window to it via
-    // ?focus, which materialises both its tree entry and its pane on load.
+    // P2: a Timeline bar may target a node this page cannot show — neither an own
+    // pane nor a tree row. Selecting it in place would silently fall back to the
+    // first visible node (the WRONG node). Instead navigate to it via ?focus, which
+    // materialises it on load. A point node HAS a tree row and is shown through the
+    // shared pane, so it selects in place — no reload.
     if (bar) {
       var barSeq = bar.getAttribute("data-seq");
-      if (!document.querySelector('.pane[data-seq="' + barSeq + '"]')) {
+      if (!ownPaneFor(barSeq) && !treeRowFor(barSeq)) {
         window.location.assign(detailUrl + "?focus=" + encodeURIComponent(barSeq));
         return;
       }
@@ -432,6 +467,13 @@
   // ``guarded`` marks a SELECTION-triggered load (its payload is written only while
   // its node is still the selected one); an expand-triggered load (the <details>
   // toggle) is unguarded and always renders its own entry.
+  // Whether ``pre`` still shows the node this load was issued for. Always true for
+  // a per-node anchor (its data-load-seq never changes); false for the SHARED pane's
+  // anchor once it has been re-pointed at another node.
+  function stillOurs(pre, seq) {
+    return String(pre.getAttribute("data-load-seq")) === String(seq);
+  }
+
   function loadToolBody(pre, guarded) {
     var seq = pre.getAttribute("data-load-seq");
     if (!seq) return Promise.resolve();
@@ -448,6 +490,11 @@
     var promise = fetch(base + "/events?from_seq=" + encodeURIComponent(seq) + "&to_seq=" + encodeURIComponent(seq))
       .then(function (response) { return response.json(); })
       .then(function (records) {
+        // The SHARED pane's <pre> is one element re-pointed at whichever point node
+        // is selected. A response for a node this element no longer shows must
+        // neither write nor clear — otherwise a late answer for an earlier node
+        // wipes the payload the newer node already rendered (P1).
+        if (!stillOurs(pre, seq)) return;
         pre._loadPromise = null;
         // Aufgabe B: a GUARDED load renders only if ITS node is STILL the selected
         // one — so a superseded selection (a NEWER node chosen) writes nothing and
@@ -468,6 +515,7 @@
           : hint("payload-missing", "(payload not found)");
       })
       .catch(function () {
+        if (!stillOurs(pre, seq)) return;  // see the P1 note above
         pre._loadPromise = null;
         pre.removeAttribute("data-loaded"); // allow a retry on the next expand
         if (guarded && String(seq) !== String(selectedSeq)) return;

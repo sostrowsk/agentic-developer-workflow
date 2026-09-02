@@ -553,6 +553,100 @@ async function runTimelineFocus() {
   };
 }
 
+function lazyPaneDom() {
+  // The unpaged tree column: a SPAN node with its own pane (seq 1) and a POINT node
+  // that has a tree row but NO pane of its own (seq 42) — the case the shared
+  // generic pane shell serves.
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  const spanRow = el("li", { classes: ["node"], attrs: { "data-seq": "1" } });
+  const pointLabel = el("span", { classes: ["label"] });
+  pointLabel.textContent = "Read adw/gui/app.py";
+  const pointRow = el("li", { classes: ["node"],
+    attrs: { "data-seq": "42", "data-node-type": "agent.tool.call" },
+    children: [pointLabel] });
+  const pointLabel2 = el("span", { classes: ["label"] });
+  pointLabel2.textContent = "Grep needle";
+  const pointRow2 = el("li", { classes: ["node"],
+    attrs: { "data-seq": "43", "data-node-type": "agent.tool.call" },
+    children: [pointLabel2] });
+  const tree = el("div", { classes: ["trace"], children: [spanRow, pointRow, pointRow2] });
+  const spanPane = el("div", { classes: ["pane"], attrs: { "data-seq": "1" } });
+  const genLabel = el("span", { attrs: { "data-generic-label": "" } });
+  const genType = el("small", { classes: ["type"], attrs: { "data-generic-type": "" } });
+  const genBody = el("pre", { classes: ["raw", "tool-body"], attrs: { "data-load-seq": "" } });
+  const generic = el("div", { classes: ["pane", "pane-generic"],
+    attrs: { "data-generic-pane": "" },
+    children: [el("h3", { children: [genLabel, genType] }), genBody] });
+  const panes = el("div", { classes: ["panes"], children: [spanPane, generic] });
+  body.append(tree, panes);
+  return { body, spanRow, pointRow, pointRow2, spanPane, generic, genLabel, genType, genBody };
+}
+
+async function runLazyPane() {
+  const dom = lazyPaneDom();
+  const rootDoc = el("html", { children: [dom.body] });
+  installGlobals(rootDoc, dom.body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: dom.pointRow }); await drain();
+  const fetchedOwnRecord = pendingFetchCount("from_seq=42&to_seq=42") === 1;
+  resolveFetch("from_seq=42", eventsResponse(
+    [{ seq: 42, type: "agent.tool.call", payload: { tool: "Read", marker: "LAZYMARK" } }]));
+  await settle();
+
+  const afterPoint = {
+    generic_selected: dom.generic.classes.has("selected"),
+    span_selected: dom.spanPane.classes.has("selected"),
+    load_seq: dom.genBody.getAttribute("data-load-seq"),
+    label: dom.genLabel.textContent,
+    type: dom.genType.textContent,
+    body: dom.genBody.textContent,
+    fetched_own_record: fetchedOwnRecord,
+    navigations: navigations.slice(),
+  };
+
+  // Selecting the span node again must hand the pane back to its OWN pane.
+  dispatch("click", { target: dom.spanRow }); await settle();
+  return {
+    ok: true,
+    after_point: afterPoint,
+    span_selected_after: dom.spanPane.classes.has("selected"),
+    generic_selected_after: dom.generic.classes.has("selected"),
+  };
+}
+
+async function runLazyPaneRace() {
+  const dom = lazyPaneDom();
+  const rootDoc = el("html", { children: [dom.body] });
+  installGlobals(rootDoc, dom.body);
+  loadAppJs(APP);
+
+  // A then B, both before either fetch settles: the shared <pre> is re-pointed at B
+  // while A's request is still in flight.
+  dispatch("click", { target: dom.pointRow }); await drain();
+  dispatch("click", { target: dom.pointRow2 }); await drain();
+
+  // B (the node actually selected) answers FIRST and renders ...
+  resolveFetch("from_seq=43", eventsResponse(
+    [{ seq: 43, type: "agent.tool.call", payload: { marker: "FRESH_B" } }]));
+  await drain();
+  const afterFresh = { body: dom.genBody.textContent };
+
+  // ... then A's response arrives LATE. The element no longer shows node A, so this
+  // must neither write into it nor clear it.
+  resolveFetch("from_seq=42", eventsResponse(
+    [{ seq: 42, type: "agent.tool.call", payload: { marker: "STALE_A" } }]));
+  await settle();
+
+  return {
+    ok: true,
+    after_fresh: afterFresh,
+    final_body: dom.genBody.textContent,
+    final_load_seq: dom.genBody.getAttribute("data-load-seq"),
+    generic_selected: dom.generic.classes.has("selected"),
+  };
+}
+
 function artifactDom() {
   const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
   // A dummy node so the IIFE's initial applySelection() has something to select
@@ -898,6 +992,8 @@ const ARG = process.argv[4];
   else if (SCENARIO === "trace-focus-fold") result = await runTraceFocusFold();
   else if (SCENARIO === "context-panel") result = await runContextPanel();
   else if (SCENARIO === "context-live-swap") result = await runContextLiveSwap();
+  else if (SCENARIO === "lazy-pane") result = await runLazyPane();
+  else if (SCENARIO === "lazy-pane-race") result = await runLazyPaneRace();
   else if (SCENARIO === "artifact") result = await runArtifact();
   else if (SCENARIO === "recovery-link") result = await runRecoveryLink();
   else if (SCENARIO === "recovery-live") result = await runRecoveryLive();

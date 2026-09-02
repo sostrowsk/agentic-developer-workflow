@@ -65,17 +65,18 @@ def _parse_limit(raw) -> int:
     return max(1, min(value, _LIMIT_MAX))
 
 
-# Hard cap on the number of ENTRY NODES materialised in the DOM per collection
-# (Aufgabe A): the trace tree and the Tools entries each stay at most this many,
-# independent of the total number of entries. The ``?offset`` moving window slides
-# this bounded slice so every entry stays reachable without ever growing a prefix.
-# The per-entry markers ``data-tree-entry`` / ``data-tool-entry`` are the selectors
-# the automated tests count and the guide documents.
+# Hard cap on the number of Tools ENTRY NODES materialised in the DOM (Aufgabe A):
+# the tool entries inside the detail panes stay at most this many, independent of
+# the total. The ``?tools_offset`` moving window slides this bounded slice so every
+# entry stays reachable without ever growing a prefix. The trace COLUMN is exempt —
+# it renders every node and is kept readable by compaction, not by a window.
+# ``data-tool-entry`` is the marker the automated tests count.
 _ENTRY_CAP = 200
 
 
 def _parse_offset(raw) -> int:
-    """The ``?offset`` moving-window start (>= 0); a missing/invalid value is 0."""
+    """A moving-window start (>= 0) such as ``?tools_offset``; a missing or invalid
+    value is 0."""
     try:
         value = int(raw)
     except (TypeError, ValueError):
@@ -96,8 +97,8 @@ def _parse_seq_bound(raw):
 
 
 def _entry_window(limit) -> int:
-    """The per-collection entry-node budget: at most ``_ENTRY_CAP``, and never more
-    than the requested ``?limit`` — so the DOM entry count stays bounded even when a
+    """The Tools entry-node budget: at most ``_ENTRY_CAP``, and never more than the
+    requested ``?limit`` — so the Tools DOM entry count stays bounded even when a
     large ``?limit`` is requested (the bound holds throughout navigation)."""
     return max(1, min(limit, _ENTRY_CAP))
 
@@ -125,16 +126,14 @@ def _flatten_tree(tree):
     return flat
 
 
-def _tree_window(tree, offset, size):
-    """The bounded, MOVING slice of the trace tree: one global budget of ``size``
-    entries across ALL nesting levels together. Returns the flat rows to render
-    (each marked as exactly one trace entry) and the window bounds."""
+def _tree_rows(tree):
+    """EVERY node of the trace tree as a flat row list — the column is not paged.
+    What keeps the column readable is the compaction (folded results, repeat and
+    group nodes, phases collapsed by default), not a cut: folding hides nothing,
+    a window did. ``?offset`` is therefore inert for the trace tree; the Tools
+    entries inside the panes keep their own window (``?tools_offset``)."""
     flat = _flatten_tree(tree)
-    lo, hi = _clamp_window(len(flat), offset, size)
-    return {
-        "rows": [{"node": n, "depth": d} for n, d in flat[lo:hi]],
-        "offset": lo, "shown": hi - lo, "total": len(flat),
-    }
+    return {"rows": [{"node": n, "depth": d} for n, d in flat], "total": len(flat)}
 
 
 def _tool_entries(tree):
@@ -167,36 +166,33 @@ def _tool_window(tree, offset, size):
 
 def _focus_index(tree, seq):
     """The pre-order index of the node with ``seq``, or None. Used by ``?focus`` to
-    position the bounded window on a node that a Timeline bar targets even when it
-    lies outside the current window (P2), so its tree entry and pane materialise."""
+    resolve the targeted node — a result focused this way is redirected to its call,
+    whose own seq then carries the selection (A5)."""
     for i, (n, _) in enumerate(_flatten_tree(tree)):
         if n.get("seq") == seq:
             return i
     return None
 
 
-def _pane_nodes(tree, tree_rows):
-    """The nodes whose detail panes are materialised: every node in the current
-    trace-tree window (so a visible entry is selectable) plus every agent.run (there
-    are few) so its Tools tab — the tool-entry window — is available regardless of
-    where the tree window currently sits. Intermediate hidden panes are NOT eagerly
-    materialised, so the pane DOM stays bounded too."""
-    seen = set()
+def _pane_nodes(tree):
+    """The nodes that get their OWN server-rendered detail pane: the SPAN nodes.
+    Their panes carry content only the server can build — the aggregates of a
+    phase/lane/round, a gate's command and output, a review's findings table, an
+    agent.run's prompt, prompt diff and Tools window, plus any Diff tab.
+
+    POINT nodes (tool calls/results, messages, snapshots, …) are the many, and their
+    pane is nothing but the event payload. Since the trace column is no longer paged,
+    one pane per node would put thousands of hidden elements into the DOM — the very
+    node-count bottleneck the display bounds exist for (``docs/gui-response-time.md``).
+    They share ONE server-rendered pane shell instead, which the client fills from the
+    read-only events route on selection (the same lazy load the tool bodies use); no
+    DOM is constructed in JS (GUI-SPEC §7.3)."""
     order = []
-
-    def add(n):
-        if id(n) in seen:
-            return
-        seen.add(id(n))
-        order.append(n)
-
-    for row in tree_rows:
-        add(row["node"])
 
     def walk(nodes):
         for n in nodes:
-            if n.get("type") == "agent.run":
-                add(n)
+            if "end_seq" in n:  # a span — a point node has no subtree range
+                order.append(n)
             walk(n.get("children") or [])
 
     walk(tree)
@@ -2359,14 +2355,11 @@ def create_app(repos=None) -> FastAPI:
         # server materialises (a bounded DOM by default). "Load more" is a plain
         # server-rendered link that raises it — no divergent client-side rendering.
         limit = _parse_limit(request.query_params.get("limit"))
-        # Aufgabe A: `?offset` slides a bounded, moving window over the trace tree and
-        # the tool entries, so the DOM entry count stays capped (independent of the
-        # total) while every entry stays reachable — reaching a late entry never
-        # re-materialises the preceding ones.
-        offset = _parse_offset(request.query_params.get("offset"))
-        # The Tools window is paged INDEPENDENTLY of the trace tree (its own offset),
-        # so advancing tool entries never moves the tree window or drops the selected
-        # agent (P1 finding). tree offset <-> `?offset`/`?focus`, tools <-> `?tools_offset`.
+        # Aufgabe A: `?tools_offset` slides a bounded, moving window over the tool
+        # entries of the detail panes, so their DOM entry count stays capped
+        # (independent of the total) while every entry stays reachable. The trace
+        # column has no window any more — `?offset` is accepted and ignored so a
+        # bookmarked URL from the paged era still renders the full tree.
         tools_offset = _parse_offset(request.query_params.get("tools_offset"))
         # Raw-tab filters (Aufgabe C): applied server-side over the full payload so
         # a match beyond the rendered preview is still found; empty -> no filter.
@@ -2408,14 +2401,13 @@ def create_app(repos=None) -> FastAPI:
                         and _tool_use_id(flat[focus_at - 1][0]) == _tool_use_id(node)):
                     focus_at -= 1
                     focus_seq = flat[focus_at][0].get("seq")
-                offset = focus_at
-        tree_window = _tree_window(detail["tree"], offset, window)
+        tree_window = _tree_rows(detail["tree"])
         tool_window = _tool_window(detail["tree"], tools_offset, window)
-        pane_nodes = _pane_nodes(detail["tree"], tree_window["rows"])
-        # The trace COLUMN renders a page-local compaction of the window (A1-A4, A6);
-        # the JSON `tree` and the window semantics stay untouched. Paths are made
-        # repo-relative here (A4); the default-open phase is decided over the full
-        # tree (A5) and handed to the client as a marker.
+        pane_nodes = _pane_nodes(detail["tree"])
+        # The trace COLUMN renders the compaction of the COMPLETE tree (A1-A4, A6);
+        # the JSON `tree` stays untouched. Paths are made repo-relative here (A4);
+        # the default-open phase is decided over the full tree (A5) and handed to
+        # the client as a marker.
         compact = _compact_rows(tree_window["rows"])
         _annotate_paths(compact["entries"], ref.path)
         compact["default_phase"] = _default_open_phase(detail["tree"])
@@ -2424,7 +2416,7 @@ def create_app(repos=None) -> FastAPI:
         # stay out of the JSON detail contract.
         events, _problems = _read_events(run_dir, runs_root)
         html = _TEMPLATES.get_template("run_detail.html").render({
-            "detail": detail, "limit": limit, "offset": offset, "focus_seq": focus_seq,
+            "detail": detail, "limit": limit, "focus_seq": focus_seq,
             "raw_q": raw_q or "", "raw_type": raw_type or "",
             "raw_from_seq": raw_from_seq, "raw_to_seq": raw_to_seq,
             "raw_range_active": raw_range_active,
@@ -2445,8 +2437,8 @@ def create_app(repos=None) -> FastAPI:
 def _lang_context(request: Request):
     """The (language code, chrome catalog, switch-link query string) for a request.
     The switch query preserves every current query parameter and only flips
-    ``lang`` — so the language link keeps the windowed slice (offset/tools_offset/
-    focus) and node selection (A5)."""
+    ``lang`` — so the language link keeps the Tools slice (``tools_offset``) and the
+    node selection (``focus``, A5)."""
     lang = i18n.select_language(request)
     params = dict(request.query_params)
     params["lang"] = i18n.other_language(lang)

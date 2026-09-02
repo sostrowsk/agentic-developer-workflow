@@ -36,22 +36,27 @@ route (a "Show more" reveals the rest), so bounding the display never hides cont
 ## Bounded DOM — the entry-node budget (Aufgabe A)
 
 The real ≤ 2 s bottleneck was the **number** of DOM entry nodes, not their
-contents. Both entry collections are now rendered through one **global budget of at
-most 200 entries per collection**, independent of the total, and this bound holds
-**throughout navigation** (not only on initial render):
+contents. Two mechanisms hold it down, and neither hides content:
 
-- **Trace tree (left):** one machine-readable marker per rendered entry —
-  `data-tree-entry` — over the complete document. Count it with
-  `document.querySelectorAll("[data-tree-entry]").length` (≤ 200 at any run size).
-- **Tools tab (right):** one marker per rendered tool entry — `data-tool-entry` —
+- **Trace tree (left):** rendered COMPLETELY — one `data-tree-entry` marker per node,
+  no cap and no paging. What keeps the element count down here is the *compaction*
+  (results folded into their call, repeat and group nodes, phases collapsed by
+  default) and, decisively, that point nodes get **no pane of their own**: the many
+  tool calls/results, messages and snapshots share ONE server-rendered pane shell
+  (`[data-generic-pane]`) that the client re-points and fills from the events route
+  on selection. Measured on real runs: `d0bdb365` (584 events) ≈ 3 600 elements,
+  `7fe9d702` (1 296 events) ≈ 6 400 — against the ≈ 12 700 that produced the original
+  > 40 s freeze.
+- **Tools tab (right):** still bounded by one **global budget of at most 200 entries**,
   counted across **all** panes, hidden ones included:
-  `document.querySelectorAll("[data-tool-entry]").length` (≤ 200).
+  `document.querySelectorAll("[data-tool-entry]").length` (≤ 200). Every entry stays
+  reachable through a **moving window**: `?tools_offset` slides the bounded slice
+  (`← previous` / `more →` links), so reaching a late entry never re-materialises the
+  preceding ones (a growing `?limit` prefix is insufficient and is not the
+  reachability mechanism).
 
-Every entry stays reachable through a **moving window**: the `?offset` query
-parameter slides the bounded slice (`← previous` / `more →` links), so reaching a
-late entry never re-materialises the preceding ones (a growing `?limit` prefix is
-insufficient and is not the reachability mechanism). Each entry's full payload
-remains reachable via the read-only events / artifacts routes.
+Each entry's full payload remains reachable via the read-only events / artifacts
+routes.
 
 ## Steps
 
