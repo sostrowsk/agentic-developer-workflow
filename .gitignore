@@ -3,6 +3,7 @@
 # Sitzung neu geschrieben und nie committet. Ohne diesen Eintrag verweigert die
 # Arbeitsbaum-Pruefung jedes `adw run`/`resume`/`approve`, solange sie existiert.
 /ONBOARDING.md
+/OFFBOARDING*.md
 .idea
 .venv/
 __pycache__/
