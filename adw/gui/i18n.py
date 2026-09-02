@@ -63,6 +63,8 @@ _EN: dict[str, str] = {
     # are distinct where the count varies.
     "fold_call_one": "call",
     "fold_call_many": "calls",
+    "fold_artifact_one": "artifact",
+    "fold_artifact_many": "artifacts",
     "fold_op_one": "operation",
     "fold_op_many": "operations",
     "fold_row": "row",
@@ -186,6 +188,8 @@ _DE: dict[str, str] = {
     "nav_of": "von",
     "fold_call_one": "Aufruf",
     "fold_call_many": "Aufrufe",
+    "fold_artifact_one": "Artefakt",
+    "fold_artifact_many": "Artefakte",
     "fold_op_one": "Operation",
     "fold_op_many": "Operationen",
     "fold_row": "Zeile",

@@ -418,12 +418,17 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
      (`ts(result) − ts(call)`, nur bei parsebaren Zeitstempeln und Differenz `≥ 0`)
      stehen rechts an der Aufrufzeile. Ein Ergebnis ohne zuordenbaren Vorgänger
      bleibt eigener Knoten.
-   - **Wiederholungen zählen (A2).** ≥ 2 unmittelbar aufeinanderfolgende,
-     zielgleiche Aufrufe desselben `Read`/`Grep`/`Glob`-Werkzeugs (Ziel:
-     `input.file_path` bzw. `input.pattern`, exakter Rohwert-Vergleich) werden zu
-     einem aufklappbaren Wiederholungsknoten mit Zähler und aufsummierter
-     bestimmbarer Dauer; aufgeklappt die Einzelaufrufe in Reihenfolge inkl.
-     gefalteter Ergebnisse.
+   - **Wiederholungen zählen (A2).** ≥ 2 unmittelbar aufeinanderfolgende Nachbarn
+     mit gleichem Wiederholungsschlüssel werden zu einem aufklappbaren
+     Wiederholungsknoten mit Zähler und aufsummierter bestimmbarer Dauer; aufgeklappt
+     die Einzelmitglieder in Reihenfolge inkl. gefalteter Ergebnisse. Der Schlüssel
+     ist (Werkzeug, Ziel) für `Read`/`Grep`/`Glob` **und** `Write`/`Edit` (Ziel:
+     `input.file_path`, für Grep/Glob `input.pattern` — exakter Rohwert-Vergleich)
+     und für `artifact` der Typ allein: benachbarte Artefakte sind jeweils eine
+     andere Datei, Zielgleichheit würde sie also nie zusammenfassen, während die
+     Zeilen selbst keinen unterscheidenden Text tragen. Schreiboperationen und
+     Artefakte werden gezählt, aber nie *gruppiert* — sie beenden weiterhin eine
+     Lese-/Suchfolge (A3).
    - **Lese-/Suchfolgen gruppieren (A3).** Eine ununterbrochene `Read`/`Grep`/`Glob`-
      Folge mit ≥ 2 Kindern (nach A1/A2) wird zu einem aufklappbaren Gruppenknoten mit
      Anzahl und den vorkommenden Operationsarten. Die Folge endet — und das brechende
@@ -454,8 +459,18 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
    Snapshot, …) hat keine — davon gibt es so viele, dass sie in der ungeblätterten
    Spalte tausende versteckte Elemente ergäben; sie teilen sich EINE serverseitig
    gerenderte Hülle, die der Client auf den gewählten Knoten umhängt und aus der
-   Read-only-Events-Route füllt (Überschrift aus der Baumzeile, Payload als
-   eingerücktes JSON). Kein DOM wird in JS gebaut (§7.3). Für `agent.run` vier
+   Read-only-Events-Route füllt (Überschrift aus der Baumzeile). Kein DOM wird in JS
+   gebaut (§7.3). In beiden Fällen erscheint der Payload als eingerückte **Feldliste**,
+   nicht als JSON-Dump: ein mehrzeiliger String (das Issue eines Laufs, der Prompt
+   eines Agenten) behält seine echten Zeilenumbrüche unter seinem Schlüssel, Skalare
+   stehen als `key: value`, Container schachteln um zwei Leerzeichen. Server und Client
+   erzeugen denselben Text (`_pretty_payload` / `prettyPayload`) für die Wertebereiche,
+   die in ADW-Payloads vorkommen; ein Payload liest sich also überall gleich. Zwei
+   Abweichungen sind bekannt und bewusst nicht verfolgt, weil kein Event-Payload sie
+   erzeugt: eine Ganzzahl jenseits von 2^53 oder ≥ 1e21 (der Client liest
+   JSON-Zahlen als IEEE-754-Doubles) und ein Objekt mit ganzzahlartigen Schlüsseln in
+   nicht aufsteigender Reihenfolge (`Object.keys` sortiert Array-Index-Schlüssel um).
+   Für `agent.run` vier
    Reiter:
    - **Prompt** — der vollständige Task-String plus System-Append, Monospace,
      kopierbar (der Hebel für Prompt-Optimierung). Zusätzlich ein **Unified Diff**

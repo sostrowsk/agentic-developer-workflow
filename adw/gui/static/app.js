@@ -467,6 +467,73 @@
   // ``guarded`` marks a SELECTION-triggered load (its payload is written only while
   // its node is still the selected one); an expand-triggered load (the <details>
   // toggle) is unguarded and always renders its own entry.
+  // --- readable payload text (mirrors _pretty_payload in adw/gui/app.py) ---------
+  // An event payload as an indented FIELD LIST, not a JSON dump: a run's issue or an
+  // agent's prompt is a long string with embedded newlines, and JSON turns it into
+  // one endless line of \n escapes. Multi-line strings keep their real line breaks,
+  // indented under their key. The format is pinned against the server's on both
+  // sides, so a payload reads identically wherever it is shown.
+  function scalarText(v) {
+    if (v === null || v === undefined) return "null";
+    if (v === true) return "true";
+    if (v === false) return "false";
+    if (typeof v === "string") return v;
+    return JSON.stringify(v);
+  }
+
+  function isContainer(v) {
+    return v !== null && typeof v === "object";
+  }
+
+  function isEmptyContainer(v) {
+    return isContainer(v) && (Array.isArray(v) ? v.length === 0 : Object.keys(v).length === 0);
+  }
+
+  function indentLines(text, width) {
+    var pad = new Array(width + 1).join(" ");
+    return text.split("\n").map(function (line) { return pad + line; }).join("\n");
+  }
+
+  function prettyField(key, value, indent) {
+    var pad = new Array(indent + 1).join(" ");
+    if (isContainer(value)) {
+      if (isEmptyContainer(value)) return pad + key + ": " + (Array.isArray(value) ? "[]" : "{}");
+      return pad + key + ":\n" + prettyPayload(value, indent + 2);
+    }
+    var text = scalarText(value);
+    if (text.indexOf("\n") !== -1) return pad + key + ":\n" + indentLines(text, indent + 2);
+    return pad + key + ": " + text;
+  }
+
+  function prettyItem(value, indent) {
+    var pad = new Array(indent + 1).join(" ");
+    if (isContainer(value) && !isEmptyContainer(value)) {
+      return pad + "-\n" + prettyPayload(value, indent + 2);
+    }
+    var text = scalarText(value);
+    if (text.indexOf("\n") !== -1) {
+      var lines = text.split("\n");
+      return pad + "- " + lines[0] + "\n" + indentLines(lines.slice(1).join("\n"), indent + 2);
+    }
+    return pad + "- " + text;
+  }
+
+  function prettyPayload(value, indent) {
+    indent = indent || 0;
+    if (value === null || value === undefined) return "";
+    var pad = new Array(indent + 1).join(" ");
+    if (Array.isArray(value)) {
+      if (!value.length) return pad + "[]";
+      return value.map(function (v) { return prettyItem(v, indent); }).join("\n");
+    }
+    if (typeof value === "object") {
+      var keys = Object.keys(value);
+      if (!keys.length) return pad + "{}";
+      return keys.map(function (k) { return prettyField(k, value[k], indent); }).join("\n");
+    }
+    return indentLines(scalarText(value), indent);
+  }
+
   // Whether ``pre`` still shows the node this load was issued for. Always true for
   // a per-node anchor (its data-load-seq never changes); false for the SHARED pane's
   // anchor once it has been re-pointed at another node.
@@ -511,7 +578,7 @@
           if (String(records[i].seq) === String(seq)) { found = records[i]; break; }
         }
         pre.textContent = found
-          ? JSON.stringify(found.payload, null, 2)
+          ? prettyPayload(found.payload)
           : hint("payload-missing", "(payload not found)");
       })
       .catch(function () {

@@ -12,6 +12,21 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.19.0] — 2026-09-02
+
+### Changed
+- **The pane's payload reads as text, not as a JSON dump.** It renders as an indented
+  field list in which a multi-line string — a run's issue, an agent's prompt — keeps
+  its real line breaks instead of arriving as one endless line of `\n` escapes.
+  Server and client produce the same text, so a payload reads identically in a
+  server-rendered pane and in the shared lazy one.
+- **The repeat counter now covers writes and artifacts.** ≥ 2 adjacent
+  target-identical `Write`/`Edit` calls collapse into one counted row, as do adjacent
+  `artifact` events (which are each a different file, so they collapse by type rather
+  than by target). Both are still *grouping* boundaries — they keep ending a
+  read/search run. On run `7fe9d702` this takes the trace column from 702 to 642 rows
+  and raises the folded events from 554 to 649.
+
 ## [0.18.0] — 2026-09-02
 
 ### Changed
@@ -564,6 +579,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.19.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.3...v0.17.0
 [0.16.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.2...v0.16.3

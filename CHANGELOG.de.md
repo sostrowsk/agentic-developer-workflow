@@ -13,6 +13,23 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.19.0] — 2026-09-02
+
+### Geändert
+- **Der Payload der Pane liest sich als Text statt als JSON-Dump.** Er erscheint als
+  eingerückte Feldliste, in der ein mehrzeiliger String — das Issue eines Laufs, der
+  Prompt eines Agenten — seine echten Zeilenumbrüche behält, statt als eine endlose
+  Zeile voller `\n`-Escapes anzukommen. Server und Client erzeugen denselben Text,
+  ein Payload liest sich also in einer serverseitig gerenderten Pane genauso wie in
+  der geteilten nachladenden.
+- **Der Wiederholungszähler erfasst jetzt auch Schreiboperationen und Artefakte.**
+  ≥ 2 benachbarte, zielgleiche `Write`/`Edit`-Aufrufe werden zu einer gezählten Zeile,
+  ebenso benachbarte `artifact`-Ereignisse (die je eine andere Datei sind und deshalb
+  über den Typ statt über das Ziel zusammengefasst werden). Beide bleiben
+  *Gruppen*-Grenzen — sie beenden weiterhin eine Lese-/Suchfolge. Bei Lauf `7fe9d702`
+  sinkt die Trace-Spalte damit von 702 auf 642 Zeilen, die eingefalteten Events
+  steigen von 554 auf 649.
+
 ## [0.18.0] — 2026-09-02
 
 ### Geändert
@@ -608,6 +625,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.19.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.3...v0.17.0
 [0.16.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.2...v0.16.3

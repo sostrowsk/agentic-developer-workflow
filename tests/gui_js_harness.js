@@ -647,6 +647,21 @@ async function runLazyPaneRace() {
   };
 }
 
+async function runPrettyPayload(payloadJson) {
+  // The formatter is a closure inside the served IIFE; exercise it through the one
+  // public path that uses it — the shared pane's lazy load.
+  const dom = lazyPaneDom();
+  const rootDoc = el("html", { children: [dom.body] });
+  installGlobals(rootDoc, dom.body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: dom.pointRow }); await drain();
+  resolveFetch("from_seq=42", eventsResponse(
+    [{ seq: 42, type: "agent.tool.call", payload: JSON.parse(payloadJson) }]));
+  await settle();
+  return { ok: true, text: dom.genBody.textContent };
+}
+
 function artifactDom() {
   const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
   // A dummy node so the IIFE's initial applySelection() has something to select
@@ -992,6 +1007,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "trace-focus-fold") result = await runTraceFocusFold();
   else if (SCENARIO === "context-panel") result = await runContextPanel();
   else if (SCENARIO === "context-live-swap") result = await runContextLiveSwap();
+  else if (SCENARIO === "pretty-payload") result = await runPrettyPayload(ARG);
   else if (SCENARIO === "lazy-pane") result = await runLazyPane();
   else if (SCENARIO === "lazy-pane-race") result = await runLazyPaneRace();
   else if (SCENARIO === "artifact") result = await runArtifact();

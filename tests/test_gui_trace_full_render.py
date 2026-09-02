@@ -103,17 +103,21 @@ def test_trace_column_ignores_a_stale_offset_parameter(home, tmp_path):  # noqa:
 
 
 def test_pane_raw_payload_is_pretty_printed(home, tmp_path):  # noqa: F811
-    """The pane's raw payload block is indented JSON over several lines, not one
-    long line — the key/value pairs are readable without horizontal scrolling."""
+    """The pane's payload block is a readable field list over several lines — not one
+    long line, and not a JSON dump (no quoted keys, no braces). See
+    tests/test_gui_payload_pretty.py for the format itself."""
     client, slug = _client(tmp_path, many_tool_entries_lines(2))
 
     html = _detail_html(client, slug)
 
-    i = html.find('<pre class="raw">')
+    open_tag = '<pre class="raw">'
+    i = html.find(open_tag)
     assert i != -1, "no raw payload block rendered"
-    block = html[i : html.find("</pre>", i)]
-    assert "\n" in block, "raw payload is still a single line"
-    assert '\n  "' in block, "raw payload keys are not indented"
+    block = html[i + len(open_tag) : html.find("</pre>", i)]
+    assert "\n" in block, "payload is still a single line"
+    assert "&#34;" not in block and '"' not in block, "payload is still a JSON dump"
+    assert "{" not in block and "}" not in block, "payload is still a JSON dump"
+    assert ": " in block, "payload is not a key/value listing"
 
 
 # --- lazy detail panes: one shared shell instead of one pane per point node -----

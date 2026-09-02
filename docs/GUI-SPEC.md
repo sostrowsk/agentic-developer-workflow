@@ -405,11 +405,15 @@ the GUI stays read-only.
      (`ts(result) − ts(call)`, shown only when both parse and the difference is
      `≥ 0`) ride at the right of the call row. A result with no matching predecessor
      stays its own node.
-   - **Repetitions collapse (A2).** ≥ 2 immediately consecutive, target-identical
-     calls of the same `Read`/`Grep`/`Glob` tool (target: `input.file_path` resp.
-     `input.pattern`, exact raw comparison) become one collapsible repeat node with
-     a counter and the summed determinable duration; expanded it lists the single
-     calls in order with their folded results.
+   - **Repetitions collapse (A2).** ≥ 2 immediately consecutive neighbours sharing a
+     repeat key become one collapsible repeat node with a counter and the summed
+     determinable duration; expanded it lists the single members in order with their
+     folded results. The key is (tool, target) for `Read`/`Grep`/`Glob` **and**
+     `Write`/`Edit` (target: `input.file_path`, resp. `input.pattern` for
+     Grep/Glob — exact raw comparison), and the type alone for `artifact`: adjacent
+     artifacts are each a different file, so target identity would never collapse
+     them while the rows carry no distinguishing text. Writes and artifacts are
+     counted but never *grouped* — they keep ending a read/search run (A3).
    - **Read/search runs group (A3).** An uninterrupted run of `Read`/`Grep`/`Glob`
      operations with ≥ 2 children (after A1/A2) becomes one collapsible group node
      with the call count and the operation kinds present. The run ends — and the
@@ -437,8 +441,16 @@ the GUI stays read-only.
    **point** node (tool call/result, message, snapshot, …) has none — the many of
    them would put thousands of hidden elements into the unpaged column; they share
    ONE server-rendered shell that the client re-points at the selected node and fills
-   from the read-only events route (heading from the tree row, payload as indented
-   JSON). No DOM is constructed in JS (§7.3). For `agent.run` four tabs:
+   from the read-only events route (heading from the tree row). No DOM is constructed
+   in JS (§7.3). Either way the payload renders as an indented **field list**, not as
+   a JSON dump: a multi-line string (a run's issue, an agent's prompt) keeps its real
+   line breaks under its key, scalars are `key: value`, containers nest by two spaces.
+   Server and client produce the same text (`_pretty_payload` / `prettyPayload`) for
+   the value ranges ADW payloads contain, so a payload reads identically wherever it
+   is shown. Two divergences are known and deliberately not chased, because no event
+   payload produces them: an integer beyond 2^53 or ≥ 1e21 (the client parses JSON
+   numbers as IEEE-754 doubles), and an object with integer-like keys in non-ascending
+   order (`Object.keys` reorders array-index keys). For `agent.run` four tabs:
    - **Prompt** — the full task string plus system append, monospace, copyable
      (the prompt-optimization lever). Additionally a **unified diff** of this
      prompt against the prompt of the *previous* `agent.run` of the **same agent

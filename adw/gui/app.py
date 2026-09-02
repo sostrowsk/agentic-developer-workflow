@@ -19,6 +19,7 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -208,6 +209,10 @@ def _pane_nodes(tree):
 # (E4) and never reaches past the loaded page (E3), because it sees only the window.
 
 _FOLDABLE_TOOLS = ("Read", "Grep", "Glob")
+# Countable but never groupable: a write is a structural boundary (it ENDS a
+# read/search group, A3) yet repeating the same write is pure noise, so it collapses
+# into a repeat of its own.
+_WRITE_TOOLS = ("Write", "Edit")
 
 
 def _tool_use_id(node):
@@ -222,14 +227,16 @@ def _tool_name(node):
 
 def _tool_target(node):
     """The raw comparison target of a foldable call (exact string, no normalisation):
-    Read → ``input.file_path``, Grep/Glob → ``input.pattern``. None (never compared)
-    for anything else or when the target is absent (spec: no target → no summary)."""
+    Read/Write/Edit → ``input.file_path``, Grep/Glob → ``input.pattern``. None (never
+    compared) for anything else or when the target is absent (no target → no
+    summary)."""
     p = node.get("payload")
     inp = p.get("input") if isinstance(p, dict) else None
     if not isinstance(inp, dict):
         return None
     tool = p.get("tool")
-    key = "file_path" if tool == "Read" else ("pattern" if tool in ("Grep", "Glob") else None)
+    key = ("file_path" if tool in ("Read",) + _WRITE_TOOLS
+           else ("pattern" if tool in ("Grep", "Glob") else None))
     if key is None:
         return None
     value = inp.get(key)
@@ -290,33 +297,64 @@ def _is_groupable(item):
             and item.get("outcome") != "error")
 
 
-def _repeat_entry(items, depth):
+def _repeat_entry(items, depth, unit="call"):
     durs = [x["duration"] for x in items if x.get("duration") is not None]
-    return {"kind": "repeat", "depth": depth, "count": len(items),
+    return {"kind": "repeat", "depth": depth, "count": len(items), "unit": unit,
             "duration": (sum(durs) if durs else None),
             "children": [_node_entry(x) for x in items]}
 
 
+def _repeat_key(node):
+    """What makes two NEIGHBOURS the same repetition, or None when the node does not
+    repeat at all. A tool call repeats per (tool, target) — the same file read or
+    edited again. An ``artifact`` repeats per TYPE: consecutive artifacts are each a
+    different file, so target identity would never collapse them, while the rows
+    themselves carry no distinguishing text — the run of them is the noise."""
+    if node.get("type") == "artifact":
+        return ("artifact",)
+    if node.get("type") != "agent.tool.call":
+        return None
+    target = _tool_target(node)
+    return ("tool", _tool_name(node), target) if target is not None else None
+
+
+def _repeat_unit(node) -> str:
+    return "artifact" if node.get("type") == "artifact" else "call"
+
+
 def _repeat_children(run):
-    """Collapse maximal runs of target-identical, same-tool neighbours (>= 2) into a
-    repeat; everything else stays a single node entry, in original order."""
+    """Collapse maximal runs of neighbours sharing a repeat key (>= 2) into a repeat;
+    everything else stays a single node entry, in original order."""
     children = []
     j = 0
     while j < len(run):
-        tool = _tool_name(run[j]["node"])
-        target = _tool_target(run[j]["node"])
+        key = _repeat_key(run[j]["node"])
         k = j + 1
-        if target is not None:
-            while (k < len(run) and _tool_name(run[k]["node"]) == tool
-                   and _tool_target(run[k]["node"]) == target):
+        if key is not None:
+            while k < len(run) and _repeat_key(run[k]["node"]) == key:
                 k += 1
         if k - j >= 2:
-            children.append(_repeat_entry(run[j:k], run[j]["depth"]))
+            children.append(
+                _repeat_entry(run[j:k], run[j]["depth"], _repeat_unit(run[j]["node"])))
         else:
             children.append(_node_entry(run[j]))
             k = j + 1
         j = k
     return children
+
+
+def _is_countable(item):
+    """Whether the item may be COUNTED into a repeat although it is not groupable:
+    a write to a known file, or an artifact. Both keep breaking a read/search group
+    (A3 unchanged); a determinate error is never taken into a collector."""
+    node = item["node"]
+    if item.get("outcome") == "error":
+        return False
+    if node.get("type") == "artifact":
+        return True
+    return (node.get("type") == "agent.tool.call"
+            and _tool_name(node) in _WRITE_TOOLS
+            and _tool_target(node) is not None)
 
 
 def _group_entry(children, depth):
@@ -342,7 +380,8 @@ def _compact_rows(rows):
 
     * A1 — a result whose ``tool_use_id`` matches the immediately preceding call folds
       into it (outcome + determinable duration); anything else stays its own node.
-    * A2 — >= 2 target-identical same-tool neighbours collapse into a repeat.
+    * A2 — >= 2 neighbours sharing a repeat key collapse into a repeat: the same
+      tool on the same target (reads/searches AND writes), or adjacent artifacts.
     * A3 — an uninterrupted Read/Grep/Glob run with >= 2 children (after A1/A2)
       becomes a group; below that threshold nothing is wrapped.
     * ``rows`` — display entries outside any collector (originals + collectors).
@@ -379,6 +418,15 @@ def _compact_rows(rows):
                 entries.append(_group_entry(children, depth))
             else:
                 entries.extend(children)
+        elif _is_countable(items[i]):
+            # Countable but NOT groupable: collapse the repetition, wrap nothing.
+            depth, key = items[i]["depth"], _repeat_key(items[i]["node"])
+            run = []
+            while (i < len(items) and _is_countable(items[i])
+                   and items[i]["depth"] == depth and _repeat_key(items[i]["node"]) == key):
+                run.append(items[i])
+                i += 1
+            entries.extend(_repeat_children(run))
         else:
             entries.append(_node_entry(items[i]))
             i += 1
@@ -562,7 +610,118 @@ def _compact_context(ctx):
 _TEMPLATES.env.filters["fmt_duration"] = _fmt_duration
 _TEMPLATES.env.filters["fmt_cost"] = _fmt_cost
 _TEMPLATES.env.filters["fmt_ts"] = _fmt_ts
+def _js_number(value) -> str:
+    """A number exactly as JavaScript's ``Number::toString`` renders it.
+
+    The payload formatter runs on BOTH sides (here and as ``prettyPayload`` in
+    app.js), and the two disagree on numbers out of the box: ``json.dumps(1.0)`` is
+    ``"1.0"`` where JS gives ``"1"``, and the two switch to exponent notation at
+    different magnitudes (Python at 1e16 / 1e-5, JS at 1e21 / 1e-7). Porting the JS
+    rules here — rather than the reverse — is the only direction that works: a JS
+    number carries no int/float distinction, so the client cannot know that ``1``
+    was a float. Python's ``repr`` already yields the same shortest round-trip
+    digits, so only the placement of the decimal point differs (ECMA-262 §6.1.6.1.20).
+
+    Known limitation (deliberate): an INTEGER beyond 2^53 or >= 1e21 still differs,
+    because the client parses JSON numbers as IEEE-754 doubles and loses the exact
+    value before formatting. No ADW event payload holds such a number — the largest
+    are byte counts and seq numbers — so chasing it would buy nothing.
+    """
+    if isinstance(value, bool):  # bool is an int subclass — never a number here
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if value != value or value in (float("inf"), float("-inf")):
+        return "null"  # JSON has no NaN/Infinity; json.dumps' extensions are not JS
+    d = Decimal(repr(value)).normalize()
+    sign, digits, exp = d.as_tuple()
+    text = "".join(str(x) for x in digits)
+    if text == "0":
+        return "0"  # covers 0.0 and -0.0 (JS prints "0" for both)
+    k = len(text)          # number of significant digits
+    n = k + exp            # position of the decimal point relative to the digits
+    if k <= n <= 21:
+        out = text + "0" * (n - k)
+    elif 0 < n <= 21:
+        out = text[:n] + "." + text[n:]
+    elif -6 < n <= 0:
+        out = "0." + "0" * (-n) + text
+    else:
+        mantissa = text[0] + ("." + text[1:] if k > 1 else "")
+        out = f"{mantissa}e{'+' if n - 1 >= 0 else '-'}{abs(n - 1)}"
+    return ("-" + out) if sign else out
+
+
+def _pretty_payload(value, indent=0) -> str:
+    """An event payload as a readable, indented FIELD LIST — not a JSON dump.
+
+    A `run`'s issue or an agent's prompt is a long string with embedded newlines;
+    serialised as JSON it becomes one endless line of ``\n`` escapes. Here a
+    multi-line string keeps its real line breaks, indented under its key so it stays
+    attached to it; scalars are ``key: value``; objects and lists nest by two spaces;
+    an empty container stays on its line. ``app.js`` renders the shared pane with the
+    same format (``prettyPayload``), so a payload reads identically wherever it is
+    shown — the format is pinned on both sides by tests.
+    """
+    if value is None:
+        return ""  # a missing payload renders as nothing, never as the word "null"
+    pad = " " * indent
+    if isinstance(value, dict):
+        if not value:
+            return pad + "{}"
+        # Insertion order, as the server received it. JS `Object.keys` would hoist
+        # integer-like keys ahead of the rest — a divergence no event payload can
+        # produce (payload keys are identifiers), documented in GUI-SPEC.
+        return "\n".join(_pretty_field(k, v, indent) for k, v in value.items())
+    if isinstance(value, list):
+        if not value:
+            return pad + "[]"
+        return "\n".join(_pretty_item(v, indent) for v in value)
+    return "\n".join(pad + line for line in _scalar_text(value).split("\n"))
+
+
+def _scalar_text(value) -> str:
+    if value is None:
+        return "null"
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (int, float)):
+        return _js_number(value)
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _pretty_field(key, value, indent) -> str:
+    pad = " " * indent
+    if isinstance(value, (dict, list)):
+        if not value:
+            return f"{pad}{key}: " + ("{}" if isinstance(value, dict) else "[]")
+        return f"{pad}{key}:\n" + _pretty_payload(value, indent + 2)
+    text = _scalar_text(value)
+    if "\n" in text:
+        body = "\n".join(" " * (indent + 2) + line for line in text.split("\n"))
+        return f"{pad}{key}:\n{body}"
+    return f"{pad}{key}: {text}"
+
+
+def _pretty_item(value, indent) -> str:
+    pad = " " * indent
+    if isinstance(value, (dict, list)) and value:
+        nested = _pretty_payload(value, indent + 2)
+        return f"{pad}-\n{nested}"
+    text = _scalar_text(value)
+    if "\n" in text:
+        lines = text.split("\n")
+        rest = "\n".join(" " * (indent + 2) + line for line in lines[1:])
+        return f"{pad}- {lines[0]}\n{rest}"
+    return f"{pad}- {text}"
+
+
 _TEMPLATES.env.filters["compact_context"] = _compact_context
+_TEMPLATES.env.filters["pretty_payload"] = _pretty_payload
 
 # The seven workflow phases in order (contract PhaseStatus enum / GUI-SPEC §7.2).
 PHASES = ["spec", "plan", "build", "integration", "codex_review", "final_review", "ci"]

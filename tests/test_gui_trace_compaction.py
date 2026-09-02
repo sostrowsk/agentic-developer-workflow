@@ -32,6 +32,7 @@ here so adjacency, depth and the loaded-page boundary are under test control
 (E3/E4). RED until the seam exists.
 """
 
+from adw.gui import i18n
 from adw.gui.app import (
     _compact_rows,
     _default_open_phase,
@@ -482,3 +483,98 @@ def test_default_open_phase_is_first_error_phase_else_last_started():
     # Without any error, the LAST-started phase opens.
     tree2, phase_seq2 = _two_phase_tree(error_in=None)
     assert _default_open_phase(tree2) == phase_seq2["build"]
+
+
+# --- A2 extended: writes count too, and adjacent artifacts collapse -------------
+
+
+def _write_run(tool, paths, *, artifacts=()):
+    """A run whose agent does one ``tool`` call per entry in ``paths`` (each with a
+    folding result), followed by one ``artifact`` event per name in ``artifacts``."""
+    lines = [
+        rec(1, "run", "start", "R", None, sec=0, payload=run_start_payload("W")),
+        rec(2, "agent.run", "start", "A", "R", sec=1,
+            payload={"agent": "plan_agent", "prompt": "p", "system_append": ""}),
+    ]
+    seq = 3
+    for i, path in enumerate(paths):
+        lines.append(rec(seq, "agent.tool.call", "point", "A", sec=seq, payload={
+            "tool": tool, "tool_use_id": f"u{i}", "input": {"file_path": path}}))
+        seq += 1
+        lines.append(rec(seq, "agent.tool.result", "point", "A", sec=seq,
+                         payload={"tool_use_id": f"u{i}", "is_error": False}))
+        seq += 1
+    for name in artifacts:
+        lines.append(rec(seq, "artifact", "point", "A", sec=seq,
+                         payload={"name": name, "path": f"/x/{name}", "bytes": 1}))
+        seq += 1
+    lines.append(rec(seq, "agent.run", "end", "A", "R", sec=seq,
+                     payload={"result_text": "d", "is_error": False}))
+    seq += 1
+    lines.append(rec(seq, "run", "end", "R", None, sec=seq,
+                     payload={"status": "done", "totals": {"duration": 1.0}}))
+    return lines
+
+
+def _compacted_entries(lines):
+    events = [e for e in lines if isinstance(e, dict)]
+    tree = [_serialize(r, _tool_names_by_use_id(events)) for r in build_tree(events)]
+    return _compact_rows(_tree_rows(tree)["rows"])["entries"]
+
+
+def test_repeated_writes_to_the_same_file_collapse_into_one_repeat():
+    """A2 now counts ``Write``/``Edit`` too: eight edits of the same file are one
+    row with a counter, not eight rows."""
+    entries = _compacted_entries(_write_run("Edit", ["/x/plan.md"] * 8))
+
+    repeats = [e for e in entries if e["kind"] == "repeat"]
+    assert len(repeats) == 1
+    assert repeats[0]["count"] == 8
+    assert repeats[0]["unit"] == "call"
+    assert len(repeats[0]["children"]) == 8      # every call stays reachable (E2)
+
+
+def test_writes_to_different_files_are_not_collapsed():
+    """Target-identity still decides: three edits of three different files stay three
+    rows — the counter never merges unlike targets."""
+    entries = _compacted_entries(_write_run("Edit", ["/x/a.md", "/x/b.md", "/x/c.md"]))
+
+    assert [e["kind"] for e in entries if e["kind"] == "repeat"] == []
+
+
+def test_a_write_repeat_does_not_form_or_join_a_group():
+    """A3 is unchanged: writes still break a read/search group and never become one
+    themselves — the repeat is a sibling of the group, not a child."""
+    entries = _compacted_entries(_write_run("Edit", ["/x/plan.md"] * 3))
+
+    assert all(e["kind"] != "group" for e in entries)
+    repeats = [e for e in entries if e["kind"] == "repeat"]
+    assert len(repeats) == 1 and repeats[0]["count"] == 3
+
+
+def test_adjacent_artifacts_collapse_into_one_row():
+    """Consecutive ``artifact`` events collapse into a single counted row (they are
+    adjacent, not target-identical — each artifact is a different file)."""
+    entries = _compacted_entries(_write_run("Edit", [], artifacts=["a.md", "b.md", "c.md", "d.md"]))
+
+    repeats = [e for e in entries if e["kind"] == "repeat"]
+    assert len(repeats) == 1
+    assert repeats[0]["count"] == 4
+    assert repeats[0]["unit"] == "artifact"
+    assert len(repeats[0]["children"]) == 4
+
+
+def test_a_lone_artifact_keeps_its_own_row():
+    """Below two members nothing is wrapped — a single artifact stays a plain node."""
+    entries = _compacted_entries(_write_run("Edit", [], artifacts=["only.md"]))
+
+    assert all(e["kind"] != "repeat" for e in entries)
+    assert any(e["kind"] == "node" and e["node"]["type"] == "artifact" for e in entries)
+
+
+def test_artifact_repeat_labels_exist_in_both_languages():
+    """A7: the artifact counter has singular and plural in both catalogs."""
+    for lang in ("en", "de"):
+        cat = i18n.CATALOG[lang]
+        assert cat["fold_artifact_one"] and cat["fold_artifact_many"]
+        assert cat["fold_artifact_one"] != cat["fold_artifact_many"]
