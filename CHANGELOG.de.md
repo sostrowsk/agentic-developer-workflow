@@ -13,6 +13,22 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Verdichtete Trace-Baum-Spalte — Werkzeug-Rauschen gefaltet statt paginiert.**
+  Im Trace-Reiter des Run-Details faltet die Baum-Spalte ein `agent.tool.result`
+  jetzt in seinen zugehörigen Aufruf (Ausgang + Dauer an der Aufrufzeile), fasst
+  unmittelbar wiederholte, zielgleiche `Read`/`Grep`/`Glob`-Aufrufe zu einem
+  gezählten Wiederholungsknoten zusammen und gruppiert ununterbrochene
+  Lese-/Suchfolgen zu einem aufklappbaren Gruppenknoten (abgebrochen an jeder
+  Nachricht, Schreiboperation, jedem Artefakt, Fehler oder `Bash`/unbekanntem
+  Werkzeug). Pfade erscheinen repo-relativ mit vollem Pfad im `title`, der Baum
+  öffnet mit zugeklappten Phasen (offen: die erste Fehler-Phase, sonst die zuletzt
+  begonnene), und eine Zeilenbilanz je Seite zeigt Zeilen gegenüber eingefalteten
+  Events. Rein seitenlokale Darstellung: das `tree` von
+  `GET /api/runs/{repo}/{run_id}` und das Blätter-Fenster bleiben unverändert.
+
 ## [0.16.2] — 2026-09-01
 
 ### Hinzugefügt

@@ -190,6 +190,9 @@
   document.addEventListener("click", function (event) {
     var target = event.target;
     if (!target || !target.closest) return;
+    // A5: the phase fold caret toggles collapse only — it must not select the node
+    // it sits on (original-node clicks stay unchanged).
+    if (target.closest("[data-fold-toggle]")) return;
     var bar = target.closest(".tl-bar[data-seq]");
     var node = target.closest(".node[data-seq]");
     if (!bar && !node) return;
@@ -266,6 +269,70 @@
     // activateTab returns the diff load promise for the Diff tab, else resolves
     // immediately (C1).
     perfEndAfterContent("adw:tab:start", "adw:tab:end", "adw:tab", activateTab(tabs, btn.getAttribute("data-tab")));
+  });
+
+  // --- A5: default-fold of phases (pure client state, no persistence). The tree
+  // opens with phases collapsed; only the server-named default phase (the one with
+  // the tree-order-first error, else the last-started) — and the phase containing a
+  // ?focus target — starts open. Group/repeat wrappers collapse natively via
+  // <details>. A phase's subtree is the run of DIRECT trace-list rows after it whose
+  // depth is greater than the phase's, up to the next same-or-shallower row; those
+  // are shown/hidden together. Phases whose subtree begins before the loaded page
+  // simply have no rows to fold and stay visible (E3).
+  function directRows(list) {
+    var out = [];
+    for (var i = 0; i < list.children.length; i++) {
+      if (list.children[i].tagName === "LI") out.push(list.children[i]);
+    }
+    return out;
+  }
+  function rowDepth(li) {
+    var raw = li.style && li.style.getPropertyValue("--depth");
+    var n = parseInt(raw, 10);
+    return isNaN(n) ? 0 : n;
+  }
+  function phaseEnd(rows, idx, depth) {
+    var k = idx + 1;
+    while (k < rows.length && rowDepth(rows[k]) > depth) k++;
+    return k;  // exclusive
+  }
+  function setPhaseOpen(rows, idx, open) {
+    var li = rows[idx];
+    var depth = rowDepth(li);
+    var end = phaseEnd(rows, idx, depth);
+    li.classList.toggle("phase-open", open);
+    var caret = li.querySelector("[data-fold-toggle]");
+    if (caret) caret.setAttribute("aria-expanded", open ? "true" : "false");
+    for (var k = idx + 1; k < end; k++) rows[k].classList.toggle("fold-hidden", !open);
+  }
+  function initTreeFold() {
+    var list = document.querySelector(".trace-list");
+    if (!list) return;
+    var openSeq = list.getAttribute("data-default-phase");
+    var focusSeq = body.getAttribute("data-focus");
+    var rows = directRows(list);
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].getAttribute("data-node-type") !== "phase") continue;
+      var depth = rowDepth(rows[i]);
+      var end = phaseEnd(rows, i, depth);
+      var open = rows[i].getAttribute("data-seq") === openSeq;
+      if (!open && focusSeq) {
+        for (var k = i; k < end; k++) {
+          if (rows[k].getAttribute("data-seq") === focusSeq) { open = true; break; }
+        }
+      }
+      setPhaseOpen(rows, i, open);
+    }
+  }
+  document.addEventListener("click", function (event) {
+    var caret = event.target.closest ? event.target.closest("[data-fold-toggle]") : null;
+    if (!caret) return;
+    var li = caret.closest(".node[data-node-type='phase']");
+    var list = li && li.closest(".trace-list");
+    if (!li || !list) return;
+    var rows = directRows(list);
+    var idx = rows.indexOf(li);
+    if (idx !== -1) setPhaseOpen(rows, idx, !li.classList.contains("phase-open"));
   });
 
   // The recovery card's escalation-report link opens the Artifacts tab and reveals
@@ -561,11 +628,13 @@
     ++selectionGen;
     applySelection();
     updateContextPanel();  // re-project the context onto the swapped-in panel
+    initTreeFold();        // re-apply the default fold to the swapped-in tree (A5)
   }
 
   ++selectionGen;
   applySelection(); // initial: select the root node's pane
   updateContextPanel(); // initial: latest_context (no explicit selection yet)
+  initTreeFold(); // initial: phases collapsed except the default-open / focused one
 
   function refresh() {
     if (inFlight) { repeat = true; return; }
