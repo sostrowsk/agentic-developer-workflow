@@ -156,6 +156,27 @@ def test_focus_opens_every_fold_ancestor_of_a_deeply_nested_node(tmp_path):
     assert r["focused_hidden"] is False      # the focused node is not fold-hidden
 
 
+def test_run_detail_survives_mixed_timezone_tool_timestamps(home, tmp_path):  # noqa: F811
+    """A1 (regression): a call with a timezone-naive ts and its result with a
+    tz-aware (Z) ts must not crash the fold (datetime would raise TypeError). The
+    run-detail page renders 200 with the pair folded and no duration."""
+    lines = [
+        rec(1, "run", "start", "R", None, sec=0, payload=run_start_payload("tz")),
+        rec(2, "agent.run", "start", "A", "R", sec=1,
+            payload={"agent": "spec_agent", "prompt": "p", "system_append": ""}),
+        rec(3, "agent.tool.call", "point", "A", ts="2026-08-05T14:00:00", payload={
+            "tool": "Read", "tool_use_id": "u1", "input": {"file_path": "/x/a.py"}}),
+        rec(4, "agent.tool.result", "point", "A", ts="2026-08-05T14:00:05.000Z",
+            payload={"tool_use_id": "u1", "is_error": False}),
+        rec(5, "agent.run", "end", "A", "R", sec=6,
+            payload={"result_text": "d", "is_error": False}),
+        rec(6, "run", "end", "R", None, sec=7,
+            payload={"status": "done", "totals": {"duration": 1.0}}),
+    ]
+    client, slug, _repo = _client(tmp_path, lines)
+    assert client.get(f"/runs/{slug}/{RUN_ID}").status_code == 200
+
+
 # --- Contract: the JSON ``tree`` is structurally unchanged ----------------------
 
 

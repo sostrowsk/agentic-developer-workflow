@@ -265,12 +265,17 @@ def _iso_dt(ts):
 
 def _fold_duration(call_node, result_node):
     """``ts(result) − ts(call)`` in seconds when both are parseable and the diff is
-    ``>= 0``; otherwise None (undetermined, no substitute value)."""
+    ``>= 0``; otherwise None (undetermined, no substitute value). Subtracting a
+    timezone-aware from a naive datetime raises ``TypeError`` — that mismatch is
+    treated as undetermined too, never as a 500 (A1)."""
     a = _iso_dt(call_node.get("ts"))
     b = _iso_dt(result_node.get("ts"))
     if a is None or b is None:
         return None
-    delta = (b - a).total_seconds()
+    try:
+        delta = (b - a).total_seconds()
+    except TypeError:
+        return None  # mixed timezone awareness -> undetermined duration
     return delta if delta >= 0 else None
 
 
@@ -445,12 +450,22 @@ def _raw_main_arg(tool, inp):
 
 
 def _repo_relative(value, repo_root):
-    """``value`` with the repo prefix stripped when it is inside ``repo_root``;
-    otherwise ``value`` unchanged (a path outside the repo is never relativised)."""
-    if isinstance(value, str) and isinstance(repo_root, str) and repo_root:
-        root = repo_root.rstrip("/")
-        if value.startswith(root + "/"):
-            return value[len(root) + 1:]
+    """``value`` made repo-relative when it genuinely resolves INSIDE ``repo_root``,
+    else ``value`` unchanged (A4: a path outside the repo stays visibly unchanged).
+
+    Containment is decided on NORMALISED absolute paths, not a lexical prefix — so a
+    traversal path that escapes the repo (``/root/../outside/x``) and a mere textual
+    prefix collision (``/rootkit/x`` against ``/root``) are NOT shortened. The
+    filesystem is never touched (the path may not exist); ``..`` is resolved
+    lexically only. A non-absolute value is never treated as a repo-absolute path."""
+    if not (isinstance(value, str) and value and isinstance(repo_root, str) and repo_root):
+        return value
+    if not os.path.isabs(value):
+        return value
+    root = os.path.normpath(repo_root)
+    norm = os.path.normpath(value)
+    if norm == root or norm.startswith(root + os.sep):
+        return os.path.relpath(norm, root)
     return value
 
 

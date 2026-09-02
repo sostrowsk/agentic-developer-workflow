@@ -35,7 +35,9 @@ here so adjacency, depth and the loaded-page boundary are under test control
 from adw.gui.app import (
     _compact_rows,
     _default_open_phase,
+    _display_label,
     _flatten_tree,
+    _repo_relative,
     _serialize,
     _tool_names_by_use_id,
     _tree_window,
@@ -182,6 +184,20 @@ def test_a1_undetermined_outcome_is_never_success_and_duration_needs_valid_ts():
         _result(2, "a", is_error=False),         # ts None
     ))["entries"][0]
     assert missing["duration"] is None
+
+
+def test_a1_mixed_timezone_awareness_folds_without_duration_and_never_crashes():
+    # One naive ISO timestamp and one tz-aware (Z) one: subtracting them raises
+    # TypeError in datetime, which must be treated as an UNDETERMINED duration —
+    # the fold still succeeds (page must not 500).
+    call = _call(1, "Read", "a", "/x/a.py")
+    call["ts"] = "2026-08-05T14:00:00"          # timezone-naive
+    result = _result(2, "a", is_error=False)
+    result["ts"] = "2026-08-05T14:00:05.000Z"   # timezone-aware
+    entry = _compact_rows(_rows(call, result))["entries"][0]
+    assert entry["result"] is not None and entry["result"]["seq"] == 2
+    assert entry["outcome"] == "ok"
+    assert entry["duration"] is None
 
 
 # --- A2: count immediate repetitions of the same target -------------------------
@@ -335,6 +351,37 @@ def test_a6_line_balance_matches_the_spec_reference_example():
 
     assert out["rows"] == 4
     assert out["folded"] == 7
+
+
+# --- A4: repo-relative paths use CONTAINMENT, not a lexical prefix ---------------
+
+
+def test_a4_repo_relative_only_shortens_paths_truly_inside_the_repo():
+    root = "/repo/root"
+    # A clean inside path is relativised.
+    assert _repo_relative("/repo/root/adw/app.py", root) == "adw/app.py"
+    # A traversal path that ESCAPES the repo is NOT shortened (normalised containment,
+    # not a lexical startswith) — it stays visibly unchanged (A4).
+    assert _repo_relative("/repo/root/../outside/file", root) == "/repo/root/../outside/file"
+    # A mere textual prefix collision (/repo/rootkit vs /repo/root) is NOT shortened.
+    assert _repo_relative("/repo/rootkit/file", root) == "/repo/rootkit/file"
+    # A genuinely outside path and a non-absolute path are unchanged.
+    assert _repo_relative("/etc/hosts", root) == "/etc/hosts"
+    assert _repo_relative("relative/inside.py", root) == "relative/inside.py"
+
+
+def test_a4_display_label_keeps_escaping_path_unchanged_with_full_title():
+    # An outside-repo path reached via traversal renders visibly unchanged AND keeps
+    # its full raw path in the title (A4 — the tooltip stays present for path args).
+    node = {
+        "type": "agent.tool.call", "seq": 1, "label": "Read x",
+        "payload": {"tool": "Read", "tool_use_id": "u1",
+                    "input": {"file_path": "/repo/root/../outside/x.py"}},
+        "children": [],
+    }
+    text, title = _display_label(node, "/repo/root")
+    assert text == "Read /repo/root/../outside/x.py"   # visibly unchanged
+    assert title == "/repo/root/../outside/x.py"        # full raw path in the title
 
 
 # --- E3: compaction is page-local; a run split across the boundary never joins ---
