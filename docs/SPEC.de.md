@@ -147,7 +147,12 @@ nicht nach Crash + `resume`; ein `resume` an einem noch nicht freigegebenen Halt
 wartend; `adw approve` auf einen nicht wartenden Lauf ist ein sauberer Fehler. `--no-approval`
 (`skip_approval`, auch über `--gates none`) überspringt auch die Haltepunkte — EIN Schalter für
 „keine menschliche Freigabe in diesem Lauf". Default (kein Schlüssel oder leere Liste):
-heutiges Verhalten, unverändert.
+heutiges Verhalten, unverändert. Die wirksame Haltepunkt-Menge wird **beim Run-Start gepinnt**
+(State-Feld `pinned_breakpoints`, analog `pinned_base_branch`): jedes `resume`/`approve` hält an
+genau den beim Start konfigurierten Punkten, eine mid-run editierte `.adw/config.yaml` fügt also
+weder einen künftigen Halt hinzu noch entfernt sie einen. Eine leere Pinnung heißt „keine
+Haltepunkte", nicht „ungepinnt"; ein State aus der Zeit vor der Pinnung folgt weiterhin der
+Config.
 
 ## 5. Schnittstellen
 

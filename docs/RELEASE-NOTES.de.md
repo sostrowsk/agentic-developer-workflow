@@ -54,12 +54,12 @@ Crash und `resume`; `--no-approval` überspringt sie mit, ein einziger Schalter
 für „keine menschliche Freigabe in diesem Lauf". Ohne den Schlüssel verhält sich
 alles wie bisher.
 
-**Bekannte Einschränkung [P2]:** `_config_for_continuation()` lädt
-`.adw/config.yaml` bei jedem `resume` und `approve` neu, und der Run-State hält
+**Bekannte Einschränkung [P2], behoben in 0.16.3:** `_config_for_continuation()` lud
+`.adw/config.yaml` bei jedem `resume` und `approve` neu, und der Run-State hielt
 keinen Schnappschuss der aktiven Haltepunkte. Wer die Konfiguration während
-eines laufenden Runs bearbeitet, kann künftige Halte hinzufügen oder entfernen —
-die Spezifikation verbietet Laufzeitänderungen, der Code erzwingt sie nicht. Der
-Fix wäre, die effektive Haltepunkt-Menge beim Run-Start zu pinnen.
+eines laufenden Runs bearbeitete, konnte künftige Halte hinzufügen oder entfernen —
+die Spezifikation verbietet Laufzeitänderungen, der Code erzwang sie nicht.
+0.16.3 pinnt die wirksame Haltepunkt-Menge beim Run-Start in `pinned_breakpoints`.
 
 ## 0.15.0 — Änderungsumfang eines Laufs
 

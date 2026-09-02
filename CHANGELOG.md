@@ -12,6 +12,19 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.16.3] — 2026-09-02
+
+### Fixed
+- **The breakpoint set is pinned when a run starts** (follow-up [P2] of run
+  `f4942ef3`). `_config_for_continuation()` reloaded `.adw/config.yaml` on every
+  `resume`/`approve` while the state kept no snapshot of the enabled
+  breakpoints, so editing the file mid-run added or removed a *future* hold —
+  which the specification forbids. The effective set is now pinned in the new
+  state field `pinned_breakpoints` (like `pinned_base_branch`) and every
+  continuation holds at exactly those points. An empty pin means "no
+  breakpoints", not "unpinned"; a state persisted before the field existed
+  reads as `null` and keeps following the config.
+
 ## [0.16.2] — 2026-09-01
 
 ### Added
@@ -518,6 +531,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.16.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.2...v0.16.3
 [0.16.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.15.0...v0.16.0

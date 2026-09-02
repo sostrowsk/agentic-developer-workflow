@@ -13,6 +13,19 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.16.3] — 2026-09-02
+
+### Behoben
+- **Die Haltepunkt-Menge wird beim Run-Start gepinnt** (Follow-up [P2] des Laufs
+  `f4942ef3`). `_config_for_continuation()` lud `.adw/config.yaml` bei jedem
+  `resume`/`approve` neu, während der State keinen Schnappschuss der aktiven
+  Haltepunkte hielt — wer die Datei mitten im Lauf bearbeitete, fügte damit einen
+  *künftigen* Halt hinzu oder entfernte ihn, was die Spezifikation verbietet. Die
+  wirksame Menge steht jetzt im neuen State-Feld `pinned_breakpoints` (analog
+  `pinned_base_branch`), und jede Fortsetzung hält an genau diesen Punkten. Eine
+  leere Pinnung heißt „keine Haltepunkte", nicht „ungepinnt"; ein State aus der
+  Zeit vor dem Feld liest sich als `null` und folgt weiterhin der Config.
+
 ## [0.16.2] — 2026-09-01
 
 ### Hinzugefügt
@@ -558,6 +571,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.16.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.2...v0.16.3
 [0.16.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.15.0...v0.16.0

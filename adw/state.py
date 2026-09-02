@@ -109,6 +109,13 @@ class RunState(BaseModel):
     # geleert. KEIN neuer Phase-Wert (E3b). Alt-States ohne das Feld laden als
     # None. Überlebt Crash + resume + approve wie skip_approval.
     pending_breakpoint: BreakpointName | None = None
+    # Die beim Run-Start gepinnte, wirksame Haltepunkt-Menge (Pendant zu
+    # pinned_base_branch). Fortsetzungen halten IMMER an genau diesen Punkten —
+    # eine mid-run editierte config.yaml darf einen künftigen Halt weder
+    # hinzufügen noch entfernen. Die leere Liste ist eine echte Pinnung ("keine
+    # Haltepunkte"); None heißt "Alt-State von vor der Pinnung", dann gilt
+    # weiterhin die Config.
+    pinned_breakpoints: list[BreakpointName] | None = None
     # Runden-Zähler der Integration/E2E-Phase — persistiert, damit ein Crash
     # das 10-Runden-Limit nicht zurücksetzt. last_failures ist die
     # Circuit-Breaker-Basis (wird erst NACH dem Fix-Dispatch fortgeschrieben).

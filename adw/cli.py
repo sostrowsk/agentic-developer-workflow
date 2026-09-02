@@ -389,6 +389,9 @@ def run(
     # Effektiven Base-Branch pinnen (Config ODER Override): Fortsetzungen
     # bauen exakt gegen diese Basis, auch wenn die config.yaml sich ändert.
     state.pinned_base_branch = config.base_branch
+    # Ebenso die Haltepunkte pinnen: der Lauf hält an genau der Menge, die beim
+    # Start konfiguriert war — eine spätere Config-Änderung verschiebt sie nicht.
+    state.pinned_breakpoints = list(config.breakpoints)
     # SOFORT persistieren: crasht der allererste Agent-Lauf, muss die
     # angezeigte run_id per `adw resume` auffindbar sein.
     ensure_runs_gitignored(repo)
@@ -925,7 +928,12 @@ def _load_config(repo: Path, base_branch: str | None) -> AdwConfig:
 def _config_for_continuation(
     repo: Path, state: RunState, cli_override: str | None
 ) -> tuple[AdwConfig, bool]:
-    """Config for resume/approve: the CLI flag wins, otherwise the run's override.
+    """Config for resume/approve: the CLI flag wins, otherwise the run's pins.
+
+    Run-start pins beat the file: the base branch comes from
+    ``state.pinned_base_branch`` and the breakpoints from
+    ``state.pinned_breakpoints``, so editing ``.adw/config.yaml`` mid-run can
+    neither move existing Lanes nor add/remove a future hold.
 
     Validate first (config loading stays OUTSIDE the run span, contract excludes),
     then mutate the pinned base branch IN MEMORY only — the persistence is the
@@ -937,6 +945,11 @@ def _config_for_continuation(
     forked from the old base, a switch would yield inconsistent diffs and merges."""
     candidate = cli_override if cli_override is not None else state.pinned_base_branch
     config = _load_config(repo, candidate)
+    if state.pinned_breakpoints is not None:
+        # Die Haltepunkte des Laufs kommen aus dem Run-Start-Schnappschuss, nicht
+        # aus der (womöglich zwischenzeitlich editierten) config.yaml. None wäre
+        # ein State von vor der Pinnung — der folgt weiter der Config.
+        config = config.model_copy(update={"breakpoints": list(state.pinned_breakpoints)})
     if cli_override is not None and cli_override != state.pinned_base_branch:
         if state.lanes:
             raise _fail(

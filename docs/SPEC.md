@@ -142,7 +142,12 @@ state save and the event write — both the `awaited` on entry and the `granted`
 after crash + `resume`; a `resume` at a not-yet-granted breakpoint stays waiting; `adw approve`
 on a run that is not waiting is a clean error. `--no-approval` (`skip_approval`, also via
 `--gates none`) skips the breakpoints too — one switch for "no human approval in this run".
-Default (no key or empty list): today's behavior, unchanged.
+Default (no key or empty list): today's behavior, unchanged. The effective breakpoint set is
+**pinned when the run starts** (state field `pinned_breakpoints`, like `pinned_base_branch`):
+every `resume`/`approve` holds at exactly the points configured at start, so editing
+`.adw/config.yaml` mid-run neither adds nor removes a future hold. An empty pin means "no
+breakpoints", not "unpinned"; a state persisted before the pin existed keeps following the
+config.
 
 ## 5. Interfaces
 

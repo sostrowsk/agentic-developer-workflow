@@ -51,12 +51,12 @@ call to action for free. Holds are idempotent across a crash and `resume`;
 `--no-approval` skips them too, keeping a single switch for "no human approval
 in this run". Without the key, behaviour is exactly as before.
 
-**Known limitation [P2]:** `_config_for_continuation()` reloads
-`.adw/config.yaml` on every `resume` and `approve`, and the run state keeps no
-snapshot of the enabled breakpoints. Editing the configuration while a run is in
-flight can therefore add or remove a future hold — the specification forbids
-runtime changes, the code does not enforce it. The fix is to pin the effective
-breakpoint set when the run starts.
+**Known limitation [P2], fixed in 0.16.3:** `_config_for_continuation()` reloaded
+`.adw/config.yaml` on every `resume` and `approve`, and the run state kept no
+snapshot of the enabled breakpoints. Editing the configuration while a run was in
+flight could therefore add or remove a future hold — the specification forbids
+runtime changes, the code did not enforce it. 0.16.3 pins the effective
+breakpoint set at run start in `pinned_breakpoints`.
 
 ## 0.15.0 — A run's change footprint
 

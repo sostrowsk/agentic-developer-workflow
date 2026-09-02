@@ -260,18 +260,25 @@ def test_pending_breakpoint_rejects_unknown_values(bad):
         )
 
 
-def test_pending_breakpoint_is_the_only_persisted_breakpoint_state_field():
-    """C4_state / plan B2: the persisted state delta for breakpoints is EXACTLY the
-    one field `pending_breakpoint` — no separate grant-proof field (e.g.
+# The run-start snapshot (follow-up f4942ef3) is the ONE deliberate addition to
+# the breakpoint state beyond `pending_breakpoint` — a pin like
+# `pinned_base_branch`, not a grant proof. Everything else stays forbidden.
+ALLOWED_BREAKPOINT_STATE_FIELDS = ["pending_breakpoint", "pinned_breakpoints"]
+
+
+def test_no_grant_proof_breakpoint_state_field_is_persisted():
+    """C4_state / plan B2: the persisted breakpoint state is EXACTLY the waiting
+    gate plus the run-start pin — no separate grant-proof field (e.g.
     `granted_breakpoints`) sneaks into the `extra="forbid"` schema. Crash-safe
     grant recovery must be derived from the event log, not from extra state."""
     fields = RunState.model_fields
-    assert "pending_breakpoint" in fields
     assert "granted_breakpoints" not in fields
-    assert [name for name in fields if "breakpoint" in name.lower()] == ["pending_breakpoint"]
+    found = [name for name in fields if "breakpoint" in name.lower()]
+    assert sorted(found) == sorted(ALLOWED_BREAKPOINT_STATE_FIELDS)
     # And the persisted snapshot carries no other breakpoint key either.
     dumped = json.loads(RunState.new(issue="x", parallel=False).model_dump_json())
-    assert [key for key in dumped if "breakpoint" in key.lower()] == ["pending_breakpoint"]
+    keys = [key for key in dumped if "breakpoint" in key.lower()]
+    assert sorted(keys) == sorted(ALLOWED_BREAKPOINT_STATE_FIELDS)
 
 
 def test_phase_literal_is_not_extended():
@@ -755,3 +762,124 @@ def test_gui_shows_breakpoint_hold_as_awaiting_with_recovery(tmp_path, gate):
 
     entry = next(e for e in client.get("/api/runs").json() if e["run_id"] == run_id)
     assert entry["status"] == "awaiting_approval"
+
+
+# --- Follow-up f4942ef3 [P2]: the breakpoint set is pinned at run start --------
+#
+# The spec forbids changing a running workflow's holds. Without a pinned
+# snapshot every `resume`/`approve` reloaded `.adw/config.yaml`, so editing the
+# file between two holds added or removed a FUTURE hold.
+
+
+def test_pinned_breakpoints_defaults_to_none():
+    """A fresh state carries no snapshot yet — `run` pins it before the first save."""
+    assert RunState.new(issue="x", parallel=False).pinned_breakpoints is None
+
+
+def test_old_state_without_pinned_breakpoints_loads_as_none(target_repo):
+    """Backwards compatible: a state.json written before the pinning reads as None
+    (and then falls back to the config, as it always did)."""
+    state = RunState.new(issue="x", parallel=False)
+    data = json.loads(state.model_dump_json())
+    data.pop("pinned_breakpoints", None)
+    run_dir = target_repo / ".adw" / "runs" / state.run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "state.json").write_text(json.dumps(data), encoding="utf-8")
+    assert RunState.load(target_repo, state.run_id).pinned_breakpoints is None
+
+
+def test_pinned_breakpoints_survives_save_and_load(target_repo):
+    state = RunState.new(issue="x", parallel=False)
+    state.pinned_breakpoints = ["before_integration", "before_push"]
+    state.save(target_repo)
+    reloaded = RunState.load(target_repo, state.run_id)
+    assert reloaded.pinned_breakpoints == ["before_integration", "before_push"]
+
+
+@pytest.mark.parametrize("bad", [["nope"], ["after_round:2"], [5], [True]])
+def test_pinned_breakpoints_rejects_unknown_values(bad):
+    with pytest.raises(ValidationError):
+        RunState(
+            run_id="00000000",
+            issue="x",
+            phase="build",
+            parallel=False,
+            pinned_breakpoints=bad,
+        )
+
+
+def test_run_pins_the_effective_breakpoint_set_at_start(target_repo):
+    """The snapshot is written with the run's FIRST save — a crash before the
+    first hold must not leave a state that falls back to an edited config."""
+    setup_config(target_repo, "before_integration", "before_push")
+
+    assert cli_run(target_repo).exit_code == 2  # plan gate
+    state = RunState.load(target_repo, latest_id(target_repo))
+    assert state.pinned_breakpoints == ["before_integration", "before_push"]
+
+
+def test_run_without_breakpoints_pins_the_empty_set(target_repo):
+    """An empty pin is NOT the same as "unpinned": adding a breakpoint to the
+    config mid-run must not introduce a hold in a run that started without any."""
+    setup_config(target_repo)
+
+    assert cli_run(target_repo).exit_code == 2  # plan gate
+    sid = latest_id(target_repo)
+    assert RunState.load(target_repo, sid).pinned_breakpoints == []
+
+    setup_config(target_repo, "before_integration", "before_push")
+    assert approve(target_repo, sid).exit_code == 0
+    assert RunState.load(target_repo, sid).phase == "done"
+    assert approval_pairs(target_repo, sid) == [("plan", "awaited"), ("plan", "granted")]
+
+
+def test_config_edit_between_holds_cannot_add_a_breakpoint(target_repo):
+    """A run started with only `before_integration` never holds at `before_push`,
+    even if the config gains it while the run waits at the first hold."""
+    setup_config(target_repo, "before_integration")
+
+    assert cli_run(target_repo).exit_code == 2  # plan gate
+    sid = latest_id(target_repo)
+    assert approve(target_repo, sid).exit_code == 2  # before_integration hold
+
+    setup_config(target_repo, "before_integration", "before_push")
+
+    released = approve(target_repo, sid)
+    assert released.exit_code == 0, released.output
+    assert RunState.load(target_repo, sid).phase == "done"
+    pairs = approval_pairs(target_repo, sid)
+    assert ("before_push", "awaited") not in pairs
+
+
+def test_config_edit_between_holds_cannot_remove_a_breakpoint(target_repo):
+    """The mirror case: a run started with both holds still stops at
+    `before_push` after the key was deleted from the config mid-run."""
+    setup_config(target_repo, "before_integration", "before_push")
+
+    assert cli_run(target_repo).exit_code == 2  # plan gate
+    sid = latest_id(target_repo)
+    assert approve(target_repo, sid).exit_code == 2  # before_integration hold
+
+    setup_config(target_repo)  # both breakpoints removed from the config
+
+    still_held = approve(target_repo, sid)
+    assert still_held.exit_code == 2, still_held.output
+    assert RunState.load(target_repo, sid).pending_breakpoint == "before_push"
+
+    assert approve(target_repo, sid).exit_code == 0
+    assert RunState.load(target_repo, sid).phase == "done"
+
+
+def test_unpinned_old_run_still_follows_the_config(target_repo):
+    """Backwards compatibility: a run persisted before the pinning existed has no
+    snapshot, so its continuation keeps reading the config — the old behaviour."""
+    setup_config(target_repo, "before_integration")
+
+    assert cli_run(target_repo).exit_code == 2  # plan gate
+    sid = latest_id(target_repo)
+    state = RunState.load(target_repo, sid)
+    state.pinned_breakpoints = None  # simulate a pre-pinning state.json
+    state.save(target_repo)
+
+    assert approve(target_repo, sid).exit_code == 2  # config still governs
+    assert RunState.load(target_repo, sid).pending_breakpoint == "before_integration"
