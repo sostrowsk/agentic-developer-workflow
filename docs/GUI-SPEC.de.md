@@ -406,6 +406,49 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
    Pollen von echter Arbeit unterschieden wird; derselbe Span, den die Timeline
    als wartend zeichnet, liest auch hier `waiting`. Ein beendeter
    `gate`/`ci.wait`-Span behält sein Ergebnis (`passed`/`failed`, sonst `done`).
+
+   **Verdichtete Baum-Spalte (Werkzeug-Rauschen falten).** Die Baum-*Spalte* ist
+   eine seitenlokale Darstellungsschicht über der aktuellen (gefensterten)
+   Knotenliste — sie ändert das JSON-`tree` nicht (siehe §API) und greift nie über
+   die Seitengrenze; jede Faltung/Gruppe endet an der Seitengrenze und verbindet nur
+   direkte Nachbarn.
+   - **Ergebnisse falten (A1).** Ein `agent.tool.result`, dessen `tool_use_id` der
+     des unmittelbar vorangehenden `agent.tool.call` gleicht, ist keine eigene Zeile;
+     sein Ausgang (aus dem vorhandenen Ergebnis-Label — `ok`/`error`, ein
+     unbestimmter Ausgang nie als Erfolg erfunden) und seine Dauer
+     (`ts(result) − ts(call)`, nur bei parsebaren Zeitstempeln und Differenz `≥ 0`)
+     stehen rechts an der Aufrufzeile. Ein Ergebnis ohne zuordenbaren Vorgänger
+     bleibt eigener Knoten.
+   - **Wiederholungen zählen (A2).** ≥ 2 unmittelbar aufeinanderfolgende,
+     zielgleiche Aufrufe desselben `Read`/`Grep`/`Glob`-Werkzeugs (Ziel:
+     `input.file_path` bzw. `input.pattern`, exakter Rohwert-Vergleich) werden zu
+     einem aufklappbaren Wiederholungsknoten mit Zähler und aufsummierter
+     bestimmbarer Dauer; aufgeklappt die Einzelaufrufe in Reihenfolge inkl.
+     gefalteter Ergebnisse.
+   - **Lese-/Suchfolgen gruppieren (A3).** Eine ununterbrochene `Read`/`Grep`/`Glob`-
+     Folge mit ≥ 2 Kindern (nach A1/A2) wird zu einem aufklappbaren Gruppenknoten mit
+     Anzahl und den vorkommenden Operationsarten. Die Folge endet — und das brechende
+     Ereignis bleibt eigener, ungefalteter Knoten — an erster Nachricht, jeder
+     Schreiboperation (`Write`/`Edit`), jedem Artefakt, jedem bestimmten Fehler sowie
+     bei `Bash`/unbekanntem Werkzeug. Unter zwei Kindern keine Hülle (auch nicht um
+     einen einzelnen Wiederholungsknoten).
+   - **Repo-relative Pfade (A4).** Ein Pfad im Repo erscheint ohne Repo-Präfix und
+     behält den vollen Pfad im `title`-Attribut; ein Pfad außerhalb bleibt
+     unverändert. Kein Knoten zeigt den absoluten Repo-Pfad im sichtbaren Text.
+   - **Default-Faltung (A5).** Der Baum öffnet mit zugeklappten Phasen; offen startet
+     nur die Phase mit dem in Baumreihenfolge ersten bestimmten Fehler, sonst die
+     zuletzt begonnene (serverseitiger Marker; die Faltung selbst ist Client-Zustand
+     ohne Persistenz). Genau drei Klappebenen — Phase, Gruppe, Wiederholung;
+     `agent.run`, `round` usw. keine. Ein `?focus=<seq>`-Deep-Link öffnet die
+     Klapp-Vorfahren des Ziels auf der geladenen Seite; ein `?focus` auf ein
+     gefaltetes Ergebnis wird auf dessen Aufruf-Knoten (gleiche `tool_use_id`)
+     umgelenkt — dessen `seq` wird ausgewählt und dessen Pane gezeigt, der
+     Ergebnis-Inhalt bleibt über den Tools-Reiter erreichbar.
+   - **Zeilenbilanz (A6).** Unter dem Baum, neben der unveränderten Blätternavigation,
+     eine Bilanz je Seite aus zwei Zahlen: Zeilen (Darstellungseinträge außerhalb
+     jedes Sammelknotens) und eingefaltete Events (Seiten-Events minus der Einträge,
+     die selbst ein Original-Event sind — angehängte Ergebnisse und jedes
+     Sammel-Mitglied zählen je einmal).
 3. **Detail-Pane** (rechts): abhängig vom gewählten Knoten. Für `agent.run` vier
    Reiter:
    - **Prompt** — der vollständige Task-String plus System-Append, Monospace,

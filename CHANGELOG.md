@@ -12,6 +12,20 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.17.0] — 2026-09-02
+
+### Added
+- **Compacted trace-tree column — tool noise folded, not paginated.** In the run
+  detail's Trace tab, the tree column now folds an `agent.tool.result` into its
+  matching call (outcome + duration on the call row), collapses immediately
+  repeated target-identical `Read`/`Grep`/`Glob` calls into a counted repeat node,
+  and groups uninterrupted read/search runs into a collapsible group node (broken by
+  any message, write, artefact, error or `Bash`/unknown tool). Paths render
+  repo-relative with the full path in a `title`, the tree opens with phases
+  collapsed (open: the first-error phase, else the last-started), and a per-page line
+  balance shows rows vs. events folded. Pure page-local presentation: the
+  `GET /api/runs/{repo}/{run_id}` `tree` and the paging window are unchanged.
+
 ## [0.16.3] — 2026-09-02
 
 ### Fixed
@@ -531,6 +545,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.17.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.3...v0.17.0
 [0.16.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.2...v0.16.3
 [0.16.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.0...v0.16.1

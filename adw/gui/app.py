@@ -203,6 +203,305 @@ def _pane_nodes(tree, tree_rows):
     return order
 
 
+# --- trace-tree compaction (Trace-Baum verdichten): a PAGE-LOCAL presentation layer
+# over the already-windowed pre-order rows. It never touches the JSON ``tree`` (the
+# API stays the unverdichtete source, contract-pinned); it only shapes how the tree
+# COLUMN of the loaded page renders. Fold each result into its call (A1), collapse
+# repeated (A2) and group adjacent (A3) Read/Grep/Glob operations, and report the
+# per-page line balance (A6). Grouping joins only DIRECT neighbours in the row list
+# (E4) and never reaches past the loaded page (E3), because it sees only the window.
+
+_FOLDABLE_TOOLS = ("Read", "Grep", "Glob")
+
+
+def _tool_use_id(node):
+    p = node.get("payload")
+    return p.get("tool_use_id") if isinstance(p, dict) else None
+
+
+def _tool_name(node):
+    p = node.get("payload")
+    return p.get("tool") if isinstance(p, dict) else None
+
+
+def _tool_target(node):
+    """The raw comparison target of a foldable call (exact string, no normalisation):
+    Read → ``input.file_path``, Grep/Glob → ``input.pattern``. None (never compared)
+    for anything else or when the target is absent (spec: no target → no summary)."""
+    p = node.get("payload")
+    inp = p.get("input") if isinstance(p, dict) else None
+    if not isinstance(inp, dict):
+        return None
+    tool = p.get("tool")
+    key = "file_path" if tool == "Read" else ("pattern" if tool in ("Grep", "Glob") else None)
+    if key is None:
+        return None
+    value = inp.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _result_outcome(result_node):
+    """The determinable outcome of a folded result, read from its existing label
+    (``_tool_result_label``): ``"ok"``/``"error"`` — or None when undetermined, which
+    is NEVER presented as success (spec A1)."""
+    label = result_node.get("label")
+    if not isinstance(label, str):
+        return None
+    if label.startswith("error"):
+        return "error"
+    if label == "ok" or label.startswith("ok "):
+        return "ok"
+    return None
+
+
+def _iso_dt(ts):
+    if not isinstance(ts, str) or not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _fold_duration(call_node, result_node):
+    """``ts(result) − ts(call)`` in seconds when both are parseable and the diff is
+    ``>= 0``; otherwise None (undetermined, no substitute value). Subtracting a
+    timezone-aware from a naive datetime raises ``TypeError`` — that mismatch is
+    treated as undetermined too, never as a 500 (A1)."""
+    a = _iso_dt(call_node.get("ts"))
+    b = _iso_dt(result_node.get("ts"))
+    if a is None or b is None:
+        return None
+    try:
+        delta = (b - a).total_seconds()
+    except TypeError:
+        return None  # mixed timezone awareness -> undetermined duration
+    return delta if delta >= 0 else None
+
+
+def _node_entry(item):
+    return {"kind": "node", "node": item["node"], "depth": item["depth"],
+            "result": item.get("result"), "outcome": item.get("outcome"),
+            "duration": item.get("duration")}
+
+
+def _is_groupable(item):
+    """Whether the item is a foldable Read/Grep/Glob call with no determinate error
+    (a determinate error is never taken into a collector, spec A2/A3)."""
+    node = item["node"]
+    return (node.get("type") == "agent.tool.call"
+            and _tool_name(node) in _FOLDABLE_TOOLS
+            and item.get("outcome") != "error")
+
+
+def _repeat_entry(items, depth):
+    durs = [x["duration"] for x in items if x.get("duration") is not None]
+    return {"kind": "repeat", "depth": depth, "count": len(items),
+            "duration": (sum(durs) if durs else None),
+            "children": [_node_entry(x) for x in items]}
+
+
+def _repeat_children(run):
+    """Collapse maximal runs of target-identical, same-tool neighbours (>= 2) into a
+    repeat; everything else stays a single node entry, in original order."""
+    children = []
+    j = 0
+    while j < len(run):
+        tool = _tool_name(run[j]["node"])
+        target = _tool_target(run[j]["node"])
+        k = j + 1
+        if target is not None:
+            while (k < len(run) and _tool_name(run[k]["node"]) == tool
+                   and _tool_target(run[k]["node"]) == target):
+                k += 1
+        if k - j >= 2:
+            children.append(_repeat_entry(run[j:k], run[j]["depth"]))
+        else:
+            children.append(_node_entry(run[j]))
+            k = j + 1
+        j = k
+    return children
+
+
+def _group_entry(children, depth):
+    count = 0
+    ops = []
+    for c in children:
+        if c["kind"] == "repeat":
+            count += c["count"]
+            tool = _tool_name(c["children"][0]["node"])
+        else:
+            count += 1
+            tool = _tool_name(c["node"])
+        if tool and tool not in ops:
+            ops.append(tool)
+    return {"kind": "group", "depth": depth, "count": count, "ops": ops,
+            "children": children}
+
+
+def _compact_rows(rows):
+    """Shape the windowed pre-order rows (each ``{"node", "depth"}``) into the trace
+    column's display entries plus the per-page line balance. Returns
+    ``{"entries": [...], "rows": int, "folded": int}``:
+
+    * A1 — a result whose ``tool_use_id`` matches the immediately preceding call folds
+      into it (outcome + determinable duration); anything else stays its own node.
+    * A2 — >= 2 target-identical same-tool neighbours collapse into a repeat.
+    * A3 — an uninterrupted Read/Grep/Glob run with >= 2 children (after A1/A2)
+      becomes a group; below that threshold nothing is wrapped.
+    * ``rows`` — display entries outside any collector (originals + collectors).
+    * ``folded`` — window events minus the entries that are themselves an original
+      event (so attached results and every collector member count as folded)."""
+    items = []
+    for row in rows:
+        node = row["node"]
+        if node.get("type") == "agent.tool.result" and items:
+            prev = items[-1]
+            uid = _tool_use_id(node)
+            if (prev["node"].get("type") == "agent.tool.call"
+                    and prev.get("result") is None
+                    and uid is not None
+                    and _tool_use_id(prev["node"]) == uid):
+                prev["result"] = node
+                prev["outcome"] = _result_outcome(node)
+                prev["duration"] = _fold_duration(prev["node"], node)
+                continue
+        items.append({"node": node, "depth": row["depth"], "result": None,
+                      "outcome": None, "duration": None})
+
+    entries = []
+    i = 0
+    while i < len(items):
+        if _is_groupable(items[i]):
+            depth = items[i]["depth"]
+            run = []
+            while i < len(items) and _is_groupable(items[i]) and items[i]["depth"] == depth:
+                run.append(items[i])
+                i += 1
+            children = _repeat_children(run)
+            if len(children) >= 2:
+                entries.append(_group_entry(children, depth))
+            else:
+                entries.extend(children)
+        else:
+            entries.append(_node_entry(items[i]))
+            i += 1
+
+    original = sum(1 for e in entries if e["kind"] == "node")
+    return {"entries": entries, "rows": len(entries), "folded": len(rows) - original}
+
+
+def _node_determinate_error(node) -> bool:
+    """Whether a node is a determinate error by the existing outcome rules
+    (``is_error: true``, else ``exit_code != 0``, else a failed span); an
+    undetermined result is not an error."""
+    if node.get("type") == "agent.tool.result":
+        p = node.get("payload") or {}
+        ie, ec = p.get("is_error"), p.get("exit_code")
+        if isinstance(ie, bool):
+            return ie
+        if isinstance(ec, int) and not isinstance(ec, bool):
+            return ec != 0
+        return False
+    return node.get("status") == "failed"
+
+
+def _subtree_has_error(node) -> bool:
+    if _node_determinate_error(node):
+        return True
+    return any(_subtree_has_error(c) for c in (node.get("children") or []))
+
+
+def _default_open_phase(tree):
+    """The ``seq`` of the phase the tree opens with (A5): the tree-order-first phase
+    whose subtree carries a determinate error, else the last-started phase, else None
+    when the run has no phase node. Needs the FULL tree, so it is a server decision."""
+    phases = []
+
+    def walk(nodes):
+        for n in nodes:
+            if n.get("type") == "phase":
+                phases.append(n)
+            walk(n.get("children") or [])
+
+    walk(tree)
+    if not phases:
+        return None
+    for ph in phases:
+        if _subtree_has_error(ph):
+            return ph.get("seq")
+    return phases[-1].get("seq")
+
+
+# The main-argument keys that hold a filesystem PATH (A4): their full path is always
+# kept in the ``title``, whether or not the visible text was shortened.
+_PATH_ARG_KEYS = ("file_path", "path", "file")
+
+
+def _raw_main_arg(tool, inp):
+    """The ``(value, key)`` of a tool call's UNtruncated main argument (the key so a
+    path argument can be told from a non-path one), or ``(None, None)``."""
+    if isinstance(inp, dict):
+        for key in _TOOL_ARG_PRIORITY.get(tool, ()) + _TOOL_ARG_FALLBACK:
+            value = inp.get(key)
+            if isinstance(value, str) and value:
+                return value, key
+    return None, None
+
+
+def _repo_relative(value, repo_root):
+    """``value`` made repo-relative when it genuinely resolves INSIDE ``repo_root``,
+    else ``value`` unchanged (A4: a path outside the repo stays visibly unchanged).
+
+    Containment is decided on NORMALISED absolute paths, not a lexical prefix — so a
+    traversal path that escapes the repo (``/root/../outside/x``) and a mere textual
+    prefix collision (``/rootkit/x`` against ``/root``) are NOT shortened. The
+    filesystem is never touched (the path may not exist); ``..`` is resolved
+    lexically only. A non-absolute value is never treated as a repo-absolute path."""
+    if not (isinstance(value, str) and value and isinstance(repo_root, str) and repo_root):
+        return value
+    if not os.path.isabs(value):
+        return value
+    root = os.path.normpath(repo_root)
+    norm = os.path.normpath(value)
+    if norm == root or norm.startswith(root + os.sep):
+        return os.path.relpath(norm, root)
+    return value
+
+
+def _display_label(node, repo_root):
+    """The (visible label, full-path title) for a tree node (A4). A tool call shows
+    the repo-relative main argument in the text and keeps the full raw value in the
+    title; every other node keeps its serialized label and has no title."""
+    if node.get("type") != "agent.tool.call":
+        return node.get("label"), None
+    p = node.get("payload") or {}
+    tool = p.get("tool")
+    if not tool:
+        return node.get("label"), None
+    raw, key = _raw_main_arg(tool, p.get("input"))
+    if raw is None:
+        return str(tool), None
+    rel = _repo_relative(raw, repo_root)
+    shown = rel if len(rel) <= _TOOL_ARG_MAX else rel[:_TOOL_ARG_MAX] + "…"
+    # A4: a PATH argument always keeps its complete path in the title — including an
+    # outside-repo path shown unchanged — so the full path stays reachable. A
+    # non-path argument (e.g. a Bash command) gets a title only when the visible text
+    # was actually shortened, so a value shown in full is not duplicated redundantly.
+    title = raw if (key in _PATH_ARG_KEYS or shown != raw) else None
+    return f"{tool} {shown}", title
+
+
+def _annotate_paths(entries, repo_root) -> None:
+    """Attach the A4 display ``label``/``title`` to every node entry (recursively
+    through collectors); the serialized ``label`` in the API ``tree`` stays absolute."""
+    for e in entries:
+        if e["kind"] == "node":
+            e["label"], e["title"] = _display_label(e["node"], repo_root)
+        else:
+            _annotate_paths(e["children"], repo_root)
+
+
 # --- presentation formatting (Aufgabe E): applied in the HTML templates only; the
 # JSON API keeps its raw numeric values. Missing values render empty, never 0/null.
 
@@ -2098,10 +2397,28 @@ def create_app(repos=None) -> FastAPI:
         if focus_seq is not None:
             focus_at = _focus_index(detail["tree"], focus_seq)
             if focus_at is not None:
+                # A5: a ?focus on an A1-foldable result is redirected to its call
+                # (same tool_use_id) so the pair lands together and the result folds;
+                # selection then targets the call's own seq (the result carries none).
+                flat = _flatten_tree(detail["tree"])
+                node = flat[focus_at][0]
+                if (node.get("type") == "agent.tool.result" and focus_at > 0
+                        and flat[focus_at - 1][0].get("type") == "agent.tool.call"
+                        and _tool_use_id(node) is not None
+                        and _tool_use_id(flat[focus_at - 1][0]) == _tool_use_id(node)):
+                    focus_at -= 1
+                    focus_seq = flat[focus_at][0].get("seq")
                 offset = focus_at
         tree_window = _tree_window(detail["tree"], offset, window)
         tool_window = _tool_window(detail["tree"], tools_offset, window)
         pane_nodes = _pane_nodes(detail["tree"], tree_window["rows"])
+        # The trace COLUMN renders a page-local compaction of the window (A1-A4, A6);
+        # the JSON `tree` and the window semantics stay untouched. Paths are made
+        # repo-relative here (A4); the default-open phase is decided over the full
+        # tree (A5) and handed to the client as a marker.
+        compact = _compact_rows(tree_window["rows"])
+        _annotate_paths(compact["entries"], ref.path)
+        compact["default_phase"] = _default_open_phase(detail["tree"])
         # The Timeline derives from the same events Trace uses; the Artifacts tab
         # lists the whitelisted files of the run. Both are page-render concerns and
         # stay out of the JSON detail contract.
@@ -2112,6 +2429,7 @@ def create_app(repos=None) -> FastAPI:
             "raw_from_seq": raw_from_seq, "raw_to_seq": raw_to_seq,
             "raw_range_active": raw_range_active,
             "tree_window": tree_window, "tool_window": tool_window, "pane_nodes": pane_nodes,
+            "compact": compact,
             "timeline": _timeline(events),
             "artifacts": _artifacts_listing(run_dir),
             "t": t, "lang": lang, "switch_qs": switch_qs,

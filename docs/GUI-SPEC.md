@@ -393,6 +393,45 @@ the GUI stays read-only.
    `waiting`, not `running`, so idle polling is told apart from real work; the
    same span the Timeline draws as waiting reads `waiting` here too. A closed
    `gate`/`ci.wait` span keeps its result (`passed`/`failed`, else `done`).
+
+   **Compacted tree column (tool-noise folding).** The tree *column* is a
+   page-local presentation layer over the current (windowed) node list — it never
+   changes the JSON `tree` (see §API) and never crosses the paging window; every
+   fold/group ends at the page boundary and joins only direct neighbours.
+   - **Results fold into their call (A1).** An `agent.tool.result` whose
+     `tool_use_id` equals that of the immediately preceding `agent.tool.call` is not
+     a row of its own; its outcome (from the existing result label — `ok`/`error`,
+     never an invented success for an undetermined result) and its duration
+     (`ts(result) − ts(call)`, shown only when both parse and the difference is
+     `≥ 0`) ride at the right of the call row. A result with no matching predecessor
+     stays its own node.
+   - **Repetitions collapse (A2).** ≥ 2 immediately consecutive, target-identical
+     calls of the same `Read`/`Grep`/`Glob` tool (target: `input.file_path` resp.
+     `input.pattern`, exact raw comparison) become one collapsible repeat node with
+     a counter and the summed determinable duration; expanded it lists the single
+     calls in order with their folded results.
+   - **Read/search runs group (A3).** An uninterrupted run of `Read`/`Grep`/`Glob`
+     operations with ≥ 2 children (after A1/A2) becomes one collapsible group node
+     with the call count and the operation kinds present. The run ends — and the
+     breaking event stays its own, unfolded node — at the first message, any write
+     (`Write`/`Edit`), any artefact, any determinate error, and at `Bash`/any
+     unknown tool. Below two children nothing is wrapped (not even a lone repeat).
+   - **Repo-relative paths (A4).** A path inside the repo shows with the repo prefix
+     stripped and keeps the full path in the element's `title`; a path outside the
+     repo is shown unchanged. No node shows the absolute repo path as visible text.
+   - **Default fold (A5).** The tree opens with phases collapsed; open by default is
+     only the phase with the tree-order-first determinate error, else the
+     last-started phase (a server-decided marker; the fold itself is client state
+     with no persistence). There are exactly three collapse levels — phase, group,
+     repeat; `agent.run`, `round` etc. get none. A `?focus=<seq>` deep link opens
+     the collapsible ancestors of its target on the loaded page; a `?focus` on a
+     folded result is redirected to its call node (same `tool_use_id`) — that call's
+     `seq` is selected and its pane shown, the result content stays reachable through
+     the Tools tab.
+   - **Line balance (A6).** Below the tree, beside the unchanged paging navigation,
+     a per-page balance of two numbers: rows (display entries outside any collector)
+     and events folded (window events minus the entries that are themselves an
+     original event — so attached results and every collector member count once).
 3. **Detail pane** (right): depends on the selected node. For `agent.run` four
    tabs:
    - **Prompt** — the full task string plus system append, monospace, copyable

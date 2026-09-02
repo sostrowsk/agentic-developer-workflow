@@ -141,6 +141,27 @@ main.detail { display: block; }
 .node .dur { color: var(--muted); margin-left: 0.4rem; font-size: 0.8rem; }
 .node .round { color: var(--accent); margin-left: 0.3rem; }
 
+/* Trace-Baum verdichten: folded result outcome/duration ride at the right of the
+   call row (A1); synthetic group/repeat wrappers are collapsible, non-selectable
+   summaries (A2/A3); paths render repo-relative with the full path in a title (A4);
+   the per-page line balance sits under the tree beside the paging nav (A6). */
+.node .tool-outcome { color: var(--muted); margin-left: 0.5rem; font-size: 0.8rem; }
+.node .tool-outcome.outcome-error { color: #c33; }
+.node .tool-outcome.outcome-ok { color: var(--accent); }
+.trace-wrap { list-style: none; }
+.trace-wrap { padding-left: calc(var(--depth, 0) * 0.9rem); }
+.trace-summary { cursor: pointer; color: var(--muted); }
+.trace-summary .repeat-count, .trace-summary .group-count { color: var(--fg); }
+.trace-summary .group-ops { font-size: 0.85rem; }
+.trace-sublist { list-style: none; padding-left: 0; margin: 0; }
+.fold-toggle { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 0 0.2rem 0 0; font: inherit; }
+.fold-toggle::before { content: "\25B8"; display: inline-block; }
+.phase-open > .fold-toggle::before { content: "\25BE"; }
+/* A5 default-fold hides every direct row of a collapsed phase — original nodes AND
+   the synthetic group/repeat wrapper rows (which carry no `node` class). */
+.trace-list li.fold-hidden { display: none; }
+.trace-balance { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
+
 /* Expand/collapse: native <details>/<summary>, no JS needed to toggle. */
 .trace summary { cursor: pointer; }
 .node .label { cursor: pointer; }

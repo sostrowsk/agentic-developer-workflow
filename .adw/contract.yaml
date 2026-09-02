@@ -1,225 +1,170 @@
-# Interface contract — Single-Lane project (`backend`).
+# Interface-Contract — Trace-Baum verdichten
 #
-# This feature has NO HTTP surface: it adds two configurable breakpoints that
-# pause an ADW run via the EXISTING approval path. The contract therefore pins
-# only the externally observable, non-HTTP surfaces (config, CLI exit + approve,
-# persisted state field, event log):
-#   1. The `breakpoints:` config key: the exactly-two allowed values, the empty
-#      default, and that any other value is a config error that stops the run
-#      from starting (C1_config).
-#   2. The pause behavior: persisted phase `awaiting_approval`, process exit
-#      code 2, continuation via `adw approve <run_id> --repo <path>`, and the two
-#      boundaries at which each breakpoint pauses (C2_pause, C3_boundaries).
-#   3. The new persisted state field `pending_breakpoint` (which breakpoint
-#      waits) — NOT a new `Phase` value (C4_state).
-#   4. The `approval` event with `gate` = breakpoint name and
-#      `event` = awaited/granted, and the idempotency of holds (C5_event,
-#      C6_idempotency).
-#   5. The effect of `--no-approval` (`skip_approval`) on breakpoints
-#      (C7_no_approval).
+# Single-Lane-Projekt (backend). Der Contract pinnt NUR extern beobachtbare
+# Flächen: die JSON-API, das beobachtbare Verhalten der HTML-Trace-Spalte und
+# die i18n-Anforderung. NICHT Contract (bewusst offen für die Umsetzung):
+# interne Helper-Signaturen, Projektions-/Dictionary-Schlüssel jenseits der
+# Antwortfelder, Markup-/CSS-Wortlaut.
 #
-# It does NOT pin internal helper signatures, module layout, the order of
-# orchestrator steps, or any dictionary/internal key. Implementation constraints
-# (no new `Phase` literal — E3b, no second pause mechanism — E3, the untouched
-# diff/snapshot/retention path) live in `.adw/plan.md` and its Definition of
-# Done, not here. No existing route, phase value, or event type is added or
-# removed; `breakpoints` (config), `pending_breakpoint` (state) and the two new
-# `gate` values are the only observable additions.
+# Kernaussage: Dieses Feature ist eine SEITENLOKALE Darstellungsschicht der
+# Trace-Baum-Spalte. Es ändert die API NICHT. Die Verdichtung ist seitenabhängig
+# (E3) und deshalb nicht im seitenunabhängigen `tree` der API abbildbar.
 
-openapi: 3.1.0
+openapi: 3.0.3
 info:
-  title: ADW Breakpoints — configurable holds as a generalized approval (delta only)
-  version: 1.0.0
+  title: ADW Run Inspector — Trace-Baum (unveränderte API-Fläche)
+  version: "1.0.0"
 
-# No `paths`: the observable surfaces of this feature are the target-repo config,
-# the CLI process contract, the persisted run state, and the event log — pinned
-# below as schemas and as x-adw-behavior rules.
+paths:
+  /api/runs/{repo}/{run_id}:
+    get:
+      summary: >
+        Run-Detail als JSON. Durch dieses Feature UNVERÄNDERT — insbesondere
+        `tree`. Ein Regressionstest fixiert die strukturelle Invarianz.
+      parameters:
+        - { name: repo, in: path, required: true, schema: { type: string } }
+        - { name: run_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Run-Detail. Alle hier gepinnten Flächen bleiben unverändert.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunDetail"
+        "404":
+          description: Unbekanntes Repo/Run oder kein lesbarer Lauf.
 
 components:
   schemas:
-    BreakpointName:
-      description: >
-        The closed, enumerated set of breakpoints. Exactly these two string
-        values are allowed anywhere a breakpoint is named — the config list,
-        the `pending_breakpoint` state field, and the `approval` event `gate`.
-      type: string
-      enum:
-        - before_integration
-        - before_push
-
-    AdwConfigBreakpointsAddition:
-      description: >
-        The additive, OPTIONAL top-level `breakpoints:` key of
-        `.adw/config.yaml`. This schema pins only this key; every existing
-        config key keeps its current shape and meaning. Absent or empty →
-        today's behavior, no extra holds (C1_config).
+    RunDetail:
       type: object
-      properties:
-        breakpoints:
-          description: >
-            List of active breakpoints. Each element MUST be a `BreakpointName`.
-            Default when the key is absent: the empty list. Any other value (an
-            unknown string such as `after_round:2`, a typo, a wrong type such as
-            a mapping or a boolean element) is a config error under the existing
-            strict validation and the run does NOT start (C1_config). Element
-            order and repetition carry no meaning: the breakpoints act as an
-            enabled set, and no breakpoint holds more than once.
-          type: array
-          items:
-            $ref: "#/components/schemas/BreakpointName"
-      examples:
-        - breakpoints: []
-        - breakpoints: [before_integration]
-        - breakpoints: [before_integration, before_push]
-
-    RunStateBreakpointAddition:
       description: >
-        Existing persisted run state (`.adw/runs/<run_id>/state.json`), plus one
-        additive field `pending_breakpoint`. Every other state field keeps its
-        current shape and meaning; the `phase` field's set of values is
-        UNCHANGED (no new `Phase` literal — C4_state). The field persists across
-        crash, `resume` and `approve`.
-      type: object
+        Nur die vom Feature berührbaren Invarianten sind gepinnt; weitere
+        bestehende Felder bleiben ebenfalls unangetastet, werden aber nicht neu
+        spezifiziert.
       properties:
-        pending_breakpoint:
-          description: >
-            Which breakpoint the run is currently waiting at, or null when it is
-            not waiting at a breakpoint. Set exactly while the run is paused at a
-            breakpoint (with `phase == "awaiting_approval"`); cleared on
-            `approve`. Old states without the field load as null (C4_state).
+        run:
+          $ref: "#/components/schemas/RunSummary"
+        tree:
+          $ref: "#/components/schemas/Tree"
+      required: [run, tree]
+
+    RunSummary:
+      type: object
+      description: >
+        Laufzusammenfassung. Die Statusdomäne bleibt unverändert; insbesondere
+        die vom vorigen Lauf übernommenen Werte `waiting` (Knotenebene) und
+        `awaiting_approval` (Laufebene) werden nicht angefasst.
+      properties:
+        status:
           oneOf:
-            - $ref: "#/components/schemas/BreakpointName"
+            - type: string
             - type: "null"
 
-    ApprovalGate:
+    Tree:
+      type: array
       description: >
-        The closed set of `approval` event gate names after this change. The
-        existing gates keep the values `spec` and `plan`; the two breakpoint
-        names are the only additions.
-      type: string
-      enum:
-        - spec
-        - plan
-        - before_integration
-        - before_push
+        UNVERDICHTETER, serialisierter Baum in HEUTIGER Struktur: KEINE
+        synthetischen Knoten (keine Gruppen-/Wiederholungsknoten, keine
+        angehängten Ergebnisse), KEINE entfernten Knoten, KEINE neuen Felder.
+        Jedes `agent.tool.call` und jedes `agent.tool.result` bleibt ein
+        eigener Knoten; für denselben Event-Log ist die Antwort vor und nach
+        dem Feature strukturell identisch. Blätter-Totale und
+        `?offset`-Semantik speisen sich unverändert aus dem flachen Fenster
+        über dieser unverdichteten Knotenliste.
+      items:
+        type: object
 
-    ApprovalEvent:
-      description: >
-        The existing `approval` event, now also emitted for breakpoints. Same
-        shape as the existing `spec`/`plan` gate events; GUI and timeline render
-        a breakpoint with no special case (C5_event).
-      type: object
-      additionalProperties: true
-      required:
-        - gate
-        - event
-      properties:
-        gate:
-          $ref: "#/components/schemas/ApprovalGate"
-        event:
-          description: >
-            `awaited` when the run actually enters the wait; `granted` when the
-            hold is released. Only actually-entered states are logged — no
-            fabricated `awaited`/`granted` for a breakpoint the run did not wait
-            at (C5_event).
-          type: string
-          enum:
-            - awaited
-            - granted
+# --- Beobachtbares HTML-Seitenverhalten (Template-Verhalten, kein Wortlaut) ----
+# Normativ ist das Verhalten von A1–A6; die konkrete Markup-/CSS-Form ist NICHT
+# Contract. Adressiert die HTML-Route GET /runs/{repo}/{run_id}.
+x-page-behavior:
+  route: GET /runs/{repo}/{run_id}
+  scope: NUR die Trace-Baum-Spalte (<ul class="trace-list">).
+  unchanged:
+    - Blätterung — dasselbe bewegliche Fenster über die flache Knotenliste,
+      `?offset`, Fenstergröße 100, unverändertes Total. Gefaltet wird INNERHALB
+      der geladenen Seite; jede Faltung/Gruppe endet an der Seitengrenze und
+      greift nicht vor (E3).
+    - Dreispaltiges Layout, Knoten-Auswahl per Klick, Detail-Panes,
+      Run-Kontext-Panel, Timeline-Deep-Links (E5).
+    - Zweites Fenster über die Werkzeug-Einträge der Detail-Panes
+      (`?tools_offset`): `agent.tool.call`/`agent.tool.result` bleiben dort
+      getrennte Einträge; A1 gilt nur für die Baum-Spalte (E8).
+    - Timeline, Artefakte, Rohansicht, SSE-Pfad, Run-Liste, Event-Typen und
+      -Payloads, Statuswerte (inkl. `waiting`, `awaiting_approval`).
+  observable:
+    A1_fold_results: >
+      Ein `agent.tool.result`, das über gleiche vorhandene `tool_use_id` dem
+      unmittelbar vorangehenden Tool-Aufruf derselben Seite zugeordnet ist,
+      erscheint nicht als eigener Knoten, sondern mit Ausgang und bestimmbarer
+      Dauer (`ts(result) − ts(call)`, nur parsebar und ≥ 0) an der Aufrufzeile.
+      Keine Zuordnung über Werkzeugname, Zeitnähe oder Position. Ohne
+      zuordenbaren Vorgänger bleibt es eigener Knoten. Unbestimmter Ausgang
+      (kein `is_error`, kein `exit_code`) wird nie als Erfolg dargestellt.
+    A2_repeat_nodes: >
+      ≥ 2 unmittelbar aufeinanderfolgende, zielgleiche `Read`/`Grep`/`Glob`-
+      Aufrufe (Ziel: `input.file_path` bzw. `input.pattern`, exakter
+      Rohwert-Vergleich ohne Normalisierung) werden zu einem aufklappbaren
+      Wiederholungsknoten (Zähler + aufsummierte bestimmbare Dauer; keine
+      bestimmbare Dauer → keine Summendauer). Aufgeklappt: Einzelaufrufe in
+      Originalreihenfolge inkl. A1-Ergebnissen. Unterschiedliches/fehlendes
+      Ziel, jedes dazwischenliegende Ereignis, `Write`/`Edit`,
+      `Bash`/unbekanntes Tool, Struktur- und Seitengrenze sowie ein bestimmter
+      Fehler-Ausgang beenden die Wiederholung; der Fehler-Aufruf bleibt eigener
+      Knoten. Unbestimmter Ausgang ist kein Fehler und verhindert nichts.
+    A3_group_nodes: >
+      Ununterbrochene `Read`/`Grep`/`Glob`-Folge mit ≥ 2 Kindknoten nach A1/A2
+      (ein Wiederholungsknoten zählt als ein Kind) wird zu einem aufklappbaren
+      Gruppenknoten mit Anzahl der enthaltenen Aufrufe und den tatsächlich
+      vorkommenden Operationsarten. Bricht an Nachricht, Schreiboperation
+      (`Write`/`Edit`), Artefakt, bestimmtem Fehler, `Bash`/unbekanntem Tool,
+      Struktur- und Seitengrenze; das brechende Ereignis bleibt eigener Knoten.
+      Unterhalb der Mindestgröße keine Gruppen-Hülle (auch nicht um einen
+      einzelnen Wiederholungsknoten).
+    A4_repo_relative_paths: >
+      Repo-Präfix im sichtbaren Text abgeschnitten, voller Pfad im
+      `title`-Attribut. Pfade außerhalb des Repos unverändert. Kein Baum-Knoten
+      enthält den absoluten Repo-Pfad im sichtbaren Text. Der Ziel-Vergleich
+      (A2/A3) nutzt weiterhin den unveränderten Rohwert.
+    A5_default_fold_and_focus: >
+      Baum öffnet mit zugeklappten Phasen; offen startet ausschließlich die
+      Phase mit dem in Baumreihenfolge ersten bestimmten Fehler, sonst die
+      zuletzt begonnene. Genau drei Klappebenen: Phase, Gruppe, Wiederholung —
+      `agent.run`, `round` u. a. erhalten keine Klappmechanik. Klappzustand ist
+      reines Client-Verhalten ohne Persistenz. `?focus=<seq>` klappt die
+      seiten-internen Klapp-Vorfahren des Ziels auf; seitenfremde Vorfahren
+      werden nicht materialisiert, Knoten mit Klapp-Elternteil vor der Seite
+      werden aufgeklappt dargestellt. `?focus` auf ein gefaltetes Ergebnis
+      lenkt auf den Aufruf-Knoten (gleiche `tool_use_id`) um: dessen `seq` wird
+      ausgewählt, dessen Pane gezeigt. Auswahl und `?focus` adressieren
+      weiterhin ausschließlich Original-`seq`s.
+    A6_line_balance: >
+      Unter dem Baum, NEBEN dem bestehenden `window_nav` (bleibt funktional),
+      eine je geladener Seite serverseitig gebildete Bilanz aus zwei Zahlen,
+      unabhängig vom Client-Klappzustand. Zeilen: Knoten der verdichteten Liste
+      außerhalb jedes Sammelknotens (Original- + synthetische Knoten; Kinder
+      von Sammelknoten und angehängte Ergebnisse zählen nicht). Eingefaltete
+      Events: Events der ungefalteten Seitenliste minus der Zeilen, die selbst
+      Original-Events sind; jedes Event zählt genau einmal, auch verschachtelt.
+  reachability: >
+    Kein Event verschwindet (E2): Ab aufgeklappter Phase ist jedes Event über
+    höchstens zwei Klicks erreichbar — als eigener Knoten, als angehängtes
+    Ergebnis oder als Einzelknoten in geöffneter Gruppe/Wiederholung.
+  synthetic_nodes: >
+    Gruppen-/Wiederholungsknoten sind auswahl-/pane-neutral (E9) und tragen
+    keine `data-seq`; nur weiterhin einzeln existierende Original-Knoten
+    behalten ihre `data-seq`-Auswahl- und Pane-Semantik.
+  no_server_state: >
+    Kein Frontend-Zustand jenseits von Auf-/Zuklappen (E7): keine Persistenz,
+    kein Polling, kein Filter, keine Suche, kein Sortieren.
 
-x-adw-behavior:
-  C1_config:
-    surface: ".adw/config.yaml — key `breakpoints`"
-    rule: >
-      `.adw/config.yaml` accepts an OPTIONAL top-level key `breakpoints` as a
-      list. The only allowed elements are the two strings `before_integration`
-      and `before_push`. When the key is absent or the list is empty, ADW
-      behaves exactly as today: no additional holds arise, and the existing spec
-      and plan approvals keep their phases, exit codes, CLI continuation and
-      their `approval` events with gates `spec`/`plan`. Any other value — an
-      unknown string (e.g. `after_round:2`), a typo, or a wrong type — is a
-      config error with a clear message, consistent with the existing strict
-      validation; the run does NOT start and the value is never silently
-      ignored.
-
-  C2_pause:
-    surface: "adw run / adw resume — process contract"
-    rule: >
-      At an ACTIVE breakpoint the run pauses via the existing approval path: the
-      persisted state phase is `awaiting_approval`, the process exits with code
-      2, and the run continues with `adw approve <run_id> --repo <path>`. No new
-      pause mechanism is introduced and no new `Phase` literal is added; which
-      breakpoint waits is recorded solely in `pending_breakpoint`. `adw approve`
-      on a run that is waiting at a breakpoint releases it and continues from
-      exactly that point, without repeating already-completed phases. `adw
-      approve` on a run that is NOT waiting for approval is a clean error with a
-      clear message, without changing the run.
-
-  C3_boundaries:
-    rule: >
-      Each active breakpoint pauses the run at most once, at a boundary defined
-      by OBSERVABLE work:
-        `before_integration` — pauses after all build lanes have passed their
-          gates green, and before any integration/merge work or any subsequent
-          review work has begun. In single-lane operation (no separate merge
-          work) this means: after the build lane completes, before
-          `codex_review` work begins.
-        `before_push` — pauses after the final review completes and before ANY
-          work of the CI phase begins: no push, no CI preparation (including the
-          integration/E2E preparation that parallel mode performs at the start
-          of the CI phase), and no forge/CI polling. At the hold nothing has
-          been pushed. This holds for both single-lane and parallel
-          orchestration, for both paths that reach the breakpoint.
-
-  C4_state:
-    surface: ".adw/runs/<run_id>/state.json — field `pending_breakpoint`"
-    rule: >
-      The waiting breakpoint is held in a dedicated state field
-      `pending_breakpoint` with the value `before_integration` or `before_push`
-      while the run is paused at that breakpoint, and null otherwise. The
-      `Phase` set of values is NOT extended (E3b): the hold reuses
-      `awaiting_approval`, so the phase bar, retention and the recovery card stay
-      unchanged. The field is persisted and survives crash, `resume` and
-      `approve`; an old state without the field reads as null.
-
-  C5_event:
-    surface: "event log — `approval` event"
-    rule: >
-      Every breakpoint is logged as an `approval` event: `gate` = the breakpoint
-      name (`before_integration` or `before_push`), `event` = `awaited` when the
-      wait is entered and `event` = `granted` on release — exactly the shape of
-      the existing `spec`/`plan` gate events, so GUI and timeline render the
-      breakpoint with no special case. Only actually-entered states are logged:
-      no fabricated `awaited`/`granted` for a breakpoint the run did not wait at
-      (in particular under `--no-approval`, or for a disabled or already granted
-      breakpoint). Per actual entry into a breakpoint wait, exactly ONE logical
-      `awaited` event ends up in the log — this holds even if the process
-      crashes between persisting the waiting state and writing the event log
-      (the missing event is caught up on the next `resume`), and a repeated
-      `adw resume` of a run already waiting at an ungranted breakpoint still
-      exits with code 2 but appends no duplicate `awaited` event. The GUI shows
-      the waiting run and the recovery hint
-      `adw approve <run_id> --repo <path>` as for the existing approval gates,
-      with no new write path and no new phase value; the GUI stays read-only.
-
-  C6_idempotency:
-    rule: >
-      A breakpoint that has been granted does not hold the run a second time —
-      not even if the run then crashes and is continued with `adw resume`:
-      `resume` after a granted release runs through without stopping again. An
-      `adw resume` on a run waiting at a NOT-yet-granted breakpoint runs no work
-      behind the breakpoint — the run stays in the waiting state, as with the
-      existing approval gates. When both breakpoints are active, the run holds
-      once at each in turn: after `before_integration` is granted it continues to
-      `before_push` and holds there again with exit code 2; after that is granted
-      it runs through. No breakpoint holds twice.
-
-  C7_no_approval:
-    surface: "adw run --no-approval / --gates"
-    rule: >
-      `--no-approval` (`skip_approval`, also when set via a `--gates` mode) ALSO
-      skips the breakpoints: a run with this switch holds at no configured
-      breakpoint. It is ONE switch for "no human approval in this run", not two
-      separate ones. The skipping survives crash + resume, exactly as the
-      existing `skip_approval` is pinned in the state, and it emits no fabricated
-      breakpoint events (C5_event).
+# --- i18n (A7) -----------------------------------------------------------------
+x-i18n:
+  module: adw/gui/i18n.py
+  requirement: >
+    Neue Chrome-Labels für A2 (Wiederholungszähler), A3 (Gruppenanzahl +
+    Operationsarten) und A6 (Zeilenbilanz) liegen in `_EN` und `_DE` mit
+    identischen Schlüsselmengen und korrekten Singular-/Pluralformen vor.
+    Konkrete Schlüsselnamen sind NICHT Contract; Event-, Pfad-, Werkzeug- und
+    Payload-Inhalte werden nicht übersetzt.

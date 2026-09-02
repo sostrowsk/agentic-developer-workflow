@@ -17,6 +17,44 @@
        tab server-side. Point events have no subtree range, so no jump. #}
     {% if node.end_seq is defined and node.end_seq is not none %}<a class="raw-jump" href="?limit={{ limit }}{% if raw_q %}&amp;raw_q={{ raw_q|urlencode }}{% endif %}{% if raw_type %}&amp;raw_type={{ raw_type|urlencode }}{% endif %}&amp;raw_from_seq={{ node.seq }}&amp;raw_to_seq={{ node.end_seq }}">{{ t.raw_jump }}</a>{% endif %}
 {% endmacro %}
+{# The compacted trace COLUMN (Trace-Baum verdichten): renders the page-local
+   compaction entries. An original node is an <li> carrying exactly one
+   `data-tree-entry` (its bounded-DOM marker); it keeps its `data-seq` unless it is
+   an A1-folded result attached to a call (then the outcome/duration ride on the
+   call row as a non-selectable `data-tree-entry` badge — one marker per original
+   node still). Repeat (A2) and group (A3) nodes are collapsible, non-selectable
+   wrappers (no `data-seq`, no `data-tree-entry`) whose members carry their own. #}
+{% macro trace_entries(entries) %}
+  {% for e in entries %}
+  {%- if e.kind == "node" %}
+    <li class="node node-{{ e.node.status }}"{% if e.node.seq is not none %} data-seq="{{ e.node.seq }}"{% endif %} data-node-type="{{ e.node.type }}" data-tree-entry
+        data-context='{{ e.node.context | compact_context | tojson }}' style="--depth:{{ e.depth }}">
+      {%- if e.node.type == "phase" %}<button type="button" class="fold-toggle" data-fold-toggle aria-expanded="true"></button>{% endif %}
+      <span class="icon" aria-hidden="true">{{ status_icon(e.node.status) }}</span>
+      <span class="label"{% if e.title %} title="{{ e.title }}"{% endif %}>{{ e.label }}</span>
+      {% if e.node.duration is not none %}<span class="dur">{{ e.node.duration | fmt_duration }}</span>{% endif %}
+      {% if e.node.type == "round" and e.node.n is defined %}<span class="round">{{ e.node.n }}/{{ e.node.cap }}</span>{% endif %}
+      {%- if e.result is not none %}<span class="tool-outcome{% if e.outcome %} outcome-{{ e.outcome }}{% endif %}" data-tree-entry>{% if e.outcome %}{{ e.result.label }}{% endif %}{% if e.duration is not none %} {{ e.duration | fmt_duration }}{% endif %}</span>{% endif %}
+      {% if e.node.end_seq is defined and e.node.end_seq is not none %}<a class="raw-jump" href="?limit={{ limit }}{% if raw_q %}&amp;raw_q={{ raw_q|urlencode }}{% endif %}{% if raw_type %}&amp;raw_type={{ raw_type|urlencode }}{% endif %}&amp;raw_from_seq={{ e.node.seq }}&amp;raw_to_seq={{ e.node.end_seq }}">{{ t.raw_jump }}</a>{% endif %}
+      {%- if detail.recovery is defined and detail.recovery.kind == 'none' and detail.recovery.anchor_seq is not none and e.node.seq == detail.recovery.anchor_seq %}{{ recovery_card() }}{% endif %}
+    </li>
+  {%- elif e.kind == "repeat" %}
+    <li class="trace-wrap trace-repeat" style="--depth:{{ e.depth }}">
+      <details class="trace-collapse">
+        <summary class="trace-summary"><span class="label"{% if e.children[0].title %} title="{{ e.children[0].title }}"{% endif %}>{{ e.children[0].label }}</span> <span class="repeat-count">{{ e.count }}&times; {{ t.fold_call_one if e.count == 1 else t.fold_call_many }}</span>{% if e.duration is not none %} <span class="dur">{{ e.duration | fmt_duration }}</span>{% endif %}</summary>
+        <ul class="trace-sublist">{{ trace_entries(e.children) }}</ul>
+      </details>
+    </li>
+  {%- else %}
+    <li class="trace-wrap trace-group" style="--depth:{{ e.depth }}">
+      <details class="trace-collapse">
+        <summary class="trace-summary"><span class="group-count">{{ e.count }} {{ t.fold_op_one if e.count == 1 else t.fold_op_many }}</span> <span class="group-ops">({{ e.ops | join(', ') }})</span></summary>
+        <ul class="trace-sublist">{{ trace_entries(e.children) }}</ul>
+      </details>
+    </li>
+  {%- endif %}
+  {% endfor %}
+{% endmacro %}
 {# Recovery card (§7.2): the next step for a run that needs human intervention. Pure
    display — the command is selectable text, never executed (E1). In the escalation
    case (kind `none`) it is anchored at the governing escalation tree node (the macro
@@ -395,16 +433,16 @@
             {# The trace tree is a BOUNDED, MOVING window over the pre-order entry
                list (Aufgabe A): one global budget of at most 200 entries, each
                carrying exactly one ``data-tree-entry`` marker, indented by depth.
-               ?offset slides the window so every entry stays reachable. #}
-            <ul class="trace-list">
-              {% for row in tree_window.rows %}
-              <li class="node node-{{ row.node.status }}" data-seq="{{ row.node.seq }}" data-tree-entry
-                  data-context='{{ row.node.context | compact_context | tojson }}' style="--depth:{{ row.depth }}">
-                {{ tree_row(row.node) }}
-                {%- if detail.recovery is defined and detail.recovery.kind == 'none' and detail.recovery.anchor_seq is not none and row.node.seq == detail.recovery.anchor_seq %}{{ recovery_card() }}{% endif %}
-              </li>
-              {% endfor %}
+               ?offset slides the window so every entry stays reachable. The column
+               is compacted PAGE-LOCALLY (Trace-Baum verdichten): results fold into
+               their call, repeated/adjacent Read/Grep/Glob operations collapse into
+               synthetic wrappers, paths are repo-relative. `data-default-phase` names
+               the phase the client opens by default (A5). #}
+            <ul class="trace-list"{% if compact.default_phase is not none %} data-default-phase="{{ compact.default_phase }}"{% endif %}>
+              {{ trace_entries(compact.entries) }}
             </ul>
+            {# A6: the per-page line balance beside the unchanged blätter navigation. #}
+            <p class="trace-balance">{{ compact.rows }} {{ t.fold_row if compact.rows == 1 else t.fold_rows }} &middot; {{ compact.folded }} {{ t.fold_event_folded_one if compact.folded == 1 else t.fold_event_folded_many }}</p>
             {{ window_nav(tree_window, "offset") }}
           </section>
 
