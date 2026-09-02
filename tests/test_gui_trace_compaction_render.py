@@ -111,6 +111,59 @@ def test_a4_paths_are_repo_relative_in_text_and_full_in_title(home, tmp_path):  
     assert 'title="/etc/hosts"' in trace or "title='/etc/hosts'" in trace
 
 
+def test_css_hides_folded_wrapper_rows_not_only_node_rows(home, tmp_path):  # noqa: F811
+    """A5 (regression): a collapsed phase sets ``fold-hidden`` on ALL its direct
+    rows, including the synthetic ``<li class="trace-wrap …">`` group/repeat wrappers
+    (which carry no ``node`` class). The stylesheet must hide those too — a rule
+    gated on ``.node.fold-hidden`` would leave every group/repetition of a collapsed
+    phase visible, defeating the fold for exactly the tool-noise content."""
+    css = TestClient(create_app(repos=[])).get("/static/app.css").text
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)  # drop comments (may mention 'node')
+    covered = False
+    for sel, body in re.findall(r"([^{}]*)\{([^}]*)\}", css):
+        if "display" not in body or "none" not in body:
+            continue
+        # A wrapper row <li class="trace-wrap trace-group fold-hidden"> has no `node`
+        # class, so at least one hiding selector must match `fold-hidden` without
+        # requiring `.node`.
+        for one in sel.split(","):
+            if "fold-hidden" in one and ".node" not in one:
+                covered = True
+    assert covered, "app.css hides fold-hidden only on .node rows, not on wrapper rows"
+
+
+def test_a4_repeat_summary_shows_relative_path_with_full_title(home, tmp_path):  # noqa: F811
+    """A4: a repeat node's summary shows the first call's repo-relative path yet keeps
+    its full raw path in a ``title`` on the shortened label."""
+    repo_abs = os.path.normpath(str((tmp_path / "repo").resolve()))
+    inside = f"{repo_abs}/adw/gui/model.py"
+    lines = [
+        rec(1, "run", "start", "R", None, sec=1, payload=run_start_payload("rep")),
+        rec(2, "agent.run", "start", "A", "R", sec=2,
+            payload={"agent": "spec_agent", "prompt": "p", "system_append": ""}),
+        rec(3, "agent.tool.call", "point", "A", sec=3, payload={
+            "tool": "Read", "tool_use_id": "u1", "input": {"file_path": inside}}),
+        rec(4, "agent.tool.result", "point", "A", sec=4,
+            payload={"tool_use_id": "u1", "is_error": False}),
+        rec(5, "agent.tool.call", "point", "A", sec=5, payload={
+            "tool": "Read", "tool_use_id": "u2", "input": {"file_path": inside}}),
+        rec(6, "agent.tool.result", "point", "A", sec=6,
+            payload={"tool_use_id": "u2", "is_error": False}),
+        rec(7, "agent.run", "end", "A", "R", sec=7,
+            payload={"result_text": "d", "is_error": False}),
+        rec(8, "run", "end", "R", None, sec=8,
+            payload={"status": "done", "totals": {"duration": 1.0}}),
+    ]
+    client, slug, _repo = _client(tmp_path, lines)
+    trace = _trace_section(client.get(f"/runs/{slug}/{RUN_ID}").text)
+    # The two same-target reads fold into a repeat; its summary shows the relative
+    # path with the full path preserved in a title.
+    summary = trace[trace.find("repeat-count") - 400:trace.find("repeat-count")]
+    assert "adw/gui/model.py" in _visible_text(summary)
+    assert f'title="{inside}"' in summary
+    assert inside not in _visible_text(trace)
+
+
 # --- A5: ?focus on a folded result redirects to its call node -------------------
 
 

@@ -157,7 +157,9 @@ main.detail { display: block; }
 .fold-toggle { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 0 0.2rem 0 0; font: inherit; }
 .fold-toggle::before { content: "\25B8"; display: inline-block; }
 .phase-open > .fold-toggle::before { content: "\25BE"; }
-.node.fold-hidden { display: none; }
+/* A5 default-fold hides every direct row of a collapsed phase — original nodes AND
+   the synthetic group/repeat wrapper rows (which carry no `node` class). */
+.trace-list li.fold-hidden { display: none; }
 .trace-balance { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
 
 /* Expand/collapse: native <details>/<summary>, no JS needed to toggle. */

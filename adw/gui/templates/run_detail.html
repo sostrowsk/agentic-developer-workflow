@@ -41,7 +41,7 @@
   {%- elif e.kind == "repeat" %}
     <li class="trace-wrap trace-repeat" style="--depth:{{ e.depth }}">
       <details class="trace-collapse">
-        <summary class="trace-summary">{{ e.children[0].label }} <span class="repeat-count">{{ e.count }}&times; {{ t.fold_call_one if e.count == 1 else t.fold_call_many }}</span>{% if e.duration is not none %} <span class="dur">{{ e.duration | fmt_duration }}</span>{% endif %}</summary>
+        <summary class="trace-summary"><span class="label"{% if e.children[0].title %} title="{{ e.children[0].title }}"{% endif %}>{{ e.children[0].label }}</span> <span class="repeat-count">{{ e.count }}&times; {{ t.fold_call_one if e.count == 1 else t.fold_call_many }}</span>{% if e.duration is not none %} <span class="dur">{{ e.duration | fmt_duration }}</span>{% endif %}</summary>
         <ul class="trace-sublist">{{ trace_entries(e.children) }}</ul>
       </details>
     </li>
