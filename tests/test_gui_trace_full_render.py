@@ -110,9 +110,9 @@ def test_pane_raw_payload_is_pretty_printed(home, tmp_path):  # noqa: F811
 
     html = _detail_html(client, slug)
 
-    open_tag = '<pre class="raw">'
+    open_tag = '<pre class="raw-fields">'
     i = html.find(open_tag)
-    assert i != -1, "no raw payload block rendered"
+    assert i != -1, "no payload field block rendered"
     block = html[i + len(open_tag) : html.find("</pre>", i)]
     assert "\n" in block, "payload is still a single line"
     assert "&#34;" not in block and '"' not in block, "payload is still a JSON dump"

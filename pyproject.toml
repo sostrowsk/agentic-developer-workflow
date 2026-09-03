@@ -1,6 +1,6 @@
 [project]
 name = "adw"
-version = "0.19.0"
+version = "0.20.0"
 description = "Agentic Developer Workflow — 7-Phasen-Orchestrator: Claude Agent SDK + Codex + deterministische Gates"
 requires-python = ">=3.12"
 dependencies = [
@@ -20,6 +20,10 @@ gui = [
     "fastapi>=0.110",
     "uvicorn>=0.27",
     "jinja2>=3",
+    # Renders the Markdown payload fields of the detail pane (issue, prompt,
+    # answer). Already in the tree transitively via typer -> rich, but a direct
+    # dependency is declared rather than relied upon.
+    "markdown-it-py>=3",
 ]
 
 [project.scripts]
@@ -37,6 +41,7 @@ dev = [
     "fastapi>=0.110",
     "uvicorn>=0.27",
     "jinja2>=3",
+    "markdown-it-py>=3",
     "httpx>=0.27",
 ]
 

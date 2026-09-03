@@ -12,6 +12,18 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.20.0] — 2026-09-03
+
+### Added
+- **Markdown payload fields render as documents.** In a server-rendered detail pane a
+  multi-line string — a run's issue, an agent's prompt, its answer, an assistant
+  message — is passed through `markdown-it-py`: headings, lists, fenced code and
+  tables instead of source text. Raw HTML is escaped and links render as literal text,
+  so agent-generated text can neither inject markup nor become a click target; a
+  unified prompt diff stays verbatim. The field-list scaffolding around a payload
+  stays literal (CommonMark would fold the scalar lines into one paragraph); the
+  shared lazy pane keeps the plain field list.
+
 ## [0.19.0] — 2026-09-02
 
 ### Changed
@@ -579,6 +591,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.20.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.16.3...v0.17.0

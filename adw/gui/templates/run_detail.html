@@ -142,6 +142,38 @@
     <pre class="diff-body">{{ t.diff_hint }}</pre>
   </section>
 {% endmacro %}
+{# A payload as alternating blocks: the literal field-list scaffolding in <pre>, and
+   every multi-line string value rendered as Markdown. The renderer escapes raw HTML
+   and emits no links, so agent-generated payload text can neither inject markup nor
+   become a click target — `| safe` is applied to the renderer's own output only. #}
+{# A free-text field (prompt, answer, assistant message) as one block: rendered
+   Markdown when multi-line, literal text otherwise. Same escaping and no-link rules
+   as payload_view — `| safe` covers the renderer's own output only. #}
+{% macro text_view(value, cls="") %}
+  {%- set b = value | markdown_or_text %}
+  {#- The class is written as template STRUCTURE, never built inside an expression:
+      Jinja autoescapes an expression's quotes, so `class="final"` would arrive as
+      `class=&#34;final&#34;` and the browser would read the quotes as part of the
+      class name — every existing `.final` / `.assistant` rule would stop matching. #}
+  {%- if b.kind == "markdown" %}
+    {%- if cls %}<div class="raw-md {{ cls }}">{{ b.html | safe }}</div>
+    {%- else %}<div class="raw-md">{{ b.html | safe }}</div>{% endif %}
+  {%- else %}
+    {%- if cls %}<pre class="{{ cls }}">{{ b.text }}</pre>
+    {%- else %}<pre>{{ b.text }}</pre>{% endif %}
+  {%- endif %}
+{% endmacro %}
+{% macro payload_view(payload) %}
+  <div class="raw">
+  {%- for b in payload | payload_blocks %}
+    {%- if b.kind == "markdown" %}
+    <div class="raw-md" style="--indent:{{ b.indent }}">{{ b.html | safe }}</div>
+    {%- else %}
+    <pre class="raw-fields">{{ b.text }}</pre>
+    {%- endif %}
+  {%- endfor %}
+  </div>
+{% endmacro %}
 {# The type-specific body of a node (no Diff tab — that is added uniformly by the
    pane wrapper for any bracketed node). #}
 {% macro node_body(node) %}
@@ -173,7 +205,7 @@
         <div class="agg-outcome">{{ t.agg_outcome }} {{ node.outcome if node.outcome is not none else "" }}</div>
       </div>
     {% else %}
-      <pre class="raw">{{ node.payload | pretty_payload }}</pre>
+      {{ payload_view(node.payload) }}
     {% endif %}
 {% endmacro %}
 {% macro pane(node, tool_window) %}
@@ -193,8 +225,11 @@
            (empty diff, predecessor seq set) or the visible unified diff. #}
         <section class="tab tab-prompt active" data-tab-panel="prompt"
                  data-prompt-diff-state="{% if node.previous_prompt_seq is none %}none{% elif node.prompt_diff == '' %}identical{% else %}diff{% endif %}">
-          <pre>{{ node.payload.prompt if node.payload else "" }}
-{{ node.payload.system_append if node.payload else "" }}</pre>
+          {{ text_view(node.payload.prompt if node.payload else "") }}
+          {#- An empty system append gets no block: as its own <pre> it would be a
+              styled, visibly blank panel under the prompt. #}
+          {%- set sysapp = node.payload.system_append if node.payload else "" %}
+          {% if sysapp %}{{ text_view(sysapp, "system-append") }}{% endif %}
           {% if node.previous_prompt_seq is none %}
           <p class="prompt-diff-none">{{ t.prompt_diff_none }}</p>
           {% elif node.prompt_diff == "" %}
@@ -205,9 +240,9 @@
           {% endif %}
         </section>
         <section class="tab tab-answer" data-tab-panel="answer">
-          <pre class="final">{{ node.end_payload.result_text if node.end_payload else "" }}</pre>
+          {{ text_view(node.end_payload.result_text if node.end_payload else "", "final") }}
           {% for c in node.children if c.type == "agent.message" %}
-          <pre class="assistant">{{ c.payload.text if c.payload else "" }}</pre>
+          {{ text_view(c.payload.text if c.payload else "", "assistant") }}
           {% endfor %}
         </section>
         {# Tools entries come from ONE global budget across all panes (Aufgabe A):

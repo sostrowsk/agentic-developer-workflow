@@ -466,7 +466,17 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
    stehen als `key: value`, Container schachteln um zwei Leerzeichen. Server und Client
    erzeugen denselben Text (`_pretty_payload` / `prettyPayload`) für die Wertebereiche,
    die in ADW-Payloads vorkommen; ein Payload liest sich also überall gleich. Zwei
-   Abweichungen sind bekannt und bewusst nicht verfolgt, weil kein Event-Payload sie
+   Ein mehrzeiliger String — das Issue eines Laufs, der Prompt eines Agenten, seine
+   Antwort, eine Assistenz-Nachricht — wird zusätzlich als **Markdown** gerendert (nur
+   serverseitig, `markdown-it-py`): Überschriften, Listen, Codeblöcke, Tabellen.
+   Roh-HTML wird escaped, Links erscheinen als reiner Text — agentenerzeugter Text
+   kann so weder Markup einschleusen noch zum Klickziel werden; ein Unified-Prompt-Diff
+   bleibt wörtlich (seine `-`/`+`-Zeilen sind kein Markdown). Markdown läuft NICHT über
+   die ganze Feldliste: CommonMark würde die skalaren `key: value`-Zeilen zu einem
+   Absatz zusammenziehen und verschachtelte Einrückung als Codeblock lesen. Die
+   geteilte nachladende Pane behält die reine Feldliste; ihr Client-Formatter hat
+   keinen Markdown-Durchlauf. Zwei Abweichungen des Text-Formatters sind bekannt und
+   bewusst nicht verfolgt, weil kein Event-Payload sie
    erzeugt: eine Ganzzahl jenseits von 2^53 oder ≥ 1e21 (der Client liest
    JSON-Zahlen als IEEE-754-Doubles) und ein Objekt mit ganzzahlartigen Schlüsseln in
    nicht aufsteigender Reihenfolge (`Object.keys` sortiert Array-Index-Schlüssel um).

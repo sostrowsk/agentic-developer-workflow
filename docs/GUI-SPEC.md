@@ -447,7 +447,16 @@ the GUI stays read-only.
    line breaks under its key, scalars are `key: value`, containers nest by two spaces.
    Server and client produce the same text (`_pretty_payload` / `prettyPayload`) for
    the value ranges ADW payloads contain, so a payload reads identically wherever it
-   is shown. Two divergences are known and deliberately not chased, because no event
+   is shown. A multi-line string value — a run's issue, an agent's prompt, its answer,
+   an assistant message — is additionally rendered as **Markdown** (server side only,
+   `markdown-it-py`): headings, lists, fenced code, tables. Raw HTML in a payload is
+   escaped and links render as literal text, so agent-generated text can neither
+   inject markup nor become a click target; a unified prompt diff stays verbatim
+   (its `-`/`+` lines are not Markdown). Markdown is not run over the whole field
+   list — CommonMark would fold the scalar `key: value` lines into one paragraph and
+   read nested indentation as a code block. The shared lazy pane keeps the plain field
+   list; its client formatter has no Markdown pass. Two divergences of the text
+   formatter are known and deliberately not chased, because no event
    payload produces them: an integer beyond 2^53 or ≥ 1e21 (the client parses JSON
    numbers as IEEE-754 doubles), and an object with integer-like keys in non-ascending
    order (`Object.keys` reorders array-index keys). For `agent.run` four tabs:

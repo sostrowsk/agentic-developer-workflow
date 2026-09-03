@@ -28,6 +28,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from markdown_it import MarkdownIt
 
 from adw.env import safe_env
 from adw.gui import i18n
@@ -652,6 +653,95 @@ def _js_number(value) -> str:
     return ("-" + out) if sign else out
 
 
+# Markdown for the payload's multi-line string fields (a run's issue, an agent's
+# prompt/answer). `html=False` escapes raw HTML instead of passing it through, and
+# the link rules are disabled so a URL in agent-generated text renders as literal
+# text — a payload never becomes a click target. Built once: the parser is stateless
+# across renders.
+_MD = MarkdownIt("gfm-like", {"html": False, "linkify": False})
+_MD.disable(["link", "autolink", "reference", "image"])
+
+
+def _render_markdown(text: str) -> str:
+    return _MD.render(text)
+
+
+def _is_markdown_field(value) -> bool:
+    """Only a MULTI-LINE string is rendered. A single-line value belongs in the field
+    list, where `key: value` reads better than a one-line paragraph."""
+    return isinstance(value, str) and "\n" in value
+
+
+def _markdown_or_text(value) -> dict:
+    """One display block for a free-text field (prompt, answer, assistant message):
+    rendered Markdown when it has several lines, literal text otherwise. Keeps the
+    single decision — "multi-line means Markdown" — in one place, so the prompt and
+    answer tabs read like the payload fields do."""
+    if _is_markdown_field(value):
+        return {"kind": "markdown", "html": _render_markdown(value)}
+    return {"kind": "text", "text": value if isinstance(value, str) else ""}
+
+
+def _payload_blocks(value):
+    """The payload as an alternating sequence of blocks: literal field-list ``text``
+    and rendered ``markdown``.
+
+    Markdown is deliberately NOT run over the whole field list. CommonMark folds
+    consecutive lines into one paragraph — the scalar fields would run together —
+    and reads four-space indentation as a code block, so nested values would be
+    mangled. Rendering only the multi-line string values keeps the scaffolding
+    legible and turns the parts that ARE Markdown into a document.
+    """
+    blocks = []
+    buf = []
+
+    def flush():
+        if buf:
+            blocks.append({"kind": "text", "text": "\n".join(buf)})
+            buf.clear()
+
+    def walk(node, indent):
+        if isinstance(node, dict):
+            for key, item in node.items():
+                emit(key, item, indent)
+        elif isinstance(node, list):
+            for item in node:
+                if _is_markdown_field(item) or (isinstance(item, (dict, list)) and item):
+                    emit(None, item, indent)
+                else:
+                    buf.append(_pretty_item(item, indent))
+
+    def emit(key, item, indent):
+        pad = " " * indent
+        head = f"{pad}{key}:" if key is not None else f"{pad}-"
+        if _is_markdown_field(item):
+            buf.append(head)
+            flush()
+            blocks.append({"kind": "markdown", "html": _render_markdown(item),
+                           "indent": indent + 2})
+        elif isinstance(item, (dict, list)) and item:
+            buf.append(head)
+            walk(item, indent + 2)
+        elif key is not None:
+            buf.append(_pretty_field(key, item, indent))
+        else:
+            buf.append(_pretty_item(item, indent))
+
+    if value is None:
+        return []
+    if isinstance(value, (dict, list)) and not value:
+        # A valid, EMPTY payload: `walk` would append nothing and leave the pane
+        # blank, so render it the way a nested empty container renders.
+        return [{"kind": "text", "text": "{}" if isinstance(value, dict) else "[]"}]
+    if not isinstance(value, (dict, list)):
+        if _is_markdown_field(value):
+            return [{"kind": "markdown", "html": _render_markdown(value), "indent": 0}]
+        return [{"kind": "text", "text": _pretty_payload(value)}]
+    walk(value, 0)
+    flush()
+    return blocks
+
+
 def _pretty_payload(value, indent=0) -> str:
     """An event payload as a readable, indented FIELD LIST — not a JSON dump.
 
@@ -722,6 +812,8 @@ def _pretty_item(value, indent) -> str:
 
 _TEMPLATES.env.filters["compact_context"] = _compact_context
 _TEMPLATES.env.filters["pretty_payload"] = _pretty_payload
+_TEMPLATES.env.filters["payload_blocks"] = _payload_blocks
+_TEMPLATES.env.filters["markdown_or_text"] = _markdown_or_text
 
 # The seven workflow phases in order (contract PhaseStatus enum / GUI-SPEC §7.2).
 PHASES = ["spec", "plan", "build", "integration", "codex_review", "final_review", "ci"]

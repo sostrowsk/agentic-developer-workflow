@@ -263,3 +263,17 @@ table.findings th, table.findings td { border: 1px solid var(--border); padding:
 .artifact-draft .draft-name { color: var(--muted); font-size: 0.85rem; }
 .artifact-body { margin: 0.2rem 0 0; font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .artifact-more { display: inline-block; margin-top: 0.3rem; font-size: 0.85rem; }
+
+/* The payload view: field-list scaffolding as monospace lines, every rendered
+   Markdown value indented under its key so it stays visually attached to it. */
+.raw-fields { margin: 0; white-space: pre-wrap; }
+/* The page is globally overflow-x: hidden, so wide rendered content (a table
+   with many columns, a long unbreakable cell) scrolls inside its own block
+   instead of being clipped at the pane edge. */
+.raw-md { margin: 0 0 .4rem calc(var(--indent, 0) * 1ch); max-width: 100%; overflow-x: auto; }
+.raw-md > :first-child { margin-top: .2rem; }
+.raw-md > :last-child { margin-bottom: 0; }
+.raw-md h1, .raw-md h2, .raw-md h3 { font-size: 1em; margin: .5rem 0 .2rem; }
+.raw-md pre { overflow-x: auto; }
+.raw-md table { border-collapse: collapse; }
+.raw-md th, .raw-md td { border: 1px solid #ccc; padding: .1rem .3rem; }
