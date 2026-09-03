@@ -2475,6 +2475,25 @@ def _stream(events_path, last_id):
         time.sleep(_POLL_SECONDS)
 
 
+class _RevalidatingStatic(StaticFiles):
+    """``/static`` with ``Cache-Control: no-cache``.
+
+    ``StaticFiles`` sends ``etag`` and ``last-modified`` but no ``Cache-Control``, and
+    without one a browser applies HEURISTIC freshness: it reuses its cached copy
+    without asking the server. For a local inspection tool whose assets change
+    whenever the orchestrator is worked on, that is the wrong default — a stale
+    stylesheet survives a server restart and even a hard reload in another tab.
+
+    ``no-cache`` does not forbid caching; it forbids using a cached copy WITHOUT
+    revalidating. The ETag is already there, so revalidation costs one 304.
+    """
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["cache-control"] = "no-cache"
+        return response
+
+
 # --- app factory ----------------------------------------------------------------
 
 
@@ -2482,7 +2501,7 @@ def create_app(repos=None) -> FastAPI:
     app = FastAPI(title="ADW Read-only GUI")
     static_dir = _HERE / "static"
     if static_dir.is_dir():
-        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        app.mount("/static", _RevalidatingStatic(directory=str(static_dir)), name="static")
     refs = _resolve_repos(repos)
 
     def resolve_repo(slug: str) -> RepoRef:

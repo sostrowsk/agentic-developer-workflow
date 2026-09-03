@@ -13,6 +13,18 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.20.2] — 2026-09-03
+
+### Behoben
+- **Die eigenen Assets der GUI werden immer revalidiert.** `/static` lieferte `etag`
+  und `last-modified`, aber kein `Cache-Control`; ein Browser wendet dann heuristische
+  Frische an und benutzt die gecachte Kopie, ohne den Server zu fragen. Nach 0.20.1
+  lieferte der Server das korrigierte `app.css`, aber der Stylesheet der Seite kam mit
+  `transferSize: 0` an und der Fix blieb unsichtbar — ein Server-Neustart half nicht,
+  und ein Hard-Reload in einem Tab half einem neu geöffneten nicht. Assets senden
+  jetzt `Cache-Control: no-cache`: die Kopie bleibt im Cache, muss aber revalidiert
+  werden, was mit dem vorhandenen ETag ein 304 kostet.
+
 ## [0.20.1] — 2026-09-03
 
 ### Behoben
@@ -648,6 +660,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.20.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.18.0...v0.19.0

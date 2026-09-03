@@ -12,6 +12,18 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.20.2] — 2026-09-03
+
+### Fixed
+- **The GUI's own assets are always revalidated.** `/static` sent `etag` and
+  `last-modified` but no `Cache-Control`, so a browser applied heuristic freshness and
+  reused its cached copy without asking the server: after 0.20.1 the served `app.css`
+  carried the label-wrap fix, yet the page's stylesheet arrived with `transferSize: 0`
+  and the fix stayed invisible — a restarted server did not help, and a hard reload in
+  one tab did not help a newly opened one. Assets now send `Cache-Control: no-cache`,
+  which keeps the cached copy but requires revalidation; with the existing ETag that
+  costs one 304.
+
 ## [0.20.1] — 2026-09-03
 
 ### Fixed
@@ -600,6 +612,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.20.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.18.0...v0.19.0
