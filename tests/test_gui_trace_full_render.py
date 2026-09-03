@@ -189,3 +189,23 @@ def test_a_late_response_never_clears_the_shared_pane(tmp_path):
     assert "STALE_A" not in r["final_body"]
     assert r["final_load_seq"] == "43"
     assert r["generic_selected"] is True
+
+
+def test_long_tree_labels_wrap_inside_their_column():
+    """Regression: a long unbreakable label — a worktree path, a grep pattern — used
+    to overflow the trace column and paint over the detail pane beside it (measured
+    on run 16f39431: 59 labels past the column edge, the worst 282px into the panes
+    column). The column already has `min-width: 0`; the labels must also be allowed
+    to break."""
+    import re
+
+    css = TestClient(create_app(repos=[])).get("/static/app.css").text
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    wraps = False
+    for sel, body in re.findall(r"([^{}]*)\{([^}]*)\}", css):
+        if ".label" not in sel:
+            continue
+        m = re.search(r"overflow-wrap\s*:\s*([\w-]+)", body)
+        if m and m.group(1) in ("anywhere", "break-word"):
+            wraps = True
+    assert wraps, "app.css lets long trace labels overflow their column"

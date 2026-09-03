@@ -12,6 +12,15 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.20.1] — 2026-09-03
+
+### Fixed
+- **Long tree labels no longer overflow the trace column.** A worktree path or a grep
+  pattern has few break opportunities, and without an explicit one the label ran past
+  the column edge and painted over the detail pane beside it (measured on run
+  `16f39431`: 59 labels past the edge, the worst 282px into the panes column). The
+  column already had `min-width: 0`; the labels now break like the `pre` blocks do.
+
 ## [0.20.0] — 2026-09-03
 
 ### Added
@@ -591,6 +600,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.20.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.17.0...v0.18.0

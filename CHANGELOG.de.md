@@ -13,6 +13,16 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.20.1] — 2026-09-03
+
+### Behoben
+- **Lange Baum-Labels laufen nicht mehr aus der Trace-Spalte heraus.** Ein
+  Worktree-Pfad oder ein Grep-Muster bietet kaum Umbruchstellen, und ohne eine
+  explizite lief das Label über den Spaltenrand hinaus und überlagerte die Detail-Pane
+  daneben (gemessen an Lauf `16f39431`: 59 Labels über dem Rand, das weiteste 282 px
+  in die Panes-Spalte hinein). Die Spalte hatte bereits `min-width: 0`; die Labels
+  brechen jetzt wie die `pre`-Blöcke.
+
 ## [0.20.0] — 2026-09-03
 
 ### Hinzugefügt
@@ -638,6 +648,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.20.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.17.0...v0.18.0
