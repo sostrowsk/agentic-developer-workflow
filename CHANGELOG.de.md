@@ -13,6 +13,17 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.21.0] — 2026-09-04
+
+### Hinzugefügt
+- **Artefakt-Zeilen nennen ihre Datei.** Ein `artifact`-Knoten erschien als das bloße
+  Wort `artifact`, eine Folge davon sagte dem Leser also nichts — und der in 0.19.0
+  ergänzte Sammelknoten machte das schlimmer statt besser: `5× Artefakte` faltete
+  korrekt, aufgeklappt standen aber fünf identische Zeilen. Das Label ist jetzt
+  `artifact <name>`, dieselbe Form wie bei einem Werkzeugaufruf, mit dem vollständigen
+  Pfad im `title`. Ohne brauchbaren Namen bleibt der reine Typname stehen. Das `label`
+  im API-`tree` trägt denselben Text — es wird an einer Stelle gebildet.
+
 ## [0.20.2] — 2026-09-03
 
 ### Behoben
@@ -660,6 +671,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.21.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.2...v0.21.0
 [0.20.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.19.0...v0.20.0

@@ -420,6 +420,11 @@ the GUI stays read-only.
      breaking event stays its own, unfolded node — at the first message, any write
      (`Write`/`Edit`), any artefact, any determinate error, and at `Bash`/any
      unknown tool. Below two children nothing is wrapped (not even a lone repeat).
+   - **Artifact rows name their file.** An `artifact` node renders as
+     `artifact <payload.name>` — the same shape a tool call has (`Read <path>`) — with
+     the complete `payload.path` in the `title`. Without a usable name the bare type
+     name stays. A run of artifacts still collapses into one counted collector; only
+     now does opening it say which files they were.
    - **Repo-relative paths (A4).** A path inside the repo shows with the repo prefix
      stripped and keeps the full path in the element's `title`; a path outside the
      repo is shown unchanged. No node shows the absolute repo path as visible text.

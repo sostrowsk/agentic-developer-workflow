@@ -12,6 +12,17 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.21.0] — 2026-09-04
+
+### Added
+- **Artifact rows name their file.** An `artifact` node rendered as the bare word
+  `artifact`, so a run of them told the reader nothing — and the counted collector
+  added in 0.19.0 made that worse, not better: `5× artifacts` collapsed correctly but
+  expanded into five identical rows. The label is now `artifact <name>`, the same
+  shape a tool call has, with the complete path in the `title`. Without a usable name
+  the bare type name stays. The `label` in the API `tree` carries the same text — it
+  is built once.
+
 ## [0.20.2] — 2026-09-03
 
 ### Fixed
@@ -612,6 +623,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.21.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.2...v0.21.0
 [0.20.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.19.0...v0.20.0

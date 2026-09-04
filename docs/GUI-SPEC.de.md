@@ -436,6 +436,12 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
      Schreiboperation (`Write`/`Edit`), jedem Artefakt, jedem bestimmten Fehler sowie
      bei `Bash`/unbekanntem Werkzeug. Unter zwei Kindern keine Hülle (auch nicht um
      einen einzelnen Wiederholungsknoten).
+   - **Artefakt-Zeilen nennen ihre Datei.** Ein `artifact`-Knoten erscheint als
+     `artifact <payload.name>` — dieselbe Form, die ein Werkzeugaufruf hat
+     (`Read <pfad>`) — mit dem vollständigen `payload.path` im `title`-Attribut. Ohne
+     brauchbaren Namen bleibt der reine Typname stehen. Eine Folge von Artefakten wird
+     weiterhin zu einem gezählten Sammelknoten; erst jetzt sagt das Aufklappen, welche
+     Dateien es waren.
    - **Repo-relative Pfade (A4).** Ein Pfad im Repo erscheint ohne Repo-Präfix und
      behält den vollen Pfad im `title`-Attribut; ein Pfad außerhalb bleibt
      unverändert. Kein Knoten zeigt den absoluten Repo-Pfad im sichtbaren Text.

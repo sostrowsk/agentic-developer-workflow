@@ -518,6 +518,14 @@ def _display_label(node, repo_root):
     """The (visible label, full-path title) for a tree node (A4). A tool call shows
     the repo-relative main argument in the text and keeps the full raw value in the
     title; every other node keeps its serialized label and has no title."""
+    if node.get("type") == "artifact":
+        # A4 for an artifact: the visible text is its short name, the complete path
+        # stays reachable in the title — the same deal a path argument gets. The
+        # payload is guarded like everywhere else: a corrupt record may carry a
+        # truthy NON-mapping value, and that must not 500 the whole page.
+        p = node.get("payload")
+        path = p.get("path") if isinstance(p, dict) else None
+        return node.get("label"), (path if isinstance(path, str) and path else None)
     if node.get("type") != "agent.tool.call":
         return node.get("label"), None
     p = node.get("payload") or {}
@@ -1194,6 +1202,15 @@ def _tool_result_label(p, tool_names) -> str:
     return outcome
 
 
+def _artifact_label(p) -> str:
+    """``artifact <name>`` — the same shape a tool call has (``Read <path>``). Every
+    artifact row used to read just ``artifact``, which made a run of them (and the
+    counted collector over it) tell the reader nothing. Without a usable name the
+    bare type name stays: invent nothing."""
+    name = p.get("name") if isinstance(p, dict) else None
+    return f"artifact {name}" if isinstance(name, str) and name else "artifact"
+
+
 def _node_label(node, tool_names=None) -> str:
     tool_names = tool_names or {}
     if _is_span(node):
@@ -1212,6 +1229,8 @@ def _node_label(node, tool_names=None) -> str:
         return _tool_call_label(node.payload)
     if node.type == "agent.tool.result":
         return _tool_result_label(node.payload, tool_names)
+    if node.type == "artifact":
+        return _artifact_label(node.payload)
     return node.type or "?"
 
 
