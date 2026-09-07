@@ -12,6 +12,16 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.21.1] — 2026-09-07
+
+### Changed
+- **ADW-on-itself now holds before the push.** `.adw/config.yaml` activates the
+  `before_push` breakpoint, so a run of this repo stops after the final review
+  and before *any* CI work, and continues only on `adw approve <run_id>`. This
+  is the first practical use of the breakpoints shipped in 0.16.0 — until now
+  the feature was only covered by tests — and it exercises the run-start pinning
+  from 0.16.3 against real data. Config only, no code change.
+
 ## [0.21.0] — 2026-09-04
 
 ### Added
@@ -623,6 +633,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.21.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.2...v0.21.0
 [0.20.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.0...v0.20.1

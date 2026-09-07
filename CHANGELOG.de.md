@@ -13,6 +13,17 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.21.1] — 2026-09-07
+
+### Geändert
+- **ADW-auf-sich-selbst hält jetzt vor dem Push.** `.adw/config.yaml` aktiviert
+  den Haltepunkt `before_push`: ein Lauf dieses Repos stoppt nach dem finalen
+  Review und vor *jeglicher* CI-Arbeit und läuft erst auf
+  `adw approve <run_id>` weiter. Das ist die erste praktische Nutzung der in
+  0.16.0 gelieferten Haltepunkte — bisher war das Feature nur durch Tests
+  gedeckt — und erprobt zugleich die Run-Start-Pinnung aus 0.16.3 an echten
+  Daten. Nur Config, keine Code-Änderung.
+
 ## [0.21.0] — 2026-09-04
 
 ### Hinzugefügt
@@ -671,6 +682,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.21.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.2...v0.21.0
 [0.20.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.0...v0.20.1
