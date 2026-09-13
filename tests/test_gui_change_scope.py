@@ -24,7 +24,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-from adw.gui.app import create_app
+from adw.gui.app import _observed_lanes, _snapshots_by_lane, create_app
 from adw.gui.i18n import CATALOG
 from adw.gui.registry import _slug
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
@@ -339,6 +339,99 @@ def test_non_string_lane_names_are_ignored_without_a_5xx(home, tmp_path):  # noq
     lanes = r.json()["change_scope"]["lanes"]
     assert [ln["lane"] for ln in lanes] == ["backend"]
     assert all(isinstance(ln["lane"], str) and ln["lane"] for ln in lanes)
+
+
+def _nonmapping_lane_start(seq, payload):
+    """A `lane`/`start` event whose WHOLE `payload` is a truthy non-mapping value
+    (list / string / number) — the crafted-or-corrupt shape `_mapping_payload`
+    guards against, distinct from a mapping carrying a malformed field."""
+    return rec(seq, "lane", "start", f"L{seq}", "PB", sec=seq, payload=payload)
+
+
+def _nonmapping_snap(seq, payload):
+    """A `snapshot` event whose WHOLE `payload` is a truthy non-mapping value."""
+    return rec(seq, "snapshot", "point", "L", sec=seq, payload=payload)
+
+
+def test_non_mapping_payload_helpers_ignore_the_event_without_raising():
+    """AC-4 (RED proof): the two change-scope helpers must READ the payload through
+    the mapping guard. Called directly on a `lane`/`start` event whose payload is a
+    truthy list and a `snapshot` whose payload is a truthy string — exactly the
+    reproduction in the issue — they return an empty result instead of raising
+    `AttributeError` on `.get`. The exception is NOT caught: before the fix these
+    calls raise and the test fails."""
+    assert _observed_lanes(
+        [{"type": "lane", "kind": "start", "seq": 1, "payload": ["nope"]}], {}
+    ) == []
+    assert _snapshots_by_lane(
+        [{"type": "snapshot", "seq": 2, "payload": "text"}], "abcd1234"
+    ) == {}
+
+
+def test_non_mapping_lane_start_payload_is_ignored_without_a_5xx(home, tmp_path):  # noqa: F811
+    """AC-1: a `lane`/`start` event whose entire `payload` is a non-empty list, a
+    non-empty string and a non-zero number never becomes a lane. Beside a valid
+    string lane the detail stays 200 and the only reported lane is the valid one —
+    no extra entry, placeholder or diagnostic field."""
+    repo = tmp_path / "repo"
+    write_run(repo, RUN_ID, _wrap([
+        _lane_start(3, "backend"),
+        _nonmapping_lane_start(4, ["nope"]),   # list payload -> ignored
+        _nonmapping_lane_start(5, "text"),     # string payload -> ignored
+        _nonmapping_lane_start(6, 42),         # number payload -> ignored
+    ]), phase="done")
+    r = _client(repo).get(f"/api/runs/{_slug_for(repo)}/{RUN_ID}")
+    assert r.status_code == 200
+
+    cs = r.json()["change_scope"]
+    assert set(cs) == {"lanes", "declared_scope"}
+    assert [ln["lane"] for ln in cs["lanes"]] == ["backend"]
+
+
+def test_non_mapping_snapshot_payload_is_ignored_and_keeps_the_valid_pair(home, tmp_path):  # noqa: F811,E501
+    """AC-2: `snapshot` events whose entire `payload` is a list, a string and a
+    number — placed before, between and after a valid snapshot pair — are ignored:
+    the detail stays 200, the broken events bracket no node and appear in no lane,
+    and the valid backend pair keeps its `diff_available`/`files` unchanged."""
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    _commit_ref(repo, {"backend/a.py": "a\nb\nc\n"}, _ref(1))
+    _commit_ref(repo, {"backend/a.py": "a\nX\nc\nd\n"}, _ref(2))
+
+    write_run(repo, RUN_ID, _wrap([
+        _nonmapping_snap(3, ["nope"]),         # before the valid pair
+        _lane_start(4, "backend"),
+        _snap(5, "backend", _ref(1)),
+        _nonmapping_snap(6, "text"),           # between the valid snapshots
+        _snap(7, "backend", _ref(2)),
+        _nonmapping_snap(8, 42),               # after the valid pair
+    ]), phase="done")
+    r = _client(repo).get(f"/api/runs/{_slug_for(repo)}/{RUN_ID}")
+    assert r.status_code == 200
+
+    lanes = r.json()["change_scope"]["lanes"]
+    assert [ln["lane"] for ln in lanes] == ["backend"]     # broken events add no lane
+    backend = lanes[0]
+    assert backend["diff_available"] is True               # the valid pair survives
+    assert [f["path"] for f in backend["files"]] == ["backend/a.py"]
+
+
+def test_run_with_only_non_mapping_payload_events_is_200_with_no_lanes(home, tmp_path):  # noqa: F811,E501
+    """AC-3: a run whose only `lane`/`start` and `snapshot` events carry a
+    non-mapping payload (list / string / number) yields 200 with
+    `change_scope.lanes == []` — no error and no synthetic lane entry."""
+    repo = tmp_path / "repo"
+    write_run(repo, RUN_ID, _wrap([
+        _nonmapping_lane_start(3, ["nope"]),
+        _nonmapping_lane_start(4, "text"),
+        _nonmapping_lane_start(5, 42),
+        _nonmapping_snap(6, ["x"]),
+        _nonmapping_snap(7, "s"),
+        _nonmapping_snap(8, 99),
+    ]), phase="done")
+    r = _client(repo).get(f"/api/runs/{_slug_for(repo)}/{RUN_ID}")
+    assert r.status_code == 200
+    assert r.json()["change_scope"]["lanes"] == []
 
 
 def test_unhashable_lane_values_do_not_crash_the_detail(home, tmp_path):  # noqa: F811

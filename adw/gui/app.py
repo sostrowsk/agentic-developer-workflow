@@ -1328,7 +1328,7 @@ def _snapshots_by_lane(events, run_id) -> dict:
         if e.get("type") != "snapshot":
             continue
         seq = e.get("seq")
-        payload = e.get("payload") or {}
+        payload = _mapping_payload(e)
         lane = payload.get("lane")
         ref = payload.get("ref")
         # The lane must be a non-empty STRING: a malformed non-string value (numeric,
@@ -2327,7 +2327,7 @@ def _observed_lanes(events, snaps: dict) -> list:
 
     for e in events:
         if e.get("type") == "lane" and e.get("kind") == "start":
-            observe((e.get("payload") or {}).get("name"), e.get("seq"))
+            observe(_mapping_payload(e).get("name"), e.get("seq"))
     for lane, pairs in snaps.items():
         for seq, _ref in pairs:
             observe(lane, seq)
