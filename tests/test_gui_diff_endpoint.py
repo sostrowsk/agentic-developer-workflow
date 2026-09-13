@@ -13,12 +13,13 @@ Derived from .adw/spec.md (AC-B1..B4, B7), .adw/contract.yaml
 against temp git repos via FastAPI's TestClient. RED until the diff route exists.
 """
 
+import json
 import os
 import subprocess
 
 from fastapi.testclient import TestClient
 
-from adw.gui.app import create_app
+from adw.gui.app import _snapshot_refs, create_app
 from adw.gui.registry import _slug
 from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     build_diff_run,
@@ -330,3 +331,66 @@ def test_large_diff_patch_and_counts_are_fully_reachable(home, tmp_path):  # noq
     total_lines = sum(f["additions"] + f["deletions"] for f in text_files)
     assert total_lines >= 1500
     assert body["patch"]  # the unified patch is present in full
+
+
+# --- Follow-up of run e4e70373: non-mapping payloads must not 5xx the allowlist --
+#
+# 0.21.2 put the `_mapping_payload` guard into `_snapshots_by_lane` and
+# `_observed_lanes`. `_snapshot_refs` — the allowlist this endpoint validates
+# `from`/`to` against — still read `(e.get("payload") or {}).get("ref")` and so
+# raised `AttributeError` on an event whose WHOLE payload is a truthy
+# non-mapping, turning a rejection into a 5xx.
+
+
+def _bad_snapshot(seq, payload):
+    """A `snapshot` event whose ENTIRE payload is a truthy non-mapping value."""
+    return rec(seq, "snapshot", "point", "L", sec=seq, lane="backend", payload=payload)
+
+
+def _append_events(repo, run_id, records):
+    """Append extra event records to an existing run's events.jsonl."""
+    path = repo / ".adw" / "runs" / run_id / "events.jsonl"
+    with path.open("a", encoding="utf-8") as fh:
+        for r in records:
+            fh.write(json.dumps(r) + "\n")
+
+
+def test_snapshot_refs_ignores_non_mapping_payloads_without_raising():
+    """RED proof: the allowlist helper must READ the payload through the mapping
+    guard. Before the fix each of these raises `AttributeError` — the exception is
+    deliberately NOT caught, so a regression fails loudly instead of passing."""
+    assert _snapshot_refs([_bad_snapshot(1, ["nope"])]) == set()
+    assert _snapshot_refs([_bad_snapshot(2, "refs/adw/aaaa1111/1")]) == set()
+    assert _snapshot_refs([_bad_snapshot(3, 42)]) == set()
+
+
+def test_non_mapping_snapshot_payloads_keep_the_valid_diff_at_200(home, tmp_path):  # noqa: F811
+    """A run carrying broken snapshot events still diffs its valid pair: the
+    allowlist ignores the broken events, the endpoint stays 200 and the payload is
+    unchanged."""
+    client, info = _diff_client(tmp_path)
+    _append_events(info["repo"], RUN_ID, [
+        _bad_snapshot(11, ["nope"]),
+        _bad_snapshot(12, "refs/adw/aaaa1111/3"),
+        _bad_snapshot(13, 42),
+    ])
+
+    resp = client.get(info["url"], params={"from": info["ref1"], "to": info["ref2"]})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert set(body) == {"files", "patch"}
+    assert any(f["path"] == "src/example.py" for f in body["files"])
+
+
+def test_unlisted_ref_is_404_not_5xx_despite_non_mapping_payloads(home, tmp_path):  # noqa: F811
+    """The rejection path is the one that actually broke: building the allowlist
+    raised before it could answer. A structurally valid but unlisted ref must stay
+    a clean 404 even when the log contains non-mapping snapshot payloads."""
+    client, info = _diff_client(tmp_path)
+    _append_events(info["repo"], RUN_ID, [
+        _bad_snapshot(11, ["nope"]),
+        _bad_snapshot(12, 42),
+    ])
+
+    resp = client.get(info["url"], params={"from": info["ref1"], "to": info["unlisted"]})
+    assert resp.status_code == 404, resp.text

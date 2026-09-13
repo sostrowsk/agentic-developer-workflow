@@ -12,6 +12,37 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.21.3] — 2026-09-13
+
+### Fixed
+- **A corrupt event payload no longer 5xx's the reads — everywhere, not just in
+  the change scope.** 0.21.2 guarded two helpers; a sweep of the whole read
+  surface found ten more unguarded payload accesses. Measured against a run
+  whose every event carries a truthy non-mapping payload, three of the four read
+  endpoints returned 500: the run **list** (`_summary` on `payload.totals`), the
+  run **detail**, and the server-rendered detail **page**. The list was the worst
+  of them — one corrupt run took every healthy run beside it off the home page.
+  All ten now read through `_mapping_payload()`, including `_snapshot_refs`,
+  whose failure turned the diff endpoint's *rejection* path into a 500.
+- **Nested non-mapping values are covered too.** A payload that *is* a mapping
+  but whose `totals` is not (`{"totals": ["nope"]}`) broke `_summary` and the
+  timeline just the same. The new `_as_mapping()` is the single place that makes
+  an arbitrary JSON value safe to `.get` on; `_mapping_payload()` is now defined
+  in terms of it.
+- **Span nodes were the blind spot.** `_node_status` and `_aggregate_outcome`
+  read `node.end_payload` — a tree node's own field, not a raw event — and were
+  missed by the first sweep. Found by `codex review`, which also showed why: the
+  first version of the new fixture reused one span id for every event, so
+  `build_tree()` collapsed them into a single node and no per-span end payload
+  was ever exercised. The fixture now gives each span its own id and pairs
+  start/end, plus an open span and a point event per type.
+
+### Added
+- `tests/test_gui_payload_robustness.py` pins the guarantee at endpoint level:
+  every event type crossed with every kind and every non-mapping shape, in one
+  run, against list, detail, page and events. Plus three tests in
+  `tests/test_gui_diff_endpoint.py` for the allowlist.
+
 ## [0.21.2] — 2026-09-13
 
 ### Fixed
@@ -661,6 +692,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.21.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.2...v0.21.0

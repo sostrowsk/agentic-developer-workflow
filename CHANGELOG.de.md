@@ -13,6 +13,39 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.21.3] — 2026-09-13
+
+### Behoben
+- **Ein korrupter Event-Payload wirft die Lese-Endpunkte nicht mehr auf 5xx —
+  überall, nicht nur im Änderungsumfang.** 0.21.2 hatte zwei Helfer abgesichert;
+  eine Durchsicht der gesamten Lesefläche fand zehn weitere ungeschützte
+  Payload-Zugriffe. Gemessen an einem Lauf, dessen sämtliche Events einen truthy
+  Nicht-Mapping-Payload tragen, lieferten drei der vier Lese-Endpunkte 500: die
+  Lauf-**Liste** (`_summary` über `payload.totals`), das Lauf-**Detail** und die
+  servergerenderte Detail-**Seite**. Die Liste war der schlimmste Fall — ein
+  einziger korrupter Lauf nahm jeden gesunden Lauf daneben von der Startseite.
+  Alle zehn lesen jetzt über `_mapping_payload()`, darunter `_snapshot_refs`,
+  dessen Fehler den *Ablehnungs*-Pfad des Diff-Endpunkts auf 500 warf.
+- **Verschachtelte Nicht-Mapping-Werte sind mit abgedeckt.** Ein Payload, der
+  selbst ein Mapping ist, dessen `totals` aber nicht (`{"totals": ["nope"]}`),
+  brach `_summary` und die Timeline genauso. Das neue `_as_mapping()` ist die
+  eine Stelle, die einen beliebigen JSON-Wert `.get`-sicher macht;
+  `_mapping_payload()` ist jetzt darüber definiert.
+- **Die Span-Knoten waren der blinde Fleck.** `_node_status` und
+  `_aggregate_outcome` lesen `node.end_payload` — ein Feld des Baumknotens, kein
+  Roh-Event — und wurden von der ersten Durchsicht übersehen. Gefunden von
+  `codex review`, das auch zeigte, warum: die erste Fassung des neuen Fixtures
+  benutzte für jedes Event dieselbe Span-ID, `build_tree()` faltete sie damit zu
+  einem einzigen Knoten, und kein einziger Span-`end`-Payload wurde je geprüft.
+  Das Fixture gibt jetzt jedem Span eine eigene ID und paart Start/Ende, dazu je
+  Typ einen offenen Span und ein Point-Event.
+
+### Hinzugefügt
+- `tests/test_gui_payload_robustness.py` pinnt die Zusage auf Endpunkt-Ebene:
+  jeder Event-Typ gekreuzt mit jedem Kind und jeder Nicht-Mapping-Form, in einem
+  Lauf, gegen Liste, Detail, Seite und Events. Dazu drei Tests in
+  `tests/test_gui_diff_endpoint.py` für die Allowlist.
+
 ## [0.21.2] — 2026-09-13
 
 ### Behoben
@@ -711,6 +744,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.21.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.2...v0.21.0

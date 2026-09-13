@@ -441,7 +441,7 @@ def _node_determinate_error(node) -> bool:
     (``is_error: true``, else ``exit_code != 0``, else a failed span); an
     undetermined result is not an error."""
     if node.get("type") == "agent.tool.result":
-        p = node.get("payload") or {}
+        p = _mapping_payload(node)
         ie, ec = p.get("is_error"), p.get("exit_code")
         if isinstance(ie, bool):
             return ie
@@ -528,7 +528,7 @@ def _display_label(node, repo_root):
         return node.get("label"), (path if isinstance(path, str) and path else None)
     if node.get("type") != "agent.tool.call":
         return node.get("label"), None
-    p = node.get("payload") or {}
+    p = _mapping_payload(node)
     tool = p.get("tool")
     if not tool:
         return node.get("label"), None
@@ -971,7 +971,7 @@ def _latest_approval_event(events):
     latest = None
     for e in events:
         if e.get("type") == "approval":
-            ev = (e.get("payload") or {}).get("event")
+            ev = _mapping_payload(e).get("event")
             if ev in ("awaited", "granted"):
                 latest = ev
     return latest
@@ -989,7 +989,7 @@ def _awaiting_gate_phase(events, state_phase):
     for e in events:
         if e.get("type") != "approval":
             continue
-        payload = e.get("payload") or {}
+        payload = _mapping_payload(e)
         ev = payload.get("event")
         g = payload.get("gate")
         g = g if g in ("spec", "plan") else None
@@ -1013,9 +1013,9 @@ def _awaiting_gate_phase(events, state_phase):
 
 def _summary(slug, run_id, events, state) -> dict:
     start_rec, end_rec = _run_span(events)
-    start_payload = (start_rec or {}).get("payload") or {}
-    end_payload = (end_rec or {}).get("payload") or {}
-    totals = end_payload.get("totals") or {}
+    start_payload = _mapping_payload(start_rec or {})
+    end_payload = _mapping_payload(end_rec or {})
+    totals = _as_mapping(end_payload.get("totals"))
     issue = start_payload.get("issue")
     if issue is None and state is not None:
         # A run without an event log (Aufgabe G) still names its issue in state.
@@ -1067,12 +1067,19 @@ def _summary(slug, run_id, events, state) -> dict:
     }
 
 
+def _as_mapping(value) -> dict:
+    """``value`` if it is a mapping, else an empty dict. The single place that turns
+    an arbitrary — possibly corrupt — JSON value into something safe to ``.get`` on.
+    Also covers NESTED values such as ``payload.totals``, which the payload guard
+    alone does not reach."""
+    return value if isinstance(value, dict) else {}
+
+
 def _mapping_payload(rec) -> dict:
     """The event's payload if it is a mapping, else an empty dict. A crafted or
     corrupt event whose ``payload`` is a truthy non-mapping (string/list/number)
     must never reach ``.get`` — it would raise and turn a read into a 5xx (AC 7)."""
-    payload = rec.get("payload")
-    return payload if isinstance(payload, dict) else {}
+    return _as_mapping(rec.get("payload"))
 
 
 def _phase_bar(events, state_phase) -> list[dict]:
@@ -1243,7 +1250,7 @@ def _node_status(node):
         # other open span (agent.run, codex, run, phase, lane, round) stays running.
         return "waiting" if node.type in _WAITING_TYPES else "running"
     if node.type == "gate":
-        return "passed" if (node.end_payload or {}).get("passed") else "failed"
+        return "passed" if _as_mapping(node.end_payload).get("passed") else "failed"
     return "done"
 
 
@@ -1268,7 +1275,7 @@ def _aggregate_outcome(node):
     """A per-node-type outcome for phase/lane/round aggregates: the frozen end
     payloads use different keys (round: ``outcome``, lane: ``completed``, phase:
     ``to_phase``), so none of them is a literal ``outcome`` field."""
-    ep = node.end_payload or {}
+    ep = _as_mapping(node.end_payload)
     if node.type == "round":
         return ep.get("outcome")
     if node.type == "lane":
@@ -1286,7 +1293,7 @@ def _tool_names_by_use_id(events) -> dict:
     names: dict = {}
     for e in events:
         if e.get("type") == "agent.tool.call":
-            p = e.get("payload") or {}
+            p = _mapping_payload(e)
             uid, tool = p.get("tool_use_id"), p.get("tool")
             if uid and tool:
                 names[uid] = str(tool)
@@ -1613,11 +1620,11 @@ def _tokens_per_model(events) -> list[dict]:
     model_by_span: dict = {}
     for e in events:
         if e.get("type") == "agent.run" and e.get("kind") == "start":
-            model_by_span[e.get("span")] = (e.get("payload") or {}).get("model")
+            model_by_span[e.get("span")] = _mapping_payload(e).get("model")
     per: dict = {}
     for e in events:
         if e.get("type") == "agent.run" and e.get("kind") == "end":
-            usage = (e.get("payload") or {}).get("usage")
+            usage = _mapping_payload(e).get("usage")
             if not isinstance(usage, dict):
                 continue
             model = model_by_span.get(e.get("span")) or "?"
@@ -1849,7 +1856,7 @@ def _timeline(events) -> dict:
         s = starts[sid]
         e = ends.get(sid)
         typ = s.get("type")
-        payload = s.get("payload") or {}
+        payload = _mapping_payload(s)
         if typ == "run":
             key, label = "orchestrator", "orchestrator"
         elif typ == "phase":
@@ -1899,7 +1906,7 @@ def _timeline(events) -> dict:
         })
 
     start_rec, end_rec = _run_span(events)
-    totals = ((end_rec or {}).get("payload") or {}).get("totals") or {}
+    totals = _as_mapping(_mapping_payload(end_rec or {}).get("totals"))
     duration = totals.get("duration")
     if duration is None:
         a = _ts_epoch((start_rec or {}).get("ts"))
@@ -2242,7 +2249,7 @@ def _snapshot_refs(events) -> set:
     refs = set()
     for e in events:
         if e.get("type") == "snapshot":
-            ref = (e.get("payload") or {}).get("ref")
+            ref = _mapping_payload(e).get("ref")
             if isinstance(ref, str) and ref:
                 refs.add(ref)
     return refs
