@@ -30,9 +30,11 @@ English edition: [CHANGELOG.md](CHANGELOG.md)
   Panes-Spalte; die Kontext-Spalte bleibt die schmalste.
 - **Timeline: Geometrie in die Spur, Wörter daneben.** Ein Timeline-Balken ist jetzt
   reine Geometrie — `left`/`width` in Prozent und die Unterscheidung
-  aktiv/wartend/noch laufend bleiben unverändert — und sein Name steht in einer
-  eigenen Beschriftungszeile unter der Spur, sodass ein kurzer Balken seinen Namen
-  nicht mehr abschneidet. Das `title`-Attribut bleibt erhalten. Rein darstellend —
+  aktiv/wartend/noch laufend bleiben unverändert — und jeder Balken bekommt eine
+  eigene Zeile mit seinem Namen in einer eigenen Beschriftung neben seiner eigenen
+  Spur, sodass ein kurzer Balken seinen Namen nicht mehr abschneidet und ein Balken je
+  Zeile die Zuordnung Name↔Balken eindeutig hält. Das `title`-Attribut bleibt
+  erhalten. Rein darstellend —
   `GET /api/runs` und `GET /api/runs/{repo}/{run_id}` bleiben in allen Feldern, Typen
   und Werten unverändert; die Baum-Spalte rendert weiterhin vollständig (ein
   `data-tree-entry` je Knoten, `?offset` inert), und die 200er-Schranke gilt weiterhin

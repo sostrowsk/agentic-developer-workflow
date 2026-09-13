@@ -544,10 +544,11 @@ column widths / label wrapping (AC 6) and the timeline label readability / non-o
      rendered differently. Answers "where does the time go". Header shows
      total duration, total cost, tokens per model. A bar is **pure geometry**
      (`left`/`width` in percent, plus the active/waiting/still-running state);
-     its name rides in a **separate label row** under the track (not inside the
-     width-scaled bar), so a short bar never clips its own name — the same rule
-     the phase band already follows. The `title` attribute and the fixed lane
-     label on the left are unchanged.
+     each bar gets its **own row** (`.tl-bar-row`) with its name in a dedicated
+     label **beside its own track** (not inside the width-scaled bar), so a short
+     bar never clips its own name and one bar per row keeps the name↔bar
+     association unambiguous. The `title` attribute and the fixed lane label on
+     the left are unchanged.
    - **Artifacts**: `issue.md`, `spec.md`, `plan.md`, `contract.yaml`,
      `escalation.md`, `followups.md`, the drafts from dual authoring — rendered
      as Markdown, with the drafts side by side against the synthesis.

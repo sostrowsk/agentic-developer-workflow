@@ -28,8 +28,9 @@ Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
   column; the context column stays the narrowest.
 - **Timeline: geometry into the track, words beside it.** A timeline bar is now pure
   geometry — its `left`/`width` percent and its active/waiting/still-running state are
-  unchanged — and its name rides in a separate label row under the track, so a short
-  bar no longer clips its own name. The `title` attribute is preserved. Purely
+  unchanged — and each bar gets its own row with its name in a dedicated label beside
+  its own track, so a short bar no longer clips its own name and one bar per row keeps
+  the name-to-bar association unambiguous. The `title` attribute is preserved. Purely
   presentational — `GET /api/runs` and `GET /api/runs/{repo}/{run_id}` are unchanged
   in every field, type and value; the trace column still renders in full (one
   `data-tree-entry` per node, `?offset` inert), and the 200-marker cap continues to

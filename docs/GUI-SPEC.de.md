@@ -572,10 +572,11 @@ Nichtüberlagerung der Timeline-Beschriftung (AC 7) sind in
      unterschiedlich dargestellt. Beantwortet „wo geht die Zeit hin". Der Kopf
      zeigt Gesamtdauer, Gesamtkosten, Tokens je Modell. Ein Balken ist **reine
      Geometrie** (`left`/`width` in Prozent plus die Unterscheidung
-     aktiv/wartend/noch laufend); sein Name steht in einer **eigenen
-     Beschriftungszeile** unter der Spur (nicht im proportional bemessenen Balken),
-     sodass ein kurzer Balken seinen Namen nicht mehr abschneidet — dieselbe Regel,
-     der die Zeitachse schon folgt. Das `title`-Attribut und die feste
+     aktiv/wartend/noch laufend); jeder Balken bekommt eine **eigene Zeile**
+     (`.tl-bar-row`) mit seinem Namen in einer eigenen Beschriftung **neben seiner
+     eigenen Spur** (nicht im proportional bemessenen Balken), sodass ein kurzer
+     Balken seinen Namen nicht mehr abschneidet und ein Balken je Zeile die
+     Zuordnung Name↔Balken eindeutig hält. Das `title`-Attribut und die feste
      Spurbeschriftung links bleiben unverändert.
    - **Artefakte**: `issue.md`, `spec.md`, `plan.md`, `contract.yaml`,
      `escalation.md`, `followups.md`, die Entwürfe aus dem Dual Authoring — als
