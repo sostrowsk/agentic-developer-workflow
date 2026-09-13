@@ -1,27 +1,33 @@
-"""RED tests for Aufgabe A — the ≤ 2 s promise, kept by BOUNDING THE NUMBER OF
-ENTRY NODES in the DOM (not only their contents).
+"""Tests for the ≤ 2 s promise, kept by BOUNDING THE NUMBER OF ENTRY NODES in the
+DOM (not only their contents) — for the TOOLS entries only.
 
 Twice a fix offloaded only the *contents* (lazy payload, collapsing) while the
 sheer COUNT of DOM entry nodes kept the real view blocking (real run ``bf831719``:
-2 126 tool nodes, 12 738 DOM nodes, > 40 s). This run turns the per-sibling-group /
-per-pane slicing into ONE GLOBAL budget per collection that holds throughout
-navigation, and it is proven here on the automatable half:
+2 126 tool nodes, 12 738 DOM nodes, > 40 s). The per-sibling-group / per-pane slicing
+became ONE GLOBAL budget per collection that holds throughout navigation.
 
-* **A1** the number of rendered *entry markers* is bounded by a hard cap of at most
-  200 per collection, independent of the total — for the trace tree (deeply nested
-  branches) and the Tools tab (spread over multiple tool-bearing nodes, hidden
-  panes included);
-* **A2** every entry stays reachable through a MOVING window (the ``?offset``
-  navigation): reaching a late entry brings it into the DOM without re-materialising
-  all preceding entries — the growing-prefix ``?limit`` is insufficient;
+Scope correction (GUI-Redesign, Brief 3 / A5): the 200-entry cap and its moving
+``?offset`` window were REMOVED from the trace TREE — its column now renders the
+complete run (one ``data-tree-entry`` per node, ``?offset`` inert for it), kept
+readable by the compaction, not by a cut (see tests/test_gui_trace_full_render.py
+and tests/test_gui_tree_size_stated.py). What this module still bounds is the TOOLS
+window (``data-tool-entry`` in the detail panes, its own ``?tools_offset``):
+
+* **A1** the number of rendered TOOL *entry markers* is bounded by a hard cap of at
+  most 200, independent of the total, spread over multiple tool-bearing nodes
+  (hidden panes included);
+* **A2** every tool entry stays reachable through a MOVING window (the
+  ``?tools_offset`` navigation): reaching a late entry brings it into the DOM without
+  re-materialising all preceding entries — the growing-prefix ``?limit`` is
+  insufficient;
 * **A3** bounded rendering changes presentation only: entries keep the underlying
   order and their call/result identity, and the full payload stays reachable.
 
-*Counting definition (A1, pinned by these tests as the verification policy the
-contract leaves to the spec/plan):* exactly ONE machine-readable marker element per
-rendered entry — ``data-tree-entry`` for a trace-tree entry, ``data-tool-entry``
-for a Tools entry. The concrete selector is the implementation's choice; these two
-are the selectors the automated tests count and the guide documents.
+*Counting definition:* exactly ONE machine-readable marker element per rendered
+entry — ``data-tree-entry`` for a trace-tree entry (uncapped: one per node),
+``data-tool-entry`` for a Tools entry (the capped collection). The concrete selector
+is the implementation's choice; these two are the selectors the automated tests
+count and the guide documents.
 
 Wall-clock ≤ 2 s is evidenced manually per ``docs/gui-response-time.md`` (A4); the
 automated half proves the DOM bound. Derived from .adw/spec.md (A1–A3),
@@ -48,8 +54,9 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
 
 RUN_ID = "aaaa1111"
 
-# The hard cap pinned by the spec/contract (A1): at most this many entry markers per
-# collection, at every fixture size.
+# The hard cap pinned by the spec/contract (A1): at most this many TOOL entry markers
+# (``data-tool-entry``) at every fixture size. It applies ONLY to the Tools window;
+# the trace tree renders completely and is never bounded by it (Brief 3 / A5).
 CAP = 200
 
 # The two per-entry markers the automated tests count (the counting definition).

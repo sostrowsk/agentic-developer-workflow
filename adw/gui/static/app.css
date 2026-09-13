@@ -389,16 +389,16 @@ table.findings th, table.findings td { border: 1px solid var(--rule); padding: 0
 .timeline-lanes { display: flex; flex-direction: column; gap: 0.5rem; }
 .tl-lane { display: flex; align-items: flex-start; gap: 0.5rem; }
 .tl-lane-label { flex: 0 0 7rem; text-align: right; font-size: 0.8125rem; color: var(--ink-soft); font-family: var(--mono); line-height: 1.2rem; }
-.tl-lane-body { flex: 1 1 auto; min-width: 0; }
-.tl-track { display: block; position: relative; width: 100%; height: 1.2rem; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
-.tl-bar { position: absolute; top: 0; height: 100%; box-sizing: border-box; cursor: pointer; border-radius: 3px; }
-/* A4: the bar's name leaves the proportional bar and rides in a label row under the
-   track — its readability no longer depends on the bar width, and the labels flow
-   (no absolute positioning) so many short bars' names never overlap. */
-.tl-track-labels { display: flex; flex-wrap: wrap; gap: 0.25rem 0.75rem; margin-top: 0.25rem; }
-.tl-bar-label { font-size: 0.75rem; font-family: var(--mono); color: var(--ink-soft); white-space: nowrap; border-left: 3px solid transparent; padding-left: 0.5rem; }
+.tl-lane-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 0.25rem; }
+/* A4: one row per bar — its own label beside its own track. The name↔bar
+   association is the shared row (unambiguous even for many short bars), and one bar
+   per row means names never overlap and a short bar never clips its own name. */
+.tl-bar-row { display: flex; align-items: center; gap: 0.5rem; }
+.tl-bar-label { flex: 0 0 8rem; font-size: 0.75rem; font-family: var(--mono); color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid transparent; padding-left: 0.5rem; }
 .tl-bar-label.bar-active { border-left-color: var(--busy); }
 .tl-bar-label.bar-waiting { border-left-color: var(--wait); }
+.tl-track { display: block; position: relative; flex: 1 1 auto; height: 1.2rem; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+.tl-bar { position: absolute; top: 0; height: 100%; box-sizing: border-box; cursor: pointer; border-radius: 3px; }
 /* Active work — a solid bar. */
 .tl-bar.bar-active { background: var(--busy); color: var(--signal-ink); }
 /* Waiting (CI polling, gate runtime) — "technically waiting" (--wait), so time

@@ -435,7 +435,10 @@ Client-Zustand, keine Persistenz, kein Query-Parameter — ein Klick auf die
 Zusammenfassungszeile ist die einzige Bedienung). Die Trace-Baum-Spalte ist
 mindestens so breit wie die Panes-Spalte; die Kontext-Spalte behält ihre
 `minmax`-Untergrenze und bleibt die schmalste. Jede Zusammenfassungszeile nennt ihre
-Kernaussage ohne Aufklappen (siehe §7.2 Punkte 7 und 8).
+Kernaussage ohne Aufklappen (siehe §7.2 Punkte 7 und 8). Die geforderten
+Browsermessungen für Spaltenbreiten / Beschriftungsumbruch (AC 6) und Lesbarkeit /
+Nichtüberlagerung der Timeline-Beschriftung (AC 7) sind in
+[gui-redesign-3-measurements.de.md](gui-redesign-3-measurements.de.md) protokolliert.
 
 2. **Trace-Baum** (links): der Span-Baum aus §4.2, aufklappbar, chronologisch.
    Je Knoten: Icon (Status), Label, Dauer, bei Loops `n/cap`. Lanes sind

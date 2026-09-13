@@ -573,23 +573,22 @@
           {% for lane in timeline.lanes %}
           <div class="tl-lane">
             <span class="tl-lane-label">{{ lane.label }}</span>
-            {#- A4: the bar is pure GEOMETRY — `left`/`width` in percent, unchanged —
-                and carries no text of its own, so a short bar can no longer clip its
-                name. The name rides in a separate label row below the track, whose
-                readability does NOT depend on the bar's width; the bars flow in
-                start-time (left-to-right) order, so the label row reads in the same
-                order. The `title` attribute stays on the bar. -#}
+            {#- A4: each bar gets its OWN row inside the lane — a dedicated label
+                beside its own track. The bar stays pure GEOMETRY (`left`/`width` in
+                percent, unchanged) and carries no text of its own, so a short bar
+                can no longer clip its name; the name sits in the SAME row as its bar,
+                so the name↔bar association is unambiguous even for many short bars,
+                and one bar per row means names can never overlap. The `title`
+                attribute and the bar's state classes are unchanged. -#}
             <div class="tl-lane-body">
-              <span class="tl-track">
-                {% for bar in lane.bars %}
-                <span class="tl-bar bar-{{ bar.state }}{% if bar.running %} bar-running{% endif %}" data-seq="{{ bar.seq }}" style="left:{{ bar.left }}%;width:{{ bar.width }}%" title="{{ bar.label }}"></span>
-                {% endfor %}
-              </span>
-              <div class="tl-track-labels">
-                {% for bar in lane.bars %}
+              {% for bar in lane.bars %}
+              <div class="tl-bar-row" data-seq="{{ bar.seq }}">
                 <span class="tl-bar-label bar-{{ bar.state }}" data-seq="{{ bar.seq }}">{{ bar.label }}</span>
-                {% endfor %}
+                <span class="tl-track">
+                  <span class="tl-bar bar-{{ bar.state }}{% if bar.running %} bar-running{% endif %}" data-seq="{{ bar.seq }}" style="left:{{ bar.left }}%;width:{{ bar.width }}%" title="{{ bar.label }}"></span>
+                </span>
               </div>
+              {% endfor %}
             </div>
           </div>
           {% endfor %}

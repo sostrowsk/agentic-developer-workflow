@@ -1,0 +1,697 @@
+{
+  "detail": {
+    "change_scope": {
+      "declared_scope": null,
+      "lanes": [
+        {
+          "diff_available": false,
+          "files": null,
+          "lane": "backend"
+        }
+      ]
+    },
+    "latest_context": {
+      "circuit_breakers": null,
+      "cost_usd": 0.4,
+      "followups": null,
+      "limit_hits": null,
+      "phase": "build",
+      "round": null
+    },
+    "phases": [
+      {
+        "duration": null,
+        "end": null,
+        "name": "spec",
+        "start": null,
+        "status": "pending"
+      },
+      {
+        "duration": null,
+        "end": null,
+        "name": "plan",
+        "start": null,
+        "status": "pending"
+      },
+      {
+        "duration": 15.0,
+        "end": "2026-08-05T14:00:17.000Z",
+        "name": "build",
+        "start": "2026-08-05T14:00:02.000Z",
+        "status": "completed"
+      },
+      {
+        "duration": null,
+        "end": null,
+        "name": "integration",
+        "start": null,
+        "status": "pending"
+      },
+      {
+        "duration": null,
+        "end": null,
+        "name": "codex_review",
+        "start": null,
+        "status": "pending"
+      },
+      {
+        "duration": null,
+        "end": null,
+        "name": "final_review",
+        "start": null,
+        "status": "pending"
+      },
+      {
+        "duration": null,
+        "end": null,
+        "name": "ci",
+        "start": null,
+        "status": "pending"
+      }
+    ],
+    "plan_skeleton": [
+      {
+        "status": "done",
+        "tasks": [
+          "B1 \u2014 Parser",
+          "B2 \u2014 Guard"
+        ],
+        "workstream": "backend"
+      }
+    ],
+    "problems": [],
+    "raw": {
+      "total": 18,
+      "types": [
+        "agent.message",
+        "agent.run",
+        "agent.tool.call",
+        "agent.tool.result",
+        "codex.review",
+        "gate",
+        "lane",
+        "phase",
+        "round",
+        "run",
+        "weird.unknown"
+      ],
+      "window": [
+        {
+          "payload_text": "{\"adw_version\": \"0.4.0\", \"base_branch\": \"main\", \"dry_run\": false, \"issue\": \"Fix the failing parser test and add a null guard\", \"lanes\": [\"backend\"], \"parallel\": false, \"repo\": \"/some/target/repo\"}",
+          "seq": 1,
+          "type": "run"
+        },
+        {
+          "payload_text": "{\"from_phase\": \"build\", \"name\": \"build\"}",
+          "seq": 2,
+          "type": "phase"
+        },
+        {
+          "payload_text": "{\"base_sha\": null, \"branch\": \"adw/backend\", \"name\": \"backend\", \"ports\": {}, \"worktree\": \"wt\"}",
+          "seq": 3,
+          "type": "lane"
+        },
+        {
+          "payload_text": "{\"cap\": 10, \"loop\": \"gates\", \"n\": 2}",
+          "seq": 4,
+          "type": "round"
+        },
+        {
+          "payload_text": "{\"agent\": \"build_agent\", \"allowed_tools\": [], \"cwd\": \"wt\", \"model\": \"opus-4.8\", \"prompt\": \"Fix the failing parser test and add a null guard\", \"resume_session\": null, \"system_append\": \"You are the ADW build agent. Follow the plan strictly.\", \"tools\": []}",
+          "seq": 5,
+          "type": "agent.run"
+        },
+        {
+          "payload_text": "{\"role\": \"assistant\", \"text\": \"Let me first read the parser module.\"}",
+          "seq": 6,
+          "type": "agent.message"
+        },
+        {
+          "payload_text": "{\"input\": {\"file\": \"parser.py\"}, \"tool\": \"Read\", \"tool_use_id\": \"t1\"}",
+          "seq": 7,
+          "type": "agent.tool.call"
+        },
+        {
+          "payload_text": "{\"content\": \"def parse(x): return x  # current parser body\", \"is_error\": false, \"tool_use_id\": \"t1\"}",
+          "seq": 8,
+          "type": "agent.tool.result"
+        },
+        {
+          "payload_text": "{\"cost_usd\": 0.4, \"is_error\": false, \"result_text\": \"Added a null guard in parser.py and the test now passes\", \"session_id\": \"sess\", \"usage\": {\"cache_creation\": 0, \"cache_read\": 0, \"input\": 10, \"output\": 20}}",
+          "seq": 9,
+          "type": "agent.run"
+        },
+        {
+          "payload_text": "{\"cmd\": \"ruff check .\", \"cwd\": \"wt\", \"name\": \"lint\", \"timeout\": 30}",
+          "seq": 10,
+          "type": "gate"
+        },
+        {
+          "payload_text": "{\"exit_code\": 1, \"output\": \"parser.py:12:1 E501 line too long\", \"passed\": false, \"timed_out\": false}",
+          "seq": 11,
+          "type": "gate"
+        },
+        {
+          "payload_text": "{\"argv\": [\"codex\", \"review\"], \"custom_prompt\": null, \"cwd\": \"wt\", \"kind\": \"code\"}",
+          "seq": 12,
+          "type": "codex.review"
+        },
+        {
+          "payload_text": "{\"findings\": [{\"category\": \"implementation\", \"file\": \"parser.py\", \"issue\": \"Missing null check before parse\", \"lane\": \"backend\", \"remediation_plan\": [\"Add a guard clause\"], \"severity\": \"P2\"}], \"parse_ok\": true, \"raw_stdout\": \"codex analysed 3 files and found one issue\"}",
+          "seq": 13,
+          "type": "codex.review"
+        },
+        {
+          "payload_text": "{\"foo\": \"bar\"}",
+          "seq": 14,
+          "type": "weird.unknown"
+        },
+        {
+          "payload_text": "{\"outcome\": \"ok\"}",
+          "seq": 15,
+          "type": "round"
+        },
+        {
+          "payload_text": "{\"completed\": true, \"fix_cycles\": 0, \"gate_iterations\": 2}",
+          "seq": 16,
+          "type": "lane"
+        },
+        {
+          "payload_text": "{\"name\": \"build\", \"to_phase\": \"done\"}",
+          "seq": 17,
+          "type": "phase"
+        },
+        {
+          "payload_text": "{\"status\": \"done\", \"totals\": {\"cost\": 0.5, \"duration\": 17.0, \"tokens\": 30}}",
+          "seq": 18,
+          "type": "run"
+        }
+      ]
+    },
+    "run": {
+      "cost": 0.5,
+      "dry_run": false,
+      "duration": 17.0,
+      "event_count": 18,
+      "has_trace": true,
+      "issue": "Fix the failing parser test and add a null guard",
+      "phase": null,
+      "phase_seconds": 15.0,
+      "repo": "<REPO>",
+      "repo_exists": true,
+      "run_id": "aaaa1111",
+      "start": "2026-08-05T14:00:01.000Z",
+      "status": "done",
+      "tokens": 30,
+      "total_seconds": 15.0,
+      "wait_seconds": 0.0,
+      "work_seconds": 17.0
+    },
+    "tree": [
+      {
+        "children": [
+          {
+            "children": [
+              {
+                "children": [
+                  {
+                    "cap": 10,
+                    "children": [
+                      {
+                        "children": [
+                          {
+                            "children": [],
+                            "context": {
+                              "circuit_breakers": null,
+                              "cost_usd": null,
+                              "followups": null,
+                              "limit_hits": null,
+                              "phase": "build",
+                              "round": {
+                                "cap": 10,
+                                "loop": "gates",
+                                "n": 2
+                              }
+                            },
+                            "diff_from": null,
+                            "diff_to": null,
+                            "duration": null,
+                            "label": "agent.message",
+                            "payload": {
+                              "role": "assistant",
+                              "text": "Let me first read the parser module."
+                            },
+                            "seq": 6,
+                            "status": null,
+                            "ts": "2026-08-05T14:00:06.000Z",
+                            "type": "agent.message"
+                          },
+                          {
+                            "children": [],
+                            "context": {
+                              "circuit_breakers": null,
+                              "cost_usd": null,
+                              "followups": null,
+                              "limit_hits": null,
+                              "phase": "build",
+                              "round": {
+                                "cap": 10,
+                                "loop": "gates",
+                                "n": 2
+                              }
+                            },
+                            "diff_from": null,
+                            "diff_to": null,
+                            "duration": null,
+                            "label": "Read parser.py",
+                            "payload": {
+                              "input": {
+                                "file": "parser.py"
+                              },
+                              "tool": "Read",
+                              "tool_use_id": "t1"
+                            },
+                            "seq": 7,
+                            "status": null,
+                            "ts": "2026-08-05T14:00:07.000Z",
+                            "type": "agent.tool.call"
+                          },
+                          {
+                            "children": [],
+                            "context": {
+                              "circuit_breakers": null,
+                              "cost_usd": null,
+                              "followups": null,
+                              "limit_hits": null,
+                              "phase": "build",
+                              "round": {
+                                "cap": 10,
+                                "loop": "gates",
+                                "n": 2
+                              }
+                            },
+                            "diff_from": null,
+                            "diff_to": null,
+                            "duration": null,
+                            "label": "ok",
+                            "payload": {
+                              "content": "def parse(x): return x  # current parser body",
+                              "is_error": false,
+                              "tool_use_id": "t1"
+                            },
+                            "seq": 8,
+                            "status": null,
+                            "ts": "2026-08-05T14:00:08.000Z",
+                            "type": "agent.tool.result"
+                          }
+                        ],
+                        "context": {
+                          "circuit_breakers": null,
+                          "cost_usd": 0.4,
+                          "followups": null,
+                          "limit_hits": null,
+                          "phase": "build",
+                          "round": {
+                            "cap": 10,
+                            "loop": "gates",
+                            "n": 2
+                          }
+                        },
+                        "diff_from": null,
+                        "diff_to": null,
+                        "duration": 4.0,
+                        "end_payload": {
+                          "cost_usd": 0.4,
+                          "is_error": false,
+                          "result_text": "Added a null guard in parser.py and the test now passes",
+                          "session_id": "sess",
+                          "usage": {
+                            "cache_creation": 0,
+                            "cache_read": 0,
+                            "input": 10,
+                            "output": 20
+                          }
+                        },
+                        "end_seq": 9,
+                        "end_ts": "2026-08-05T14:00:09.000Z",
+                        "label": "build_agent",
+                        "payload": {
+                          "agent": "build_agent",
+                          "allowed_tools": [],
+                          "cwd": "wt",
+                          "model": "opus-4.8",
+                          "prompt": "Fix the failing parser test and add a null guard",
+                          "resume_session": null,
+                          "system_append": "You are the ADW build agent. Follow the plan strictly.",
+                          "tools": []
+                        },
+                        "previous_prompt_seq": null,
+                        "prompt_diff": null,
+                        "running": false,
+                        "seq": 5,
+                        "span_id": "A",
+                        "start_payload": {
+                          "agent": "build_agent",
+                          "allowed_tools": [],
+                          "cwd": "wt",
+                          "model": "opus-4.8",
+                          "prompt": "Fix the failing parser test and add a null guard",
+                          "resume_session": null,
+                          "system_append": "You are the ADW build agent. Follow the plan strictly.",
+                          "tools": []
+                        },
+                        "start_ts": "2026-08-05T14:00:05.000Z",
+                        "status": "done",
+                        "type": "agent.run"
+                      },
+                      {
+                        "children": [],
+                        "context": {
+                          "circuit_breakers": null,
+                          "cost_usd": 0.4,
+                          "followups": null,
+                          "limit_hits": null,
+                          "phase": "build",
+                          "round": {
+                            "cap": 10,
+                            "loop": "gates",
+                            "n": 2
+                          }
+                        },
+                        "diff_from": null,
+                        "diff_to": null,
+                        "duration": 1.0,
+                        "end_payload": {
+                          "exit_code": 1,
+                          "output": "parser.py:12:1 E501 line too long",
+                          "passed": false,
+                          "timed_out": false
+                        },
+                        "end_seq": 11,
+                        "end_ts": "2026-08-05T14:00:11.000Z",
+                        "label": "lint",
+                        "payload": {
+                          "cmd": "ruff check .",
+                          "cwd": "wt",
+                          "name": "lint",
+                          "timeout": 30
+                        },
+                        "running": false,
+                        "seq": 10,
+                        "span_id": "G",
+                        "start_payload": {
+                          "cmd": "ruff check .",
+                          "cwd": "wt",
+                          "name": "lint",
+                          "timeout": 30
+                        },
+                        "start_ts": "2026-08-05T14:00:10.000Z",
+                        "status": "failed",
+                        "type": "gate"
+                      }
+                    ],
+                    "context": {
+                      "circuit_breakers": null,
+                      "cost_usd": 0.4,
+                      "followups": null,
+                      "limit_hits": null,
+                      "phase": "build",
+                      "round": {
+                        "cap": 10,
+                        "loop": "gates",
+                        "n": 2
+                      }
+                    },
+                    "cost": 0.4,
+                    "diff_from": null,
+                    "diff_to": null,
+                    "duration": 11.0,
+                    "end_payload": {
+                      "outcome": "ok"
+                    },
+                    "end_seq": 15,
+                    "end_ts": "2026-08-05T14:00:15.000Z",
+                    "label": "round 2/10",
+                    "n": 2,
+                    "outcome": "ok",
+                    "payload": {
+                      "cap": 10,
+                      "loop": "gates",
+                      "n": 2
+                    },
+                    "running": false,
+                    "seq": 4,
+                    "span_id": "RD",
+                    "start_payload": {
+                      "cap": 10,
+                      "loop": "gates",
+                      "n": 2
+                    },
+                    "start_ts": "2026-08-05T14:00:04.000Z",
+                    "status": "done",
+                    "type": "round"
+                  }
+                ],
+                "context": {
+                  "circuit_breakers": null,
+                  "cost_usd": 0.4,
+                  "followups": null,
+                  "limit_hits": null,
+                  "phase": "build",
+                  "round": null
+                },
+                "cost": 0.4,
+                "diff_from": null,
+                "diff_to": null,
+                "duration": 13.0,
+                "end_payload": {
+                  "completed": true,
+                  "fix_cycles": 0,
+                  "gate_iterations": 2
+                },
+                "end_seq": 16,
+                "end_ts": "2026-08-05T14:00:16.000Z",
+                "label": "backend",
+                "outcome": "completed",
+                "payload": {
+                  "base_sha": null,
+                  "branch": "adw/backend",
+                  "name": "backend",
+                  "ports": {},
+                  "worktree": "wt"
+                },
+                "running": false,
+                "seq": 3,
+                "span_id": "L",
+                "start_payload": {
+                  "base_sha": null,
+                  "branch": "adw/backend",
+                  "name": "backend",
+                  "ports": {},
+                  "worktree": "wt"
+                },
+                "start_ts": "2026-08-05T14:00:03.000Z",
+                "status": "done",
+                "type": "lane"
+              },
+              {
+                "children": [],
+                "context": {
+                  "circuit_breakers": null,
+                  "cost_usd": 0.4,
+                  "followups": null,
+                  "limit_hits": null,
+                  "phase": "build",
+                  "round": {
+                    "cap": 10,
+                    "loop": "gates",
+                    "n": 2
+                  }
+                },
+                "diff_from": null,
+                "diff_to": null,
+                "duration": 1.0,
+                "end_payload": {
+                  "findings": [
+                    {
+                      "category": "implementation",
+                      "file": "parser.py",
+                      "issue": "Missing null check before parse",
+                      "lane": "backend",
+                      "remediation_plan": [
+                        "Add a guard clause"
+                      ],
+                      "severity": "P2"
+                    }
+                  ],
+                  "parse_ok": true,
+                  "raw_stdout": "codex analysed 3 files and found one issue"
+                },
+                "end_seq": 13,
+                "end_ts": "2026-08-05T14:00:13.000Z",
+                "label": "codex.review",
+                "payload": {
+                  "argv": [
+                    "codex",
+                    "review"
+                  ],
+                  "custom_prompt": null,
+                  "cwd": "wt",
+                  "kind": "code"
+                },
+                "running": false,
+                "seq": 12,
+                "span_id": "C",
+                "start_payload": {
+                  "argv": [
+                    "codex",
+                    "review"
+                  ],
+                  "custom_prompt": null,
+                  "cwd": "wt",
+                  "kind": "code"
+                },
+                "start_ts": "2026-08-05T14:00:12.000Z",
+                "status": "done",
+                "type": "codex.review"
+              },
+              {
+                "children": [],
+                "context": {
+                  "circuit_breakers": null,
+                  "cost_usd": 0.4,
+                  "followups": null,
+                  "limit_hits": null,
+                  "phase": "build",
+                  "round": {
+                    "cap": 10,
+                    "loop": "gates",
+                    "n": 2
+                  }
+                },
+                "diff_from": null,
+                "diff_to": null,
+                "duration": null,
+                "label": "weird.unknown",
+                "payload": {
+                  "foo": "bar"
+                },
+                "seq": 14,
+                "status": null,
+                "ts": "2026-08-05T14:00:14.000Z",
+                "type": "weird.unknown"
+              }
+            ],
+            "context": {
+              "circuit_breakers": null,
+              "cost_usd": 0.4,
+              "followups": null,
+              "limit_hits": null,
+              "phase": "build",
+              "round": null
+            },
+            "cost": 0.4,
+            "diff_from": null,
+            "diff_to": null,
+            "duration": 15.0,
+            "end_payload": {
+              "name": "build",
+              "to_phase": "done"
+            },
+            "end_seq": 17,
+            "end_ts": "2026-08-05T14:00:17.000Z",
+            "label": "build",
+            "outcome": "done",
+            "payload": {
+              "from_phase": "build",
+              "name": "build"
+            },
+            "running": false,
+            "seq": 2,
+            "span_id": "PB",
+            "start_payload": {
+              "from_phase": "build",
+              "name": "build"
+            },
+            "start_ts": "2026-08-05T14:00:02.000Z",
+            "status": "done",
+            "type": "phase"
+          }
+        ],
+        "context": {
+          "circuit_breakers": null,
+          "cost_usd": 0.4,
+          "followups": null,
+          "limit_hits": null,
+          "phase": "build",
+          "round": null
+        },
+        "diff_from": null,
+        "diff_to": null,
+        "duration": 17.0,
+        "end_payload": {
+          "status": "done",
+          "totals": {
+            "cost": 0.5,
+            "duration": 17.0,
+            "tokens": 30
+          }
+        },
+        "end_seq": 18,
+        "end_ts": "2026-08-05T14:00:18.000Z",
+        "label": "run",
+        "payload": {
+          "adw_version": "0.4.0",
+          "base_branch": "main",
+          "dry_run": false,
+          "issue": "Fix the failing parser test and add a null guard",
+          "lanes": [
+            "backend"
+          ],
+          "parallel": false,
+          "repo": "/some/target/repo"
+        },
+        "running": false,
+        "seq": 1,
+        "span_id": "R",
+        "start_payload": {
+          "adw_version": "0.4.0",
+          "base_branch": "main",
+          "dry_run": false,
+          "issue": "Fix the failing parser test and add a null guard",
+          "lanes": [
+            "backend"
+          ],
+          "parallel": false,
+          "repo": "/some/target/repo"
+        },
+        "start_ts": "2026-08-05T14:00:01.000Z",
+        "status": "done",
+        "type": "run"
+      }
+    ]
+  },
+  "run_id": "aaaa1111",
+  "runs": [
+    {
+      "cost": 0.5,
+      "dry_run": false,
+      "duration": 17.0,
+      "event_count": 18,
+      "has_trace": true,
+      "issue": "Fix the failing parser test and add a null guard",
+      "phase": null,
+      "phase_seconds": 15.0,
+      "repo": "<REPO>",
+      "repo_exists": true,
+      "run_id": "aaaa1111",
+      "start": "2026-08-05T14:00:01.000Z",
+      "status": "done",
+      "tokens": 30,
+      "total_seconds": 15.0,
+      "wait_seconds": 0.0,
+      "work_seconds": 17.0
+    }
+  ],
+  "source_rev": "cc201f1"
+}

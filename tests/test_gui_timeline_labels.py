@@ -166,6 +166,46 @@ def test_a_bar_name_is_rendered_beyond_the_title_attribute(home, tmp_path):  # n
             )
 
 
+# --- A4: name-to-bar association stays recognizable (no ambiguity) --------------
+
+
+def _seq_spans(panel: str):
+    """The ``data-seq``-bearing SPANS of the timeline panel in document order, each
+    classified as the geometry ``bar`` (a ``width:`` percent style) or its ``label``
+    (visible text). The per-bar row structure is what makes the pairing observable."""
+    out = []
+    for m in re.finditer(r'<span[^>]*data-seq="(\d+)"[^>]*>(.*?)</span>', panel):
+        tag, seq, inner = m.group(0), m.group(1), m.group(2)
+        kind = "bar" if re.search(r"width:\s*[\d.]+%", tag) else "label"
+        out.append((kind, seq, inner.strip()))
+    return out
+
+
+def test_each_bar_shares_a_row_with_its_own_label(home, tmp_path):  # noqa: F811
+    """A4 (association, Codex P2): with many short bars in one track the name↔bar
+    correspondence must stay unambiguous. Each bar and its label sit in the SAME row
+    and carry the SAME ``data-seq`` — so the ``data-seq``-bearing spans come in
+    adjacent (label, bar) pairs, one per bar, each label carrying exactly that bar's
+    name. That is a recognizable association without JavaScript and without relying on
+    shared colour or global ordering alone."""
+    lines = _many_short_bars_lines(8)
+    panel = _panel(tmp_path, lines)
+
+    names = {str(b["seq"]): b["label"] for b in _bars_from_model(lines)}
+    spans = _seq_spans(panel)
+    assert spans, "no data-seq spans in the timeline panel"
+    assert len(spans) == 2 * len(names), (len(spans), len(names))
+
+    for i in range(0, len(spans), 2):
+        (k1, s1, t1), (k2, s2, t2) = spans[i], spans[i + 1]
+        # The two spans of a row share the bar's seq: one geometry bar, one label.
+        assert s1 == s2, f"a bar and its label drifted apart: {s1} vs {s2}"
+        assert {k1, k2} == {"bar", "label"}, (k1, k2)
+        # The label carries exactly this bar's name (not a neighbour's).
+        label_text = t1 if k1 == "label" else t2
+        assert label_text == names[s1], (s1, label_text, names.get(s1))
+
+
 # --- AC 8: the geometry and state of every bar are unchanged --------------------
 
 

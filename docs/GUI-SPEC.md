@@ -422,7 +422,9 @@ native `<details>` without `open` (no JavaScript, no client state, no persistenc
 no query parameter — one click on the summary line is the only control). The
 trace-tree column is at least as wide as the panes column; the context column keeps
 its `minmax` lower bound and stays the narrowest. Each summary line states its gist
-without expanding (see §7.2 items 7 and 8).
+without expanding (see §7.2 items 7 and 8). The required browser measurements for the
+column widths / label wrapping (AC 6) and the timeline label readability / non-overlap
+(AC 7) are logged in [gui-redesign-3-measurements.md](gui-redesign-3-measurements.md).
 
 2. **Trace tree** (left): the span tree from §4.2, collapsible, chronological.
    Each node: icon (status), label, duration, and for loops `n/cap`. Lanes are

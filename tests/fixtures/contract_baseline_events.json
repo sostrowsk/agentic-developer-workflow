@@ -1,0 +1,329 @@
+{
+  "events": [
+    {
+      "kind": "start",
+      "lane": null,
+      "parent": null,
+      "payload": {
+        "adw_version": "0.4.0",
+        "base_branch": "main",
+        "dry_run": false,
+        "issue": "Fix the failing parser test and add a null guard",
+        "lanes": [
+          "backend"
+        ],
+        "parallel": false,
+        "repo": "/some/target/repo"
+      },
+      "phase": null,
+      "round": null,
+      "seq": 1,
+      "span": "R",
+      "ts": "2026-08-05T14:00:01.000Z",
+      "type": "run"
+    },
+    {
+      "kind": "start",
+      "lane": null,
+      "parent": "R",
+      "payload": {
+        "from_phase": "build",
+        "name": "build"
+      },
+      "phase": null,
+      "round": null,
+      "seq": 2,
+      "span": "PB",
+      "ts": "2026-08-05T14:00:02.000Z",
+      "type": "phase"
+    },
+    {
+      "kind": "start",
+      "lane": null,
+      "parent": "PB",
+      "payload": {
+        "base_sha": null,
+        "branch": "adw/backend",
+        "name": "backend",
+        "ports": {},
+        "worktree": "wt"
+      },
+      "phase": null,
+      "round": null,
+      "seq": 3,
+      "span": "L",
+      "ts": "2026-08-05T14:00:03.000Z",
+      "type": "lane"
+    },
+    {
+      "kind": "start",
+      "lane": null,
+      "parent": "L",
+      "payload": {
+        "cap": 10,
+        "loop": "gates",
+        "n": 2
+      },
+      "phase": null,
+      "round": null,
+      "seq": 4,
+      "span": "RD",
+      "ts": "2026-08-05T14:00:04.000Z",
+      "type": "round"
+    },
+    {
+      "kind": "start",
+      "lane": null,
+      "parent": "RD",
+      "payload": {
+        "agent": "build_agent",
+        "allowed_tools": [],
+        "cwd": "wt",
+        "model": "opus-4.8",
+        "prompt": "Fix the failing parser test and add a null guard",
+        "resume_session": null,
+        "system_append": "You are the ADW build agent. Follow the plan strictly.",
+        "tools": []
+      },
+      "phase": null,
+      "round": null,
+      "seq": 5,
+      "span": "A",
+      "ts": "2026-08-05T14:00:05.000Z",
+      "type": "agent.run"
+    },
+    {
+      "kind": "point",
+      "lane": null,
+      "parent": null,
+      "payload": {
+        "role": "assistant",
+        "text": "Let me first read the parser module."
+      },
+      "phase": null,
+      "round": null,
+      "seq": 6,
+      "span": "A",
+      "ts": "2026-08-05T14:00:06.000Z",
+      "type": "agent.message"
+    },
+    {
+      "kind": "point",
+      "lane": null,
+      "parent": null,
+      "payload": {
+        "input": {
+          "file": "parser.py"
+        },
+        "tool": "Read",
+        "tool_use_id": "t1"
+      },
+      "phase": null,
+      "round": null,
+      "seq": 7,
+      "span": "A",
+      "ts": "2026-08-05T14:00:07.000Z",
+      "type": "agent.tool.call"
+    },
+    {
+      "kind": "point",
+      "lane": null,
+      "parent": null,
+      "payload": {
+        "content": "def parse(x): return x  # current parser body",
+        "is_error": false,
+        "tool_use_id": "t1"
+      },
+      "phase": null,
+      "round": null,
+      "seq": 8,
+      "span": "A",
+      "ts": "2026-08-05T14:00:08.000Z",
+      "type": "agent.tool.result"
+    },
+    {
+      "kind": "end",
+      "lane": null,
+      "parent": "RD",
+      "payload": {
+        "cost_usd": 0.4,
+        "is_error": false,
+        "result_text": "Added a null guard in parser.py and the test now passes",
+        "session_id": "sess",
+        "usage": {
+          "cache_creation": 0,
+          "cache_read": 0,
+          "input": 10,
+          "output": 20
+        }
+      },
+      "phase": null,
+      "round": null,
+      "seq": 9,
+      "span": "A",
+      "ts": "2026-08-05T14:00:09.000Z",
+      "type": "agent.run"
+    },
+    {
+      "kind": "start",
+      "lane": null,
+      "parent": "RD",
+      "payload": {
+        "cmd": "ruff check .",
+        "cwd": "wt",
+        "name": "lint",
+        "timeout": 30
+      },
+      "phase": null,
+      "round": null,
+      "seq": 10,
+      "span": "G",
+      "ts": "2026-08-05T14:00:10.000Z",
+      "type": "gate"
+    },
+    {
+      "kind": "end",
+      "lane": null,
+      "parent": "RD",
+      "payload": {
+        "exit_code": 1,
+        "output": "parser.py:12:1 E501 line too long",
+        "passed": false,
+        "timed_out": false
+      },
+      "phase": null,
+      "round": null,
+      "seq": 11,
+      "span": "G",
+      "ts": "2026-08-05T14:00:11.000Z",
+      "type": "gate"
+    },
+    {
+      "kind": "start",
+      "lane": null,
+      "parent": "PB",
+      "payload": {
+        "argv": [
+          "codex",
+          "review"
+        ],
+        "custom_prompt": null,
+        "cwd": "wt",
+        "kind": "code"
+      },
+      "phase": null,
+      "round": null,
+      "seq": 12,
+      "span": "C",
+      "ts": "2026-08-05T14:00:12.000Z",
+      "type": "codex.review"
+    },
+    {
+      "kind": "end",
+      "lane": null,
+      "parent": "PB",
+      "payload": {
+        "findings": [
+          {
+            "category": "implementation",
+            "file": "parser.py",
+            "issue": "Missing null check before parse",
+            "lane": "backend",
+            "remediation_plan": [
+              "Add a guard clause"
+            ],
+            "severity": "P2"
+          }
+        ],
+        "parse_ok": true,
+        "raw_stdout": "codex analysed 3 files and found one issue"
+      },
+      "phase": null,
+      "round": null,
+      "seq": 13,
+      "span": "C",
+      "ts": "2026-08-05T14:00:13.000Z",
+      "type": "codex.review"
+    },
+    {
+      "kind": "point",
+      "lane": null,
+      "parent": null,
+      "payload": {
+        "foo": "bar"
+      },
+      "phase": null,
+      "round": null,
+      "seq": 14,
+      "span": "PB",
+      "ts": "2026-08-05T14:00:14.000Z",
+      "type": "weird.unknown"
+    },
+    {
+      "kind": "end",
+      "lane": null,
+      "parent": "L",
+      "payload": {
+        "outcome": "ok"
+      },
+      "phase": null,
+      "round": null,
+      "seq": 15,
+      "span": "RD",
+      "ts": "2026-08-05T14:00:15.000Z",
+      "type": "round"
+    },
+    {
+      "kind": "end",
+      "lane": null,
+      "parent": "PB",
+      "payload": {
+        "completed": true,
+        "fix_cycles": 0,
+        "gate_iterations": 2
+      },
+      "phase": null,
+      "round": null,
+      "seq": 16,
+      "span": "L",
+      "ts": "2026-08-05T14:00:16.000Z",
+      "type": "lane"
+    },
+    {
+      "kind": "end",
+      "lane": null,
+      "parent": "R",
+      "payload": {
+        "name": "build",
+        "to_phase": "done"
+      },
+      "phase": null,
+      "round": null,
+      "seq": 17,
+      "span": "PB",
+      "ts": "2026-08-05T14:00:17.000Z",
+      "type": "phase"
+    },
+    {
+      "kind": "end",
+      "lane": null,
+      "parent": null,
+      "payload": {
+        "status": "done",
+        "totals": {
+          "cost": 0.5,
+          "duration": 17.0,
+          "tokens": 30
+        }
+      },
+      "phase": null,
+      "round": null,
+      "seq": 18,
+      "span": "R",
+      "ts": "2026-08-05T14:00:18.000Z",
+      "type": "run"
+    }
+  ],
+  "plan_md": "## Workstream: backend\n### B1 \u2014 Parser\n### B2 \u2014 Guard\n",
+  "run_id": "aaaa1111"
+}
