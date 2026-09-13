@@ -25,10 +25,3 @@ ci:
   timeout: 900
   # staging_job bewusst leer: das Repo deployt nichts, der
   # Pipeline-Gesamtstatus ist das vollständige Urteil.
-
-# Haltepunkte: der Lauf pausiert vor dem Push (nach dem finalen Review, vor
-# JEGLICHER CI-Arbeit) und wartet auf `adw approve <run_id>`. Die wirksame
-# Menge wird beim Run-Start gepinnt (0.16.3) — eine Änderung an dieser Datei
-# während eines laufenden Runs verschiebt dessen Halte nicht mehr.
-breakpoints:
-  - before_push

@@ -12,6 +12,34 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.21.2] — 2026-09-13
+
+### Fixed
+- **Run detail stays 200 when an event carries a non-mapping payload.**
+  `_snapshots_by_lane` and `_observed_lanes` read the event payload with
+  `(e.get("payload") or {}).get(...)`, bypassing the established
+  `_mapping_payload()` guard. An event whose *entire* payload is a truthy
+  non-mapping (list, string, number) raised `AttributeError` and turned an
+  otherwise successful `GET /api/runs/{repo}/{run_id}` into a 5xx — against the
+  robustness guarantee in `docs/GUI-SPEC.md`. Both helpers now use the guard;
+  such events are silently ignored and healthy lanes, snapshots and diffs are
+  unaffected. Built by ADW run `e4e70373`; four tests added to
+  `tests/test_gui_change_scope.py`, among them a direct RED proof.
+
+### Changed
+- **The `before_push` breakpoint is switched off again.** It was enabled in
+  0.21.1 to exercise the feature in a real run; that experiment is complete
+  (see below), so `.adw/config.yaml` carries no `breakpoints:` key again and
+  runs of this repo no longer hold before the push.
+
+### Notes
+- **First practical validation of the breakpoints from 0.16.0.** Run `e4e70373`
+  held exactly once at `before_push`: the event log shows `awaited` at seq 301
+  and `granted` at seq 305, and the phase spans place the hold between the end
+  of `final_review` and the start of `ci` — precisely where the specification
+  puts it. The run-start pinning from 0.16.3 was active throughout
+  (`pinned_breakpoints: ["before_push"]` in the state from the very first save).
+
 ## [0.21.1] — 2026-09-07
 
 ### Changed
@@ -633,6 +661,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.21.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.2...v0.21.0
 [0.20.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.20.1...v0.20.2
