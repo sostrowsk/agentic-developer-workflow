@@ -12,6 +12,29 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Changed
+- **Run-detail page: the work field comes first.** The trace tree now begins
+  directly under the page head. "Planned tasks" and "Change scope" moved **below**
+  the three-column work field (trace tree │ detail panes │ run context) and render
+  **collapsed** — native `<details>` without `open`, no JavaScript, no persistence.
+  Each collapse line states, without expanding, what it holds: "Planned tasks" the
+  per-lane name, task count and state; "Change scope" the number of changed files
+  over all observed lanes with the sums of added/removed lines (a binary file counts
+  towards the file number but not the line sums; a run without a usable diff gets an
+  explanatory line instead of a `0`, distinct from an available diff with no changed
+  files). The trace-tree column was widened so it is at least as wide as the panes
+  column; the context column stays the narrowest.
+- **Timeline: geometry into the track, words beside it.** A timeline bar is now pure
+  geometry — its `left`/`width` percent and its active/waiting/still-running state are
+  unchanged — and its name rides in a separate label row under the track, so a short
+  bar no longer clips its own name. The `title` attribute is preserved. Purely
+  presentational — `GET /api/runs` and `GET /api/runs/{repo}/{run_id}` are unchanged
+  in every field, type and value; the trace column still renders in full (one
+  `data-tree-entry` per node, `?offset` inert), and the 200-marker cap continues to
+  apply only to the Tools entries.
+
 ## [0.23.0] — 2026-09-13
 
 ### Fixed

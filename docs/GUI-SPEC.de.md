@@ -427,6 +427,16 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
    `active`; keine andere Phase ist dann aktiv, und `awaiting` entfällt, sobald
    das Gate freigegeben ist. Das ist die Orientierungsebene; sie spiegelt den
    Flowchart aus `docs/adw-flowchart.excalidraw`.
+**Blockreihenfolge (Arbeitsfeld zuerst).** Das Arbeitsfeld — Trace-Baum │
+Detail-Panes │ Run-Kontext — beginnt unmittelbar unter dem Seitenkopf. Die beiden
+Zusammenfassungen „Planned tasks“ und „Change scope“ stehen **darunter**, jeweils
+**zugeklappt** in einem nativen `<details>` ohne `open` (kein JavaScript, kein
+Client-Zustand, keine Persistenz, kein Query-Parameter — ein Klick auf die
+Zusammenfassungszeile ist die einzige Bedienung). Die Trace-Baum-Spalte ist
+mindestens so breit wie die Panes-Spalte; die Kontext-Spalte behält ihre
+`minmax`-Untergrenze und bleibt die schmalste. Jede Zusammenfassungszeile nennt ihre
+Kernaussage ohne Aufklappen (siehe §7.2 Punkte 7 und 8).
+
 2. **Trace-Baum** (links): der Span-Baum aus §4.2, aufklappbar, chronologisch.
    Je Knoten: Icon (Status), Label, Dauer, bei Loops `n/cap`. Lanes sind
    Geschwister — Parallelität ist als zwei offene Äste sichtbar. Auto-Scroll zum
@@ -438,9 +448,16 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
    `gate`/`ci.wait`-Span behält sein Ergebnis (`passed`/`failed`, sonst `done`).
 
    **Verdichtete Baum-Spalte (Werkzeug-Rauschen falten).** Die Baum-*Spalte* zeigt
-   JEDEN Knoten des Laufs — sie blättert nicht und hat keine Knoten-Obergrenze.
-   Lesbar hält sie die Verdichtung unten: eine Darstellungsschicht, die das
-   JSON-`tree` nicht ändert (siehe §API) und nur direkte Nachbarn verbindet.
+   JEDEN Knoten des Laufs — sie blättert nicht und hat keine Knoten-Obergrenze;
+   `?offset` ist für sie inert und sie rendert keine Blätter-Navigation. Lesbar hält
+   sie die Verdichtung unten: eine Darstellungsschicht, die das JSON-`tree` nicht
+   ändert (siehe §API) und nur direkte Nachbarn verbindet. Die Spalte trägt genau
+   **einen `data-tree-entry`-Marker je serialisiertem Knoten** — ein an seinen Aufruf
+   gefaltetes Ergebnis behält seinen eigenen Marker, ein Verdichtungswrapper
+   (Wiederholung/Gruppe) erzeugt keinen — und ein Test fixiert das bei mehreren Größen
+   (auch über 200 Knoten). Die Schranke „höchstens 200 Marker je Sammlung“ gilt
+   **nur** für die Tools-Einträge (`data-tool-entry`, mit eigenem `?tools_offset`),
+   niemals für die Baum-Spalte.
    - **Ergebnisse falten (A1).** Ein `agent.tool.result`, dessen `tool_use_id` der
      des unmittelbar vorangehenden `agent.tool.call` gleicht, ist keine eigene Zeile;
      sein Ausgang (aus dem vorhandenen Ergebnis-Label — `ok`/`error`, ein
@@ -550,7 +567,13 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
    - **Timeline**: horizontale Swimlanes (Orchestrator, Spec, Plan, je Lane,
      Codex, CI) als CSS-Balken — aktiv vs. wartend (CI-Polling, Gate-Laufzeit)
      unterschiedlich dargestellt. Beantwortet „wo geht die Zeit hin". Der Kopf
-     zeigt Gesamtdauer, Gesamtkosten, Tokens je Modell.
+     zeigt Gesamtdauer, Gesamtkosten, Tokens je Modell. Ein Balken ist **reine
+     Geometrie** (`left`/`width` in Prozent plus die Unterscheidung
+     aktiv/wartend/noch laufend); sein Name steht in einer **eigenen
+     Beschriftungszeile** unter der Spur (nicht im proportional bemessenen Balken),
+     sodass ein kurzer Balken seinen Namen nicht mehr abschneidet — dieselbe Regel,
+     der die Zeitachse schon folgt. Das `title`-Attribut und die feste
+     Spurbeschriftung links bleiben unverändert.
    - **Artefakte**: `issue.md`, `spec.md`, `plan.md`, `contract.yaml`,
      `escalation.md`, `followups.md`, die Entwürfe aus dem Dual Authoring — als
      Markdown gerendert, die Entwürfe nebeneinander gegen die Synthese.
@@ -658,8 +681,12 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
      Kommandozeile, Eventwerte, `run_id` und Repo-Pfad werden nicht übersetzt.
 7. **Plan-Skelett** (wenn die `plan.md` des Laufs geplante Aufgaben ergibt): die
    Trace-Ansicht zeigt je Workstream eine read-only Liste der *noch geplanten*
-   Aufgaben neben bzw. über dem Trace-Baum derselben Lane — so liegen „geplant"
-   (Skelett) und „geleistet" (Trace) in einer Ansicht. Es ist eine rein abgeleitete
+   Aufgaben — seit dem Arbeitsfeld-zuerst-Layout **unter** dem Arbeitsfeld,
+   **zugeklappt** in einem `<details>`, dessen Zusammenfassungszeile je Lane den
+   Workstream-Namen, die Aufgabenzahl (zweisprachiger Plural) und den bestehenden
+   Lane-Zustand nennt — so liest sich die Kernaussage ohne Aufklappen, und „geplant"
+   (Skelett) und „geleistet" (Trace) liegen weiterhin in einer Ansicht. Es ist eine
+   rein abgeleitete
    Projektion aus der `plan.md` des Laufs (nur über den bestehenden
    Whitelist-Artefakt-Pfad gelesen) und dem bereits geladenen Event-Strom (für den
    groben Lane-Status) — kein neues Event, kein neuer Reader, keine neue Route, keine
@@ -701,8 +728,14 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
 
 8. **Änderungsumfang** (immer vorhanden): das Run-Detail zeigt nebeneinander, welche
    Dateien der Lauf tatsächlich geändert hat — gruppiert je Lane, mit `+/-`-Zahlen je
-   Datei — und den im Contract deklarierten Scope, so wie er dasteht. Beide Fakten
-   stehen **unbewertet** nebeneinander; ob eine Änderung „im Scope" liegt, entscheidet
+   Datei — und den im Contract deklarierten Scope, so wie er dasteht. Seit dem
+   Arbeitsfeld-zuerst-Layout steht er **unter** dem Arbeitsfeld, **zugeklappt** in
+   einem `<details>`, dessen Zusammenfassungszeile die Zahl der geänderten Dateien
+   über alle beobachteten Lanes und die Summen der Plus-/Minuszeilen nennt (eine
+   Binärdatei zählt bei der Dateizahl mit, nicht bei den Zeilensummen; ein Lauf ohne
+   verwertbaren Diff zeigt eine erklärende Zeile statt einer `0`, unterscheidbar von
+   einem verwertbaren Diff ohne geänderte Dateien). Beide Fakten stehen **unbewertet**
+   nebeneinander; ob eine Änderung „im Scope" liegt, entscheidet
    der Mensch. Es ist eine rein abgeleitete Projektion der bereits geladenen Events,
    der bestehenden Snapshots und der gewhitelisteten `contract.yaml` — keine neue
    Git-Operation, Route, kein neues Event, keine Persistenz. Beobachtbar als additives

@@ -71,6 +71,20 @@ def _page(client, slug, **params):
     return r.text
 
 
+def _trace_tab(html: str) -> str:
+    """The whole Trace TAB region (from its panel marker up to the Timeline tab).
+
+    Lifted for GUI-Redesign 3 (Brief 3, A1): the skeleton block moved from ABOVE the
+    trace to BELOW the work field — still inside the Trace tab, but now after the
+    detail panes. The shared ``tab_panel(html, "trace")`` helper stops at the panes'
+    own nested ``data-tab-panel`` (prompt/answer/tools), so it no longer reaches the
+    relocated block; this scopes to the run-level Trace tab as a whole instead."""
+    i = html.find('data-tab-panel="trace"')
+    j = html.find('data-tab-panel="timeline"')
+    assert i != -1 and j != -1 and i < j, "trace/timeline tab markers not found"
+    return html[i:j]
+
+
 def _no_lane_lines():
     """A run in its ``build`` phase with NO ``backend`` lane event, so the lane has
     no trace node yet."""
@@ -98,13 +112,13 @@ def _running_lane_lines():
 
 def test_skeleton_renders_in_trace_view_with_done_marker(home, tmp_path):  # noqa: F811
     """AC3/S5: with a completed ``backend`` lane the skeleton renders inside the
-    Trace tab panel — beside/above the trace — with a ``done`` marker and every task
-    text verbatim. The trace tree itself is still present (unchanged)."""
+    Trace tab — below the work field since Brief 3 (A1) — with a ``done`` marker and
+    every task text verbatim. The trace tree itself is still present (unchanged)."""
     client, slug, _repo = _client(tmp_path, lines=comprehensive_lines(), plan=DONE_PLAN)
     html = _page(client, slug)
 
     assert html.count("data-plan-skeleton") == 1
-    trace = tab_panel(html, "trace")
+    trace = _trace_tab(html)
     assert "data-plan-skeleton" in trace                 # placed within the Trace view
     assert 'data-skeleton-status="done"' in trace
     assert "B1 — Parser" in trace and "B2 — Additives Feld" in trace
@@ -154,8 +168,10 @@ def test_skeleton_is_read_only_and_task_text_untranslated(home, tmp_path):  # no
     task off — and the task texts are CONTENT, rendered identically in both GUI
     languages (only the chrome differs)."""
     client, slug, _repo = _client(tmp_path, lines=comprehensive_lines(), plan=DONE_PLAN)
-    en = tab_panel(_page(client, slug, lang="en"), "trace")
-    de = tab_panel(_page(client, slug, lang="de"), "trace")
+    # Brief 3 (A1) moved the skeleton below the work field; scope to the whole Trace
+    # tab (the shared tab_panel stops at the panes' nested tabs — see _trace_tab).
+    en = _trace_tab(_page(client, slug, lang="en"))
+    de = _trace_tab(_page(client, slug, lang="de"))
 
     # Isolate the skeleton region roughly by its marker; assert no interactive affordance.
     start = en.find("data-plan-skeleton")

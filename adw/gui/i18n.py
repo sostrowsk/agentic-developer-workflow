@@ -150,6 +150,10 @@ _EN: dict[str, str] = {
     "plan_skeleton_title": "Planned tasks",
     "plan_skeleton_pending": "pending",
     "plan_skeleton_done": "done",
+    # The collapsed "Planned tasks" summary line (A2): the per-lane task count uses
+    # these plural forms (the lane name and its state reuse the labels above).
+    "plan_skeleton_tasks_one": "task",
+    "plan_skeleton_tasks_many": "tasks",
     # Change-scope chrome (§7.2): the heading of the change-scope block, the +/-
     # column headers and the fallback texts. Only these labels switch language — the
     # file paths and the declared contract scope are CONTENT and stay untranslated.
@@ -162,6 +166,11 @@ _EN: dict[str, str] = {
     "change_scope_no_run_diff": "no run diff available",
     "change_scope_declared": "Declared scope",
     "change_scope_no_declared": "no declared scope",
+    # The collapsed "Change scope" summary line (A2): the changed-file count uses
+    # these plural forms; the +/- sums reuse change_scope_col_add/_del and the
+    # unavailable case reuses change_scope_no_run_diff.
+    "change_scope_files_one": "changed file",
+    "change_scope_files_many": "changed files",
 }
 
 _DE: dict[str, str] = {
@@ -270,6 +279,8 @@ _DE: dict[str, str] = {
     "plan_skeleton_title": "Geplante Aufgaben",
     "plan_skeleton_pending": "ausstehend",
     "plan_skeleton_done": "erledigt",
+    "plan_skeleton_tasks_one": "Aufgabe",
+    "plan_skeleton_tasks_many": "Aufgaben",
     "change_scope_title": "Änderungsumfang",
     "change_scope_col_add": "+",
     "change_scope_col_del": "−",
@@ -279,6 +290,8 @@ _DE: dict[str, str] = {
     "change_scope_no_run_diff": "kein Lauf-Diff verfügbar",
     "change_scope_declared": "Deklarierter Scope",
     "change_scope_no_declared": "kein deklarierter Scope",
+    "change_scope_files_one": "geänderte Datei",
+    "change_scope_files_many": "geänderte Dateien",
 }
 
 CATALOG: dict[str, dict[str, str]] = {"en": _EN, "de": _DE}

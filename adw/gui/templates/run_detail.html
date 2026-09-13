@@ -426,79 +426,10 @@
         <button type="button" class="tab-btn{% if raw_range_active %} active{% endif %}" data-tab="raw">{{ t.tab_raw }}</button>
       </div>
       <section class="tab tab-trace{% if not raw_range_active %} active{% endif %}" data-tab-panel="trace">
+        {#- A1: the work field (Trace tree │ detail panes │ run context) begins
+            directly under the head. The two summaries — "Planned tasks" and "Change
+            scope" — drop BELOW it, collapsed (see after this grid). -#}
         <div class="trace-layout">
-          {#- Plan skeleton (§7.2): read-only "what's still planned" beside/above the
-              trace, one list per `## Workstream:` section of plan.md, mapped to the
-              lane of the same name. Present only when `plan_skeleton` is derived (no
-              empty box). It is NOT bound to a trace node — a not-yet-started lane still
-              shows its `pending` list without an artificial node. Task texts are
-              CONTENT (never translated); only the chrome labels switch. Pure display:
-              no form/button/checkbox (E5). -#}
-          {% if detail.plan_skeleton is defined %}
-          <section class="plan-skeleton" data-plan-skeleton aria-label="{{ t.plan_skeleton_title }}">
-            <h3 class="plan-skeleton-title">{{ t.plan_skeleton_title }}</h3>
-            {% for ws in detail.plan_skeleton %}
-            <div class="plan-skeleton-lane" data-workstream="{{ ws.workstream }}" data-skeleton-status="{{ ws.status }}">
-              <p class="plan-skeleton-head"><span class="plan-skeleton-name">{{ ws.workstream }}</span>
-                <span class="plan-skeleton-status status-{{ ws.status }}">{{ t['plan_skeleton_' + ws.status] }}</span></p>
-              <ul class="plan-skeleton-tasks">
-                {% for task in ws.tasks %}
-                <li class="plan-skeleton-task">{{ task }}</li>
-                {% endfor %}
-              </ul>
-            </div>
-            {% endfor %}
-          </section>
-          {% endif %}
-          {#- Change scope (§7.2): read-only "what this run changed" (the files each
-              observed lane touched, first vs last snapshot) beside the contract's
-              declared `x-adw-*` scope. Facts side by side, NO judgement (E1): no
-              in-/out-of-scope marker, no file↔scope mapping. File paths and the
-              declared scope are CONTENT (never translated); only the chrome labels
-              switch. `change_scope` is always present; when no lane has a usable diff
-              the table view is dropped with a clear statement, while the declared
-              scope still renders. Pure display: no form/button (E6). -#}
-          {% set usable_lanes = detail.change_scope.lanes | selectattr('diff_available') | list %}
-          <section class="change-scope" data-change-scope aria-label="{{ t.change_scope_title }}">
-            <h3 class="change-scope-title">{{ t.change_scope_title }}</h3>
-            {#- Every observed lane keeps its own entry (AC-6): an unavailable lane —
-                including a span-only lane with no snapshot — shows its name and a clear
-                "no diff available" instead of a table, never hidden. Only the file
-                TABLE is a usable-lane thing; when NO lane has a usable diff the global
-                "no run diff available" statement is added below (AC-7), not instead. -#}
-            {%- for lane in detail.change_scope.lanes %}
-            <div class="change-scope-lane" data-lane="{{ lane.lane }}"
-                 data-diff-available="{{ 'true' if lane.diff_available else 'false' }}">
-              <p class="change-scope-lane-name">{{ lane.lane }}</p>
-              {%- if not lane.diff_available %}
-              <p class="change-scope-no-diff">{{ t.change_scope_no_diff }}</p>
-              {%- elif lane.files | length == 0 %}
-              <p class="change-scope-no-files">{{ t.change_scope_no_files }}</p>
-              {%- else %}
-              <table class="change-scope-files"><thead><tr><th class="cs-path"></th><th class="cs-add">{{ t.change_scope_col_add }}</th><th class="cs-del">{{ t.change_scope_col_del }}</th></tr></thead><tbody>
-              {%- for f in lane.files %}
-                {%- if f.additions is none and f.deletions is none %}
-<tr class="cs-file"><td class="cs-path">{{ f.path }}</td><td class="cs-bin" colspan="2">{{ t.change_scope_binary }}</td></tr>
-                {%- else %}
-<tr class="cs-file"><td class="cs-path">{{ f.path }}</td><td class="cs-add">{{ f.additions }}</td><td class="cs-del">{{ f.deletions }}</td></tr>
-                {%- endif %}
-              {%- endfor %}
-</tbody></table>
-              {%- endif %}
-            </div>
-            {%- endfor %}
-            {% if not usable_lanes %}
-            <p class="change-scope-no-run-diff">{{ t.change_scope_no_run_diff }}</p>
-            {% endif %}
-            <div class="change-scope-declared">
-              <h4 class="change-scope-declared-title">{{ t.change_scope_declared }}</h4>
-              {% if detail.change_scope.declared_scope is not none %}
-              <pre class="change-scope-declared-text">{{ detail.change_scope.declared_scope }}</pre>
-              {% else %}
-              <p class="change-scope-no-declared">{{ t.change_scope_no_declared }}</p>
-              {% endif %}
-            </div>
-          </section>
           <section class="trace">
             {% if not detail.run.has_trace %}
             <p class="no-trace-hint">{{ t.no_trace_line }}</p>
@@ -536,6 +467,80 @@
           {{ context_panel(detail.latest_context) }}
         </div>
 
+        {#- Plan skeleton (§7.2): read-only "what's still planned", one list per
+            `## Workstream:` section of plan.md. Now COLLAPSED (A1) — a native
+            <details> with no `open`, no JavaScript, no query parameter — whose
+            <summary> names, per lane, its name / task count / existing state (A2)
+            without expanding. Present only when `plan_skeleton` is derived (no empty
+            box). Task texts are CONTENT (never translated). Pure display (E5). -#}
+        {% if detail.plan_skeleton is defined %}
+        <details class="plan-skeleton" data-plan-skeleton aria-label="{{ t.plan_skeleton_title }}">
+          <summary class="plan-skeleton-summary"><span class="plan-skeleton-title">{{ t.plan_skeleton_title }}</span> {% for ws in detail.plan_skeleton %}<span class="plan-skeleton-lane-summary" data-workstream="{{ ws.workstream }}"><span class="plan-skeleton-name">{{ ws.workstream }}</span>: {{ ws.tasks | length }} {{ t.plan_skeleton_tasks_one if ws.tasks | length == 1 else t.plan_skeleton_tasks_many }} (<span class="plan-skeleton-status status-{{ ws.status }}">{{ t['plan_skeleton_' + ws.status] }}</span>)</span>{% if not loop.last %} &middot; {% endif %}{% endfor %}</summary>
+          <div class="plan-skeleton-body">
+            {% for ws in detail.plan_skeleton %}
+            <div class="plan-skeleton-lane" data-workstream="{{ ws.workstream }}" data-skeleton-status="{{ ws.status }}">
+              <p class="plan-skeleton-head"><span class="plan-skeleton-name">{{ ws.workstream }}</span>
+                <span class="plan-skeleton-status status-{{ ws.status }}">{{ t['plan_skeleton_' + ws.status] }}</span></p>
+              <ul class="plan-skeleton-tasks">
+                {% for task in ws.tasks %}
+                <li class="plan-skeleton-task">{{ task }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endfor %}
+          </div>
+        </details>
+        {% endif %}
+        {#- Change scope (§7.2): read-only "what this run changed" beside the declared
+            `x-adw-*` scope. Now COLLAPSED (A1) — a native <details> with no `open` —
+            whose <summary> names the number of changed files over all observed lanes
+            and the +/- line sums (A2); a binary file counts towards the file number,
+            not the line sums, and a run without a usable diff gets an explanatory line
+            instead of a 0. Facts side by side, NO judgement (E1). Pure display (E6). -#}
+        {% set usable_lanes = detail.change_scope.lanes | selectattr('diff_available') | list %}
+        <details class="change-scope" data-change-scope aria-label="{{ t.change_scope_title }}">
+          <summary class="change-scope-summary"><span class="change-scope-title">{{ t.change_scope_title }}</span> {% if change_summary.available %}{{ change_summary.files }} {{ t.change_scope_files_one if change_summary.files == 1 else t.change_scope_files_many }} &middot; <span class="cs-add">{{ t.change_scope_col_add }}{{ change_summary.additions }}</span> <span class="cs-del">{{ t.change_scope_col_del }}{{ change_summary.deletions }}</span>{% else %}{{ t.change_scope_no_run_diff }}{% endif %}</summary>
+          <div class="change-scope-body">
+            {#- Every observed lane keeps its own entry (AC-6): an unavailable lane —
+                including a span-only lane with no snapshot — shows its name and a clear
+                "no diff available" instead of a table, never hidden. Only the file
+                TABLE is a usable-lane thing; when NO lane has a usable diff the global
+                "no run diff available" statement is added below (AC-7), not instead. -#}
+            {%- for lane in detail.change_scope.lanes %}
+            <div class="change-scope-lane" data-lane="{{ lane.lane }}"
+                 data-diff-available="{{ 'true' if lane.diff_available else 'false' }}">
+              <p class="change-scope-lane-name">{{ lane.lane }}</p>
+              {%- if not lane.diff_available %}
+              <p class="change-scope-no-diff">{{ t.change_scope_no_diff }}</p>
+              {%- elif lane.files | length == 0 %}
+              <p class="change-scope-no-files">{{ t.change_scope_no_files }}</p>
+              {%- else %}
+              <table class="change-scope-files"><thead><tr><th class="cs-path"></th><th class="cs-add">{{ t.change_scope_col_add }}</th><th class="cs-del">{{ t.change_scope_col_del }}</th></tr></thead><tbody>
+              {%- for f in lane.files %}
+                {%- if f.additions is none and f.deletions is none %}
+<tr class="cs-file"><td class="cs-path">{{ f.path }}</td><td class="cs-bin" colspan="2">{{ t.change_scope_binary }}</td></tr>
+                {%- else %}
+<tr class="cs-file"><td class="cs-path">{{ f.path }}</td><td class="cs-add">{{ f.additions }}</td><td class="cs-del">{{ f.deletions }}</td></tr>
+                {%- endif %}
+              {%- endfor %}
+</tbody></table>
+              {%- endif %}
+            </div>
+            {%- endfor %}
+            {% if not usable_lanes %}
+            <p class="change-scope-no-run-diff">{{ t.change_scope_no_run_diff }}</p>
+            {% endif %}
+            <div class="change-scope-declared">
+              <h4 class="change-scope-declared-title">{{ t.change_scope_declared }}</h4>
+              {% if detail.change_scope.declared_scope is not none %}
+              <pre class="change-scope-declared-text">{{ detail.change_scope.declared_scope }}</pre>
+              {% else %}
+              <p class="change-scope-no-declared">{{ t.change_scope_no_declared }}</p>
+              {% endif %}
+            </div>
+          </div>
+        </details>
+
         <section class="problems">
           <h2>{{ t.reader_problems }}</h2>
           {% if detail.problems %}
@@ -568,11 +573,24 @@
           {% for lane in timeline.lanes %}
           <div class="tl-lane">
             <span class="tl-lane-label">{{ lane.label }}</span>
-            <span class="tl-track">
-              {% for bar in lane.bars %}
-              <span class="tl-bar bar-{{ bar.state }}{% if bar.running %} bar-running{% endif %}" data-seq="{{ bar.seq }}" style="left:{{ bar.left }}%;width:{{ bar.width }}%" title="{{ bar.label }}">{{ bar.label }}</span>
-              {% endfor %}
-            </span>
+            {#- A4: the bar is pure GEOMETRY — `left`/`width` in percent, unchanged —
+                and carries no text of its own, so a short bar can no longer clip its
+                name. The name rides in a separate label row below the track, whose
+                readability does NOT depend on the bar's width; the bars flow in
+                start-time (left-to-right) order, so the label row reads in the same
+                order. The `title` attribute stays on the bar. -#}
+            <div class="tl-lane-body">
+              <span class="tl-track">
+                {% for bar in lane.bars %}
+                <span class="tl-bar bar-{{ bar.state }}{% if bar.running %} bar-running{% endif %}" data-seq="{{ bar.seq }}" style="left:{{ bar.left }}%;width:{{ bar.width }}%" title="{{ bar.label }}"></span>
+                {% endfor %}
+              </span>
+              <div class="tl-track-labels">
+                {% for bar in lane.bars %}
+                <span class="tl-bar-label bar-{{ bar.state }}" data-seq="{{ bar.seq }}">{{ bar.label }}</span>
+                {% endfor %}
+              </div>
+            </div>
           </div>
           {% endfor %}
         </div>

@@ -2570,6 +2570,30 @@ def _change_scope(events, snaps: dict, repo_path, run_dir: Path) -> dict:
     return {"lanes": lanes, "declared_scope": _declared_scope(run_dir)}
 
 
+def _change_scope_summary(change_scope: dict) -> dict:
+    """The collapsed "Change scope" summary (A2): over ALL observed lanes the number
+    of changed files and the sums of added / removed lines. Binary files (null
+    counts) count towards the file number but contribute nothing to the line sums.
+
+    ``available`` is True as soon as ANY lane produced a usable diff — an available
+    diff with no changed files then reads as ``files: 0`` (distinct from the
+    unavailable case where no lane has a diff at all). Derived here as a pure
+    RENDER-context value from the already-built ``change_scope`` object; it is NOT
+    written into ``detail`` and so never joins the JSON API (AC 12)."""
+    lanes = change_scope.get("lanes") or []
+    available = any(lane.get("diff_available") for lane in lanes)
+    files = additions = deletions = 0
+    for lane in lanes:
+        for f in lane.get("files") or []:
+            files += 1
+            if f.get("additions") is not None:
+                additions += f["additions"]
+            if f.get("deletions") is not None:
+                deletions += f["deletions"]
+    return {"available": available, "files": files,
+            "additions": additions, "deletions": deletions}
+
+
 _TITLE_MAX = 90
 
 
@@ -3005,6 +3029,10 @@ def create_app(repos=None) -> FastAPI:
             "raw_range_active": raw_range_active,
             "tree_window": tree_window, "tool_window": tool_window, "pane_nodes": pane_nodes,
             "compact": compact,
+            # A2: the collapsed change-scope summary is a pure RENDER-context value
+            # (never written into `detail` / the JSON API, AC 12); the planned-tasks
+            # summary is rendered inline from the existing `detail.plan_skeleton`.
+            "change_summary": _change_scope_summary(detail["change_scope"]),
             "timeline": _timeline(
                 events, has_trace=_events_source(run_dir, runs_root) is not None
             ),

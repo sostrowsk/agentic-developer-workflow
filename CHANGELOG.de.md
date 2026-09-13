@@ -13,6 +13,31 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Geändert
+- **Run-Detail-Seite: das Arbeitsfeld zuerst.** Der Trace-Baum beginnt jetzt
+  unmittelbar unter dem Seitenkopf. „Planned tasks“ und „Change scope“ sind **unter**
+  das dreispaltige Arbeitsfeld (Trace-Baum │ Detail-Panes │ Run-Kontext) gerückt und
+  werden **zugeklappt** dargestellt — native `<details>` ohne `open`, ohne
+  JavaScript, ohne Persistenz. Jede Zusammenfassungszeile nennt ohne Aufklappen, was
+  der Block enthält: „Planned tasks“ je Lane Name, Aufgabenzahl und Zustand; „Change
+  scope“ die Zahl der geänderten Dateien über alle beobachteten Lanes samt den Summen
+  der Plus-/Minuszeilen (eine Binärdatei zählt bei der Dateizahl mit, nicht bei den
+  Zeilensummen; ein Lauf ohne verwertbaren Diff bekommt eine erklärende Zeile statt
+  einer `0`, unterscheidbar von einem verwertbaren Diff ohne geänderte Dateien). Die
+  Trace-Baum-Spalte wurde verbreitert, sodass sie mindestens so breit ist wie die
+  Panes-Spalte; die Kontext-Spalte bleibt die schmalste.
+- **Timeline: Geometrie in die Spur, Wörter daneben.** Ein Timeline-Balken ist jetzt
+  reine Geometrie — `left`/`width` in Prozent und die Unterscheidung
+  aktiv/wartend/noch laufend bleiben unverändert — und sein Name steht in einer
+  eigenen Beschriftungszeile unter der Spur, sodass ein kurzer Balken seinen Namen
+  nicht mehr abschneidet. Das `title`-Attribut bleibt erhalten. Rein darstellend —
+  `GET /api/runs` und `GET /api/runs/{repo}/{run_id}` bleiben in allen Feldern, Typen
+  und Werten unverändert; die Baum-Spalte rendert weiterhin vollständig (ein
+  `data-tree-entry` je Knoten, `?offset` inert), und die 200er-Schranke gilt weiterhin
+  nur für die Tools-Einträge.
+
 ## [0.23.0] — 2026-09-13
 
 ### Behoben

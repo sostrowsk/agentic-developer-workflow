@@ -415,6 +415,15 @@ the GUI stays read-only.
    then, and `awaiting` disappears once the gate is granted. This is the
    orientation layer; it mirrors the flowchart in
    `docs/adw-flowchart.excalidraw`.
+**Block order (work field first).** The work field — trace tree │ detail panes │
+run context — begins directly under the page head. The two summaries "Planned
+tasks" and "Change scope" render **below** the work field, each **collapsed** into a
+native `<details>` without `open` (no JavaScript, no client state, no persistence,
+no query parameter — one click on the summary line is the only control). The
+trace-tree column is at least as wide as the panes column; the context column keeps
+its `minmax` lower bound and stays the narrowest. Each summary line states its gist
+without expanding (see §7.2 items 7 and 8).
+
 2. **Trace tree** (left): the span tree from §4.2, collapsible, chronological.
    Each node: icon (status), label, duration, and for loops `n/cap`. Lanes are
    siblings — parallelism is visible as two open branches. Auto-scroll to the
@@ -425,9 +434,15 @@ the GUI stays read-only.
    `gate`/`ci.wait` span keeps its result (`passed`/`failed`, else `done`).
 
    **Compacted tree column (tool-noise folding).** The tree *column* renders EVERY
-   node of the run — it is not paged and has no entry cap. What keeps it readable is
-   the compaction below, a presentation layer that never changes the JSON `tree`
-   (see §API) and joins only direct neighbours.
+   node of the run — it is not paged and has no entry cap; `?offset` is inert for it
+   and it renders no page navigation. What keeps it readable is the compaction below,
+   a presentation layer that never changes the JSON `tree` (see §API) and joins only
+   direct neighbours. The column carries exactly **one `data-tree-entry` marker per
+   serialized node** — a result folded onto its call keeps its own marker, a
+   compaction wrapper (repeat/group) adds none — and this is fixed by a test at
+   several sizes (including trees past 200 nodes). The "at most 200 markers per
+   collection" bound applies **only** to the Tools entries (`data-tool-entry`, its own
+   `?tools_offset` window), never to the trace column.
    - **Results fold into their call (A1).** An `agent.tool.result` whose
      `tool_use_id` equals that of the immediately preceding `agent.tool.call` is not
      a row of its own; its outcome (from the existing result label — `ok`/`error`,
@@ -525,7 +540,12 @@ the GUI stays read-only.
    - **Timeline**: horizontal swimlanes (orchestrator, spec, plan, per lane,
      codex, CI) as CSS bars — active vs. waiting (CI polling, gate runtime)
      rendered differently. Answers "where does the time go". Header shows
-     total duration, total cost, tokens per model.
+     total duration, total cost, tokens per model. A bar is **pure geometry**
+     (`left`/`width` in percent, plus the active/waiting/still-running state);
+     its name rides in a **separate label row** under the track (not inside the
+     width-scaled bar), so a short bar never clips its own name — the same rule
+     the phase band already follows. The `title` attribute and the fixed lane
+     label on the left are unchanged.
    - **Artifacts**: `issue.md`, `spec.md`, `plan.md`, `contract.yaml`,
      `escalation.md`, `followups.md`, the drafts from dual authoring — rendered
      as Markdown, with the drafts side by side against the synthesis.
@@ -621,8 +641,11 @@ the GUI stays read-only.
      labels are bilingual (`adw/gui/i18n.py`); the command line, event values,
      `run_id` and repo path are not translated.
 7. **Plan skeleton** (when the run's `plan.md` yields planned tasks): the Trace view
-   shows, per workstream, a read-only list of the tasks *still planned* beside/above
-   that lane's trace — so "planned" (skeleton) and "done" (trace) sit in one view. It
+   shows, per workstream, a read-only list of the tasks *still planned* — since the
+   work-field-first layout it sits **below** the work field, **collapsed** into a
+   `<details>` whose summary line names, per lane, the workstream name, its task count
+   (bilingual plural) and the existing lane state — so the gist reads without
+   expanding, and "planned" (skeleton) and "done" (trace) still sit in one view. It
    is a purely derived projection of the run's `plan.md` (read only through the
    existing whitelist artifact path) and of the already-loaded event stream (for the
    coarse lane status) — no new event, reader, route or persistence. Observable as an
@@ -660,7 +683,12 @@ the GUI stays read-only.
 
 8. **Change scope** (always present): the run detail shows, side by side, which files
    the run actually changed — grouped per lane, with `+/-` counts per file — and the
-   scope the contract declares, as it stands. Both facts sit **unjudged** next to each
+   scope the contract declares, as it stands. Since the work-field-first layout it sits
+   **below** the work field, **collapsed** into a `<details>` whose summary line names
+   the number of changed files over all observed lanes and the sums of added/removed
+   lines (a binary file counts towards the file number but not the line sums; a run
+   without a usable diff shows an explanatory line instead of a `0`, distinct from an
+   available diff with no changed files). Both facts sit **unjudged** next to each
    other; whether a change is "in scope" is decided by a human. It is a purely derived
    projection of the already-loaded events, the existing snapshots and the whitelisted
    `contract.yaml` — no new git operation, route, event or persistence. Observable as
