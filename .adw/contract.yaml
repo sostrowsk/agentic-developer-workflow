@@ -1,170 +1,132 @@
-# Interface-Contract — Trace-Baum verdichten
+# Interface contract — Run-Detail bleibt 200 bei Nicht-Mapping-Payload
 #
-# Single-Lane-Projekt (backend). Der Contract pinnt NUR extern beobachtbare
-# Flächen: die JSON-API, das beobachtbare Verhalten der HTML-Trace-Spalte und
-# die i18n-Anforderung. NICHT Contract (bewusst offen für die Umsetzung):
-# interne Helper-Signaturen, Projektions-/Dictionary-Schlüssel jenseits der
-# Antwortfelder, Markup-/CSS-Wortlaut.
-#
-# Kernaussage: Dieses Feature ist eine SEITENLOKALE Darstellungsschicht der
-# Trace-Baum-Spalte. Es ändert die API NICHT. Die Verdichtung ist seitenabhängig
-# (E3) und deshalb nicht im seitenunabhängigen `tree` der API abbildbar.
-
+# Single-Lane-Projekt (nur backend). Der Contract pinnt ausschließlich die extern
+# beobachtbare Fläche: Statuscode und Form von GET /api/runs/{repo}/{run_id} bei
+# Events mit Nicht-Mapping-Payload. Interne Helfer-Signaturen und Modullayouts
+# sind KEINE Contract-Flächen.
 openapi: 3.0.3
 info:
-  title: ADW Run Inspector — Trace-Baum (unveränderte API-Fläche)
-  version: "1.0.0"
+  title: ADW GUI — Run-Detail (change_scope robustness)
+  version: 0.21.1
+  description: >-
+    Minimaler Contract für den einzigen Workstream backend. Er pinnt nur
+    das Verhalten des bestehenden Run-Detail-Endpunkts bei Nicht-Mapping-
+    Payloads und die unveränderte change_scope-Antwort. Interne Helfer,
+    Event-Schemas und weitere API-Flächen werden nicht spezifiziert.
 
 paths:
   /api/runs/{repo}/{run_id}:
     get:
-      summary: >
-        Run-Detail als JSON. Durch dieses Feature UNVERÄNDERT — insbesondere
-        `tree`. Ein Regressionstest fixiert die strukturelle Invarianz.
+      summary: Run-Detail bleibt bei Nicht-Mapping-Payloads erfolgreich.
+      description: >-
+        Bei einem ansonsten erfolgreichen Detailabruf verursachen
+        lane/start- und snapshot-Events mit Nicht-Mapping-Payload keinen
+        5xx; die Antwort bleibt 200. Dies gilt insbesondere für nichtleere
+        Listen, nichtleere Strings und Zahlen ungleich null.
+        Bestehende Fehlerbedingungen außerhalb dieses Falls bleiben unverändert.
       parameters:
-        - { name: repo, in: path, required: true, schema: { type: string } }
-        - { name: run_id, in: path, required: true, schema: { type: string } }
+        - name: repo
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
-          description: Run-Detail. Alle hier gepinnten Flächen bleiben unverändert.
+          description: >-
+            Bestehende Run-Detail-Antwort mit unveränderter Form.
+            Nicht-Mapping-Payloads beeinflussen weder gültige Lanes noch
+            gültige Snapshot-Zuordnungen oder daraus abgeleitete Diffs.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunDetail"
-        "404":
-          description: Unbekanntes Repo/Run oder kein lesbarer Lauf.
+                type: object
+                required: [change_scope]
+                description: >-
+                  Nur change_scope wird hier strukturell beschrieben.
+                  Alle weiteren bestehenden Antwortfelder bleiben unverändert;
+                  die offene Beschreibung erlaubt keine neuen Antwortfelder.
+                properties:
+                  change_scope:
+                    $ref: "#/components/schemas/ChangeScope"
 
 components:
   schemas:
-    RunDetail:
+    ChangeScope:
       type: object
-      description: >
-        Nur die vom Feature berührbaren Invarianten sind gepinnt; weitere
-        bestehende Felder bleiben ebenfalls unangetastet, werden aber nicht neu
-        spezifiziert.
+      additionalProperties: false
+      required: [lanes, declared_scope]
       properties:
-        run:
-          $ref: "#/components/schemas/RunSummary"
-        tree:
-          $ref: "#/components/schemas/Tree"
-      required: [run, tree]
+        lanes:
+          type: array
+          description: >-
+            Bestehende gültige Lane-Einträge in unveränderter Reihenfolge.
+            Nicht-Mapping-Payloads erzeugen keinen Eintrag. Enthält der Lauf
+            ausschließlich solche Events, ist diese Liste leer.
+          items:
+            $ref: "#/components/schemas/ChangeScopeLane"
+        declared_scope:
+          type: string
+          nullable: true
+          description: Nach den bisherigen Regeln unverändert abgeleiteter Wert.
 
-    RunSummary:
+    ChangeScopeLane:
       type: object
-      description: >
-        Laufzusammenfassung. Die Statusdomäne bleibt unverändert; insbesondere
-        die vom vorigen Lauf übernommenen Werte `waiting` (Knotenebene) und
-        `awaiting_approval` (Laufebene) werden nicht angefasst.
+      additionalProperties: false
+      required: [lane, diff_available, files]
       properties:
-        status:
-          oneOf:
-            - type: string
-            - type: "null"
+        lane:
+          type: string
+          minLength: 1
+        diff_available:
+          type: boolean
+          description: Bestehender Wert bleibt durch fehlerhafte Events unverändert.
+        files:
+          type: array
+          nullable: true
+          description: >-
+            Bestehendes Diff-Ergebnis einschließlich Reihenfolge und Zählwerten.
+            Weiterhin null bei nicht verfügbarem Diff und eine leere Liste
+            bei verfügbarem Diff ohne Änderungen.
+          items:
+            $ref: "#/components/schemas/ChangeScopeFile"
 
-    Tree:
-      type: array
-      description: >
-        UNVERDICHTETER, serialisierter Baum in HEUTIGER Struktur: KEINE
-        synthetischen Knoten (keine Gruppen-/Wiederholungsknoten, keine
-        angehängten Ergebnisse), KEINE entfernten Knoten, KEINE neuen Felder.
-        Jedes `agent.tool.call` und jedes `agent.tool.result` bleibt ein
-        eigener Knoten; für denselben Event-Log ist die Antwort vor und nach
-        dem Feature strukturell identisch. Blätter-Totale und
-        `?offset`-Semantik speisen sich unverändert aus dem flachen Fenster
-        über dieser unverdichteten Knotenliste.
-      items:
-        type: object
+    ChangeScopeFile:
+      type: object
+      additionalProperties: false
+      required: [path, additions, deletions]
+      properties:
+        path:
+          type: string
+        additions:
+          type: integer
+          nullable: true
+        deletions:
+          type: integer
+          nullable: true
 
-# --- Beobachtbares HTML-Seitenverhalten (Template-Verhalten, kein Wortlaut) ----
-# Normativ ist das Verhalten von A1–A6; die konkrete Markup-/CSS-Form ist NICHT
-# Contract. Adressiert die HTML-Route GET /runs/{repo}/{run_id}.
-x-page-behavior:
-  route: GET /runs/{repo}/{run_id}
-  scope: NUR die Trace-Baum-Spalte (<ul class="trace-list">).
-  unchanged:
-    - Blätterung — dasselbe bewegliche Fenster über die flache Knotenliste,
-      `?offset`, Fenstergröße 100, unverändertes Total. Gefaltet wird INNERHALB
-      der geladenen Seite; jede Faltung/Gruppe endet an der Seitengrenze und
-      greift nicht vor (E3).
-    - Dreispaltiges Layout, Knoten-Auswahl per Klick, Detail-Panes,
-      Run-Kontext-Panel, Timeline-Deep-Links (E5).
-    - Zweites Fenster über die Werkzeug-Einträge der Detail-Panes
-      (`?tools_offset`): `agent.tool.call`/`agent.tool.result` bleiben dort
-      getrennte Einträge; A1 gilt nur für die Baum-Spalte (E8).
-    - Timeline, Artefakte, Rohansicht, SSE-Pfad, Run-Liste, Event-Typen und
-      -Payloads, Statuswerte (inkl. `waiting`, `awaiting_approval`).
-  observable:
-    A1_fold_results: >
-      Ein `agent.tool.result`, das über gleiche vorhandene `tool_use_id` dem
-      unmittelbar vorangehenden Tool-Aufruf derselben Seite zugeordnet ist,
-      erscheint nicht als eigener Knoten, sondern mit Ausgang und bestimmbarer
-      Dauer (`ts(result) − ts(call)`, nur parsebar und ≥ 0) an der Aufrufzeile.
-      Keine Zuordnung über Werkzeugname, Zeitnähe oder Position. Ohne
-      zuordenbaren Vorgänger bleibt es eigener Knoten. Unbestimmter Ausgang
-      (kein `is_error`, kein `exit_code`) wird nie als Erfolg dargestellt.
-    A2_repeat_nodes: >
-      ≥ 2 unmittelbar aufeinanderfolgende, zielgleiche `Read`/`Grep`/`Glob`-
-      Aufrufe (Ziel: `input.file_path` bzw. `input.pattern`, exakter
-      Rohwert-Vergleich ohne Normalisierung) werden zu einem aufklappbaren
-      Wiederholungsknoten (Zähler + aufsummierte bestimmbare Dauer; keine
-      bestimmbare Dauer → keine Summendauer). Aufgeklappt: Einzelaufrufe in
-      Originalreihenfolge inkl. A1-Ergebnissen. Unterschiedliches/fehlendes
-      Ziel, jedes dazwischenliegende Ereignis, `Write`/`Edit`,
-      `Bash`/unbekanntes Tool, Struktur- und Seitengrenze sowie ein bestimmter
-      Fehler-Ausgang beenden die Wiederholung; der Fehler-Aufruf bleibt eigener
-      Knoten. Unbestimmter Ausgang ist kein Fehler und verhindert nichts.
-    A3_group_nodes: >
-      Ununterbrochene `Read`/`Grep`/`Glob`-Folge mit ≥ 2 Kindknoten nach A1/A2
-      (ein Wiederholungsknoten zählt als ein Kind) wird zu einem aufklappbaren
-      Gruppenknoten mit Anzahl der enthaltenen Aufrufe und den tatsächlich
-      vorkommenden Operationsarten. Bricht an Nachricht, Schreiboperation
-      (`Write`/`Edit`), Artefakt, bestimmtem Fehler, `Bash`/unbekanntem Tool,
-      Struktur- und Seitengrenze; das brechende Ereignis bleibt eigener Knoten.
-      Unterhalb der Mindestgröße keine Gruppen-Hülle (auch nicht um einen
-      einzelnen Wiederholungsknoten).
-    A4_repo_relative_paths: >
-      Repo-Präfix im sichtbaren Text abgeschnitten, voller Pfad im
-      `title`-Attribut. Pfade außerhalb des Repos unverändert. Kein Baum-Knoten
-      enthält den absoluten Repo-Pfad im sichtbaren Text. Der Ziel-Vergleich
-      (A2/A3) nutzt weiterhin den unveränderten Rohwert.
-    A5_default_fold_and_focus: >
-      Baum öffnet mit zugeklappten Phasen; offen startet ausschließlich die
-      Phase mit dem in Baumreihenfolge ersten bestimmten Fehler, sonst die
-      zuletzt begonnene. Genau drei Klappebenen: Phase, Gruppe, Wiederholung —
-      `agent.run`, `round` u. a. erhalten keine Klappmechanik. Klappzustand ist
-      reines Client-Verhalten ohne Persistenz. `?focus=<seq>` klappt die
-      seiten-internen Klapp-Vorfahren des Ziels auf; seitenfremde Vorfahren
-      werden nicht materialisiert, Knoten mit Klapp-Elternteil vor der Seite
-      werden aufgeklappt dargestellt. `?focus` auf ein gefaltetes Ergebnis
-      lenkt auf den Aufruf-Knoten (gleiche `tool_use_id`) um: dessen `seq` wird
-      ausgewählt, dessen Pane gezeigt. Auswahl und `?focus` adressieren
-      weiterhin ausschließlich Original-`seq`s.
-    A6_line_balance: >
-      Unter dem Baum, NEBEN dem bestehenden `window_nav` (bleibt funktional),
-      eine je geladener Seite serverseitig gebildete Bilanz aus zwei Zahlen,
-      unabhängig vom Client-Klappzustand. Zeilen: Knoten der verdichteten Liste
-      außerhalb jedes Sammelknotens (Original- + synthetische Knoten; Kinder
-      von Sammelknoten und angehängte Ergebnisse zählen nicht). Eingefaltete
-      Events: Events der ungefalteten Seitenliste minus der Zeilen, die selbst
-      Original-Events sind; jedes Event zählt genau einmal, auch verschachtelt.
-  reachability: >
-    Kein Event verschwindet (E2): Ab aufgeklappter Phase ist jedes Event über
-    höchstens zwei Klicks erreichbar — als eigener Knoten, als angehängtes
-    Ergebnis oder als Einzelknoten in geöffneter Gruppe/Wiederholung.
-  synthetic_nodes: >
-    Gruppen-/Wiederholungsknoten sind auswahl-/pane-neutral (E9) und tragen
-    keine `data-seq`; nur weiterhin einzeln existierende Original-Knoten
-    behalten ihre `data-seq`-Auswahl- und Pane-Semantik.
-  no_server_state: >
-    Kein Frontend-Zustand jenseits von Auf-/Zuklappen (E7): keine Persistenz,
-    kein Polling, kein Filter, keine Suche, kein Sortieren.
-
-# --- i18n (A7) -----------------------------------------------------------------
-x-i18n:
-  module: adw/gui/i18n.py
-  requirement: >
-    Neue Chrome-Labels für A2 (Wiederholungszähler), A3 (Gruppenanzahl +
-    Operationsarten) und A6 (Zeilenbilanz) liegen in `_EN` und `_DE` mit
-    identischen Schlüsselmengen und korrekten Singular-/Pluralformen vor.
-    Konkrete Schlüsselnamen sind NICHT Contract; Event-, Pfad-, Werkzeug- und
-    Payload-Inhalte werden nicht übersetzt.
+x-adw-invariants:
+  - >-
+    Nicht-Mapping-Payloads werden für Änderungsumfang-Ableitung und
+    Snapshot-Zuordnung still ignoriert: keine Lane, kein Snapshot-Beitrag,
+    kein Eintrag, kein Platzhalter, keine Fehlermeldung, kein Zusatzfeld,
+    kein Log-Eintrag und kein Zähler.
+  - >-
+    Ein snapshot-Event mit Nicht-Mapping-Payload bracketiert keinen Knoten
+    und wird keiner Lane zugeordnet. Gültige Snapshots behalten ihre
+    Zuordnung und Wirkung; gültige Paare und Diff-Ergebnisse werden
+    weder ersetzt noch entfernt.
+  - >-
+    Gültige Lane-Einträge und declared_scope behalten ihre bestehenden
+    Felder und Werte. Fehlerhafte Events verdrängen keine gesunden Events
+    aus der Ableitung.
+  - >-
+    Das Ignorieren entfernt keine Events aus dem gespeicherten Event-Log
+    und verändert nicht die bestehende Trace-Darstellung.
+  - >-
+    Keine neue Route, kein neues Antwortfeld und keine Änderung einer
+    bestehenden Antwortform. Die GUI bleibt read-only.
