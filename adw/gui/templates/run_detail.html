@@ -557,7 +557,7 @@
         <p class="no-trace-hint">{{ t.no_trace_line }}</p>
         {% else %}
         <div class="timeline-header">
-          <span class="tl-duration">{{ t.tl_duration }} {{ timeline.duration | fmt_duration }}</span>
+          <span class="tl-duration">{{ t.tl_work }} {{ timeline.duration | fmt_duration }}</span>
           {% if timeline.cost is not none %}<span class="tl-cost">{{ t.tl_cost }} {{ timeline.cost | fmt_cost }}</span>{% endif %}
           {% for m in timeline.models %}<span class="tl-model">{{ m.model }} {{ m.tokens }} {{ t.tl_tokens }}</span>{% endfor %}
         </div>

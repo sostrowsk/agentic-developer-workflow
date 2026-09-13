@@ -334,7 +334,8 @@ adw gui [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--lang de|en
 **A — Run-Liste (`/`)**
 
 Tabelle über alle registrierten Repos: Run-ID · Repo · Issue-Titel · Status ·
-Start · Dauer · Kosten · Event-Zahl. Die Issue-Spalte zeigt eine einzeilige
+Start · Arbeit (die Laufdauer, beschriftet mit dem gemeinsamen Vokabular
+Arbeit/Work) · Kosten · Event-Zahl. Die Issue-Spalte zeigt eine einzeilige
 **Titelzeile**, abgeleitet aus dem rohen Issue-Text (siehe unten), kein rohes
 Markdown; der vollständige Rohtext steht im `title`-Attribut der Zelle. Phase und
 Status sind **eine** Spalte: sie nennt den Status und ergänzt die Phase nur, wenn
@@ -865,10 +866,10 @@ Rechenregeln (bindend):
   Phase zählt bis zum Seitenaufbau) — das ist die Fläche der Schiene, **nicht**
   Arbeit, und trägt nie die Beschriftung „Arbeit" (beide gehen um das 7- bis
   25-Fache auseinander, wenn eine Phasenspanne eine Unterbrechung überdauert);
-  **Warten** = die Summe der Lücken; **Gesamt** = `T`. Phasenzeit + Warten = Gesamt
-  bis auf Rundung. Die Labels sind lokalisiert (`Arbeit`/`Work`,
-  `Phasenzeit`/`Phase time`, `Warten`/`Waiting`, `Gesamt`/`Total`). Arbeit entfällt,
-  wenn unbestimmt (keine abgeschlossene Spanne), nie als `0`.
+  **Wartezeit** = die Summe der Lücken; **Gesamt** = `T`. Phasenzeit + Wartezeit =
+  Gesamt bis auf Rundung. Die Labels sind lokalisiert (`Arbeit`/`Work`,
+  `Phasenzeit`/`Phase time`, `Wartezeit`/`Waiting`, `Gesamt`/`Total`). Arbeit
+  entfällt, wenn unbestimmt (keine abgeschlossene Spanne), nie als `0`.
 
 `duration`, `name` und `status` je Phaseneintrag bleiben exakt wie zuvor; das
 API-`end` einer offenen Phase bleibt `null` (der Seitenaufbau-Zeitpunkt ist nur
@@ -894,7 +895,7 @@ eine Zahl oder `null`):
   `start`/`end` (die Schienenfläche aus 7.7); **nicht** Arbeit.
 - `total_seconds` — Gesamt: kleinster Phasenstart bis größtes Phasenende (bis zum
   Seitenaufbau für eine aktive offene Phase).
-- `wait_seconds` — Warten: `total_seconds − phase_seconds`; die Phasen-Spannen
+- `wait_seconds` — Wartezeit: `total_seconds − phase_seconds`; die Phasen-Spannen
   überlappen nicht, die Zerlegung ist also eindeutig. `phase_seconds +
   wait_seconds = total_seconds` bis auf Rundung.
 

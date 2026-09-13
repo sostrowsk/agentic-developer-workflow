@@ -1033,23 +1033,63 @@ def _run_totals(events) -> dict:
     return sums
 
 
+def _phase_time_sizes(phases, now_epoch):
+    """The three named time sizes (A2) from the NORMATIVE definitions — independent
+    of the timeline's drawing eligibility and rounded geometry, so genuine zeros and
+    fractional seconds survive:
+
+    * ``phase_seconds`` — sum of the phase spans with BOTH a parsable ``start`` and
+      ``end`` (an open phase never contributes, so an active run's current phase is
+      excluded); fractional seconds preserved, a real ``0`` kept. ``None`` only when
+      no phase ever closed.
+    * ``total_seconds`` — smallest phase start to largest phase end; an active open
+      phase with no ``end`` reaches ``now_epoch`` (a calculation instant, never
+      written back as a phase end). ``None`` without a determinable end.
+    * ``wait_seconds`` — ``total_seconds − phase_seconds``; ``None`` when either
+      operand is undetermined. The phase spans do not overlap, so the split is
+      unambiguous.
+    """
+    starts, ends = [], []
+    phase_sum = 0.0
+    closed = False
+    for ph in phases:
+        s = _ts_epoch(ph.get("start"))
+        if s is None:
+            continue
+        starts.append(s)
+        e = _ts_epoch(ph.get("end"))
+        if e is not None:
+            ends.append(e)
+            if e >= s:
+                phase_sum += e - s
+                closed = True
+        elif ph.get("status") == "active":
+            # An open ACTIVE phase bounds TOTAL only (to now); it is not work time and
+            # never enters phase_seconds — that is the fix for the presentation-derived
+            # value which counted it.
+            ends.append(now_epoch)
+    if not starts:
+        return None, None, None
+    phase_seconds = phase_sum if closed else None
+    if not ends:
+        return phase_seconds, None, None
+    total_seconds = max(ends) - min(starts)
+    wait_seconds = (total_seconds - phase_seconds) if phase_seconds is not None else None
+    return phase_seconds, wait_seconds, total_seconds
+
+
 def _summary(slug, run_id, events, state, has_trace=None, now_epoch=None) -> dict:
     start_rec, end_rec = _run_span(events)
     start_payload = _mapping_payload(start_rec or {})
     end_payload = _mapping_payload(end_rec or {})
     # Whole-run figures (A1): summed over every closed span, not the last one.
     totals = _run_totals(events)
-    # The named time sizes (A2): the phase band's own geometry gives the phase time
-    # (sum of the coloured segments), the waiting time (the gaps) and the total; the
-    # summary reuses the same derivation the header rail uses so both agree.
+    # The named time sizes (A2): computed from the normative definitions, NOT copied
+    # from the presentation-only phase timeline (which includes open phases, rounds
+    # seconds and drops a zero-length timeline).
     phases = _phase_bar(events, state.phase if state is not None else None)
-    tl = _phase_timeline(phases, time.time() if now_epoch is None else now_epoch)
-    if tl.get("scaled"):
-        phase_seconds = tl["work_seconds"]  # the phase-band area — NOT work (E5)
-        wait_seconds = tl["wait_seconds"]
-        total_seconds = tl["total_seconds"]
-    else:
-        phase_seconds = wait_seconds = total_seconds = None
+    phase_seconds, wait_seconds, total_seconds = _phase_time_sizes(
+        phases, time.time() if now_epoch is None else now_epoch)
     issue = start_payload.get("issue")
     if issue is None and state is not None:
         # A run without an event log (Aufgabe G) still names its issue in state.
@@ -2609,10 +2649,11 @@ def _apply_list_controls(entries, sort, direction, repo_f, status_f):
         result = [e for e in result if e.get("repo") == repo_f]
     if status_f is not None:
         result = [e for e in result if e.get("status") == status_f]
-    if sort not in _LIST_SORT_KEYS:
-        sort, direction = "start", "desc"
-    if direction not in ("asc", "desc"):
-        direction = "desc"
+    # sort and dir default INDEPENDENTLY (contract): a bad/absent sort falls back to
+    # `start` without forcing `dir` back to `desc`, so `?dir=asc` alone still sorts
+    # ascending and matches the direction the control displays.
+    sort = sort if sort in _LIST_SORT_KEYS else "start"
+    direction = direction if direction in ("asc", "desc") else "desc"
     key = _LIST_SORT_KEYS[sort]
     reverse = direction == "desc"
     present = [e for e in result if e.get(key) is not None]

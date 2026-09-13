@@ -170,6 +170,19 @@ def test_unknown_filter_value_gives_empty_result_not_the_full_list(home, tmp_pat
 # --- AC 12: robustness of unknown sort/dir -------------------------------------
 
 
+def test_dir_asc_without_sort_defaults_independently(home, tmp_path):  # noqa: F811
+    """P3: `sort` and `dir` default INDEPENDENTLY. `?dir=asc` with no `sort` sorts by
+    `start` ASCENDING (not forced back to desc), and the control reflects `asc`."""
+    client = TestClient(create_app(repos=[str(_sortable_repo(tmp_path))]))
+
+    resp = client.get("/?dir=asc")
+    assert resp.status_code == 200
+    order = _order(resp.text)
+    assert order[0] == AW                       # grouping still first
+    assert order[1:] == [D1, D2, D3]            # start ascending (5<10<20<30 by start)
+    assert 'name="dir" value="asc"' in resp.text  # the displayed direction matches
+
+
 def test_unknown_sort_and_dir_fall_back_to_default_without_error(home, tmp_path):  # noqa: F811
     """AC 12: unknown ``sort``/``dir`` values fall back to start/desc — no error,
     no empty list — and null metrics sort without raising (the awaiting run has

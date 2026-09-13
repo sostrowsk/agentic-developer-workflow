@@ -183,3 +183,22 @@ def test_issue_cell_is_single_line_with_full_escaped_raw_in_title(home, tmp_path
     assert ("&lt;b&gt;" in cell) or ("&lt;b&gt;" in title)
     assert ("&amp;" in cell) or ("&amp;" in title)
     assert ("&quot;" in title) or ("&#34;" in title)
+
+
+def test_issue_cell_css_clips_to_one_rendered_line(home, tmp_path):  # noqa: F811
+    """AC 8 (rendered): the issue cell is styled to occupy ONE rendered line —
+    `white-space: nowrap`, `overflow: hidden`, `text-overflow: ellipsis` — so a long
+    title clips with an ellipsis instead of wrapping across rows (removing newlines
+    from the source is not enough on a fixed-layout table). Asserted on the served
+    stylesheet, the level the repo pins layout at."""
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True, exist_ok=True)
+    write_run(repo, "aaaa1111", _issue_run("A run", "aaaa1111"), phase="done", issue="A run")
+    css = TestClient(create_app(repos=[str(repo)])).get("/static/app.css").text
+
+    m = re.search(r"table\.run-list\s+\.issue\s*\{([^}]*)\}", css)
+    assert m, "no dedicated .issue cell rule in the run-list stylesheet"
+    block = re.sub(r"\s+", " ", m.group(1))
+    assert "white-space: nowrap" in block
+    assert "overflow: hidden" in block
+    assert "text-overflow: ellipsis" in block

@@ -22,6 +22,7 @@ label directly followed by its formatted value, so tag-stripped text reads
 
 import os
 import re
+from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -56,6 +57,15 @@ def _header_text(html: str) -> str:
     assert i != -1 and j != -1, "run header not found"
     seg = re.sub(r"<[^>]+>", " ", html[i:j])
     return re.sub(r"\s+", " ", seg).strip()
+
+
+_BASE = datetime(2026, 8, 5, 14, 0, 0)
+
+
+def _iso(offset: float) -> str:
+    """A fractional ISO-UTC timestamp ``offset`` seconds after the base — so the
+    implementation must keep real (non-integer) span seconds, not round them."""
+    return (_BASE + timedelta(seconds=offset)).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
 
 
 def _phase(seq, sid, name, start_sec, end_sec):
@@ -150,16 +160,111 @@ def test_detail_head_labels_work_and_phase_time_distinctly(home, tmp_path):  # n
 
 
 def test_time_vocabulary_present_in_both_languages():
-    """AC 15 / E5: the catalog carries the binding time vocabulary — a distinct
-    "Work" and "Phase time" (so phase time is not labeled work), plus "Total", and
-    their German counterparts "Arbeit", "Phasenzeit", "Gesamt"."""
+    """AC 15 / E5: the catalog carries the FULL binding time vocabulary in both
+    languages — Work/Arbeit, Phase time/Phasenzeit, Waiting/Wartezeit and
+    Total/Gesamt — and the four labels are distinct in each language (phase time is
+    never labeled as work)."""
     from adw.gui.i18n import CATALOG
 
     en_values = set(CATALOG["en"].values())
     de_values = set(CATALOG["de"].values())
 
-    assert {"Work", "Phase time", "Total"} <= en_values, en_values
-    assert {"Arbeit", "Phasenzeit", "Gesamt"} <= de_values, de_values
-    # Work and phase time are DIFFERENT labels in each language (E5).
-    assert "Work" != "Phase time"
-    assert {"Arbeit", "Phasenzeit"} <= de_values and "Arbeit" != "Phasenzeit"
+    assert {"Work", "Phase time", "Waiting", "Total"} <= en_values, en_values
+    assert {"Arbeit", "Phasenzeit", "Wartezeit", "Gesamt"} <= de_values, de_values
+    # Each size has its OWN word — four distinct labels per language (E5).
+    assert len({"Work", "Phase time", "Waiting", "Total"}) == 4
+    assert len({"Arbeit", "Phasenzeit", "Wartezeit", "Gesamt"}) == 4
+
+
+def test_work_metric_uses_the_work_vocabulary_not_duration(home, tmp_path):  # noqa: F811
+    """P3/AC 15: the run's work metric is labeled with the binding Work/Arbeit
+    vocabulary in the run list, not the old "Duration"/"Dauer" — the same size uses
+    the same word everywhere."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lines = [rec(1, "run", "start", "R", None, ts=ts_at(0), payload=run_start_payload("A run"))]
+    lines += _phase(2, "PB", "build", 0, 100)
+    lines.append(rec(4, "run", "end", "R", None, ts=ts_at(100),
+                     payload=run_end_payload("done", 100, 1.0, 10)))
+    write_run(repo, RUN_ID, lines, phase="done", issue="A run")
+
+    client = TestClient(create_app(repos=[str(repo)]))
+    en = client.get("/").text
+    de = client.get("/?lang=de").text
+    assert "Work" in en and "Duration" not in en
+    assert "Arbeit" in de and "Dauer" not in de
+
+
+# --- P2: summary time sizes follow the NORMATIVE definitions, not the timeline ---
+
+
+def test_open_active_phase_is_excluded_from_phase_seconds(home, tmp_path):  # noqa: F811
+    """P2: an open ACTIVE phase never contributes to phase_seconds (only phases with
+    a parsable start AND end do), but it does extend total_seconds; the phase's API
+    ``end`` stays null."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lines = [rec(1, "run", "start", "R", None, ts=ts_at(0), payload=run_start_payload("Live"))]
+    lines += _phase(2, "S", "spec", 0, 100)                    # closed → contributes 100
+    lines.append(rec(4, "phase", "start", "PB", "R", ts=ts_at(200),
+                     payload={"name": "build", "from_phase": "build"}))  # open, active
+    # no run end → the run is still running, build phase is active/open
+    write_run(repo, RUN_ID, lines, phase="build", issue="Live")
+
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = _slug_for(repo)
+    entry = _by_id(client.get("/api/runs").json(), RUN_ID)
+    assert entry["phase_seconds"] == 100  # excludes the open build phase (not 100 + elapsed)
+    assert entry["total_seconds"] is not None
+    assert entry["total_seconds"] > entry["phase_seconds"]  # the open phase extends total
+
+    detail = client.get(f"/api/runs/{slug}/{RUN_ID}").json()
+    build = next(p for p in detail["phases"] if p["name"] == "build")
+    assert build["end"] is None  # the page-build instant is never written back as an end
+
+
+def test_closed_zero_duration_phase_is_zero_not_null(home, tmp_path):  # noqa: F811
+    """P2: a closed zero-length phase (start == end) yields genuine zeros, not null —
+    the presentation timeline rejected a zero-length span, the summary must not."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lines = [
+        rec(1, "run", "start", "R", None, ts=ts_at(0), payload=run_start_payload("Zero phase")),
+        rec(2, "phase", "start", "S", "R", ts=ts_at(50),
+            payload={"name": "spec", "from_phase": "spec"}),
+        rec(3, "phase", "end", "S", "R", ts=ts_at(50),
+            payload={"name": "spec", "to_phase": "done"}),
+        rec(4, "run", "end", "R", None, ts=ts_at(60), payload=run_end_payload("done", 10, 1.0, 10)),
+    ]
+    write_run(repo, RUN_ID, lines, phase="done", issue="Zero phase")
+
+    entry = _by_id(TestClient(create_app(repos=[str(repo)])).get("/api/runs").json(), RUN_ID)
+    assert entry["phase_seconds"] == 0
+    assert entry["total_seconds"] == 0
+    assert entry["wait_seconds"] == 0
+
+
+def test_fractional_phase_timestamps_are_not_rounded(home, tmp_path):  # noqa: F811
+    """P2: fractional span seconds are preserved in the summary (the timeline rounds
+    for drawing; the metrics must not)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lines = [
+        rec(1, "run", "start", "R", None, ts=_iso(0), payload=run_start_payload("Fractional")),
+        rec(2, "phase", "start", "S", "R", ts=_iso(0.0),
+            payload={"name": "spec", "from_phase": "spec"}),
+        rec(3, "phase", "end", "S", "R", ts=_iso(100.5),
+            payload={"name": "spec", "to_phase": "plan"}),
+        rec(4, "phase", "start", "PL", "R", ts=_iso(200.0),
+            payload={"name": "plan", "from_phase": "plan"}),
+        rec(5, "phase", "end", "PL", "R", ts=_iso(350.25),
+            payload={"name": "plan", "to_phase": "done"}),
+        rec(6, "run", "end", "R", None, ts=_iso(350.25),
+            payload=run_end_payload("done", 250.75, 1.0, 10)),
+    ]
+    write_run(repo, RUN_ID, lines, phase="done", issue="Fractional")
+
+    entry = _by_id(TestClient(create_app(repos=[str(repo)])).get("/api/runs").json(), RUN_ID)
+    assert abs(entry["phase_seconds"] - 250.75) < 1e-6   # 100.5 + 150.25, not rounded
+    assert abs(entry["total_seconds"] - 350.25) < 1e-6
+    assert abs(entry["wait_seconds"] - 99.5) < 1e-6

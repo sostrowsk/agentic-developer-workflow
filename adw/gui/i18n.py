@@ -242,7 +242,7 @@ _DE: dict[str, str] = {
     "tl_tokens": "Tokens",
     "tl_work": "Arbeit",
     "tl_phase_time": "Phasenzeit",
-    "tl_waiting": "Warten",
+    "tl_waiting": "Wartezeit",
     "tl_total": "Gesamt",
     "filter_all": "(alle)",
     "filter_apply": "Filtern",

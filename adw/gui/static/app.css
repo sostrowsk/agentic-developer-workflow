@@ -105,6 +105,16 @@ table.run-list .events, table.run-list .run-id {
 }
 /* Aufgabe E4: a timestamp stays on one line and does not break across two rows. */
 table.run-list .ts { white-space: nowrap; }
+/* A3: the issue TITLE renders on exactly ONE line — clipped with an ellipsis —
+   while the full raw text stays in the cell's `title` tooltip. `max-width: 0`
+   lets the fixed table layout size the column so text-overflow can take effect
+   instead of the inherited overflow-wrap:anywhere wrapping the cell. */
+table.run-list .issue {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 0;
+}
 table.run-list .no-trace-hint { color: var(--ink-soft); font-style: italic; }
 tr.no-trace td { color: var(--ink-soft); }
 tr.missing-repo { color: var(--ink-soft); opacity: 0.55; font-style: italic; }

@@ -325,7 +325,8 @@ adw gui [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--lang de|en
 **A — Run list (`/`)**
 
 Table across all registered repos: run ID · repo · issue title · status · start ·
-duration · cost · event count. The issue column shows a one-line **title** derived
+work (the run duration, labelled with the shared Work/Arbeit vocabulary) · cost ·
+event count. The issue column shows a one-line **title** derived
 from the raw issue text (see below), not raw markdown; the full raw text is in the
 cell's `title` attribute. Phase and status are **one** column: it names the status
 and adds the phase only when that helps (a running or waiting run) — a finished run
@@ -811,7 +812,7 @@ Compute rules (binding):
   two diverge 7–25× when a phase span outlives an interruption); **Waiting** = the
   sum of the gaps; **Total** = `T`. Phase time + Waiting = Total up to rounding.
   The labels are localised (`Work`/`Arbeit`, `Phase time`/`Phasenzeit`,
-  `Waiting`/`Warten`, `Total`/`Gesamt`). Work is omitted when undetermined (no
+  `Waiting`/`Wartezeit`, `Total`/`Gesamt`). Work is omitted when undetermined (no
   closed span), never shown as `0`.
 
 `duration`, `name` and `status` on each phase entry stay exactly as before; an

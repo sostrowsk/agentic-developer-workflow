@@ -32,7 +32,7 @@ English edition: [CHANGELOG.md](CHANGELOG.md)
 
 ### Hinzugefügt
 - **Drei benannte Zeitgrößen, ein Vokabular.** Arbeit (Summe der Spannen-Dauern),
-  Phasenzeit (Fläche der farbigen Phasenband-Segmente), Warten (die Lücken an den
+  Phasenzeit (Fläche der farbigen Phasenband-Segmente), Wartezeit (die Lücken an den
   Freigabe-Gates) und Gesamt (erster Phasenstart bis letztes Phasenende) sind
   einheitlich benannt. Der Run-Detail-Kopf zeigt jetzt die echte **Arbeit** neben
   der **Phasenzeit** — die Phasenzeit trägt nicht mehr die Beschriftung „Arbeit"
