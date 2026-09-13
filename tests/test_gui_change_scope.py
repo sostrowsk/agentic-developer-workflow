@@ -417,18 +417,19 @@ def test_non_mapping_snapshot_payload_is_ignored_and_keeps_the_valid_pair(home, 
 
 
 def test_run_with_only_non_mapping_payload_events_is_200_with_no_lanes(home, tmp_path):  # noqa: F811,E501
-    """AC-3: a run whose only `lane`/`start` and `snapshot` events carry a
-    non-mapping payload (list / string / number) yields 200 with
-    `change_scope.lanes == []` — no error and no synthetic lane entry."""
+    """AC-3: a run built ONLY from `lane`/`start` and `snapshot` events whose payload
+    is a non-mapping value (list / string / number) — no valid mapping-payload event
+    at all, so the events go straight to `write_run` without the `_wrap` scaffold —
+    yields 200 with `change_scope.lanes == []`, no error and no synthetic lane."""
     repo = tmp_path / "repo"
-    write_run(repo, RUN_ID, _wrap([
-        _nonmapping_lane_start(3, ["nope"]),
-        _nonmapping_lane_start(4, "text"),
-        _nonmapping_lane_start(5, 42),
-        _nonmapping_snap(6, ["x"]),
-        _nonmapping_snap(7, "s"),
-        _nonmapping_snap(8, 99),
-    ]), phase="done")
+    write_run(repo, RUN_ID, [
+        _nonmapping_lane_start(1, ["nope"]),
+        _nonmapping_lane_start(2, "text"),
+        _nonmapping_lane_start(3, 42),
+        _nonmapping_snap(4, ["x"]),
+        _nonmapping_snap(5, "s"),
+        _nonmapping_snap(6, 99),
+    ], phase="done")
     r = _client(repo).get(f"/api/runs/{_slug_for(repo)}/{RUN_ID}")
     assert r.status_code == 200
     assert r.json()["change_scope"]["lanes"] == []
