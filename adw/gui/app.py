@@ -1147,8 +1147,13 @@ def _phase_bar(events, state_phase) -> list[dict]:
         # above, taken over verbatim from the event log, or None. `duration` is NOT
         # re-derived from them, and an open phase's end stays None — the page-build
         # instant is a display rule of the timeline, never an API phase end.
-        start = info.get("start") if info else None
-        end = info.get("end") if info else None
+        # A corrupt log can carry a non-string or unparsable `ts`; the contract
+        # requires a parsable ISO-8601 string or None, so validate before exporting
+        # (a valid string is kept verbatim). Status/duration derivation is untouched.
+        raw_start = info.get("start") if info else None
+        raw_end = info.get("end") if info else None
+        start = raw_start if _ts_epoch(raw_start) is not None else None
+        end = raw_end if _ts_epoch(raw_end) is not None else None
         bar.append({"name": name, "status": status, "duration": duration,
                     "start": start, "end": end})
     return bar

@@ -83,6 +83,43 @@ def test_each_phase_entry_carries_start_and_end_and_keeps_duration(home, tmp_pat
     assert by_name["build"]["duration"] is None
 
 
+def test_unparsable_and_non_string_timestamps_become_null(home, tmp_path):  # noqa: F811
+    """AC 13 / contract Phase schema: ``start``/``end`` must be a parsable ISO-8601
+    STRING or ``null`` — never a copied non-string or an unparsable string. A crafted
+    or corrupt event log whose phase records carry a garbage string or a numeric
+    ``ts`` must surface as ``null`` on both fields, while a well-formed neighbour
+    phase keeps its valid strings verbatim. Status/duration derivation is unchanged."""
+    repo = tmp_path / "repo"
+    repo.mkdir(parents=True, exist_ok=True)
+    lines = [
+        rec(1, "run", "start", "R", None, sec=0, payload=run_start_payload("Bad ts")),
+        # spec: an unparsable string start and a non-string (numeric) end.
+        rec(2, "phase", "start", "S", "R", ts="not-a-timestamp",
+            payload={"name": "spec", "from_phase": "spec"}),
+        rec(3, "phase", "end", "S", "R", ts=1234567890,
+            payload={"name": "spec", "to_phase": "plan"}),
+        # plan: well-formed — its verbatim ISO strings must survive untouched.
+        rec(4, "phase", "start", "PL", "R", sec=5, payload={"name": "plan", "from_phase": "plan"}),
+        rec(5, "phase", "end", "PL", "R", sec=9, payload={"name": "plan", "to_phase": "build"}),
+    ]
+    write_run(repo, "cccc3333", lines, phase="done")
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = _slug(os.path.normpath(str(repo.resolve())))
+    by_name = {p["name"]: p for p in client.get(f"/api/runs/{slug}/cccc3333").json()["phases"]}
+
+    # Garbage in → null out; the fields never carry a non-ISO string or a number.
+    assert by_name["spec"]["start"] is None
+    assert by_name["spec"]["end"] is None
+    for field in ("start", "end"):
+        for entry in by_name.values():
+            value = entry[field]
+            assert value is None or isinstance(value, str), (entry["name"], field, value)
+
+    # The valid neighbour is preserved verbatim.
+    assert by_name["plan"]["start"] == "2026-08-05T14:00:05.000Z"
+    assert by_name["plan"]["end"] == "2026-08-05T14:00:09.000Z"
+
+
 def test_start_end_addition_leaves_the_tree_structure_unchanged(home, tmp_path):  # noqa: F811
     """AC 13 / x-adw-invariants: the addition touches only ``phases``. ``tree`` is
     still present and structurally intact (a list of nodes each with the usual

@@ -16,6 +16,7 @@ template and the client projection adopt the shared cost format.
 import os
 import re
 
+import pytest
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
@@ -114,3 +115,22 @@ def test_client_projection_uses_the_shared_cost_format(tmp_path):
 
     assert r["afterA"]["cost_usd"] == "$0.40", r["afterA"]["cost_usd"]
     assert r["afterB"]["cost_usd"] == ""       # null cost stays empty, never $0.00
+
+
+# Rounding boundaries where a naive toFixed(2) (half away from zero) diverges from
+# Python's f"${v:.2f}" (half to even): the exact eighths render differently, so a
+# client that used toFixed would show a different cost than the server on selection.
+_BOUNDARY_COSTS = ["0.125", "0.375", "0.625", "0.875", "0.005", "1.005",
+                   "2.675", "0.4", "56.87666", "0.0"]
+
+
+@pytest.mark.parametrize("value", _BOUNDARY_COSTS)
+def test_client_cost_rounding_matches_the_server_formatter(tmp_path, value):
+    """AC 11 (P3): the client projection is byte-identical to the server ``_fmt_cost``
+    at rounding boundaries — for 0.125 both render ``$0.12`` (not the toFixed
+    ``$0.13``). Asserted against the ACTUAL server formatter, not a hard-coded
+    expectation, so any future change to _fmt_cost keeps the two in lockstep."""
+    from adw.gui.app import _fmt_cost
+
+    projected = run_scenario(tmp_path, "cost-format", value)["cost_usd"]
+    assert projected == _fmt_cost(float(value)), f"{value}: client {projected!r}"

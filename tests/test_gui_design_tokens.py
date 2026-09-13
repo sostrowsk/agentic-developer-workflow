@@ -200,6 +200,86 @@ def test_waiting_and_awaiting_no_longer_share_a_colour():
     assert not (busy & awaiting), f"working and awaiting share {busy & awaiting}"
 
 
+# --- AC 4 / dark-mode contrast: interactive chrome stays legible ---------------
+
+
+def _decls(block: str) -> dict:
+    """The custom-property declarations of a token block, as ``{name: value}``."""
+    return dict(re.findall(r"(--[\w-]+)\s*:\s*([^;]+);", block))
+
+
+def _resolve(name: str, decls: dict):
+    """The hex value a token resolves to, following ``var(--alias)`` chains within a
+    theme's declarations, or ``None`` if it is not a colour."""
+    seen = set()
+    value = decls.get(name, "").strip()
+    while value.startswith("var("):
+        ref = re.match(r"var\(\s*(--[\w-]+)", value)
+        if not ref or ref.group(1) in seen:
+            return None
+        seen.add(ref.group(1))
+        value = decls.get(ref.group(1), "").strip()
+    m = re.fullmatch(r"#([0-9a-fA-F]{6})", value)
+    return value if m else None
+
+
+def _luminance(hex6: str) -> float:
+    def channel(c):
+        c /= 255.0
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (int(hex6[i:i + 2], 16) for i in (1, 3, 5))
+    return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+
+
+def _contrast(fg: str, bg: str) -> float:
+    a, b = _luminance(fg), _luminance(bg)
+    hi, lo = max(a, b), min(a, b)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _rule_body(css: str, selector: str) -> str:
+    for sel, body in _rules(css):
+        # A rule may be preceded by a comment that the greedy selector capture
+        # swallows; strip comments before comparing.
+        clean = re.sub(r"/\*.*?\*/", "", sel, flags=re.S).strip()
+        if clean == selector:
+            return body
+    return ""
+
+
+def _fg_token(body: str):
+    m = re.search(r"(?<![-\w])color\s*:\s*var\(\s*(--[\w-]+)", body)
+    return m.group(1) if m else None
+
+
+def test_tab_buttons_and_links_meet_contrast_in_both_themes():
+    """AC 4 / P2: the tab buttons and ordinary links carry a token foreground (a
+    <button>/<a> does not inherit body colour), so they stay legible in dark mode
+    instead of showing browser-default dark button text or blue/purple link text.
+    The computed foreground/background contrast is >= 4.5:1 in BOTH themes — the
+    actual token values are read from the sheet, not assumed."""
+    css = _css()
+    light = _decls(_extract_block(css, r":root\b"))
+    dark_only = _decls(_extract_block(css, r"@media\s*\(\s*prefers-color-scheme\s*:\s*dark\s*\)"))
+    dark = {**light, **dark_only}  # dark inherits :root aliases, overrides base tokens
+
+    tab_body = _rule_body(css, ".tab-btn")
+    tab_fg = _fg_token(tab_body)
+    tab_bg = re.search(r"background\s*:\s*var\(\s*(--[\w-]+)", tab_body)
+    assert tab_fg and tab_bg, "the tab button sets no token foreground/background"
+
+    link_fg = _fg_token(_rule_body(css, "a") or _rule_body(css, "a, a:visited"))
+    assert link_fg, "ordinary links carry no token foreground"
+    # The visited state must be styled too (never browser-default purple).
+    assert "a:visited" in css
+
+    for theme, decls in (("light", light), ("dark", dark)):
+        tb = _contrast(_resolve(tab_fg, decls), _resolve(tab_bg.group(1), decls))
+        assert tb >= 4.5, f"{theme}: tab button contrast {tb:.2f} < 4.5"
+        lk = _contrast(_resolve(link_fg, decls), _resolve("--paper", decls))
+        assert lk >= 4.5, f"{theme}: link-on-page contrast {lk:.2f} < 4.5"
+
+
 # --- AC 6: the pinned class names / mechanisms survive the rework --------------
 
 

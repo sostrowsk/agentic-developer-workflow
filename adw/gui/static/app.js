@@ -131,9 +131,35 @@
       return (n === "" && cap === "") ? loop.trim() : (loop + n + "/" + cap).trim();
     }
     if (field === "cost_usd" && typeof value === "number") {
-      return "$" + value.toFixed(2);  // the shared _fmt_cost format ($x.xx), server-identical
+      return formatCostUsd(value);
     }
     return "" + value;
+  }
+
+  // The shared _fmt_cost format ($x.xx). It must be BYTE-IDENTICAL to the server's
+  // Python `f"${v:.2f}"`, so a node selection never changes the shown cost (AC 11).
+  // For every value that is NOT an exact 2-decimal tie, `toFixed(2)` rounds the same
+  // double to the same nearest cent Python does. The two only diverge at an exact
+  // tie — toFixed rounds it away from zero, Python to even. An exact x.xx5 tie in
+  // binary is precisely an odd multiple of 0.125 (0.125, 0.375, …), detected via
+  // `x*8` being an odd integer (multiplying a double by 8 is exact); there we round
+  // the cents to even by hand. `2.675`/`0.005` are NOT ties (their doubles are just
+  // below/above the half), so they take the toFixed path and agree with Python.
+  function formatCostUsd(value) {
+    var neg = value < 0;
+    var x = Math.abs(value);
+    var e = x * 8;
+    var body;
+    if (e === Math.floor(e) && Math.floor(e) % 2 === 1) {
+      var lo = Math.floor(x * 100);  // exact for an eighth (e.g. 12 from 12.5)
+      var cents = (lo % 2 === 0) ? lo : lo + 1;  // round half to even
+      var dollars = Math.floor(cents / 100);
+      var rem = cents - dollars * 100;
+      body = dollars + "." + (rem < 10 ? "0" + rem : "" + rem);
+    } else {
+      body = x.toFixed(2);
+    }
+    return "$" + (neg ? "-" : "") + body;
   }
 
   // The context to display for the current selection: the selected node's own

@@ -769,6 +769,34 @@ async function runContextPanel() {
   return { ok: true, afterA: afterA, afterB: afterB };
 }
 
+// Cost-format parity (AC 11): a single node whose context carries a given
+// `cost_usd`; selecting it must project the cost onto the panel in the SAME format
+// the server renders. The scenario returns the projected cell text for the value
+// passed on argv, so the pytest side can compare it to Python's _fmt_cost across
+// rounding boundaries (0.125, 2.675, …).
+async function runCostFormat(arg) {
+  var cost = parseFloat(arg);
+  var ctx = { phase: null, round: null, limit_hits: null,
+    circuit_breakers: null, cost_usd: cost, followups: null };
+  var body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111",
+    "data-latest-context": JSON.stringify({ phase: null, round: null, limit_hits: null,
+      circuit_breakers: null, cost_usd: null, followups: null }) } });
+  var node = el("div", { classes: ["node"],
+    attrs: { "data-seq": "1", "data-context": JSON.stringify(ctx) } });
+  var trace = el("div", { classes: ["trace"], children: [node] });
+  var pane = el("div", { classes: ["pane"], attrs: { "data-seq": "1" } });
+  var panes = el("div", { classes: ["panes"], children: [pane] });
+  var field = el("span", { classes: ["ctx-value"],
+    attrs: { "data-context-field": "cost_usd" } });
+  var panel = el("aside", { classes: ["run-context"], children: [field] });
+  body.append(trace, panes, panel);
+  installGlobals(el("html", { children: [body] }), body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: node }); await settle();
+  return { ok: true, cost_usd: field.textContent };
+}
+
 function contextSwapMain() {
   // A `main.detail` region with a dummy node/pane (so applySelection selects it
   // without a fetch) and the run-context panel (empty value slots).
@@ -1007,6 +1035,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "trace-focus-fold") result = await runTraceFocusFold();
   else if (SCENARIO === "context-panel") result = await runContextPanel();
   else if (SCENARIO === "context-live-swap") result = await runContextLiveSwap();
+  else if (SCENARIO === "cost-format") result = await runCostFormat(ARG);
   else if (SCENARIO === "pretty-payload") result = await runPrettyPayload(ARG);
   else if (SCENARIO === "lazy-pane") result = await runLazyPane();
   else if (SCENARIO === "lazy-pane-race") result = await runLazyPaneRace();
