@@ -206,6 +206,33 @@ def test_each_bar_shares_a_row_with_its_own_label(home, tmp_path):  # noqa: F811
         assert label_text == names[s1], (s1, label_text, names.get(s1))
 
 
+# --- A4: the label itself is never truncated (Codex P2) -------------------------
+
+
+def test_bar_label_css_never_truncates_the_name(home, tmp_path):  # noqa: F811
+    """A4 (readability, Codex P2): moving the name out of the width-scaled bar only
+    fixes *duration*-dependent clipping — the label element itself must also show the
+    COMPLETE name, never an ellipsis or a hidden overflow that hides a long agent /
+    lane / gate name. The label rule must allow the text to wrap (so it stays fully
+    visible) and must not clip it. Mirrors ``test_long_tree_labels_wrap_inside_their
+    _column`` for the trace column."""
+    css = TestClient(create_app(repos=[])).get("/static/app.css").text
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    bodies = [b for sel, b in re.findall(r"([^{}]*)\{([^}]*)\}", css)
+              if re.search(r"\.tl-bar-label\b", sel)]
+    assert bodies, "no .tl-bar-label rule in app.css"
+    joined = " ".join(bodies)
+
+    assert not re.search(r"text-overflow\s*:\s*ellipsis", joined), \
+        "the timeline label truncates with an ellipsis"
+    assert not re.search(r"white-space\s*:\s*nowrap", joined), \
+        "the timeline label is kept on one line (nowrap) and can be clipped"
+    # It must be allowed to stay fully visible by wrapping.
+    assert re.search(r"overflow-wrap\s*:\s*(anywhere|break-word)", joined) \
+        or re.search(r"white-space\s*:\s*normal", joined), \
+        "the timeline label is not allowed to wrap, so a long name is clipped"
+
+
 # --- AC 8: the geometry and state of every bar are unchanged --------------------
 
 

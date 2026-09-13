@@ -393,11 +393,14 @@ table.findings th, table.findings td { border: 1px solid var(--rule); padding: 0
 /* A4: one row per bar — its own label beside its own track. The name↔bar
    association is the shared row (unambiguous even for many short bars), and one bar
    per row means names never overlap and a short bar never clips its own name. */
-.tl-bar-row { display: flex; align-items: center; gap: 0.5rem; }
-.tl-bar-label { flex: 0 0 8rem; font-size: 0.75rem; font-family: var(--mono); color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid transparent; padding-left: 0.5rem; }
+.tl-bar-row { display: flex; align-items: baseline; gap: 0.5rem; }
+/* The label shows the COMPLETE name — it grows to fit on one line where there is
+   room and WRAPS (never truncates) where there is not, so a long agent/lane/gate
+   name stays fully readable. No ellipsis, no clipped overflow. */
+.tl-bar-label { flex: 0 1 auto; min-width: 7rem; font-size: 0.75rem; font-family: var(--mono); color: var(--ink-soft); white-space: normal; overflow-wrap: anywhere; border-left: 3px solid transparent; padding-left: 0.5rem; }
 .tl-bar-label.bar-active { border-left-color: var(--busy); }
 .tl-bar-label.bar-waiting { border-left-color: var(--wait); }
-.tl-track { display: block; position: relative; flex: 1 1 auto; height: 1.2rem; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+.tl-track { display: block; position: relative; flex: 1 1 auto; min-width: 8rem; height: 1.2rem; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
 .tl-bar { position: absolute; top: 0; height: 100%; box-sizing: border-box; cursor: pointer; border-radius: 3px; }
 /* Active work — a solid bar. */
 .tl-bar.bar-active { background: var(--busy); color: var(--signal-ink); }
