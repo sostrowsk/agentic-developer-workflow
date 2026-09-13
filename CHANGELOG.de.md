@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [Unreleased]
+## [0.22.0] — 2026-09-13
 
 ### Geändert
 - **GUI-Gestaltungsfundament: ein benanntes Token-System für Farbe, Typografie
@@ -827,6 +827,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.22.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.4...v0.22.0
 [0.21.4]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.3...v0.21.4
 [0.21.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.1...v0.21.2

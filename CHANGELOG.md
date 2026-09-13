@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [Unreleased]
+## [0.22.0] — 2026-09-13
 
 ### Changed
 - **GUI design foundation: a named colour/typography/spacing token system.**
@@ -767,6 +767,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.22.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.4...v0.22.0
 [0.21.4]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.3...v0.21.4
 [0.21.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.1...v0.21.2
