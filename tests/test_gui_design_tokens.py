@@ -252,6 +252,39 @@ def _fg_token(body: str):
     return m.group(1) if m else None
 
 
+def _blend(fg: str, bg: str, alpha: float) -> str:
+    """The hex an ``alpha``-transparent ``fg`` composites to over ``bg`` — how an
+    ``opacity`` on text actually renders against the page."""
+    def mix(i):
+        f, b = int(fg[i:i + 2], 16), int(bg[i:i + 2], 16)
+        return round(f * alpha + b * (1 - alpha))
+    return f"#{mix(1):02x}{mix(3):02x}{mix(5):02x}"
+
+
+def test_timeline_dead_legend_meets_contrast_in_both_themes():
+    """AC 4 / P2: an unstarted phase's legend entry (``.tl-dead``) stays readable —
+    its EFFECTIVE colour (the token composited with any ``opacity`` in the rule)
+    over the page reaches >= 4.5:1 in both themes. A dampening ``opacity`` on top of
+    ``--ink-soft`` sinks it to ~2.5:1 (light) / ~3.2:1 (dark), so the dampening must
+    come from the token alone."""
+    css = _css()
+    light = _decls(_extract_block(css, r":root\b"))
+    dark_only = _decls(_extract_block(css, r"@media\s*\(\s*prefers-color-scheme\s*:\s*dark\s*\)"))
+    dark = {**light, **dark_only}
+
+    body = _rule_body(css, ".tl-dead")
+    fg = _fg_token(body)
+    assert fg, "the dead-legend rule sets no token foreground"
+    m = re.search(r"(?<![-\w])opacity\s*:\s*([\d.]+)", body)
+    alpha = float(m.group(1)) if m else 1.0
+
+    for theme, decls in (("light", light), ("dark", dark)):
+        paper = _resolve("--paper", decls)
+        effective = _blend(_resolve(fg, decls), paper, alpha)
+        ratio = _contrast(effective, paper)
+        assert ratio >= 4.5, f"{theme}: dead-legend contrast {ratio:.2f} < 4.5 (alpha {alpha})"
+
+
 def test_tab_buttons_and_links_meet_contrast_in_both_themes():
     """AC 4 / P2: the tab buttons and ordinary links carry a token foreground (a
     <button>/<a> does not inherit body colour), so they stay legible in dark mode
