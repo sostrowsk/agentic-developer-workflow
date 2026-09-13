@@ -600,3 +600,27 @@ def test_gzip_temp_file_symlink_cannot_touch_external_target(target_repo, tmp_pa
     assert external.read_bytes() == victim_original  # never opened for writing
     gz = rd / "events.jsonl.gz"
     assert gz.is_file() and gzip.decompress(gz.read_bytes()) == original_plain
+
+
+# --- Follow-up of run d1c9de00 [P3]: the exact --older-than day boundary --------
+
+
+def test_older_than_treats_the_exact_day_boundary_as_old_enough(target_repo):
+    """C1: the rule is ``run_time <= now_utc - DAYS*24h`` — EQUALITY counts as old
+    enough. The existing test only covers 7d+1min and 8d, so the boundary itself was
+    never hit. `prune` takes an injectable `now`, which makes the tie deterministic."""
+    from adw.retention import prune as prune_api
+
+    now = datetime(2026, 6, 1, 12, 0, 0, tzinfo=UTC)
+    exact = "aaaa1212"
+    one_second_younger = "aaaa1313"
+    make_run(target_repo, exact, _iso(now - timedelta(days=7)))
+    make_run(target_repo, one_second_younger, _iso(now - timedelta(days=7) + timedelta(seconds=1)))
+
+    results = prune_api(target_repo, keep=0, older_than=7, now=now)
+    acted = {r.run_id for r in results if r.action == "deleted"}
+
+    assert exact in acted, "Gleichstand mit der Grenze zählt als alt genug"
+    assert one_second_younger not in acted
+    assert not run_dir(target_repo, exact).is_dir()
+    assert run_dir(target_repo, one_second_younger).is_dir()

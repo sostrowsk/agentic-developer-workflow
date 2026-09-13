@@ -249,6 +249,31 @@ a parse error is safe, a false "ok" is not. Validation strictly via Pydantic
    Worktree via `cwd`; env whitelist for all subprocesses (no secret leakage);
    never blanket permission skipping.
 7. **Session resume instead of context rebuild** in all fix cycles (SDK `resume=session_id`).
+8. **The workstream, not the task, is the unit of dispatch.** The build phase hands an
+   agent one entire `## Workstream:` section of `plan.md` and lets it work through the
+   tasks itself. The orchestrator therefore never knows which individual task is running:
+   `task_id` exists nowhere in `adw/`, and no event can carry one.
+
+### Deferred by that principle: per-task attribution in the trace
+
+Mapping individual trace nodes to individual plan tasks — so the plan skeleton (0.14.0)
+could show more than a coarse `pending`/`done` per lane — has been repeatedly proposed and
+is **deliberately not built**. It has exactly three possible implementations, and all three
+are rejected:
+
+1. **Dispatch per task.** The orchestrator parses `plan.md` into tasks and runs one agent
+   per task. This is a redesign of the build phase, not a feature: gate execution, the TDD
+   RED proof (`red_confirmed`/`red_test_paths`), fix cycles, the circuit breaker and crash
+   recovery are all anchored on *one* agent run per lane. The cost is out of proportion to
+   showing a finer progress bar.
+2. **The agent reports its own task.** Rejected on principle: proof written by the agent is
+   agent-falsifiable. The same reasoning already keeps `gates_passed` and `red_confirmed`
+   in orchestrator-persisted state instead of in commit messages.
+3. **Match agent output against task labels after the fact.** Guesswork, not derivation —
+   the same reason 0.15.0 passes no automatic scope verdict on `x-adw-scope`.
+
+Should per-task attribution ever be wanted, option 1 is the only honest route, and it is a
+build-phase redesign with its own spec.
 
 ## 7. Technology
 

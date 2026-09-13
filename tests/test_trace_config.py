@@ -228,3 +228,30 @@ def test_auto_prune_reports_a_returned_partial_failure(target_repo, monkeypatch,
     assert "dead0001" in err, f"partial failure not reported: {err!r}"
     assert "unvollst" in err.lower() or "failed" in err.lower()
 
+
+
+# --- Follow-up of run d1c9de00 [P3]: the fail-open path itself is now covered ---
+
+
+def test_failing_auto_prune_leaves_the_run_done_and_exit_zero(target_repo, monkeypatch):
+    """D3 fail-open: the existing test only covered a safety SKIP. This provokes a
+    real auto-prune ERROR and pins all three promises — exit 0, the finished run
+    stays `done`, and the failure is REPORTED rather than swallowed."""
+    import adw.cli as cli_mod
+
+    _write(target_repo, "trace:\n  keep_runs: 1\n")
+    write_state_only_run(target_repo, "cccc0011", phase="done")
+    ensure_runs_gitignored(target_repo)
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("Platte voll")
+
+    monkeypatch.setattr(cli_mod.retention, "prune", boom)
+
+    result = _cli_run(target_repo)
+    assert result.exit_code == 0, result.output
+    assert RunState.find_latest(target_repo).phase == "done"
+    assert "Auto-Pruning fehlgeschlagen" in result.output
+    assert "Platte voll" in result.output
+    # Der Seed-Lauf wurde nicht angefasst — der Fehler kam vor jeder Entfernung.
+    assert (target_repo / ".adw" / "runs" / "cccc0011").is_dir()

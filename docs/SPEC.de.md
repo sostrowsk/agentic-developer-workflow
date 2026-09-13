@@ -254,6 +254,32 @@ ein Parse-Fehler ist safe, ein falsches „ok" nicht. Validierung strikt via Pyd
    Worktree begrenzt; Env-Whitelist für alle Subprozesse (kein Secret-Leakage);
    niemals pauschales Permission-Skipping.
 7. **Session-Resume statt Kontext-Neuaufbau** in allen Fix-Zyklen (SDK `resume=session_id`).
+8. **Einheit des Dispatches ist der Workstream, nicht die Aufgabe.** Die Build-Phase
+   übergibt einem Agenten einen ganzen `## Workstream:`-Abschnitt aus `plan.md` und lässt
+   ihn die Aufgaben selbst abarbeiten. Der Orchestrator weiß deshalb nie, welche einzelne
+   Aufgabe gerade läuft: `task_id` existiert nirgends in `adw/`, und kein Event kann eine
+   tragen.
+
+### Dadurch zurückgestellt: Aufgaben-Zuordnung im Trace
+
+Einzelne Trace-Knoten einzelnen Plan-Aufgaben zuzuordnen — damit das Plan-Skelett (0.14.0)
+mehr zeigen könnte als ein grobes `pending`/`done` je Lane — wurde wiederholt vorgeschlagen
+und wird **bewusst nicht gebaut**. Es gibt genau drei mögliche Umsetzungen, und alle drei
+sind abgelehnt:
+
+1. **Dispatch je Aufgabe.** Der Orchestrator zerlegt `plan.md` in Aufgaben und fährt einen
+   Agenten pro Aufgabe. Das ist ein Redesign der Build-Phase, kein Feature: Gate-Ausführung,
+   der TDD-RED-Beweis (`red_confirmed`/`red_test_paths`), Fix-Zyklen, Circuit-Breaker und
+   Crash-Recovery hängen alle an *einem* Agent-Lauf je Lane. Der Aufwand steht in keinem
+   Verhältnis zu einer feineren Fortschrittsanzeige.
+2. **Der Agent meldet seine Aufgabe selbst.** Aus Prinzip abgelehnt: ein vom Agenten
+   geschriebener Beweis ist agent-fälschbar. Dieselbe Überlegung hält schon `gates_passed`
+   und `red_confirmed` im orchestrator-persistierten State statt in Commit-Messages.
+3. **Agenten-Ausgabe nachträglich gegen die Aufgaben-Labels matchen.** Raten statt ableiten
+   — derselbe Grund, aus dem 0.15.0 kein automatisches Scope-Urteil über `x-adw-scope` fällt.
+
+Sollte die Zuordnung je gewünscht sein, ist Variante 1 der einzig ehrliche Weg — und sie ist
+ein Build-Phasen-Redesign mit eigener Spec.
 
 ## 7. Technik
 

@@ -1011,7 +1011,7 @@ def _awaiting_gate_phase(events, state_phase):
     return None
 
 
-def _summary(slug, run_id, events, state) -> dict:
+def _summary(slug, run_id, events, state, has_trace=None) -> dict:
     start_rec, end_rec = _run_span(events)
     start_payload = _mapping_payload(start_rec or {})
     end_payload = _mapping_payload(end_rec or {})
@@ -1062,8 +1062,13 @@ def _summary(slug, run_id, events, state) -> dict:
         "duration": totals.get("duration"),
         "cost": totals.get("cost"),
         "event_count": len(events),
-        # Aufgabe G: a clear indication whether a trace exists for this run.
-        "has_trace": bool(events),
+        # Aufgabe G: a clear indication whether a trace EXISTS for this run — the
+        # presence of the event log, NOT whether the reader accepted a record. An
+        # existing but empty or entirely malformed log is a trace WITH reader
+        # problems, and reporting it as "no trace" would hide that distinction
+        # (follow-up run b6739174). `None` keeps the old event-derived answer for
+        # callers that cannot see the file.
+        "has_trace": bool(events) if has_trace is None else bool(has_trace),
     }
 
 
@@ -1809,13 +1814,18 @@ def _timeline_bar_label(node_type, payload) -> str:
     return node_type or "?"
 
 
-def _timeline(events) -> dict:
+def _timeline(events, has_trace=None) -> dict:
     """Swimlanes + bars + header for the Timeline tab, derived from ``events``. A
     run with no event log yields ``has_trace=False`` so the tab shows a clear
-    "no trace" indication rather than an error (A8)."""
+    "no trace" indication rather than an error (A8).
+
+    ``has_trace`` answers the SAME question as the summary's field — does the log
+    EXIST — so an existing but empty/unreadable log is not announced as a trace in
+    the summary and as "no event log" in this tab. ``None`` keeps the old
+    event-derived answer for callers that cannot see the file."""
     if not events:
-        return {"has_trace": False, "lanes": [], "duration": None, "cost": None,
-                "models": []}
+        return {"has_trace": bool(has_trace), "lanes": [], "duration": None,
+                "cost": None, "models": []}
 
     starts: dict = {}
     ends: dict = {}
@@ -2193,7 +2203,10 @@ def _run_detail(
     round_ranges = _round_subtree_ranges(roots, own_ranges)
     context_at = _context_deriver(events, round_ranges)
     prompt_diffs = _prompt_diffs(roots)
-    run_summary = _summary(ref.slug, run_id, events, state)
+    run_summary = _summary(
+        ref.slug, run_id, events, state,
+        has_trace=_events_source(run_dir, runs_root) is not None,
+    )
     detail = {
         "run": run_summary,
         "phases": _phase_bar(events, state.phase if state is not None else None),
@@ -2436,11 +2449,17 @@ def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
                 else:
                     events = []  # Aufgabe G: a run may predate instrumentation
                 state = _load_state(run_dir, runs_root, ref.path, child.name)
-                if not events and state is None:
-                    continue  # neither a trace nor state → not a listable run
+                if events_file is None and state is None:
+                    continue  # neither a trace NOR state → not a listable run
+                # Listability follows the log's EXISTENCE, not the parsed count: a
+                # crash can leave a freshly created, still-empty events.jsonl and no
+                # readable state, and that run must not vanish from the listing.
             except OSError:
                 continue  # one unreadable run must not drop the rest of the repo
-            entries.append(_summary(ref.slug, child.name, events, state))
+            entries.append(
+                _summary(ref.slug, child.name, events, state,
+                         has_trace=events_file is not None)
+            )
     # Stable ordering: newest start first, then grouped by status priority —
     # `awaiting_approval` (needs a human) ahead of `running` ahead of the rest.
     # A stable sort keeps the newest-first ordering within each group.
@@ -2718,7 +2737,9 @@ def create_app(repos=None) -> FastAPI:
             "raw_range_active": raw_range_active,
             "tree_window": tree_window, "tool_window": tool_window, "pane_nodes": pane_nodes,
             "compact": compact,
-            "timeline": _timeline(events),
+            "timeline": _timeline(
+                events, has_trace=_events_source(run_dir, runs_root) is not None
+            ),
             "artifacts": _artifacts_listing(run_dir),
             "t": t, "lang": lang, "switch_qs": switch_qs,
         })

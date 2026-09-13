@@ -900,3 +900,46 @@ def test_resume_refuses_when_self_heal_checkout_fails_without_discarding(target_
     assert res.exit_code != 2
     assert spec.read_text() == "# committete Spec\n\nDIRTY REST\n"  # nicht verworfen
     assert RunState.load(target_repo, state.run_id).phase == "awaiting_approval"
+
+
+# --- Follow-up of run 72a042ad [P2]: self-heal must restore from HEAD ----------
+#
+# `git checkout -- <path>` restores from the INDEX, not from HEAD. A STAGED
+# modification/deletion/rename of an ADW artifact therefore survives the heal,
+# the following status check still sees a dirty tree, and the command refuses
+# instead of healing and proceeding.
+
+
+def test_resume_self_heals_a_staged_modification(target_repo):
+    """A staged (not just unstaged) change to a tracked ADW artifact is healed —
+    `git checkout --` alone would restore the staged content over itself."""
+    state = _paused_run(target_repo)
+    spec = target_repo / ".adw" / "spec.md"
+    spec.write_text("# committete Spec\n")
+    git(target_repo, "add", ".adw/spec.md")
+    git(target_repo, "commit", "-m", "spec getrackt")
+
+    spec.write_text("# committete Spec\n\nSTAGED REST\n")
+    git(target_repo, "add", ".adw/spec.md")  # die Änderung liegt IM INDEX
+
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 2, res.output  # geheilt und fortgesetzt, keine Verweigerung
+    assert spec.read_text() == "# committete Spec\n"
+    assert RunState.load(target_repo, state.run_id).phase == "awaiting_approval"
+
+
+def test_resume_self_heals_a_staged_deletion(target_repo):
+    """A staged deletion of a tracked ADW artifact is healed back from HEAD."""
+    state = _paused_run(target_repo)
+    spec = target_repo / ".adw" / "spec.md"
+    spec.write_text("# committete Spec\n")
+    git(target_repo, "add", ".adw/spec.md")
+    git(target_repo, "commit", "-m", "spec getrackt")
+
+    git(target_repo, "rm", "--cached", "-q", ".adw/spec.md")  # aus dem Index entfernt
+    spec.unlink()
+
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 2, res.output
+    assert spec.read_text() == "# committete Spec\n"
+    assert RunState.load(target_repo, state.run_id).phase == "awaiting_approval"

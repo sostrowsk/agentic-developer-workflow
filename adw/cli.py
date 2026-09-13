@@ -180,18 +180,24 @@ def _heal_adw_artifact(repo: Path, relpath: str) -> None:
 
     A failing heal REFUSES (non-escalating) instead of running on with a
     half-healed tree — the caller must not proceed to mutate state."""
+    # Maßgeblich ist HEAD, NICHT der Index: `git checkout -- <pfad>` restauriert aus
+    # dem Index und ließe eine GESTAGETE Änderung/Löschung/Umbenennung eines
+    # Artefakts stehen — die folgende Statusprüfung sähe den Baum weiter dirty und
+    # verweigerte, statt zu heilen (Follow-up Lauf 72a042ad).
     try:
-        tracked = _git_plain(repo, "ls-files", "--", relpath)
+        in_head = _git_plain(repo, "ls-tree", "--name-only", "HEAD", "--", relpath)
     except (OSError, subprocess.SubprocessError) as exc:
-        raise _fail(f"Selbstheilung von {relpath} fehlgeschlagen: git ls-files — {exc}") from exc
-    if tracked.returncode != 0:
+        raise _fail(f"Selbstheilung von {relpath} fehlgeschlagen: git ls-tree — {exc}") from exc
+    if in_head.returncode != 0:
         raise _fail(
-            f"Selbstheilung von {relpath} fehlgeschlagen: git ls-files Exit "
-            f"{tracked.returncode} — {tracked.stderr.strip()[:300]}"
+            f"Selbstheilung von {relpath} fehlgeschlagen: git ls-tree Exit "
+            f"{in_head.returncode} — {in_head.stderr.strip()[:300]}"
         )
-    if tracked.stdout.strip():
+    if in_head.stdout.strip():
+        # `checkout HEAD -- <pfad>` setzt Index UND Arbeitsbaum auf den Stand aus
+        # HEAD zurück — pfadbezogen, fremde Dateien sind unerreichbar.
         try:
-            result = _git_plain(repo, "checkout", "--", relpath)
+            result = _git_plain(repo, "checkout", "HEAD", "--", relpath)
         except (OSError, subprocess.SubprocessError) as exc:
             raise _fail(
                 f"Selbstheilung von {relpath} fehlgeschlagen: git checkout — {exc}"
@@ -202,6 +208,20 @@ def _heal_adw_artifact(repo: Path, relpath: str) -> None:
                 f"{result.returncode} — {result.stderr.strip()[:300]}"
             )
     else:
+        # Nicht in HEAD: ein etwaiger Index-Eintrag (frisch gestagetes Artefakt)
+        # muss mit weg, sonst bliebe der Baum nach dem Löschen dirty.
+        try:
+            staged = _git_plain(
+                repo, "rm", "--cached", "--force", "--quiet", "--ignore-unmatch",
+                "--", relpath,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise _fail(f"Selbstheilung von {relpath} fehlgeschlagen: git rm — {exc}") from exc
+        if staged.returncode != 0:
+            raise _fail(
+                f"Selbstheilung von {relpath} fehlgeschlagen: git rm Exit "
+                f"{staged.returncode} — {staged.stderr.strip()[:300]}"
+            )
         try:
             (repo / relpath).unlink(missing_ok=True)
         except OSError as exc:

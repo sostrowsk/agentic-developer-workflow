@@ -12,6 +12,50 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.21.4] — 2026-09-13
+
+### Fixed
+- **Self-heal restores ADW artifacts from HEAD, not from the index.**
+  `git checkout -- <path>` restores the *staged* content, so a staged
+  modification, deletion or rename of one of the six ADW artifacts survived the
+  heal; the following status check still saw a dirty tree and the command
+  refused instead of healing and proceeding. Now `git checkout HEAD -- <path>`
+  (index and worktree, path-scoped); a path absent from HEAD has its index entry
+  dropped before the file is removed. Follow-up of run `72a042ad`.
+- **`has_trace` answers whether an event log exists**, not whether the reader
+  accepted a record. An existing but empty or entirely malformed `events.jsonl`
+  now reports `has_trace: true` with `event_count: 0` — a trace *with* reader
+  problems, which the old `bool(events)` collapsed into "no trace at all".
+  Follow-up of run `b6739174`. The same question is now answered the same way
+  everywhere: the Timeline tab takes the presence bit too (it used to say "no
+  event log" for a file the summary had just called a trace), and listability
+  follows the log's existence rather than the parsed count — a crash that leaves
+  a freshly created, still-empty log and no readable state no longer makes the
+  run vanish from `/api/runs`. Both found by `codex review`.
+
+### Added
+- **`docs/FOLLOWUPS.md` — a consolidated follow-up register.** Every `[P*]`
+  finding the ADW runs left behind in `.adw/runs/*/followups.md`, verified
+  against the code as it stands and given a disposition. Of eleven findings two
+  were already fixed, four were obsolete, four are fixed here or in 0.21.2/0.21.3,
+  and three stay open with a stated reason. The run artifacts are historical
+  records and were deliberately left untouched.
+- **Two DoD tests that were owed.** The auto-prune fail-open path (a real prune
+  error now proves exit 0, phase `done` and a visible message) and the exact
+  `--older-than` day boundary (equality counts as old enough). Both were green on
+  first run — the code was right, the proof was missing — and both were
+  mutation-checked to confirm they bite.
+
+### Changed
+- **Per-task attribution in the trace is deliberately not built** and is now
+  recorded as such in `docs/SPEC.md` §6 with its reasoning. The build phase
+  dispatches a whole `## Workstream:` section to one agent, so the orchestrator
+  never knows which individual task is running — `task_id` exists nowhere in
+  `adw/`. The three possible implementations are dispatch-per-task (a build-phase
+  redesign), agent self-reporting (agent-falsifiable) and post-hoc text matching
+  (guesswork); all three are rejected, and the decision is written down so it is
+  not re-litigated each session.
+
 ## [0.21.3] — 2026-09-13
 
 ### Fixed
@@ -692,6 +736,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.21.4]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.3...v0.21.4
 [0.21.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.0...v0.21.1

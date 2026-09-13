@@ -149,3 +149,62 @@ def test_non_mapping_totals_do_not_break_the_summary(home, tmp_path):  # noqa: F
     assert _client(repo).get("/api/runs").status_code == 200
     detail = _client(repo).get(f"/api/runs/{_slug_for(repo)}/{RUN_ID}")
     assert detail.status_code == 200, detail.text
+
+
+# --- Follow-up of run b6739174 [P3]: has_trace means "a log exists" -------------
+
+
+def test_has_trace_is_true_for_an_existing_but_unreadable_log(home, tmp_path):  # noqa: F811
+    """`has_trace` answers "does this run have an event log", not "did the reader
+    accept a record". An existing log whose every line is malformed is a trace WITH
+    reader problems — reporting `has_trace: false` hides that distinction."""
+    repo = tmp_path / "repo"
+    write_run(repo, RUN_ID, ["{ not json", "also not json"], phase="done")
+
+    entry = next(e for e in _client(repo).get("/api/runs").json() if e["run_id"] == RUN_ID)
+    assert entry["event_count"] == 0
+    assert entry["has_trace"] is True
+
+
+def test_has_trace_is_true_for_an_empty_log_file(home, tmp_path):  # noqa: F811
+    """An empty `events.jsonl` exists — the run was instrumented, it just has no
+    events yet."""
+    repo = tmp_path / "repo"
+    write_run(repo, RUN_ID, [], phase="spec")
+
+    entry = next(e for e in _client(repo).get("/api/runs").json() if e["run_id"] == RUN_ID)
+    assert entry["has_trace"] is True
+
+
+def test_timeline_agrees_with_the_summary_on_trace_presence(home, tmp_path):  # noqa: F811
+    """Consistency: `detail.run.has_trace` and the Timeline's own `has_trace` answer
+    the SAME question. An existing but unreadable log must not say "trace" in the
+    summary and "no event log" in the Timeline tab."""
+    from adw.gui.app import _timeline
+
+    repo = tmp_path / "repo"
+    write_run(repo, RUN_ID, ["{ not json"], phase="done")
+    events_file = repo / ".adw" / "runs" / RUN_ID / "events.jsonl"
+
+    assert _timeline([], has_trace=events_file.is_file())["has_trace"] is True
+    assert _timeline([], has_trace=False)["has_trace"] is False
+
+    page = _client(repo).get(f"/runs/{_slug_for(repo)}/{RUN_ID}")
+    assert page.status_code == 200
+
+
+def test_a_run_with_only_an_empty_log_is_still_listed(home, tmp_path):  # noqa: F811
+    """A crash can leave a freshly created, still-empty `events.jsonl` and no
+    loadable state. The run exists — `require_run` accepts it — so the listing must
+    not drop it just because no event parsed."""
+    repo = tmp_path / "repo"
+    run_dir = repo / ".adw" / "runs" / RUN_ID
+    run_dir.mkdir(parents=True)
+    (run_dir / "events.jsonl").write_text("", encoding="utf-8")  # existiert, leer, kein state
+
+    listing = _client(repo).get("/api/runs")
+    assert listing.status_code == 200
+    entry = next((e for e in listing.json() if e["run_id"] == RUN_ID), None)
+    assert entry is not None, "ein Lauf mit vorhandenem Log darf nicht verschwinden"
+    assert entry["has_trace"] is True
+    assert entry["event_count"] == 0

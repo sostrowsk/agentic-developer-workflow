@@ -13,6 +13,54 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.21.4] — 2026-09-13
+
+### Behoben
+- **Die Selbstheilung restauriert ADW-Artefakte aus HEAD, nicht aus dem Index.**
+  `git checkout -- <pfad>` stellt den *gestageten* Inhalt wieder her, also
+  überlebte eine gestagete Änderung, Löschung oder Umbenennung eines der sechs
+  ADW-Artefakte die Heilung; die folgende Statusprüfung sah den Baum weiter dirty
+  und das Kommando verweigerte, statt zu heilen und fortzufahren. Jetzt
+  `git checkout HEAD -- <pfad>` (Index und Arbeitsbaum, pfadbezogen); bei einem
+  Pfad, den HEAD nicht kennt, fällt vor dem Löschen der Index-Eintrag weg.
+  Follow-up des Laufs `72a042ad`.
+- **`has_trace` beantwortet, ob ein Event-Log existiert**, nicht ob der Reader
+  einen Datensatz akzeptiert hat. Eine vorhandene, aber leere oder vollständig
+  fehlerhafte `events.jsonl` meldet jetzt `has_trace: true` bei
+  `event_count: 0` — ein Trace *mit* Reader-Problemen, was das alte
+  `bool(events)` zu „gar kein Trace" zusammenfaltete. Follow-up des Laufs
+  `b6739174`. Dieselbe Frage wird jetzt überall gleich beantwortet: auch der
+  Timeline-Reiter bekommt das Vorhandensein-Bit (er meldete „kein Event-Log" für
+  eine Datei, die die Zusammenfassung gerade als Trace ausgewiesen hatte), und
+  die Listbarkeit folgt der Existenz des Logs statt der geparsten Anzahl — ein
+  Crash, der ein frisch angelegtes, noch leeres Log und keinen lesbaren State
+  hinterlässt, lässt den Lauf nicht mehr aus `/api/runs` verschwinden. Beides von
+  `codex review` gefunden.
+
+### Hinzugefügt
+- **`docs/FOLLOWUPS.md` — ein konsolidiertes Follow-up-Register.** Jeder
+  `[P*]`-Befund, den die ADW-Läufe in `.adw/runs/*/followups.md` hinterlassen
+  haben, gegen den heutigen Code geprüft und mit einer Disposition versehen. Von
+  elf Befunden waren zwei längst behoben, vier hinfällig, vier sind hier oder in
+  0.21.2/0.21.3 behoben, und drei bleiben mit begründetem Vermerk offen. Die
+  Lauf-Artefakte sind historische Aufzeichnungen und wurden bewusst nicht
+  angefasst.
+- **Zwei ausstehende DoD-Tests.** Der Fail-open-Pfad des Auto-Prunings (ein
+  echter Prune-Fehler belegt jetzt Exit 0, Phase `done` und eine sichtbare
+  Meldung) und die exakte Tagesgrenze von `--older-than` (Gleichstand zählt als
+  alt genug). Beide waren im ersten Lauf grün — der Code war richtig, der Beleg
+  fehlte — und beide wurden per Mutation geprüft.
+
+### Geändert
+- **Die Aufgaben-Zuordnung im Trace wird bewusst nicht gebaut** und ist jetzt als
+  Entscheidung samt Begründung in `docs/SPEC.md` §6 festgehalten. Die Build-Phase
+  übergibt einen ganzen `## Workstream:`-Abschnitt an einen Agenten, der
+  Orchestrator weiß also nie, welche einzelne Aufgabe läuft — `task_id` existiert
+  nirgends in `adw/`. Die drei möglichen Umsetzungen sind Dispatch je Aufgabe
+  (Redesign der Build-Phase), Selbstmeldung des Agenten (agent-fälschbar) und
+  nachträgliches Text-Matching (Raten); alle drei sind abgelehnt, und die
+  Entscheidung steht schriftlich, damit sie nicht jede Session neu verhandelt wird.
+
 ## [0.21.3] — 2026-09-13
 
 ### Behoben
@@ -744,6 +792,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.21.4]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.3...v0.21.4
 [0.21.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.2...v0.21.3
 [0.21.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.0...v0.21.1
