@@ -1,34 +1,130 @@
-# Interface contract — GUI-Redesign 1/2: Gestaltungsfundament + Zeitachse
+# Interface contract — GUI-Redesign 2/2: Ein Lauf hat eine Wahrheit
 #
 # Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Der Contract
-# pinnt ausschließlich die extern beobachtbare Fläche dieses Briefs: die
-# ADDITIVE Erweiterung der `phases`-Einträge von GET /api/runs/{repo}/{run_id}
-# um `start` und `end`, die Regression der übrigen Antwortform und das
-# beobachtbare Template-Verhalten (Zeitachse, Kostenformat). KEINE internen
-# Helfer-Signaturen, Klassennamen, Markup-/CSS-Wortlaut oder konkreten
-# Token-Werte — die sind ausdrücklich nicht Contract-Fläche (Contract-Hinweis
-# der Spec, AC 13).
+# pinnt ausschließlich die extern beobachtbare Fläche dieses Briefs:
+#
+#   1. die BEWUSSTE Bedeutungsänderung von `duration`/`cost` (gleicher Name,
+#      gleicher Typ, ganzer Lauf statt letzter CLI-Spanne),
+#   2. die ADDITIVEN Zeitgrößen-Felder an der Laufzusammenfassung
+#      (`work_seconds`, `phase_seconds`, `wait_seconds`, `total_seconds`) und
+#      die additive Token-Summe `tokens` (skalare Summe, wie sie der
+#      `totals`-Payload hergibt — verifiziert: adw/cli.py:299–303),
+#   3. die Regression aller übrigen Antwortfelder (insb. `issue`, das NICHT
+#      zum Anzeigetitel umgedeutet wird), und
+#   4. die neuen optionalen Query-Parameter der HTML-Route `/` samt dem
+#      beobachtbaren Listenverhalten (Titelzeile, eine Statusspalte,
+#      Sortierung/Filterung, Leerzustand).
+#
+# KEINE internen Helfer-Signaturen, Klassennamen, Markup-/CSS-Wortlaut und
+# kein Zeitachsenmodell in der JSON-Antwort — das ist ausdrücklich nicht
+# Contract-Fläche (Spec-Abschnitt „Contract").
 openapi: 3.0.3
 info:
-  title: ADW GUI — Run-Detail (phases mit start/end)
-  version: 1.0.0
+  title: ADW GUI — Kennzahlen über den ganzen Lauf + Listensteuerung
+  version: 2.0.0
   description: >-
     Minimaler Contract für den einzigen Workstream backend. Er fixiert die
-    additive Erweiterung jedes `phases`-Eintrags um `start` und `end` und die
-    Regression der übrigen Antwortflächen (`tree`, `raw`, `latest_context`,
-    `problems`, Statuswerte). Die Version bezeichnet diesen Contract, keine
-    Paketversion.
+    korrigierte Bedeutung von `duration`/`cost`, die additiven Zeitgrößen- und
+    Token-Felder der Laufzusammenfassung, die Regression der übrigen Felder und
+    die neuen optionalen Query-Parameter der Route `/`. Die Version bezeichnet
+    diesen Contract, keine Paketversion. Die additive Erweiterung der
+    `phases`-Einträge um `start`/`end` aus Brief 1 bleibt in Kraft und wird hier
+    nicht revidiert.
 
 paths:
+  /:
+    get:
+      summary: Run-Listen-Seite mit serverseitiger Sortierung und Filterung.
+      description: >-
+        HTML-Fläche; das beobachtbare Listenverhalten (Titelzeile, eine
+        Statusspalte, Leerzustand, Vorrang der Statusgruppierung) steht in
+        x-adw-template-behavior. Ohne Parameter sind Auswahl und Reihenfolge
+        unverändert (die korrigierten Kennzahlen und die neue
+        Listendarstellung sind davon unberührt).
+      parameters:
+        - name: sort
+          in: query
+          required: false
+          description: >-
+            Unterstützt start, duration, cost, events. Fehlend oder unbekannt
+            fällt auf start zurück — kein Fehler, keine dadurch leere Liste.
+          schema:
+            type: string
+            default: start
+        - name: dir
+          in: query
+          required: false
+          description: >-
+            Unterstützt asc und desc. Fehlend oder unbekannt fällt auf desc
+            zurück — kein Fehler, keine dadurch leere Liste.
+          schema:
+            type: string
+            default: desc
+        - name: repo
+          in: query
+          required: false
+          description: >-
+            Filter auf einen Repo-Slug. Ohne Filter keine Einschränkung; ein
+            unbekannter Wert ergibt eine leere Trefferliste mit lokalisiertem
+            Hinweis, nie die ungefilterte Liste, nie einen Fehler.
+          schema:
+            type: string
+        - name: status
+          in: query
+          required: false
+          description: >-
+            Filter auf einen Statuswert. Ohne Filter keine Einschränkung; ein
+            unbekannter Wert ergibt eine leere Trefferliste mit lokalisiertem
+            Hinweis, nie die ungefilterte Liste, nie einen Fehler. Kombiniert
+            mit repo als Schnittmenge.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: >-
+            HTML-Liste mit sichtbarer Sortier-/Filtersteuerung oder
+            lokalisiertem Hinweis bei leerer Trefferliste.
+          content:
+            text/html:
+              schema:
+                type: string
+
+  /api/runs:
+    get:
+      summary: Run-Liste; Laufzusammenfassungen mit korrigierten Kennzahlen.
+      description: >-
+        Liefert eine Liste. Jeder erreichbare Lauf erscheint als
+        Laufzusammenfassung (RunSummary); ein unerreichbares Repo erscheint
+        unverändert als Platzhalter (RepoPlaceholder). Diese Route erhält KEINE
+        Sortier-/Filterparameter — sie bleibt in Auswahl und Reihenfolge
+        unverändert; nur die Kennzahlenbedeutung ändert sich (siehe RunSummary).
+      responses:
+        "200":
+          description: >-
+            Bestehende Run-Listen-Antwort; Feldnamen und -typen unverändert,
+            `duration`/`cost` mit korrigierter Bedeutung, additive Zeitgrößen-
+            und Token-Felder hinzu.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  oneOf:
+                    - $ref: "#/components/schemas/RunSummary"
+                    - $ref: "#/components/schemas/RepoPlaceholder"
+
   /api/runs/{repo}/{run_id}:
     get:
-      summary: Bestehendes Run-Detail mit additiven Phasen-Zeitstempeln.
+      summary: Run-Detail; `run` trägt dieselbe Laufzusammenfassung.
       description: >-
-        Ein erfolgreicher Detailabruf liefert unter `phases` je Eintrag
-        zusätzlich `start` und `end`. `name`, `status` und `duration` bleiben
-        wörtlich, wie sie sind; kein Feld wird entfernt, umbenannt oder in Typ
-        oder Bedeutung geändert. Bestehende Fehlerbedingungen und
-        Fehlerantworten bleiben unverändert.
+        Ein erfolgreicher Detailabruf liefert unter `run` die Laufzusammenfassung
+        (RunSummary) mit denselben korrigierten Kennzahlen und additiven Feldern
+        wie die Liste — Liste und Detail-Kopf speisen aus derselben Quelle und
+        stimmen dadurch überein. `phases` (inkl. `start`/`end` aus Brief 1),
+        `tree`, `latest_context`, `problems` und `raw` bleiben strukturell
+        unverändert; ein offenes Phasenende bleibt null. Diese Route erhält
+        KEINE Sortier-/Filterparameter. Bestehende Fehlerbedingungen und
+        -antworten bleiben unverändert.
       parameters:
         - name: repo
           in: path
@@ -43,143 +139,266 @@ paths:
       responses:
         "200":
           description: >-
-            Bestehende Run-Detail-Antwort; ausschließlich `phases[*].start`
-            und `phases[*].end` kommen hinzu.
+            Bestehende Run-Detail-Antwort; `run` folgt RunSummary, alle übrigen
+            Felder bleiben unverändert vorhanden.
           content:
             application/json:
               schema:
                 type: object
-                required: [phases]
+                required: [run, phases, tree]
                 additionalProperties: true
                 description: >-
-                  Nur `phases` wird hier strukturell beschrieben. `tree`,
-                  `raw`, `latest_context`, `problems` und alle weiteren
+                  Nur `run` wird hier strukturell beschrieben. `phases`, `tree`,
+                  `latest_context`, `problems`, `raw` und alle weiteren
                   bestehenden Felder bleiben unverändert vorhanden; das offene
                   Schema erlaubt keine weiteren Änderungen an der bestehenden
                   API.
                 properties:
-                  phases:
-                    type: array
-                    minItems: 7
-                    maxItems: 7
-                    description: >-
-                      Die sieben Workflow-Phasen in unveränderter Reihenfolge:
-                      spec, plan, build, integration, codex_review,
-                      final_review, ci. Keine zusätzlichen Einträge.
-                    items:
-                      $ref: "#/components/schemas/Phase"
+                  run:
+                    $ref: "#/components/schemas/RunSummary"
 
 components:
   schemas:
-    Phase:
+    RunSummary:
       type: object
-      additionalProperties: false
-      required: [name, status, duration, start, end]
+      additionalProperties: true
+      required:
+        - run_id
+        - repo
+        - repo_exists
+        - issue
+        - dry_run
+        - phase
+        - status
+        - start
+        - duration
+        - cost
+        - event_count
+        - has_trace
+        - work_seconds
+        - phase_seconds
+        - wait_seconds
+        - total_seconds
       description: >-
-        Ein Phasen-Eintrag aus _phase_bar. `name`, `status`, `duration` sind
-        unverändert; `start` und `end` sind neu und additiv.
+        Die Zusammenfassung eines Laufs aus `_summary`. Alle heutigen Felder
+        bleiben wörtlich; `duration`/`cost` ändern nur die Bedeutung; die vier
+        Zeitgrößen-Felder und `tokens` sind neu und additiv.
       properties:
-        name:
+        run_id:
           type: string
-          enum: [spec, plan, build, integration, codex_review, final_review, ci]
-          description: Phasenname, unverändert wörtlich wie bisher.
-        status:
+          description: Unverändert.
+        repo:
           type: string
-          enum: [pending, active, awaiting, completed, failed]
-          description: >-
-            Phasenstatus, unveränderte Wertemenge; Statusableitung
-            einschließlich Approval- und Eskalationsverhalten bleibt
-            unverändert.
-        duration:
-          type: number
+          description: Repo-Slug, unverändert.
+        repo_exists:
+          type: boolean
+          description: Unverändert; für eine Laufzusammenfassung stets true.
+        issue:
+          type: string
           nullable: true
           description: >-
-            Phasendauer in Sekunden oder null, unverändert abgeleitet — wird
-            NICHT aus start/end neu berechnet; für eine offene Phase wird
-            keine bis zum Seitenaufbau verstrichene Dauer eingesetzt.
+            Unverändert der bisherige Issue-Wert (roher, auf `_ISSUE_MAX`
+            gekürzter Text bzw. null). Wird NICHT zum 90-Zeichen-Anzeigetitel
+            umgedeutet — der Titel ist reines Darstellungsdatum der Liste
+            (siehe x-adw-template-behavior), kein API-Feld. Das
+            `title`-Attribut der Liste trägt den vollständigen rohen Text und
+            speist sich daher NICHT aus diesem gekürzten Feld.
+        dry_run:
+          type: boolean
+          description: Unverändert abgeleitet.
+        phase:
+          type: string
+          nullable: true
+          description: Unverändert; Phasenableitung bleibt gleich.
+        status:
+          type: string
+          nullable: true
+          description: >-
+            Unverändert; Status- und Approval-/Eskalationsableitung bleiben
+            gleich (die letzte Spanne bestimmt den Status weiterhin — die
+            Summierung ersetzt diese Auswahl nicht).
         start:
           type: string
           nullable: true
           description: >-
-            NEU (additiv). ISO-8601-Zeitstempel des Phasenstarts wie im
-            Event-Log, unverändert übernommen, oder null bei fehlendem/nicht
-            parsebarem Start. Kein synthetischer Start.
-        end:
-          type: string
+            Unverändert der Zeitstempel der ERSTEN `run`-Spanne — die
+            Summierung ändert `start` nicht.
+        duration:
+          type: number
           nullable: true
           description: >-
-            NEU (additiv). ISO-8601-Zeitstempel des Phasenendes wie im
-            Event-Log, oder null. Das Ende einer offenen aktiven Phase bleibt
-            null; der Seitenaufbau-Zeitpunkt ist reine DARSTELLUNGSREGEL der
-            Zeitachse und wird nie als API-Phasenende ausgegeben.
+            BEDEUTUNGSÄNDERUNG (Name und Typ unverändert): Summe von
+            `totals.duration` über ALLE abgeschlossenen `run`-Spannen statt nur
+            der letzten. Für Läufe mit Gates steigen die Werte; das ist der
+            Zweck des Issues. null/leer, wenn keine abgeschlossene Spanne
+            vorliegt — nie eine erfundene 0.
+        cost:
+          type: number
+          nullable: true
+          description: >-
+            BEDEUTUNGSÄNDERUNG (Name und Typ unverändert): Summe von
+            `totals.cost` über alle abgeschlossenen `run`-Spannen (bisherige
+            Einheit USD). null/leer ohne abgeschlossene Spanne, nie 0
+            erfunden; echte Nullwerte aus dem Payload bleiben 0.
+        event_count:
+          type: integer
+          description: Unverändert; die Ereigniszahl des Logs.
+        has_trace:
+          type: boolean
+          description: Unverändert.
+        work_seconds:
+          type: number
+          nullable: true
+          description: >-
+            NEU (additiv). Arbeit = Summe von `totals.duration` über alle
+            `run`-Spannen mit `end`; null, wenn keine abgeschlossene Spanne
+            vorliegt (nie 0 erfunden). Numerisch identisch zu `duration`.
+        phase_seconds:
+          type: number
+          nullable: true
+          description: >-
+            NEU (additiv). Phasenzeit = Summe der Phasen-Spannen mit
+            parsebarem `start` und `end` (Fläche der farbigen Achsensegmente);
+            null, wenn nicht bestimmbar. Ist NICHT Arbeit.
+        wait_seconds:
+          type: number
+          nullable: true
+          description: >-
+            NEU (additiv). Wartezeit = Gesamt − Phasenzeit (Summe der Lücken);
+            null, wenn nicht bestimmbar.
+        total_seconds:
+          type: number
+          nullable: true
+          description: >-
+            NEU (additiv). Gesamt = kleinster Phasenstart bis größtes
+            Phasenende, bei aktiver Phase ohne Ende bis zum
+            Auswertungszeitpunkt (reiner Berechnungszeitpunkt, kein
+            nachgetragenes und nie ausgegebenes Phasenende); null, wenn nicht
+            bestimmbar. Es gilt phase_seconds + wait_seconds = total_seconds
+            bis auf Rundung.
+        tokens:
+          type: integer
+          nullable: true
+          description: >-
+            NEU (additiv). Summe von `totals.tokens` über alle abgeschlossenen
+            `run`-Spannen — der Payload führt eine skalare ganzzahlige
+            Token-Summe (adw/cli.py:299–303). null/fehlend ohne vorhandene
+            Tokenwerte, nie eine erfundene 0; echte Nullwerte aus dem Payload
+            bleiben 0.
+    RepoPlaceholder:
+      type: object
+      additionalProperties: true
+      required: [repo, repo_exists]
+      description: >-
+        Unveränderter Platzhalter für ein unerreichbares Repo in der Run-Liste;
+        erhält keine künstlichen Laufkennzahlen.
+      properties:
+        repo:
+          type: string
+        repo_exists:
+          type: boolean
+          enum: [false]
+        hint:
+          type: string
 
 x-adw-workstreams: [backend]
 
 x-adw-invariants:
   - >-
-    Rein additiv: kein bestehendes Feld wird entfernt, umbenannt oder in Typ
-    oder Bedeutung geändert. `name`, `status`, `duration` bleiben wörtlich;
-    Zahl und Reihenfolge der Phasen bleiben unverändert.
+    Bedeutungsänderung ohne Formänderung: `duration` und `cost` behalten Name
+    und Typ, beziffern aber den ganzen Lauf (Summe über alle abgeschlossenen
+    `run`-Spannen) statt der letzten CLI-Spanne. Offene Spannen tragen nichts
+    bei. Eine unbestimmte Zahl bleibt leer/null, nie 0 (E6); echte Nullwerte
+    aus dem Payload bleiben 0.
   - >-
-    Die Struktur von `tree` ist unverändert; `raw`, `latest_context`,
-    `problems` und alle Statuswerte bleiben unverändert. Keine neue Route,
-    kein neues Tab, kein neues Antwortfeld außer start/end, keine Änderung an
-    Blätterung (`?offset`, `?tools_offset`, Fenstergröße 100), SSE-Pfad,
-    Ereignistypen, Instrumentierung oder Retention.
+    Rein additiv sonst: `work_seconds`, `phase_seconds`, `wait_seconds`,
+    `total_seconds` (Zahl oder null nach den normativen Definitionen) sowie
+    `tokens` kommen hinzu; kein bestehendes Feld wird entfernt, umbenannt oder
+    umgedeutet. `start`, `status`, `phase`, `issue`, `event_count`, `dry_run`,
+    `has_trace`, `repo_exists` bleiben wörtlich.
+  - >-
+    `issue` bleibt der bisherige Wert; die 90-Zeichen-Titelableitung ist reines
+    Darstellungsdatum der Liste und wird NICHT ins `issue`-Feld zurückgespielt.
+  - >-
+    Die API-Routen `/api/runs` und `/api/runs/{repo}/{run_id}` erhalten KEINE
+    Sortier-/Filterparameter. `tree` bleibt strukturell unverändert; `raw`,
+    `latest_context`, `problems`, `phases` (inkl. `start`/`end` aus Brief 1;
+    offenes Phasenende bleibt null) bleiben unverändert. Keine neue Route, kein
+    neues Tab, keine Änderung an Ereignistypen, Instrumentierung, Payloads,
+    `build_tree`, SSE-Pfad oder Retention — die Korrektur geschieht
+    ausschließlich bei der Auswertung des vorhandenen Logs (E8).
+
+x-adw-reference:
+  # Verbindliche Rechenbeispiele (aus den Akzeptanzkriterien 1 und 6).
+  run_totals:
+    durations: [100, 200, 300]
+    costs: [1, 2, 3]
+    duration: 600
+    work_seconds: 600
+    cost: 6
+  closed_phases:
+    intervals_seconds: [[0, 100], [300, 500]]
+    phase_seconds: 300
+    wait_seconds: 200
+    total_seconds: 500
+  vocabulary:
+    work_seconds: { de: Arbeit, en: Work }
+    phase_seconds: { de: Phasenzeit, en: "Phase time" }
+    wait_seconds: { de: Wartezeit, en: Waiting }
+    total_seconds: { de: Gesamt, en: Total }
 
 x-adw-template-behavior:
-  surface: "GET /runs/{repo}/{run_id} (Run-Detail-Seite)"
-  placement: >-
-    Genau ein Phasenband an der bisherigen Stelle im Run-Kopf: die
-    maßstäbliche Zeitachse bei bestimmbarem positivem T, sonst die bestehende
-    Chip-Reihe als Rückfallebene. Kein zweites Band; die Registerkarte
-    "Timeline" bleibt unangetastet.
-  timeline:
-    bounds: >-
-      T_start = kleinstes parsebares start; T_end = größtes end, bei aktiver
-      Phase ohne end der Seitenaufbau-Zeitpunkt; T = T_end − T_start.
-      Fallback auf die Chip-Reihe, wenn T nicht bestimmbar oder T ≤ 0 ist
-      oder weniger als eine Phase einen parsebaren start hat.
-    phase_segments: >-
-      Versatz (start − T_start)/T, Breite (end − start)/T; Mindestbreite 2 px
-      (bewusste geometrische Ausnahme, ändert Zeitwerte und Summen nicht);
-      Beschriftungslänge beeinflusst die Geometrie nicht. Eine aktive Phase
-      ohne end reicht bis zum rechten Rand und ist als offen markiert. Eine
-      Phase ohne parsebaren start bekommt kein Segment und bleibt in der
-      Legende gedämpft sichtbar; Phasennamen und Dauern bleiben lesbar.
-    waiting_segments: >-
-      Phasen nach start sortieren; ausschließlich eine positive Lücke zwischen
-      dem end einer Phase und dem start der nächsten erzeugt ein als "Warten"
-      beschriftetes Segment. Keine Ursachenklassifikation; keine erfundene
-      Wartezeit vor dem ersten Start oder nach dem letzten Ende.
-    totals: >-
-      Drei beschriftete Zahlen unter der Schiene: Arbeit = Summe der
-      Phasendauern (offene aktive Phase bis Seitenaufbau), Warten = Summe der
-      Lücken, Gesamt = T; Arbeit + Warten = Gesamt bis auf
-      Darstellungsrundung.
-    reference_cases:
-      "16f39431":
-        build_seconds: 2607
-        ci_seconds: 124
-        minimum_build_to_ci_width_ratio: 20
-        waiting_segment: true
-        work_seconds: 6084
-        waiting_seconds: 3289
-        total_seconds: 9372
-        totals_tolerance_seconds: 2
-      "81795e53":
-        work_seconds: 3656
-        waiting_seconds: 0
-        total_seconds: 3656
-        waiting_segment: false
-    localization: >-
-      Arbeit/Warten/Gesamt und Segment-Titel über die bestehende i18n-Mechanik
-      in beiden Sprachen; identische Schlüsselmengen, korrekte Pluralformen.
-  costs: >-
-    Kosten erscheinen in Run-Liste, Timeline-Kopf und Run-Kontext-Panel in
-    genau EINEM Format (_fmt_cost-Konvention, z. B. $47.16) — auch nach
-    Knotenauswahl und bestehender Live-Aktualisierung; die Client-Projektion
-    fällt nicht auf die sechsstellige Anzeige zurück. Ein fehlender Kostenwert
-    bleibt leer (bestehende "nie als 0"-Regel). Übrige Kontext-Zahlenfelder
-    (ctx_num), numerische API-Werte und getreu wiedergegebene Payload-Inhalte
-    bleiben unverändert.
+  surface: "GET / (Run-Listen-Seite)"
+  query_params: >-
+    Die Route `/` nimmt zusätzlich vier OPTIONALE Query-Parameter entgegen —
+    `sort`, `dir`, `repo`, `status` —, serverseitig ausgewertet wie beim
+    Raw-Tab (`?raw_q`/`?raw_type`); kein Client-Zustand, keine Persistenz. Ohne
+    Parameter sind Auswahl und Reihenfolge unverändert (die korrigierten
+    Kennzahlen und die neue Listendarstellung sind davon unberührt).
+  sorting: >-
+    `sort` ∈ {start, duration, cost, events}, `dir` ∈ {asc, desc}. Dauer und
+    Kosten sortieren nach den korrigierten Laufwerten, `events` nach
+    `event_count`; fehlende Kennzahlen (null) sortieren ohne Ausnahme.
+    Unbekannte oder fehlende Werte fallen auf `start`/`desc` zurück — nie ein
+    Fehler, nie eine leere Liste. Die bestehende Statusgruppierung
+    (`awaiting_approval` zuerst, dann `running`, dann Rest; neueste zuerst
+    innerhalb der Gruppe) wird VOR der gewählten Sortierung angewendet und
+    behält Vorrang; sie ist durch keinen Parameter abschaltbar.
+  filtering: >-
+    `repo` filtert auf einen Repo-Slug, `status` auf einen Statuswert;
+    kombinierte Filter wirken als Schnittmenge. Ein unbekannter Wert ergibt eine
+    LEERE Trefferliste mit erklärendem, lokalisiertem Hinweis — nicht die
+    ungefilterte Liste und kein Fehler.
+  issue_title: >-
+    Die Issue-Spalte zeigt je Lauf eine einzeilige, abgeschnittene Titelzeile,
+    abgeleitet aus dem rohen Issue-Text nach den normativen Regeln (erste
+    `#`-Überschrift unter den ersten zwölf Zeilen, „Issue"-Überschrift
+    (`^issue\b`, case-insensitive) übersprungen, Überschriften außerhalb der
+    ersten zwölf Zeilen ohne Vorrang; sonst erste nicht-leere Zeile; führendes
+    `ADW-Issue:`/`Issue:` entfernt; > 90 Zeichen auf 89 + `…`; leerer/fehlender
+    Text → leere Zelle, nie ein Platzhalter). Der VOLLSTÄNDIGE rohe Issue-Text
+    steht im `title`-Attribut, als Attributtext korrekt escaped, nie als
+    Markdown oder HTML interpretiert (E7) — nicht das auf `_ISSUE_MAX`
+    gekürzte API-Feld `issue` als Quelle. Die Titelableitung ist
+    Textverarbeitung, kein Rendering.
+  status_column: >-
+    Phase und Status bilden EINE Spalte: sie nennt den Status und die Phase nur
+    dann zusätzlich, wenn diese etwas hinzufügt (laufender oder wartender Lauf).
+    Bei einem abgeschlossenen Lauf steht dort genau ein Wort; die frühere
+    Dopplung (done/done, escalated/escalated) entfällt.
+  localization: >-
+    Alle neuen Beschriftungen (Zeitgrößen, Spaltenköpfe, Sortier-/
+    Filtersteuerung, leere Trefferliste) liegen in beiden Sprachen mit
+    identischen Schlüsselmengen und korrekten Pluralformen vor. `sort`, `dir`,
+    `repo`, `status` überleben die Sprachumschaltung über den bestehenden
+    `switch_qs`-Mechanismus, weil sie in der URL stehen.
+  time_vocabulary: >-
+    Verbindliches Vokabular, je Größe überall dasselbe Wort (siehe
+    x-adw-reference.vocabulary). Phasenzeit wird nirgends als Arbeit
+    beschriftet (E5). Der i18n-Schlüssel `tl_work` (heute die Summe der
+    Phasendauern) wird umbenannt und neu beschriftet (Phasenzeit); die echte
+    Arbeitszeit aus A1 kommt als eigener Schlüssel und eigene Zahl daneben.
+    `tl_waiting` und `tl_total` behalten Bedeutung und Wert. Der
+    Run-Detail-Kopf bezieht seine Laufkennzahlen auf dieselbe korrigierte
+    Zusammenfassung wie die Liste; Modellzahlen, Spuren und Balken der
+    Timeline bleiben unverändert.

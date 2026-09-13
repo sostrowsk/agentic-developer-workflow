@@ -1,287 +1,263 @@
-# Spec: GUI-Redesign 1/2 — Gestaltungsfundament und die Zeitachse des Laufs
+# Spec — GUI-Redesign 2/2: Ein Lauf hat eine Wahrheit — und die Liste erzählt sie
 
 ## Goal
 
-Die ADW-GUI bekommt ein tragfähiges Gestaltungsfundament und ein maßstäbliches
-Phasenband:
-
-1. Alle Farben, Schriftgrößen und Abstände stammen aus einem benannten Token-
-   und Skalensystem statt aus verstreuten Literalen. Ein Dark Mode entsteht
-   allein durch Umschalten dieser Tokens über `prefers-color-scheme`.
-2. Signalfarben werden diszipliniert: „ein Mensch muss handeln", „arbeitet
-   gerade" und „technisch wartend" sind visuell eindeutig unterscheidbar.
-3. Das Phasenband im Kopf des Run-Detail wird von der Chip-Reihe (Breite folgt
-   der Beschriftungslänge) zur maßstäblichen Zeitachse: jede Phase sitzt an
-   ihrer wirklichen zeitlichen Position mit ihrer wirklichen Dauer als Breite;
-   die Lücken an den Freigabe-Gates werden als Wartesegmente sichtbar; darunter
-   stehen drei Zahlen: Arbeit, Warten, Gesamt.
-
-Die Informationsarchitektur (Run-Liste, Anordnung der Blöcke im Run-Detail,
-DOM-Deckel) bleibt in diesem Brief ausdrücklich unberührt — sie ist Gegenstand
-von Brief 2.
+Die Oberfläche berichtet die Kennzahlen eines Laufs (Dauer, Kosten, Token)
+korrekt über den **ganzen** Lauf statt nur über die letzte CLI-Spanne, benennt
+die verschiedenen Zeitgrößen (Arbeit, Phasenzeit, Wartezeit, Gesamt) mit einem
+einheitlichen Vokabular, ohne sie zu verwechseln, und macht die Run-Liste zur
+Antwort auf „was braucht mich, was läuft, was hat es gekostet": einzeilige
+Titel, eine statt zwei redundanter Spalten, serverseitiges Sortieren und
+Filtern. Aufbauend auf Brief 1 (Lauf `4609107b`), dessen Tokens, Skalen und
+Zeitachse hier **benutzt, nicht revidiert** werden.
 
 ## Scope
 
-Betroffen sind ausschließlich Darstellung und die eine additive
-Contract-Erweiterung:
+- **A1 — Kennzahlen über den ganzen Lauf.** `_summary` (`adw/gui/app.py:1014`)
+  summiert `duration`, `cost` und die im `totals`-Payload vorhandenen
+  Token-Zahlen über **alle abgeschlossenen `run`-Spannen** des Logs, statt sie
+  aus der letzten zu nehmen (`_run_span`, `adw/gui/app.py:938`). `start` bleibt
+  die erste Spanne; Status- und Phasenableitung bleiben unverändert. Run-Liste
+  und Run-Detail-Kopf speisen beide aus `_summary` und stimmen dadurch überein.
+- **A2 — Drei benannte Zeitgrößen, ein Vokabular.** Die Oberfläche benennt
+  **Arbeit**, **Gesamt** und die **Wartezeit** als drei verschiedene Größen;
+  für jede wird überall dasselbe Wort verwendet. Die Zeitachse aus Brief 1 wird
+  auf dieses Vokabular gebracht: farbige Segmente = **Phasenzeit**, Lücken =
+  **Wartezeit**. Der i18n-Schlüssel `tl_work` (heute „Arbeit"/„Work",
+  `adw/gui/i18n.py`) beschriftet die Summe der Phasendauern und wird deshalb
+  umbenannt und neu beschriftet; die echte Arbeitszeit aus A1 kommt als
+  zusätzlicher, eigener Schlüssel und eigene Zahl daneben. `tl_waiting` und
+  `tl_total` behalten Bedeutung und Wert.
+- **A3 — Titelzeile statt Roh-Markdown.** Die Issue-Spalte zeigt je Lauf eine
+  einzeilige, abgeschnittene Titelzeile (Ableitung siehe Normative
+  Definitionen); der vollständige rohe Issue-Text bleibt über das
+  `title`-Attribut erreichbar (als Attributtext korrekt escaped, nie als
+  Markdown oder HTML interpretiert).
+- **A4 — Phase und Status werden eine Spalte.** Eine Spalte, die den Status
+  nennt und die Phase nur dann zusätzlich, wenn sie etwas hinzufügt (laufender
+  oder wartender Lauf). Bei einem abgeschlossenen Lauf steht dort genau ein
+  Wort; `done`/`done` und `escalated`/`escalated` entfallen.
+- **A5 — Sortieren und Filtern, serverseitig.** Die Run-Liste erhält sichtbare
+  Steuerung für Sortierung nach Start, Dauer, Kosten und Ereigniszahl sowie
+  Filter nach Repo und Status, serverseitig über Query-Parameter wie beim
+  Raw-Tab (`?raw_q`/`?raw_type`) — kein Client-Zustand, keine Persistenz.
+  Dauer und Kosten sortieren nach den korrigierten Laufwerten aus A1,
+  Ereigniszahl nach `event_count`. Die bestehende Statusgruppierung
+  (`_status_rank`, `adw/gui/app.py:2546–2548`: `awaiting_approval`, dann
+  `running`, dann Rest; neueste zuerst innerhalb der Gruppe) bleibt
+  unangetastet und behält Vorrang vor jeder gewählten Sortierung.
+- **A6 — i18n.** Alle neuen Beschriftungen (Zeitgrößen, Spaltenköpfe,
+  Sortier-/Filtersteuerung, leere Ergebnismenge) liegen in `adw/gui/i18n.py`
+  in beiden Sprachen vor: identische Schlüsselmengen, korrekte Pluralformen.
+  Die Sprachumschaltung erhält Sortierung und Filterung, weil beide in der URL
+  stehen und der bestehende `switch_qs`-Mechanismus die Query weiterträgt.
+- **A7 — Doku und Changelog.** `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md`
+  beschreiben synchron die drei Zeitgrößen samt Rechenregeln, die Summierung
+  über alle Spannen, die bewusste Bedeutungsänderung der API-Kennzahlen samt
+  additiver Felder, die Titelableitung und die Sortier-/Filterparameter
+  einschließlich Rückfall- und Leerzuständen. `CHANGELOG.md`/`CHANGELOG.de.md`
+  werden synchron ergänzt; der A1-Eintrag steht unter `Fixed`/`Behoben` mit
+  dem Hinweis, dass frühere Werte für Läufe mit Gates zu niedrig waren.
 
-- **`adw/gui/static/app.css`** — Token-Schicht, Schrift- und Abstandsskala,
-  Signalfarben-Disziplin, Dark Mode, reduced-motion, Zeitachsen-Styling.
-- **`adw/gui/templates/run_detail.html`** — die Chip-Reihe des Phasenbands wird
-  an ihrer heutigen Stelle im Kopf durch die Zeitachse ersetzt; die Chip-Reihe
-  bleibt als Rückfallebene erhalten und wird im neuen Gestaltungssystem
-  gerendert. Der Run-Kontext-Eintrag für `cost_usd` (heute `ctx_num`,
-  Zeile 96) wechselt auf den gemeinsamen Kostenformatierer.
-- **`adw/gui/app.py`** — `_phase_bar` (Zeile 1090) gibt je Phase zusätzlich
-  `start` und `end` aus (additiv); serverseitige Kostenformatierung über
-  `_fmt_cost`.
-- **`adw/gui/static/app.js`** — ausschließlich die Kosten-Projektion des
-  Run-Kontext-Panels (heute `formatContextValue`, rundet auf 6 Nachkommastellen):
-  sie übernimmt das einheitliche Kostenformat, damit es auch nach Knotenauswahl
-  und bestehender Live-Aktualisierung erhalten bleibt.
-- **`adw/gui/i18n.py`** — neue Beschriftungsschlüssel der Zeitachse (Arbeit,
-  Warten, Gesamt, Segment-Titel) in beiden Sprachen über die bestehende Mechanik.
-- **`docs/GUI-SPEC.md` / `docs/GUI-SPEC.de.md`** — synchrone Beschreibung von
-  Token-System, den beiden Schriftrollen, Signalfarben-Regel, Dark Mode und der
-  Zeitachse samt Rechenregeln.
-- **`CHANGELOG.md` / `CHANGELOG.de.md`** — synchrone Ergänzung der
-  `Unreleased`-Sektion.
+## Normative Definitionen (bindend, nicht neu herzuleiten)
 
-### Normative Definitionen (übernommen, nicht neu herzuleiten)
+### Die drei Zeitgrößen
 
-**Farbtokens** — die Werte sind durchgerechnet (jede Text-auf-Grund-Paarung
-erreicht in beiden Themes mindestens 4,5:1) und werden wörtlich übernommen:
+- **Arbeit** = Summe von `totals.duration` über alle `run`-Spannen mit `end`.
+  Eine noch offene Spanne trägt nichts bei (sie hat noch keine `totals`).
+  Gibt es keine abgeschlossene Spanne, ist Arbeit unbestimmt und wird nicht
+  angezeigt — nie als 0 erfunden.
+- **Phasenzeit** = Summe der Phasen-Spannen mit parsebarem `start` und `end`.
+  Das ist die Fläche der farbigen Segmente der Zeitachse, **nicht** Arbeit.
+- **Gesamt** = kleinster Phasenstart bis größtes Phasenende; bei einer noch
+  aktiven Phase ohne Ende bis zum Zeitpunkt des Seitenaufbaus (der
+  Auswertungszeitpunkt ist ein Berechnungszeitpunkt, kein nachgetragenes
+  Phasenende).
+- **Wartezeit** = Gesamt − Phasenzeit, die Summe der Lücken zwischen den
+  Phasen. Die Zerlegung ist eindeutig: die Phasen-Spannen überlappen in keinem
+  der 20 vorhandenen Läufe.
+- Kosten und Token-Zahlen werden wie Arbeit über alle abgeschlossenen Spannen
+  summiert; ohne abgeschlossene Spanne bleiben sie leer.
 
-| Token | hell | dunkel | Rolle |
-|---|---|---|---|
-| `--paper` | `#f6f7f9` | `#12151a` | Seitengrund |
-| `--surface` | `#ffffff` | `#191d24` | abgesetzte Fläche (Panes, Karten) |
-| `--ink` | `#191d24` | `#e6e9ee` | Haupttext |
-| `--ink-soft` | `#5a626e` | `#949cab` | Sekundärtext (ersetzt `--muted`) |
-| `--rule` | `#dde1e7` | `#2a3039` | Linien und Rahmen (ersetzt `--border`) |
-| `--code-bg` | `#eef1f5` | `#1e232b` | Monospace-Blöcke, `pre` |
-| `--signal` | `#a8530a` | `#e8a33d` | **nur** „ein Mensch muss handeln" |
-| `--signal-ink` | `#ffffff` | `#1a1207` | Text auf `--signal` |
-| `--ok` | `#256b45` | `#4ea87a` | gelungen / fertig |
-| `--fail` | `#a5241d` | `#e0716a` | fehlgeschlagen / eskaliert |
-| `--busy` | `#1d5f8a` | `#59a7d8` | arbeitet gerade |
-| `--wait` | `#5b6472` | `#8b93a1` | technisch wartend (CI-Poll, Gate-Laufzeit) |
+Verbindliches Vokabular (je Größe überall dasselbe Wort):
+Arbeit/Work · Phasenzeit/Phase time · Wartezeit/Waiting · Gesamt/Total.
 
-`--accent`, `--fg`, `--muted`, `--border` dürfen als Aliase auf die neuen
-Tokens bestehen bleiben, solange Markup sie referenziert; neue Regeln benutzen
-die neuen Namen. Die Dry-Run-Kennzeichnung behält ihren eigenen, von `--signal`
-verschiedenen Braunton — wegen der Null-Hex-Regel (AC 1) als benanntes Token in
-der Token-Schicht — und ihre `position: sticky`-Regel.
+### Titelableitung aus dem Issue-Text (A3)
 
-**Skalen:**
+Angewandt auf den rohen Issue-Text, in dieser Reihenfolge:
 
-- Schriftgrößen, sechs Stufen: `0.75 · 0.8125 · 0.875 · 1 · 1.25 · 1.5` rem.
-  Kein anderer Wert.
-- Abstände, sechs Stufen: `0.25 · 0.5 · 0.75 · 1 · 1.5 · 2` rem. Kein anderer
-  Wert für `padding`/`margin`.
-- Radien: `3px` und `6px`, beide heute schon in Gebrauch. Keine weiteren.
-- Monospace-Stack: `ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo,
-  Consolas, monospace` — für Maschinenwerte (Lauf-IDs, Sequenznummern, Pfade,
-  Dauern, Kosten, Token- und Ereigniszahlen, Phasennamen). Die UI-Schrift
-  bleibt wörtlich der heutige Stack. Jede Zahl, die sich ändern kann, bekommt
-  `font-variant-numeric: tabular-nums`.
+1. Unter den ersten zwölf Zeilen die erste, die mit `#` beginnt; ihr Text ohne
+   führende `#` und ohne umgebende Leerzeichen. Eine Überschrift, die nur
+   „Issue" benennt (Regex `^issue\b`, ohne Beachtung der
+   Groß-/Kleinschreibung), wird übersprungen — die nächste Überschrift
+   gewinnt. Eine Überschrift außerhalb der ersten zwölf Zeilen erhält keinen
+   Vorrang.
+2. Gibt es keine solche Überschrift: die erste nicht-leere Zeile.
+3. Aus dem Ergebnis wird ein führendes `ADW-Issue:` oder `Issue:` entfernt.
+4. Länger als **90 Zeichen** wird auf 89 gekürzt und mit `…` markiert.
+5. Ist der Text leer oder fehlt er, bleibt die Zelle leer — nie ein
+   Platzhalter.
 
-**Zustandsfarben nach der Bereinigung:**
+Die Titelableitung ist Textverarbeitung, kein Rendering (E7).
 
-| Zustand | Token |
-|---|---|
-| `.phase-completed`, `.node-done`, `.node-passed` | `--ok` |
-| `.phase-active`, `.node-running` | `--busy` |
-| `.node-waiting`, Warte-Balken der Timeline, Wartesegment der Achse | `--wait` |
-| `.phase-awaiting`, `.run-status.status-awaiting_approval` | `--signal` |
-| `.phase-failed`, `.node-failed`, `.problem`, `.raw-problem` | `--fail` |
-| `.phase-pending` | `--ink-soft` |
+### Sortier- und Filterparameter (A5)
 
-**Zeitachse — Rechenregeln (bindend):**
+- `?sort=` mit `start`, `duration`, `cost`, `events`; `?dir=` mit `asc` oder
+  `desc`. Unbekannte oder fehlende Werte fallen auf das heutige Verhalten
+  zurück (`start`, `desc`) — nie ein Fehler, nie eine leere Liste.
+- `?repo=` filtert auf einen Repo-Slug, `?status=` auf einen Statuswert.
+  Kombinierte Filter wirken als Schnittmenge. Unbekannte Werte ergeben eine
+  **leere Trefferliste mit erklärendem, lokalisiertem Hinweis**, nicht die
+  ungefilterte Liste und keinen Fehler.
+- Die Statusgruppierung (`awaiting_approval` zuerst, dann `running`, dann der
+  Rest) wird **vor** der gewählten Sortierung angewendet und ist durch sie
+  nicht abschaltbar. Diese Frage ist entschieden.
+- Alle Parameter überleben die Sprachumschaltung über den bestehenden
+  `switch_qs`-Mechanismus.
 
-- `T_start` = kleinstes parsebares `start`. `T_end` = größtes `end`; hat eine
-  Phase mit Status `active` kein `end`, ist `T_end` der Zeitpunkt des
-  Seitenaufbaus. `T = T_end − T_start`.
-- Ist `T` nicht bestimmbar oder ≤ 0, oder hat weniger als eine Phase einen
-  parsebaren `start`, wird die heutige Chip-Reihe gerendert. Sie bleibt die
-  Rückfallebene und wird nicht entfernt.
-- Segment je Phase: Versatz `(start − T_start) / T`, Breite `(end − start) / T`.
-  Die Beschriftungslänge beeinflusst Position und Breite nicht. Eine Phase mit
-  `start`, ohne `end` und mit Status `active` reicht bis zum rechten Rand und
-  wird als offen markiert (dieselbe Konvention wie `.tl-bar.bar-running`).
-- Wartesegmente: Phasen nach `start` sortieren; ist der Abstand zwischen dem
-  `end` der einen und dem `start` der nächsten größer als null, entsteht dort
-  ein als „Warten" beschriftetes Segment. Warum gewartet wurde, wird nicht
-  ermittelt und nicht behauptet. Vor dem ersten Phasenstart und nach dem
-  letzten Phasenende wird keine Wartezeit erfunden.
-- Eine Phase ohne parsebaren `start` (nie gelaufen, z. B. `integration`)
-  bekommt kein Segment; sie bleibt unter der Schiene in der Legende gedämpft
-  sichtbar. Phasennamen und Dauern bleiben lesbar.
-- Mindestbreite jedes Segments: **2 px**. Sehr kurze Phasen sind dadurch bewusst
-  nicht maßstäblich; die Zeitwerte und Summen ändert das nicht. Diese Frage ist
-  entschieden.
-- Drei Zahlen unter der Schiene: **Arbeit** = Summe der Phasendauern (bei einer
-  offenen aktiven Phase zählt die bis zum Seitenaufbau verstrichene Zeit),
-  **Warten** = Summe der Lücken, **Gesamt** = `T`. Es gilt
-  Arbeit + Warten = Gesamt bis auf Rundung.
+## Contract
+
+Single-Lane-Projekt (`backend`, `.adw/config.yaml`).
+
+- **Bewusste Bedeutungsänderung:** `GET /api/runs` und
+  `GET /api/runs/{repo}/{run_id}` liefern `duration` und `cost` weiterhin
+  unter denselben Namen und Typen, aber mit korrigierter Bedeutung — sie
+  beziffern ab jetzt den **ganzen Lauf** statt nur der letzten CLI-Spanne.
+  Für Läufe mit Gates steigen die Werte; das ist der Zweck des Issues.
+- **Additiv:** neue Felder für die benannten Zeitgrößen an der
+  Laufzusammenfassung, `null` wenn unbestimmt (E6): `work_seconds`,
+  `phase_seconds`, `wait_seconds`, `total_seconds` (Zahl oder `null`, nach den
+  normativen Definitionen). Token-Summen werden additiv in der Form
+  ausgewiesen, die der `totals`-Payload hergibt — sofern vorhanden, nie als
+  erfundene 0.
+- Kein vorhandenes Feld wird entfernt, umbenannt oder umgedeutet; `start`,
+  `status`, `phase`, `issue`, `event_count`, `dry_run`, `has_trace` und
+  `repo_exists` bleiben wörtlich, wie sie sind. Insbesondere wird das
+  `issue`-Feld **nicht** zum 90-Zeichen-Anzeigetitel umgedeutet; der Titel ist
+  Darstellungsdatum der Liste.
+- Die Route `/` nimmt neue optionale Query-Parameter entgegen (`sort`, `dir`,
+  `repo`, `status`). Ohne Parameter ist das Verhalten unverändert — gemeint
+  sind Auswahl und Reihenfolge, nicht die ausdrücklich korrigierten Kennzahlen
+  oder die neue Listendarstellung. Die API-Routen erhalten keine
+  Sortier-/Filterparameter.
+- `tree`, `raw`, `latest_context` und `problems` bleiben unverändert.
+- Regressionstests fixieren beides: die neuen Felder sind da, und die
+  unveränderten Felder sind unverändert.
 
 ## Non-Goals / Scope-Deckel
 
-- Keine neue Route, kein neues Tab, keine Änderung an `build_tree`
-  (`adw/gui/model.py`), an der Verdichtungsschicht, an der Blätterung
-  (`?offset`, `?tools_offset`, Fenstergröße 100), am SSE-Pfad, an den
-  Ereignistypen, an der Instrumentierung oder an der Retention.
-- Keine Änderung an der API-Antwort außer der additiven Erweiterung um `start`
-  und `end` (A6). `tree`, `raw`, `latest_context`, `problems` und die
-  Statuswerte bleiben unverändert; `name`, `status`, `duration` bleiben
-  wörtlich, wie sie sind.
-- Keine neue Persistenz, kein Polling, kein neues Zustands-Subsystem. Keine
-  Änderung an Auswahl-, Pane-, `?focus`- oder Deep-Link-Verhalten.
-- **Kein Umbau der Informationsarchitektur (E3):** Reihenfolge und Anordnung
-  von „Planned tasks", „Change scope", Trace-Baum, Detail-Panes,
-  Run-Kontext-Panel, Registerkarten und Run-Liste bleiben exakt, einschließlich
-  der Spalten der Run-Liste und der Breitenverhältnisse des
-  `trace-layout`-Grids.
-- **Keine Umbenennung von Klassennamen (E2):** alle heutigen Zustands- und
-  Struktur-Klassennamen bleiben erhalten; verändert wird nur, wie die
-  Selektoren aussehen.
-- **Kein zusätzliches Element je wiederholtem Eintrag (E4):** gestaltet wird
-  über Selektoren auf dem vorhandenen Markup. Neue Elemente nur im Kopf für die
-  Zeitachse — ihre Anzahl hängt von der festen Phasenmenge ab, nicht von der
-  Ereigniszahl.
-- **`--signal` bedeutet genau eine Sache (E5):** kein anderer Zustand, kein
-  Hover, kein Fokusring, keine Überschrift, kein Diagramm-Element trägt diesen
-  Ton.
-- **Kein manueller Theme-Umschalter (E6):** Dark Mode ausschließlich über
-  `prefers-color-scheme`; kein `localStorage`, kein Query-Parameter, kein neuer
-  Client-Zustand.
-- **Kein zweites Band (E7):** die Zeitachse ersetzt die Chip-Reihe an deren
-  heutiger Stelle. Die Registerkarte „Timeline" wird nicht angefasst — weder
-  Spuren noch Balkengeometrie noch Beschriftungen; ihre vorhandenen Selektoren
-  erhalten lediglich die globale Token-Gestaltung (ihre Warte-Balken tragen
-  `--wait` gemäß Zustandsfarben-Tabelle).
-- **`duration`-Angabe des Laufs unangetastet (E8):** Run-Liste und
-  Timeline-Kopf zeigen weiter die heutige Zahl; welche der drei Dauer-Zahlen
-  die „Dauer eines Laufs" ist, entscheidet Brief 2 — kein Finding.
-- **Keine neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN, keine
-  Webfont (E1):** nur System-Schrift-Stacks, handgeschriebenes CSS, Vanilla JS.
-- **Animationsverzicht (E9):** außer Farb- und Hintergrundübergängen von
-  höchstens 150 ms, die `prefers-reduced-motion` respektieren, keine Bewegung,
-  kein Einblenden, kein Skalieren, kein Schatten-Spiel.
-- Artefakte bleiben getreuer Monospace-Text, keine Markdown-Bibliothek (E10).
-- Keine Änderung an der i18n-Mechanik, nur neue Schlüssel in beiden Sprachen
-  (E11); Event-, Pfad-, Werkzeug- und Payload-Inhalte werden nicht übersetzt.
-- **Kein Responsive-Umbau (E12):** keine Breakpoints, keine Mobilansicht. Die
-  bestehende Regel `html, body { max-width: 100%; overflow-x: hidden }` und die
-  `min-width: 0`-Regeln der Grid-Kinder bleiben.
-
-## Acceptance Criteria (messbar)
-
-1. **Farb-Literale gebündelt.** `adw/gui/static/app.css` enthält außerhalb der
-   beiden Token-Blöcke (`:root` und `@media (prefers-color-scheme: dark)`)
-   **null** Hex-Literale (heute 39); andere Farbnotationen umgehen die
-   Token-Schicht nicht.
-2. **Skalen greifen.** Die Datei benutzt höchstens **sechs** verschiedene
-   `font-size`-Werte (heute 9) und höchstens **sechs** verschiedene rem-Werte
-   für `padding`/`margin` (heute 21); alle stammen aus den Skalen.
-3. **Fallback-Variablen sind echte Tokens.** `--ok`, `--fail` (bzw. `--err`,
-   das auf `--fail` verweisen darf) und `--code-bg` sind in beiden Themes
-   definiert; kein `var(--name, literal)`-Aufruf verlässt sich mehr auf einen
-   Fallback für eine nicht existierende Variable.
-4. **Dark Mode & reduced-motion.** `@media (prefers-color-scheme: dark)`
-   definiert **jedes** der zwölf normativ gelisteten Tokens neu.
-   `@media (prefers-reduced-motion: reduce)` existiert und schaltet die
-   Übergänge ab.
-5. **Doppelrolle aufgelöst.** Kein Selektor setzt denselben Farbton für
-   `.node-waiting` und für `.phase-awaiting` / `.status-awaiting_approval`;
-   „arbeitet gerade" trägt ein von beiden verschiedenes Token.
-6. **Gepinnte Strings vorhanden.** Unverändert vorhanden: `.phase-active`,
-   `.phase-completed`, `.node-running`, `.node-done`, `node-waiting`,
-   `awaiting`, `trace-summary`, `nowrap` sowie eine `dry`-Regel mit
-   `position: sticky|fixed`.
-7. **Zeitachse, Maßstab.** Für den Lauf `16f39431` ist das `build`-Segment
-   mindestens **20-mal** so breit wie das `ci`-Segment (durchgerechnet:
-   2607 s / 124 s = 21,0).
-8. **Zeitachse, Warten.** Für `16f39431` weist die Achse ein Wartesegment aus,
-   und die drei Zahlen lauten Arbeit 6084 s, Warten 3289 s, Gesamt 9372 s
-   (Formatierung frei, Toleranz ±2 s); es gilt Arbeit + Warten = Gesamt bis auf
-   Rundung.
-9. **Zeitachse, lückenloser Lauf.** Für `81795e53` (Summe der Phasendauern
-   3656 s = Gesamt 3656 s) zeigt die Achse **kein** Wartesegment und Warten = 0.
-10. **Zeitachse, Rückfallebene.** Ein Lauf ohne parsebare Phasen-Zeitstempel
-    (bzw. `T ≤ 0` oder weniger als eine Phase mit parsebarem `start`) rendert
-    die heutige Chip-Reihe — nicht eine leere oder kaputte Schiene und kein
-    zweites Band daneben.
-11. **Eine Formatierung je Größe.** Die Kosten erscheinen in Run-Liste,
-    Timeline-Kopf und Run-Kontext-Panel in **genau einem** Format
-    (`_fmt_cost`-Konvention, z. B. `$47.16`) — auch nach Knotenauswahl und
-    bestehender Live-Aktualisierung; die Client-Projektion in `app.js` fällt
-    nicht auf die sechsstellige Anzeige zurück. Ein fehlender Kostenwert bleibt
-    leer (bestehende „nie als 0"-Regel). `56.87666` kommt in keiner
-    formatierten Kostenanzeige mehr vor; getreu wiedergegebene Payload-Inhalte
-    (E10) sind davon unberührt. `ctx_num` bleibt für die übrigen Zahlenfelder,
-    wie es ist.
-12. **Marker-Zahl unverändert.** Die Anzahl der `data-tree-entry`-Marker je
-    gerenderter Seite ist bei gleichen Eingabedaten gegenüber heute
-    **unverändert**, und kein Element wird je Eintrag hinzugefügt (E4).
-13. **Contract additiv erweitert.** `GET /api/runs/{repo}/{run_id}` liefert je
-    `phases`-Eintrag zusätzlich `start` und `end` (ISO-8601-String wie im
-    Event-Log, oder `null`). Ein fehlendes Phasenende bleibt in der API `null`;
-    der Seitenaufbau-Zeitpunkt ist reine Darstellungsregel und wird nicht als
-    Phasenende ausgegeben. `name`, `status`, `duration` und die Struktur von
-    `tree` sind unverändert.
-14. **Gates & Dependency-Freiheit.** `uv run ruff check .` und
-    `uv run pytest -x -q` laufen grün. Keine neue Laufzeit-Dependency, kein
-    Frontend-Paket, kein CDN, keine Webfont.
-15. **i18n vollständig.** Die neuen Zeitachsen-Beschriftungen (Arbeit, Warten,
-    Gesamt, Segment-Titel) liegen in `adw/gui/i18n.py` in beiden Sprachen vor,
-    mit identischen Schlüsselmengen und korrekten Pluralformen.
-16. **Doku & Changelog synchron.** `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md`
-    beschreiben synchron Token-System, die beiden Schriftrollen, die
-    Signalfarben-Regel, den Dark Mode und die Zeitachse samt Rechenregeln; die
-    `Unreleased`-Sektion in `CHANGELOG.md` und `CHANGELOG.de.md` ist synchron
-    ergänzt.
-
-## Definition of Done
-
-- Alle Akzeptanzkriterien 1–16 sind erfüllt und durch Tests belegt; Non-Goals
-  und Scope-Deckel sind eingehalten.
-- Richtwert **~12 neue Tests** unter `tests/test_gui_*.py`; deutlich mehr als
-  ~18 ist Scope-Drift. Mindestens abgedeckt: Token-Disziplin (AC 1–3),
-  Dark-Mode- und reduced-motion-Block (AC 4), aufgelöste Farb-Doppelrolle
-  (AC 5), Erhalt der gepinnten Selektoren (AC 6), Maßstab der Achse (AC 7),
-  Wartesegment mit und ohne Lücke (AC 8/9), Rückfallebene (AC 10),
-  einheitliche Kostenformatierung (AC 11), unveränderte Marker-Zahl (AC 12),
-  Contract-Regression für `phases` und `tree` (AC 13). Für reines
-  Client-Verhalten steht `tests/gui_js_harness.js` /
-  `tests/gui_js_harness.py` bereit.
-- Die Referenzläufe (`16f39431`, `81795e53`) werden über reproduzierbare
-  Testdaten geprüft — maßgeblich sind die angegebenen Zeitrelationen und
-  Summen, keine Abhängigkeit von lokal vorhandenen historischen
-  Run-Verzeichnissen.
-- Die bestehenden GUI-Tests bleiben grün, ohne inhaltlich umgeschrieben zu
-  werden.
-- Beide Gates grün: `uv run ruff check .` und `uv run pytest -x -q`. (Der
-  veraltete Verweis auf flake8/isort in `docs/GUI-SPEC.md` begründet keine
-  weiteren Gates; `ruff format` und black sind bewusst keine Gates.)
+- Keine neue Route, kein neues Tab, keine Persistenz, kein Polling, kein
+  neues Zustands-Subsystem, keine Änderung an Auswahl-, Pane-, `?focus`- oder
+  Deep-Link-Verhalten.
+- **E1** — Keine neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN,
+  keine Webfont; Vanilla JS, handgeschriebenes CSS, System-Schriften.
+- **E2** — Sortierung und Filterung ausschließlich serverseitig über
+  Query-Parameter; kein clientseitiges Sortieren, keine Tabellen-Bibliothek,
+  kein `localStorage`, keine Cookies, kein neuer Client-Zustand.
+- **E3** — Das Run-Detail wird nicht umgebaut: Blockreihenfolge,
+  Registerkarten, Detail-Panes, Run-Kontext-Panel, Trace-Baum samt
+  Eintragsmarkern, Verdichtung, Blätterung und Timeline-Registerkarte bleiben
+  exakt, wie Brief 1 sie hinterlässt. Berührt wird dort ausschließlich, was
+  A1/A2 an Zahlen und deren Beschriftung ändern — auch nicht als
+  Review-Finding.
+- **E4** — Gestaltungsentscheidungen aus Brief 1 (Tokens, Skalen, Signalfarbe,
+  Dark Mode, Aufbau der Zeitachse) werden benutzt, nicht revidiert; keine
+  neuen Farben, Schriftgrößen oder Abstandswerte.
+- **E5** — Phasenzeit wird nirgends als Arbeit beschriftet (die Größen gehen
+  in drei Läufen um das 7- bis 25-Fache auseinander).
+- **E6** — Eine unbestimmte Zahl bleibt leer, nie `0` (Linie des
+  Run-Kontext-Panels).
+- **E7** — Der Issue-Rohtext wird nicht als Markdown gerendert, weder in der
+  Liste noch im `title`.
+- **E8** — Keine Änderung an Ereignistypen, Instrumentierung, Event-Payloads,
+  `build_tree`, Verdichtungsschicht, Blätterung, SSE-Pfad oder Retention; die
+  A1-Korrektur geschieht ausschließlich bei der **Auswertung** des
+  vorhandenen Logs.
+- **E9** — Kein Responsive-Umbau, keine Breakpoints, keine Mobilansicht.
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-Diese Punkte sind erkannt und begründet, gehören aber in Brief 2 oder später.
-Im Codex-/Fix-Zyklus werden sie **nicht** nachgebaut, auch nicht als Finding:
+Erkannt, begründet, aber nicht Gegenstand; wird im Codex-/Fix-Zyklus **nicht**
+nachgebaut:
 
-- Informationsarchitektur der Run-Liste: umbrechende Issue-Spalte, Dopplung von
-  `Phase` und `Status`, fehlende Sortier- und Filtersteuerung.
-- Anordnung der Blöcke im Run-Detail (Trace-Baum beginnt bei 854 px).
-- Der gerissene DOM-Deckel im Baum (844 statt 200) und die fehlende Assertion
-  für `data-tree-entry` — hier folgt daraus nur die Wahrung der Marker-Zahl
-  (AC 12).
-- Die drei verschiedenen Dauer-Begriffe eines Laufs (siehe E8).
-- Spur- und Balkenbeschriftung der Timeline (heute auf „co", „b", „p"
-  verstümmelt).
-- Manueller Theme-Umschalter, Mobilansicht, eigenes Icon-Set,
-  Barrierefreiheits-Audit über die Kontrastschwelle (4,5:1) hinaus.
-- Zusätzliche Zeitmodell-Härtung für hypothetisch überlappende Phasen,
-  Ursachenklassifikation von Wartezeiten oder ein persistiertes
-  Zeitachsenmodell — es gelten die vorgegebenen Rechenregeln auf den
-  vorhandenen Ereignisdaten.
+- Die Anordnung der Blöcke im Run-Detail (der Trace-Baum beginnt weit
+  unterhalb des Seitenanfangs).
+- Die Größe der gerenderten Baum-Spalte (`_tree_rows`, `adw/gui/app.py:131`):
+  bewusst vollständig gerendert, weil die Verdichtung den Schnitt ersetzt hat.
+  Was fehlt, ist eine Aussage darüber in der Spec und ein Test, der die
+  Zähldefinition fixiert.
+- Spur- und Balkenbeschriftung der Timeline-Registerkarte.
+- Volltextsuche über Läufe, gespeicherte Filter, Spaltenauswahl, Export.
+- Eine Kennzahl „Kosten pro Lauf gegen Kosten pro Phase" oder sonstige
+  Auswertung über mehrere Läufe hinweg.
+- Rückwirkende Korrektur oder Migration alter Logs — es wird nur anders
+  ausgewertet, nie geschrieben.
+- Neue Mechanismen zur Erkennung oder persistenten Kennzeichnung hypothetisch
+  überlappender Phasenspannen; die überlappungsfreie Zerlegung ist verifiziert
+  und wird zugrunde gelegt.
+
+## Akzeptanzkriterien (messbar)
+
+1. **Summierung:** Für ein Log mit drei abgeschlossenen `run`-Spannen
+   (`totals.duration` 100/200/300, `totals.cost` 1/2/3) meldet `_summary`
+   600 bzw. 6 — nicht 300 bzw. 3. `start` bleibt der erste Beginn.
+2. **Offene Spanne:** Für ein Log, dessen letzte `run`-Spanne noch offen ist,
+   zählen nur die abgeschlossenen Spannen; die offene trägt nichts bei, und
+   es entsteht keine Ausnahme.
+3. **Keine abgeschlossene Spanne:** Arbeit und Kosten bleiben leer, nicht `0`.
+4. **Ein Gate-Lauf stimmt:** Für den Lauf `16f39431` meldet die Run-Liste
+   $56.88 (heute $47.16); für `e4e70373` einen Wert größer null (heute
+   `$0.00`). Der automatisierte Regressionstest fixiert die Korrektur über
+   eine Mehrspannen-Fixture, da lokale Laufdaten der Retention unterliegen.
+5. **Zeitgrößen getrennt:** Für ein Log, in dem eine Phasenspanne eine
+   Unterbrechung überdauert (Phasenzeit deutlich größer als die Summe der
+   Spannen-Dauern), zeigt die Oberfläche beide Zahlen verschieden an, und
+   Phasenzeit trägt nirgends die Beschriftung „Arbeit"/„Work".
+6. **Zerlegung stimmt:** Phasenzeit + Wartezeit = Gesamt bis auf Rundung.
+   Beispiel: Phasen von Sekunde 0–100 und 300–500 ergeben 300 s Phasenzeit,
+   200 s Wartezeit, 500 s Gesamt.
+7. **Titelzeile:** Ein Issue mit `# Überschrift` liefert `Überschrift` ohne
+   `#`; eine Überschrift `# Issue (…)` wird übersprungen; ein Issue ohne
+   Überschrift liefert seine erste nicht-leere Zeile; nichts länger als 90
+   Zeichen; ein leerer Issue-Text liefert eine leere Zelle.
+8. **Zeilenhöhe:** Die Issue-Zelle rendert einzeilig, und der vollständige
+   Text steht im `title`-Attribut.
+9. **Eine Statusspalte:** Bei einem abgeschlossenen Lauf erscheint der
+   Statuswert genau einmal je Zeile.
+10. **Sortierung:** `?sort=cost&dir=desc` ordnet nach Kosten absteigend,
+    **aber** ein `awaiting_approval`-Lauf steht weiterhin über allen anderen.
+11. **Filter:** `?status=escalated` liefert nur eskalierte Läufe; ein
+    unbekannter Wert liefert eine leere Liste mit Hinweis, keinen Fehler und
+    nicht die ungefilterte Liste.
+12. **Robustheit:** Unbekannte `sort`/`dir`-Werte fallen auf `start`/`desc`
+    zurück, ohne Ausnahme und ohne leere Liste.
+13. **Sprachumschaltung:** Sortierung und Filter überleben den Wechsel der
+    Sprache.
+14. **Contract:** `/api/runs` und `/api/runs/{repo}/{run_id}` behalten alle
+    heutigen Feldnamen und -typen; die neuen Zeitgrößen (`work_seconds`,
+    `phase_seconds`, `wait_seconds`, `total_seconds`) sind zusätzlich da;
+    `issue` bleibt der bisherige Wert; `tree` ist strukturell unverändert.
+15. **Gates grün:** `uv run ruff check .` und `uv run pytest -x -q`. Keine
+    neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN.
+
+## Definition of Done
+
+- Alle Akzeptanzkriterien 1–15 erfüllt und durch Tests belegt.
+- Neue Tests unter `tests/test_gui_*.py` (Richtwert ~14; deutlich mehr als
+  ~20 ist Scope-Drift); reines Client-Verhalten über
+  `tests/gui_js_harness.js`/`tests/gui_js_harness.py`. Die bestehenden
+  GUI-Tests bleiben grün.
+- Bestehende Tests, die für Läufe mit Gates die alten, zu niedrigen
+  Kennzahlen erwarten, werden auf die korrigierten Werte gehoben — mit
+  Kommentar, der das Warum nennt. Das ist die einzige erlaubte inhaltliche
+  Änderung an bestehenden Tests.
+- `adw/gui/i18n.py` hat für alle neuen Schlüssel beide Sprachen mit
+  identischen Schlüsselmengen und korrekten Pluralformen; das verbindliche
+  Zeitvokabular wird überall konsistent verwendet.
+- `docs/GUI-SPEC.md`, `docs/GUI-SPEC.de.md`, `CHANGELOG.md`, `CHANGELOG.de.md`
+  sind synchron und paarweise sprachgleich ergänzt (A7); der A1-Eintrag steht
+  unter `Fixed`/`Behoben`.
+- Gates grün: `uv run ruff check .` und `uv run pytest -x -q`. Der veraltete
+  Hinweis auf flake8/isort in `docs/GUI-SPEC.md` begründet keine weiteren
+  Gates; `ruff format` ist kein Gate.
+- Die Deferred-Punkte bleiben ungebaut, auch im Review-Loop.
