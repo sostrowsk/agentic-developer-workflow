@@ -104,6 +104,12 @@ _EN: dict[str, str] = {
     "tl_duration": "duration",
     "tl_cost": "cost",
     "tl_tokens": "tokens",
+    # The to-scale phase timeline (A5): the three numbers under the rail (work =
+    # sum of phase durations, waiting = sum of the gaps at the approval gates,
+    # total = the whole span) and the title of a waiting segment.
+    "tl_work": "Work",
+    "tl_waiting": "Waiting",
+    "tl_total": "Total",
     # Labels for the read-only run-context panel (§7.2): the run state at the seq of
     # the selected node (or the latest event when nothing is selected).
     "ctx_title": "Run context",
@@ -229,6 +235,9 @@ _DE: dict[str, str] = {
     "tl_duration": "Dauer",
     "tl_cost": "Kosten",
     "tl_tokens": "Tokens",
+    "tl_work": "Arbeit",
+    "tl_waiting": "Warten",
+    "tl_total": "Gesamt",
     "ctx_title": "Lauf-Zustand",
     "ctx_phase": "Phase",
     "ctx_round": "Runde",

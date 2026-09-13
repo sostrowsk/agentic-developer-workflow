@@ -706,6 +706,71 @@ selection: `?lang=` → cookie → `Accept-Language` → `en`. Only UI chrome is
 translated; content (prompts, outputs, findings) is never touched. Language
 switch is a link in the header, no page state is lost.
 
+### 7.6 Design system (tokens, type, colour, dark mode)
+
+The stylesheet is built on a named token/scale system, not scattered literals.
+
+- **Colour tokens.** Every colour comes from a custom property defined in exactly
+  two blocks: `:root` (light) and `@media (prefers-color-scheme: dark)`. Outside
+  them there is no hex literal. The twelve normative tokens are `--paper`,
+  `--surface`, `--ink`, `--ink-soft`, `--rule`, `--code-bg`, `--signal`,
+  `--signal-ink`, `--ok`, `--fail`, `--busy`, `--wait`; the dry-run marking keeps
+  its own `--dry`/`--dry-ink`. `--accent`/`--fg`/`--muted`/`--border`/`--err`
+  remain as aliases onto the new names for existing markup. Every text-on-ground
+  pairing meets at least 4.5:1 in both themes.
+- **Two type roles.** The existing UI font stack for prose, labels and headings;
+  a system monospace stack (`ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo,
+  Consolas, monospace`) for machine values — ids, sequence numbers, paths,
+  durations, costs, token/event counts, phase names. Every value that can change
+  carries `font-variant-numeric: tabular-nums`.
+- **Scales.** Font sizes: `0.75 · 0.8125 · 0.875 · 1 · 1.25 · 1.5` rem — no other
+  value. Spacings (padding/margin): `0.25 · 0.5 · 0.75 · 1 · 1.5 · 2` rem — no
+  other value. Radii: only `3px` and `6px`.
+- **Signal-colour discipline.** `--signal` means exactly one thing — *a human must
+  act* (`.phase-awaiting`, `.run-status.status-awaiting_approval`, the awaiting
+  timeline segment) — and is used for nothing else. *Working* is `--busy`
+  (`.phase-active`, `.node-running`), *technically waiting* is `--wait`
+  (`.node-waiting`, the Timeline waiting bars, the axis waiting segment). Done is
+  `--ok`, failed/escalated is `--fail`, pending is `--ink-soft`.
+- **Dark mode** is purely a token swap through `prefers-color-scheme` — no toggle,
+  no `localStorage`, no query parameter, no client state. A
+  `@media (prefers-reduced-motion: reduce)` rule switches the transitions off;
+  the only motion anywhere is colour/background transitions of at most 150 ms.
+
+### 7.7 Phase timeline (to-scale phase band)
+
+The phase band in the run-detail header is a to-scale timeline computed
+server-side at page build from each phase's `start`/`end` (which
+`GET /api/runs/{repo}/{run_id}` now also returns, additively; ISO-8601 or `null`).
+It replaces the chip row at the same place — there is no second band, and the
+Timeline **tab** is untouched.
+
+Compute rules (binding):
+
+- `T_start` = smallest parsable `start`; `T_end` = largest `end`, or the
+  page-build instant for an `active` phase with no `end`; `T = T_end − T_start`.
+- If `T` is not determinable or `≤ 0`, or fewer than one phase has a parsable
+  `start`, the today's chip row is rendered as the fallback (never an empty or
+  broken rail).
+- Per-phase segment: offset `(start − T_start) / T`, width `(end − start) / T`;
+  the label length does not affect the geometry. An `active` phase with no `end`
+  reaches the right edge and is marked open (the `.tl-bar.bar-running`
+  convention). A minimum width of **2 px** keeps a very short phase visible — a
+  geometry-only floor that never enters the seconds below.
+- Waiting segments: phases sorted by `start`; a positive gap between one phase's
+  `end` and the next phase's `start` becomes a *waiting* segment. No reason is
+  ascribed; no waiting is invented before the first start or after the last end.
+- A phase with no parsable `start` (never ran) gets no segment but stays visible
+  in the legend, dampened; its name and duration stay readable.
+- Three numbers beneath the rail: **work** = sum of the phase durations (an open
+  active phase counts the time elapsed to the page-build instant), **waiting** =
+  sum of the gaps, **total** = `T`. Work + waiting = total up to rounding. The
+  labels are localised (`Work`/`Arbeit`, `Waiting`/`Warten`, `Total`/`Gesamt`).
+
+`duration`, `name` and `status` on each phase entry stay exactly as before; an
+open phase's API `end` stays `null` (the page-build instant is a display rule of
+the timeline only, never an API phase end).
+
 ## 8. Security and data protection
 
 Consequence of the decision "raw capture, no redaction":

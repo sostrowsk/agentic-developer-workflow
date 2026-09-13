@@ -755,6 +755,77 @@ Label-Auswahl: `?lang=` → Cookie → `Accept-Language` → `en`. Übersetzt wi
 das UI-Gerüst; Inhalte (Prompts, Ausgaben, Findings) werden nie angefasst. Der
 Sprachumschalter ist ein Link im Kopf, ohne Verlust des Seitenzustands.
 
+### 7.6 Gestaltungssystem (Tokens, Schrift, Farbe, Dark Mode)
+
+Das Stylesheet steht auf einem benannten Token-/Skalensystem, nicht auf
+verstreuten Literalen.
+
+- **Farbtokens.** Jede Farbe stammt aus einer Custom Property, die in genau zwei
+  Blöcken definiert ist: `:root` (hell) und `@media (prefers-color-scheme: dark)`.
+  Außerhalb steht kein Hex-Literal. Die zwölf normativen Tokens sind `--paper`,
+  `--surface`, `--ink`, `--ink-soft`, `--rule`, `--code-bg`, `--signal`,
+  `--signal-ink`, `--ok`, `--fail`, `--busy`, `--wait`; die Dry-Run-Kennzeichnung
+  behält ihr eigenes `--dry`/`--dry-ink`. `--accent`/`--fg`/`--muted`/`--border`/
+  `--err` bleiben als Aliase auf die neuen Namen für bestehendes Markup. Jede
+  Text-auf-Grund-Paarung erreicht in beiden Themes mindestens 4,5:1.
+- **Zwei Schriftrollen.** Der bestehende UI-Schrift-Stack für Fließtext,
+  Beschriftungen und Überschriften; ein System-Monospace-Stack (`ui-monospace,
+  SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace`) für Maschinenwerte
+  — IDs, Sequenznummern, Pfade, Dauern, Kosten, Token- und Ereigniszahlen,
+  Phasennamen. Jeder änderbare Wert trägt `font-variant-numeric: tabular-nums`.
+- **Skalen.** Schriftgrößen: `0,75 · 0,8125 · 0,875 · 1 · 1,25 · 1,5` rem — kein
+  anderer Wert. Abstände (padding/margin): `0,25 · 0,5 · 0,75 · 1 · 1,5 · 2` rem —
+  kein anderer Wert. Radien: nur `3px` und `6px`.
+- **Signalfarben-Disziplin.** `--signal` bedeutet genau eine Sache — *ein Mensch
+  muss handeln* (`.phase-awaiting`, `.run-status.status-awaiting_approval`, das
+  Awaiting-Segment der Achse) — und wird für nichts anderes verwendet.
+  *Arbeitet gerade* ist `--busy` (`.phase-active`, `.node-running`),
+  *technisch wartend* ist `--wait` (`.node-waiting`, die Warte-Balken der Timeline,
+  das Wartesegment der Achse). Fertig ist `--ok`, fehlgeschlagen/eskaliert ist
+  `--fail`, ausstehend ist `--ink-soft`.
+- **Dark Mode** ist reiner Token-Tausch über `prefers-color-scheme` — kein
+  Umschalter, kein `localStorage`, kein Query-Parameter, kein Client-Zustand. Eine
+  `@media (prefers-reduced-motion: reduce)`-Regel schaltet die Übergänge ab; die
+  einzige Bewegung überhaupt sind Farb-/Hintergrundübergänge von höchstens 150 ms.
+
+### 7.7 Zeitachse des Laufs (maßstäbliches Phasenband)
+
+Das Phasenband im Kopf des Run-Detail ist eine maßstäbliche Zeitachse, die
+serverseitig beim Seitenaufbau aus `start`/`end` jeder Phase berechnet wird (die
+`GET /api/runs/{repo}/{run_id}` jetzt zusätzlich liefert, additiv; ISO-8601 oder
+`null`). Sie ersetzt die Chip-Reihe an derselben Stelle — es gibt kein zweites
+Band, und die Timeline-**Registerkarte** bleibt unangetastet.
+
+Rechenregeln (bindend):
+
+- `T_start` = kleinstes parsebares `start`; `T_end` = größtes `end`, oder der
+  Seitenaufbau-Zeitpunkt bei einer `active`-Phase ohne `end`; `T = T_end −
+  T_start`.
+- Ist `T` nicht bestimmbar oder `≤ 0`, oder hat weniger als eine Phase einen
+  parsebaren `start`, wird die heutige Chip-Reihe als Rückfallebene gerendert (nie
+  eine leere oder kaputte Schiene).
+- Segment je Phase: Versatz `(start − T_start) / T`, Breite `(end − start) / T`;
+  die Beschriftungslänge beeinflusst die Geometrie nicht. Eine `active`-Phase ohne
+  `end` reicht bis zum rechten Rand und wird als offen markiert (Konvention
+  `.tl-bar.bar-running`). Eine Mindestbreite von **2 px** hält eine sehr kurze
+  Phase sichtbar — ein reiner Geometrie-Boden, der nie in die Zahlen darunter
+  eingeht.
+- Wartesegmente: Phasen nach `start` sortiert; eine positive Lücke zwischen dem
+  `end` der einen und dem `start` der nächsten Phase wird ein *Warten*-Segment.
+  Kein Grund wird behauptet; vor dem ersten Start und nach dem letzten Ende wird
+  keine Wartezeit erfunden.
+- Eine Phase ohne parsebaren `start` (nie gelaufen) bekommt kein Segment, bleibt
+  aber in der Legende sichtbar, gedämpft; Name und Dauer bleiben lesbar.
+- Drei Zahlen unter der Schiene: **Arbeit** = Summe der Phasendauern (eine offene
+  aktive Phase zählt die bis zum Seitenaufbau verstrichene Zeit), **Warten** =
+  Summe der Lücken, **Gesamt** = `T`. Arbeit + Warten = Gesamt bis auf Rundung.
+  Die Labels sind lokalisiert (`Arbeit`/`Work`, `Warten`/`Waiting`,
+  `Gesamt`/`Total`).
+
+`duration`, `name` und `status` je Phaseneintrag bleiben exakt wie zuvor; das
+API-`end` einer offenen Phase bleibt `null` (der Seitenaufbau-Zeitpunkt ist nur
+eine Darstellungsregel der Zeitachse, nie ein API-Phasenende).
+
 ## 8. Sicherheit und Datenschutz
 
 Konsequenz der Entscheidung „roher Mitschnitt, keine Redaction":

@@ -13,6 +13,41 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Geändert
+- **GUI-Gestaltungsfundament: ein benanntes Token-System für Farbe, Typografie
+  und Abstand.** `adw/gui/static/app.css` bezieht jede Farbe jetzt aus Custom
+  Properties, die in genau zwei Blöcken definiert sind — `:root` (hell) und
+  `@media (prefers-color-scheme: dark)`; außerhalb steht kein Hex-Literal.
+  Schriftgrößen stammen aus einer sechsstufigen Skala, Abstände aus einer
+  sechsstufigen Skala, Radien sind nur 3px/6px. Maschinenwerte (IDs,
+  Sequenznummern, Pfade, Dauern, Kosten, Token- und Ereigniszahlen, Phasennamen)
+  laufen in einem System-Monospace-Stack; Fließtext und Beschriftungen behalten
+  die UI-Schrift.
+- **Signalfarben-Disziplin.** Die frühere Doppelrolle eines Blaus ist aufgelöst:
+  „ein Mensch muss handeln" (`--signal`), „arbeitet gerade" (`--busy`) und
+  „technisch wartend" (`--wait`) sind drei verschiedene Töne, und `--signal` wird
+  für nichts anderes verwendet.
+- **Dark Mode über `prefers-color-scheme`** (kein Umschalter, kein
+  Client-Zustand), dazu eine `prefers-reduced-motion: reduce`-Regel, die die
+  (≤150 ms, nur Farbe) Übergänge abschaltet.
+- **Ein Kostenformat überall.** Der `cost_usd`-Eintrag des Run-Kontext-Panels
+  nutzt jetzt den gemeinsamen `_fmt_cost`-Formatierer (`$47.16`) — serverseitig
+  wie in der Client-Projektion, gleich zu Run-Liste und Timeline-Kopf; die
+  sechsstellige Form entfällt.
+
+### Hinzugefügt
+- **Das Phasenband wird zur maßstäblichen Zeitachse des Laufs.** Im Kopf des
+  Run-Detail sitzt jede Phase an ihrer wirklichen zeitlichen Position mit ihrer
+  wirklichen Dauer als Breite; die Lücken an den Freigabe-Gates erscheinen als
+  eigene „Warten"-Segmente; darunter stehen drei Zahlen — Arbeit, Warten, Gesamt.
+  Eine Phase, die nie lief, nimmt keine Fläche auf der Schiene ein, bleibt aber in
+  der Legende sichtbar. Hat keine Phase einen parsebaren Zeitstempel (oder ist die
+  Spanne nicht bestimmbar), fällt der Kopf auf die heutige Chip-Reihe zurück.
+  `GET /api/runs/{repo}/{run_id}` liefert je `phases`-Eintrag zusätzlich `start`
+  und `end` (additiv; ISO-8601 oder `null`).
+
 ## [0.21.4] — 2026-09-13
 
 ### Behoben

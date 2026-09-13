@@ -1,9 +1,73 @@
-/* Hand-written CSS, system fonts only — no external asset, no CDN (GUI-SPEC E5). */
+/* Hand-written CSS, system fonts only — no external asset, no CDN, no webfont
+   (GUI-SPEC E1). All colour lives in two token blocks: :root (light) and
+   @media (prefers-color-scheme: dark). Outside them there is no hex literal — every
+   colour is a token reference. Sizes and spacings come from a six-step scale; radii
+   are only 3px/6px. The theme switch is purely a token swap (E6). */
 :root {
-  --fg: #1c1c1c;
-  --muted: #777;
-  --border: #ddd;
-  --accent: #2a6;
+  /* The twelve normative colour tokens (GUI-SPEC "Normative Definitionen"). */
+  --paper: #f6f7f9;
+  --surface: #ffffff;
+  --ink: #191d24;
+  --ink-soft: #5a626e;
+  --rule: #dde1e7;
+  --code-bg: #eef1f5;
+  --signal: #a8530a;      /* ONLY "a human must act" (E5) */
+  --signal-ink: #ffffff;  /* text on --signal, and on the coloured bars/segments */
+  --ok: #256b45;
+  --fail: #a5241d;
+  --busy: #1d5f8a;
+  --wait: #5b6472;
+  /* The dry-run marking keeps its own brown, distinct from --signal. */
+  --dry: #8a4b00;
+  --dry-ink: #ffffff;
+
+  /* Aliases kept so existing markup that references the old names still resolves;
+     new rules use the new names. */
+  --fg: var(--ink);
+  --muted: var(--ink-soft);
+  --border: var(--rule);
+  --accent: var(--ok);
+  --err: var(--fail);
+
+  /* Two type roles: the UI font (unchanged stack) for prose/labels/headings, and a
+     system monospace stack for machine values (ids, seqs, paths, durations, costs,
+     token/event counts, phase names). */
+  --ui-font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace;
+
+  /* Layout custom properties set per-node via inline style (tree indentation, the
+     rendered-Markdown indent). Their defaults live here so every var() reference
+     resolves against a declared property, not a literal fallback. */
+  --depth: 0;
+  --indent: 0;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #12151a;
+    --surface: #191d24;
+    --ink: #e6e9ee;
+    --ink-soft: #949cab;
+    --rule: #2a3039;
+    --code-bg: #1e232b;
+    --signal: #e8a33d;
+    --signal-ink: #1a1207;
+    --ok: #4ea87a;
+    --fail: #e0716a;
+    --busy: #59a7d8;
+    --wait: #8b93a1;
+    --dry: #c67a2a;
+    --dry-ink: #1a1207;
+  }
+}
+
+/* E9: transitions are limited to colour/background and switched off entirely when
+   the reader prefers reduced motion. No other motion exists. */
+a, .tab-btn, .fold-toggle, .load-more {
+  transition: color 120ms ease, background-color 120ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
 }
 
 /* Aufgabe F: the page itself never scrolls horizontally — wide children scroll
@@ -11,51 +75,99 @@
 html, body { max-width: 100%; overflow-x: hidden; }
 
 body {
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  color: var(--fg);
+  font-family: var(--ui-font);
+  color: var(--ink);
+  background: var(--paper);
   margin: 1.5rem;
   line-height: 1.4;
 }
 
-h1 { font-size: 1.4rem; }
+h1 { font-size: 1.5rem; }
 
 table.run-list { border-collapse: collapse; width: 100%; max-width: 100%; table-layout: fixed; }
 table.run-list th, table.run-list td {
-  border: 1px solid var(--border);
-  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--rule);
+  padding: 0.25rem 0.5rem;
   text-align: left;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
   overflow-wrap: anywhere;  /* wide cell content wraps, never widens the table */
+}
+/* Machine values in the run list read in the monospace role. */
+table.run-list .ts, table.run-list .dur, table.run-list .cost,
+table.run-list .events, table.run-list .run-id {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
 }
 /* Aufgabe E4: a timestamp stays on one line and does not break across two rows. */
 table.run-list .ts { white-space: nowrap; }
-table.run-list .no-trace-hint { color: var(--muted); font-style: italic; }
-tr.no-trace td { color: var(--muted); }
-tr.missing-repo { color: var(--muted); opacity: 0.55; font-style: italic; }
+table.run-list .no-trace-hint { color: var(--ink-soft); font-style: italic; }
+tr.no-trace td { color: var(--ink-soft); }
+tr.missing-repo { color: var(--ink-soft); opacity: 0.55; font-style: italic; }
 
+/* The chip-row fallback of the phase band (rendered only when the to-scale rail
+   cannot be drawn). State colours follow the cleanup table; every pinned class name
+   is preserved (E2). */
 .phase-bar { display: flex; gap: 0.25rem; flex-wrap: wrap; margin: 0.5rem 0; }
 .phase {
-  border: 1px solid var(--border);
+  border: 1px solid var(--rule);
   border-radius: 3px;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.85rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.875rem;
+  font-family: var(--mono);
 }
-.phase-completed { background: #e6f5ec; }
-.phase-active { background: #fff4d6; font-weight: 600; }
-.phase-pending { color: var(--muted); }
-.phase-failed { background: #fde5e5; }
-/* A phase pausing at a human-approval gate: distinct from `active` (working) —
-   dashed accent border, so a glance separates "working" from "waiting on a human". */
-.phase-awaiting { background: #e9ecff; font-weight: 600; border-style: dashed; border-color: #3651d6; }
+.phase-completed { color: var(--ok); border-color: var(--ok); }
+.phase-active { color: var(--busy); border-color: var(--busy); font-weight: 600; }
+.phase-pending { color: var(--ink-soft); }
+.phase-failed { color: var(--fail); border-color: var(--fail); }
+/* A phase pausing at a human-approval gate — the ONE "a human must act" hue,
+   distinct from "working" (--busy) and "technically waiting" (--wait). */
+.phase-awaiting {
+  color: var(--signal); border-color: var(--signal);
+  border-style: dashed; font-weight: 600;
+}
+
+/* The to-scale phase timeline (A5). One rail; each phase segment sits at its real
+   position with its real duration as width; the gaps show as waiting segments; the
+   three numbers sit beneath. Only colour/geometry — no motion. */
+.phase-timeline { margin: 0.5rem 0; }
+.tl-rail {
+  position: relative; height: 1.5rem;
+  background: var(--code-bg); border: 1px solid var(--rule);
+  border-radius: 3px; overflow: hidden;
+}
+.tl-seg {
+  position: absolute; top: 0; height: 100%;
+  min-width: 2px;  /* a very short phase stays visible; a geometry-only floor */
+  box-sizing: border-box;
+}
+.tl-seg-completed { background: var(--ok); }
+.tl-seg-active { background: var(--busy); }
+.tl-seg-failed { background: var(--fail); }
+.tl-seg-pending { background: var(--ink-soft); }
+/* The awaiting segment is the ONE "a human must act" hue (E5). */
+.tl-seg-awaiting { background: var(--signal); }
+/* A waiting segment (gate runtime / CI poll) — "technically waiting" (--wait). */
+.tl-seg-wait { background: var(--wait); }
+/* An open, still-active phase reaches the edge, marked like .tl-bar.bar-running. */
+.tl-seg-open { border-right: 2px dashed var(--ink); }
+.tl-legend {
+  list-style: none; display: flex; flex-wrap: wrap; gap: 0.5rem;
+  padding-left: 0; margin: 0.5rem 0 0;
+  font-family: var(--mono); font-size: 0.8125rem;
+}
+.tl-legend-dur { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+/* A phase that never ran keeps no rail area but stays visible, dampened. */
+.tl-dead { color: var(--ink-soft); opacity: 0.6; }
+.tl-totals { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.5rem; font-size: 0.875rem; }
+.tl-total-value { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
 /* The derived run status shown in the run list and the detail header. Only the
    new `awaiting_approval` gets its own emphasis; the other values render plainly.
-   It is the ONE state that needs a person to act, so it is emphasised the
-   strongest of all states (R4). */
-.run-status { border-radius: 3px; padding: 0 0.35rem; }
+   It is the ONE state that needs a person to act, so it carries --signal (R4/E5). */
+.run-status { border-radius: 3px; padding: 0 0.5rem; }
 .run-status.status-awaiting_approval {
-  background: #3651d6;
-  color: #fff;
+  background: var(--signal);
+  color: var(--signal-ink);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -65,18 +177,18 @@ tr.missing-repo { color: var(--muted); opacity: 0.55; font-style: italic; }
    run's whole detail header is pinned to the top of the viewport (position:
    sticky) so its banner stays visible while the trace tree scrolls — a static
    top-of-document note would scroll out of view. Additive: a normal run's chrome
-   is unchanged. */
+   is unchanged. The dry brown is its own token, distinct from --signal. */
 .dry-run-tag, .dry-run-banner {
-  background: #8a4b00;
-  color: #fff;
+  background: var(--dry);
+  color: var(--dry-ink);
   border-radius: 3px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.02em;
   font-size: 0.75rem;
-  padding: 0 0.35rem;
+  padding: 0 0.5rem;
 }
-.dry-run-banner { display: block; padding: 0.25rem 0.6rem; text-align: center; }
+.dry-run-banner { display: block; padding: 0.25rem 0.75rem; text-align: center; }
 .run-header[data-dry-run] { position: sticky; top: 0; z-index: 5; }
 
 main.detail { display: block; }
@@ -93,74 +205,74 @@ main.detail { display: block; }
 /* Plan skeleton (§7.2): the read-only "what's still planned" list spans the full
    trace-layout width above the trace/panes/context columns, so "planned" (skeleton)
    and "done" (trace) sit in one view. Pure display — no interactive affordance. */
-.plan-skeleton { grid-column: 1 / -1; border: 1px solid var(--border, #d0d7de); border-radius: 6px; padding: 0.5rem 0.75rem; }
-.plan-skeleton-title { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.plan-skeleton { grid-column: 1 / -1; border: 1px solid var(--rule); border-radius: 6px; padding: 0.5rem 0.75rem; }
+.plan-skeleton-title { margin: 0 0 0.5rem; font-size: 0.875rem; }
 .plan-skeleton-lane + .plan-skeleton-lane { margin-top: 0.5rem; }
 .plan-skeleton-head { margin: 0 0 0.25rem; display: flex; gap: 0.5rem; align-items: baseline; }
 .plan-skeleton-name { font-weight: 600; }
-.plan-skeleton-status { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.8; }
-.plan-skeleton-status.status-done { color: var(--ok, #1a7f37); }
-.plan-skeleton-tasks { margin: 0; padding-left: 1.25rem; }
-.plan-skeleton-task { margin: 0.1rem 0; }
+.plan-skeleton-status { font-size: 0.8125rem; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.8; }
+.plan-skeleton-status.status-done { color: var(--ok); }
+.plan-skeleton-tasks { margin: 0; padding-left: 1rem; }
+.plan-skeleton-task { margin: 0.25rem 0; }
 
 /* The read-only change-scope block (§7.2): per-lane changed files with +/- counts
    beside the declared contract scope. Facts side by side, no judgement. */
-.change-scope { grid-column: 1 / -1; border: 1px solid var(--border, #d0d7de); border-radius: 6px; padding: 0.5rem 0.75rem; }
-.change-scope-title { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.change-scope { grid-column: 1 / -1; border: 1px solid var(--rule); border-radius: 6px; padding: 0.5rem 0.75rem; }
+.change-scope-title { margin: 0 0 0.5rem; font-size: 0.875rem; }
 .change-scope-lane + .change-scope-lane { margin-top: 0.5rem; }
 .change-scope-lane-name { margin: 0 0 0.25rem; font-weight: 600; }
-.change-scope-files { border-collapse: collapse; width: 100%; font-size: 0.85rem; }
-.change-scope-files td, .change-scope-files th { padding: 0.05rem 0.5rem 0.05rem 0; text-align: left; }
-.change-scope-files .cs-add, .change-scope-files .cs-del { text-align: right; font-variant-numeric: tabular-nums; width: 3.5rem; }
-.change-scope-files .cs-add { color: var(--ok, #1a7f37); }
-.change-scope-files .cs-del { color: var(--err, #cf222e); }
+.change-scope-files { border-collapse: collapse; width: 100%; font-size: 0.875rem; }
+.change-scope-files td, .change-scope-files th { padding: 0.25rem 0.5rem; text-align: left; }
+.change-scope-files .cs-add, .change-scope-files .cs-del { text-align: right; font-variant-numeric: tabular-nums; width: 3.5rem; font-family: var(--mono); }
+.change-scope-files .cs-add { color: var(--ok); }
+.change-scope-files .cs-del { color: var(--fail); }
 .change-scope-files .cs-bin { opacity: 0.7; font-style: italic; }
 .change-scope-no-diff, .change-scope-no-files, .change-scope-no-run-diff, .change-scope-no-declared { margin: 0.25rem 0; opacity: 0.8; }
-.change-scope-declared { margin-top: 0.6rem; }
-.change-scope-declared-title { margin: 0 0 0.25rem; font-size: 0.9rem; }
-.change-scope-declared-text { margin: 0; padding: 0.4rem 0.6rem; background: var(--code-bg, #f6f8fa); border-radius: 4px; overflow-x: auto; white-space: pre; }
+.change-scope-declared { margin-top: 0.75rem; }
+.change-scope-declared-title { margin: 0 0 0.25rem; font-size: 0.875rem; }
+.change-scope-declared-text { margin: 0; padding: 0.5rem 0.75rem; background: var(--code-bg); border-radius: 3px; overflow-x: auto; white-space: pre; font-family: var(--mono); }
 
 /* The read-only run-context panel: a plain field list, no chart (E5). Null fields
    render empty, never a fabricated 0. */
-.run-context { border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; align-self: start; }
-.run-context h3 { margin: 0 0 0.4rem; font-size: 0.95rem; }
+.run-context { border: 1px solid var(--rule); border-radius: 6px; padding: 0.75rem; align-self: start; }
+.run-context h3 { margin: 0 0 0.5rem; font-size: 0.875rem; }
 .run-context .ctx-list { margin: 0; }
-.run-context .ctx-row { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.15rem 0; }
-.run-context dt { color: var(--muted); font-size: 0.85rem; }
-.run-context dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; }
+.run-context .ctx-row { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.25rem 0; }
+.run-context dt { color: var(--ink-soft); font-size: 0.875rem; }
+.run-context dd { margin: 0; font-variant-numeric: tabular-nums; text-align: right; font-family: var(--mono); }
 .tabs, .tabs .tab, .pane, .panes { min-width: 0; }
 /* Aufgabe A: the windowed-tree overflow pointer to the paging affordance. */
-.node-more { color: var(--muted); font-style: italic; list-style: none; }
+.node-more { color: var(--ink-soft); font-style: italic; list-style: none; }
 .trace ul { list-style: none; padding-left: 1rem; }
 /* Aufgabe A: the trace tree is a bounded, MOVING window rendered as one flat list;
    depth is shown by indentation (--depth) so the hierarchy still reads, and a
    ?offset paging control (.window-nav) reaches the previous / next bounded slice. */
 .trace-list { list-style: none; padding-left: 0; margin: 0; }
-.trace-list .node { padding-left: calc(var(--depth, 0) * 0.9rem); }
-.window-nav { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; display: flex; gap: 0.6rem; }
-.node .dur { color: var(--muted); margin-left: 0.4rem; font-size: 0.8rem; }
-.node .round { color: var(--accent); margin-left: 0.3rem; }
+.trace-list .node { padding-left: calc(var(--depth, 0) * 0.75rem); }
+.window-nav { color: var(--ink-soft); font-size: 0.875rem; margin-top: 0.5rem; display: flex; gap: 0.75rem; }
+.node .dur { color: var(--ink-soft); margin-left: 0.5rem; font-size: 0.8125rem; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.node .round { color: var(--accent); margin-left: 0.25rem; font-family: var(--mono); }
 
 /* Trace-Baum verdichten: folded result outcome/duration ride at the right of the
    call row (A1); synthetic group/repeat wrappers are collapsible, non-selectable
    summaries (A2/A3); paths render repo-relative with the full path in a title (A4);
    the per-page line balance sits under the tree beside the paging nav (A6). */
-.node .tool-outcome { color: var(--muted); margin-left: 0.5rem; font-size: 0.8rem; }
-.node .tool-outcome.outcome-error { color: #c33; }
-.node .tool-outcome.outcome-ok { color: var(--accent); }
+.node .tool-outcome { color: var(--ink-soft); margin-left: 0.5rem; font-size: 0.8125rem; }
+.node .tool-outcome.outcome-error { color: var(--fail); }
+.node .tool-outcome.outcome-ok { color: var(--ok); }
 .trace-wrap { list-style: none; }
-.trace-wrap { padding-left: calc(var(--depth, 0) * 0.9rem); }
-.trace-summary { cursor: pointer; color: var(--muted); }
-.trace-summary .repeat-count, .trace-summary .group-count { color: var(--fg); }
-.trace-summary .group-ops { font-size: 0.85rem; }
+.trace-wrap { padding-left: calc(var(--depth, 0) * 0.75rem); }
+.trace-summary { cursor: pointer; color: var(--ink-soft); }
+.trace-summary .repeat-count, .trace-summary .group-count { color: var(--ink); }
+.trace-summary .group-ops { font-size: 0.8125rem; }
 .trace-sublist { list-style: none; padding-left: 0; margin: 0; }
-.fold-toggle { border: 0; background: none; cursor: pointer; color: var(--muted); padding: 0 0.2rem 0 0; font: inherit; }
+.fold-toggle { border: 0; background: none; cursor: pointer; color: var(--ink-soft); padding: 0 0.25rem 0 0; font: inherit; }
 .fold-toggle::before { content: "\25B8"; display: inline-block; }
 .phase-open > .fold-toggle::before { content: "\25BE"; }
 /* A5 default-fold hides every direct row of a collapsed phase — original nodes AND
    the synthetic group/repeat wrapper rows (which carry no `node` class). */
 .trace-list li.fold-hidden { display: none; }
-.trace-balance { color: var(--muted); font-size: 0.85rem; margin-top: 0.4rem; }
+.trace-balance { color: var(--ink-soft); font-size: 0.8125rem; margin-top: 0.5rem; }
 
 /* Expand/collapse: native <details>/<summary>, no JS needed to toggle. */
 .trace summary { cursor: pointer; }
@@ -174,111 +286,112 @@ main.detail { display: block; }
 .node.selected > details > summary > .label { font-weight: 600; text-decoration: underline; }
 
 /* Per-status icon glyph coloured by the node's serialized status. */
-.node .icon { display: inline-block; width: 1.2em; text-align: center; color: var(--muted); }
-.node-running > .icon, .node-running > details > summary > .icon { color: #c90; }
+.node .icon { display: inline-block; width: 1.2em; text-align: center; color: var(--ink-soft); }
+.node-running > .icon, .node-running > details > summary > .icon { color: var(--busy); }
 /* A pure-waiting open span (CI poll / gate runtime): distinct hue from running
    work, so the tree separates "working" from "technically waiting" (R1). */
-.node-waiting > .icon, .node-waiting > details > summary > .icon { color: #3651d6; }
-.node-failed > .icon, .node-failed > details > summary > .icon { color: #c33; }
+.node-waiting > .icon, .node-waiting > details > summary > .icon { color: var(--wait); }
+.node-failed > .icon, .node-failed > details > summary > .icon { color: var(--fail); }
 .node-done > .icon, .node-done > details > summary > .icon,
-.node-passed > .icon, .node-passed > details > summary > .icon { color: var(--accent); }
+.node-passed > .icon, .node-passed > details > summary > .icon { color: var(--ok); }
 
 /* Node-dependent detail pane: only the selected node's pane is shown. */
-.panes .pane { display: none; border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; margin-bottom: 0.6rem; }
+.panes .pane { display: none; }
 .panes .pane.selected { display: block; }
 
-.pane { border: 1px solid var(--border); border-radius: 4px; padding: 0.6rem; margin-bottom: 0.6rem; }
-.pane h3 { margin: 0 0 0.4rem; font-size: 1rem; }
-.pane .type { color: var(--muted); font-weight: normal; }
+.pane { border: 1px solid var(--rule); border-radius: 3px; padding: 0.75rem; margin-bottom: 0.75rem; }
+.pane h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+.pane .type { color: var(--ink-soft); font-weight: normal; }
 /* Aufgabe D: switchable tabs — exactly one panel visible at a time (JS toggles
    the `active` class; with JS the default-active panel still shows). */
 .tabs { display: block; }
-.tab-buttons { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+.tab-buttons { display: flex; gap: 0.25rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
 .tab-btn {
   cursor: pointer;
-  border: 1px solid var(--border);
-  background: #f0f0f0;
-  padding: 0.2rem 0.7rem;
+  border: 1px solid var(--rule);
+  background: var(--code-bg);
+  padding: 0.25rem 0.75rem;
   border-radius: 3px 3px 0 0;
   font: inherit;
 }
-.tab-btn.active { background: #fff; font-weight: 600; }
+.tab-btn.active { background: var(--surface); font-weight: 600; }
 .tabs .tab { display: none; }
 .tabs .tab.active { display: block; }
-pre { background: #f6f6f6; padding: 0.4rem; overflow-x: auto; white-space: pre-wrap; max-width: 100%; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); padding: 0.5rem; overflow-x: auto; white-space: pre-wrap; max-width: 100%; overflow-wrap: anywhere; font-family: var(--mono); }
 table.findings { border-collapse: collapse; }
-table.findings th, table.findings td { border: 1px solid var(--border); padding: 0.2rem 0.4rem; }
+table.findings th, table.findings td { border: 1px solid var(--rule); padding: 0.25rem 0.5rem; }
 
-.problems .problem { color: #a33; }
+.problems .problem { color: var(--fail); }
 
 /* Aufgabe G: the 'no trace' hint on the detail page (empty tree/panes explained). */
-.trace .no-trace-hint { color: var(--muted); font-style: italic; margin: 0 0 0.5rem; }
+.trace .no-trace-hint { color: var(--ink-soft); font-style: italic; margin: 0 0 0.5rem; }
 
-/* Aufgabe B: the node-level Diff tab (own means only — E5, no third-party asset). */
-.diff-files { list-style: none; padding-left: 0; margin: 0 0 0.5rem; font-size: 0.85rem; }
-.diff-files li { border-bottom: 1px solid var(--border); padding: 0.1rem 0; overflow-wrap: anywhere; }
-.diff-patch { font-size: 0.85rem; }
+/* Aufgabe B: the node-level Diff tab (own means only — E1, no third-party asset). */
+.diff-files { list-style: none; padding-left: 0; margin: 0 0 0.5rem; font-size: 0.875rem; }
+.diff-files li { border-bottom: 1px solid var(--rule); padding: 0.25rem 0; overflow-wrap: anywhere; }
+.diff-patch { font-size: 0.875rem; }
 
 /* Aufgabe C: the run-level Raw tab — a filterable event-log fallback. */
 .raw-controls { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
 .raw-controls .raw-search { flex: 1 1 12rem; min-width: 0; }
 .raw-problem-list { list-style: none; padding-left: 0; margin: 0 0 0.5rem; }
-.raw-problem { color: #a33; font-size: 0.85rem; }
-.raw-no-problems { color: var(--muted); font-size: 0.85rem; margin: 0 0 0.5rem; }
+.raw-problem { color: var(--fail); font-size: 0.875rem; }
+.raw-no-problems { color: var(--ink-soft); font-size: 0.875rem; margin: 0 0 0.5rem; }
 .raw-list { list-style: none; padding-left: 0; margin: 0; }
-.raw-row { border-bottom: 1px solid var(--border); padding: 0.25rem 0; }
-.raw-row .raw-seq { color: var(--muted); margin-right: 0.4rem; font-size: 0.8rem; }
-.raw-row .raw-type { font-weight: 600; font-size: 0.85rem; }
-.raw-row .raw-payload { margin: 0.2rem 0 0; font-size: 0.8rem; }
+.raw-row { border-bottom: 1px solid var(--rule); padding: 0.25rem 0; }
+.raw-row .raw-seq { color: var(--ink-soft); margin-right: 0.5rem; font-size: 0.8125rem; font-family: var(--mono); }
+.raw-row .raw-type { font-weight: 600; font-size: 0.875rem; font-family: var(--mono); }
+.raw-row .raw-payload { margin: 0.25rem 0 0; font-size: 0.8125rem; }
 /* Aufgabe A/C: "Load more" is a server-rendered link that raises the ?limit
    window — no client-side rendering divergence (GUI-SPEC §7.3). */
 .load-more {
   display: inline-block; margin-top: 0.5rem;
-  border: 1px solid var(--border); background: #f0f0f0;
-  padding: 0.2rem 0.7rem; border-radius: 3px;
-  font-size: 0.85rem; text-decoration: none; color: var(--fg);
+  border: 1px solid var(--rule); background: var(--code-bg);
+  padding: 0.25rem 0.75rem; border-radius: 3px;
+  font-size: 0.875rem; text-decoration: none; color: var(--ink);
 }
-.raw-empty { color: var(--muted); font-style: italic; }
+.raw-empty { color: var(--ink-soft); font-style: italic; }
 
 /* Aufgabe A: the run-level Timeline tab — horizontal swimlanes drawn with own
-   means only (CSS bars, no charting library — E5). Active vs. waiting (CI polling,
-   gate runtime) differ visually; a still-running span's bar reaches the edge. */
-.timeline-header { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.6rem; font-size: 0.9rem; }
-.timeline-header .tl-cost, .timeline-header .tl-model { color: var(--muted); }
+   means only (CSS bars, no charting library — E1). Active vs. waiting (CI polling,
+   gate runtime) differ visually; a still-running span's bar reaches the edge.
+   Global token styling only — the tab itself is untouched (E7). */
+.timeline-header { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; font-size: 0.875rem; }
+.timeline-header .tl-cost, .timeline-header .tl-model { color: var(--ink-soft); }
 .timeline-lanes { display: flex; flex-direction: column; gap: 0.25rem; }
 .tl-lane { display: flex; align-items: center; gap: 0.5rem; }
-.tl-lane-label { flex: 0 0 7rem; text-align: right; font-size: 0.8rem; color: var(--muted); }
-.tl-track { position: relative; flex: 1 1 auto; height: 1.2rem; background: #f6f6f6; border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
-.tl-bar { position: absolute; top: 0; height: 100%; box-sizing: border-box; font-size: 0.7rem; line-height: 1.2rem; white-space: nowrap; overflow: hidden; cursor: pointer; border-radius: 2px; }
+.tl-lane-label { flex: 0 0 7rem; text-align: right; font-size: 0.8125rem; color: var(--ink-soft); font-family: var(--mono); }
+.tl-track { position: relative; flex: 1 1 auto; height: 1.2rem; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; }
+.tl-bar { position: absolute; top: 0; height: 100%; box-sizing: border-box; font-size: 0.75rem; line-height: 1.2rem; white-space: nowrap; overflow: hidden; cursor: pointer; border-radius: 3px; font-family: var(--mono); }
 /* Active work — a solid bar. */
-.tl-bar.bar-active { background: #6aa9e9; color: #04203f; }
-/* Waiting (CI polling, gate runtime) — a distinct hatched, muted bar so time
+.tl-bar.bar-active { background: var(--busy); color: var(--signal-ink); }
+/* Waiting (CI polling, gate runtime) — "technically waiting" (--wait), so time
    spent NOT working is visually separable from active work (A3). */
-.tl-bar.bar-waiting { color: #444; background: repeating-linear-gradient(45deg, #e6e0c8, #e6e0c8 4px, #d3caa6 4px, #d3caa6 8px); }
+.tl-bar.bar-waiting { color: var(--signal-ink); background: var(--wait); }
 /* A still-running span reaches the current edge, marked with an open border. */
-.tl-bar.bar-running { border-right: 2px dashed #04203f; }
+.tl-bar.bar-running { border-right: 2px dashed var(--ink); }
 
 /* Aufgabe B: the run-level Artifacts tab — whitelisted files + dual-author drafts
    rendered as faithful monospace text (E10, no Markdown library). */
 .artifact-list { list-style: none; padding-left: 0; margin: 0; }
-.artifact-group { border-bottom: 1px solid var(--border); padding: 0.3rem 0; }
+.artifact-group { border-bottom: 1px solid var(--rule); padding: 0.25rem 0; }
 .artifact-name { font-weight: 600; }
-.artifact-missing { color: var(--muted); font-style: italic; margin-left: 0.4rem; }
-.artifact-drafts { list-style: none; padding-left: 1.2rem; margin: 0.2rem 0 0; }
-.artifact-draft .draft-name { color: var(--muted); font-size: 0.85rem; }
-.artifact-body { margin: 0.2rem 0 0; font-size: 0.8rem; white-space: pre-wrap; overflow-wrap: anywhere; }
-.artifact-more { display: inline-block; margin-top: 0.3rem; font-size: 0.85rem; }
+.artifact-missing { color: var(--ink-soft); font-style: italic; margin-left: 0.5rem; }
+.artifact-drafts { list-style: none; padding-left: 1rem; margin: 0.25rem 0 0; }
+.artifact-draft .draft-name { color: var(--ink-soft); font-size: 0.875rem; }
+.artifact-body { margin: 0.25rem 0 0; font-size: 0.8125rem; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); }
+.artifact-more { display: inline-block; margin-top: 0.25rem; font-size: 0.875rem; }
 
 /* The payload view: field-list scaffolding as monospace lines, every rendered
    Markdown value indented under its key so it stays visually attached to it. */
-.raw-fields { margin: 0; white-space: pre-wrap; }
+.raw-fields { margin: 0; white-space: pre-wrap; font-family: var(--mono); }
 /* The page is globally overflow-x: hidden, so wide rendered content (a table
    with many columns, a long unbreakable cell) scrolls inside its own block
    instead of being clipped at the pane edge. */
-.raw-md { margin: 0 0 .4rem calc(var(--indent, 0) * 1ch); max-width: 100%; overflow-x: auto; }
-.raw-md > :first-child { margin-top: .2rem; }
+.raw-md { margin: 0 0 0.5rem calc(var(--indent, 0) * 1ch); max-width: 100%; overflow-x: auto; }
+.raw-md > :first-child { margin-top: 0.25rem; }
 .raw-md > :last-child { margin-bottom: 0; }
-.raw-md h1, .raw-md h2, .raw-md h3 { font-size: 1em; margin: .5rem 0 .2rem; }
+.raw-md h1, .raw-md h2, .raw-md h3 { font-size: 1rem; margin: 0.5rem 0 0.25rem; }
 .raw-md pre { overflow-x: auto; }
 .raw-md table { border-collapse: collapse; }
-.raw-md th, .raw-md td { border: 1px solid #ccc; padding: .1rem .3rem; }
+.raw-md th, .raw-md td { border: 1px solid var(--rule); padding: 0.25rem; }

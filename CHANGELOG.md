@@ -12,6 +12,37 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Changed
+- **GUI design foundation: a named colour/typography/spacing token system.**
+  `adw/gui/static/app.css` now takes every colour from custom properties defined
+  in exactly two blocks — `:root` (light) and `@media (prefers-color-scheme:
+  dark)`; outside them there is no hex literal. Font sizes come from a six-step
+  scale and spacings from a six-step scale, radii are only 3px/6px. Machine values
+  (ids, sequence numbers, paths, durations, costs, token/event counts, phase
+  names) render in a system monospace stack; prose and labels keep the UI font.
+- **Signal-colour discipline.** The former double role of one blue is resolved:
+  "a human must act" (`--signal`), "working" (`--busy`) and "technically waiting"
+  (`--wait`) are three distinct hues, and `--signal` is used for nothing else.
+- **Dark mode via `prefers-color-scheme`** (no toggle, no client state), plus a
+  `prefers-reduced-motion: reduce` rule that switches the (≤150 ms colour-only)
+  transitions off.
+- **One cost format everywhere.** The run-context panel's `cost_usd` now uses the
+  shared `_fmt_cost` format (`$47.16`) in both the server render and the client
+  projection, matching the run list and the Timeline header; the six-decimal form
+  is gone.
+
+### Added
+- **The phase band is a to-scale timeline of the run.** In the run-detail header,
+  each phase sits at its real temporal position with its real duration as width;
+  the gaps at the approval gates show as their own "waiting" segments; three
+  numbers — work, waiting, total — sit beneath the rail. A phase that never ran
+  keeps no rail area but stays visible in the legend. When no phase has a parsable
+  timestamp (or the span is not determinable), the header falls back to the
+  today's chip row. `GET /api/runs/{repo}/{run_id}` gains `start` and `end` on
+  each `phases` entry (additive; ISO-8601 or `null`).
+
 ## [0.21.4] — 2026-09-13
 
 ### Fixed

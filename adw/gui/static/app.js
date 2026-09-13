@@ -131,7 +131,7 @@
       return (n === "" && cap === "") ? loop.trim() : (loop + n + "/" + cap).trim();
     }
     if (field === "cost_usd" && typeof value === "number") {
-      return "" + (Math.round(value * 1e6) / 1e6);  // trim float noise, keep the value
+      return "$" + value.toFixed(2);  // the shared _fmt_cost format ($x.xx), server-identical
     }
     return "" + value;
   }

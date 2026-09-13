@@ -102,7 +102,7 @@
       <div class="ctx-row"><dt>{{ t.ctx_round }}</dt><dd class="ctx-value" data-context-field="round">{{ ctx_round_text(ctx.round) | trim }}</dd></div>
       <div class="ctx-row"><dt>{{ t.ctx_limit_hits }}</dt><dd class="ctx-value" data-context-field="limit_hits">{{ ctx.limit_hits if ctx.limit_hits is not none else "" }}</dd></div>
       <div class="ctx-row"><dt>{{ t.ctx_circuit_breakers }}</dt><dd class="ctx-value" data-context-field="circuit_breakers">{{ ctx.circuit_breakers if ctx.circuit_breakers is not none else "" }}</dd></div>
-      <div class="ctx-row"><dt>{{ t.ctx_cost }}</dt><dd class="ctx-value" data-context-field="cost_usd">{{ ctx_num(ctx.cost_usd) | trim }}</dd></div>
+      <div class="ctx-row"><dt>{{ t.ctx_cost }}</dt><dd class="ctx-value" data-context-field="cost_usd">{{ ctx.cost_usd | fmt_cost }}</dd></div>
       <div class="ctx-row"><dt>{{ t.ctx_followups }}</dt><dd class="ctx-value" data-context-field="followups">{{ ctx.followups if ctx.followups is not none else "" }}</dd></div>
     </dl>
   </aside>
@@ -354,11 +354,41 @@
     {% if detail.run.dry_run %}<div class="dry-run-banner">{{ t.dry_run }}</div>{% endif %}
     <a class="lang-switch" href="?{{ switch_qs }}">{{ t.lang_switch }}</a>
     <h1>Run {{ detail.run.run_id }}{% if detail.run.status is not none %} &mdash; <span class="run-status status-{{ detail.run.status }}">{{ t.get("status_" + detail.run.status, detail.run.status) }}</span>{% endif %}</h1>
+    {#- A5: the phase band is a to-scale timeline — each phase sits at its real
+        temporal position with its real duration as width; the gaps at the approval
+        gates show as their own waiting segments; three numbers (work/waiting/total)
+        sit beneath. When the rail cannot be drawn (no parsable timestamps, T not
+        determinable / <= 0) the today's chip row is the fallback — never a second
+        band (E7). The elements are fixed in count (phase-count), never per entry
+        (E4). -#}
+    {% if phase_timeline.scaled %}
+    <div class="phase-timeline">
+      <div class="tl-rail">
+        {% for seg in phase_timeline.segments %}
+        <span class="tl-seg tl-seg-{{ seg.status }}{% if seg.open %} tl-seg-open{% endif %}" data-phase-seg="{{ seg.name }}"{% if seg.open %} data-open{% endif %} title="{{ seg.name }}{% if seg.duration is not none %} {{ seg.duration | fmt_duration }}{% endif %}" style="left: {{ seg.offset }}%; width: {{ seg.width }}%"></span>
+        {% endfor %}
+        {% for w in phase_timeline.waits %}
+        <span class="tl-seg tl-seg-wait" data-wait-seg title="{{ t.tl_waiting }}" style="left: {{ w.offset }}%; width: {{ w.width }}%"></span>
+        {% endfor %}
+      </div>
+      <ol class="tl-legend">
+        {% for ph in phase_timeline.legend %}
+        <li class="tl-legend-item phase-{{ ph.status }}{% if ph.dead %} tl-dead{% endif %}"><span class="tl-legend-name">{{ ph.name }}</span>{% if ph.duration is not none %} <em class="tl-legend-dur">{{ ph.duration | fmt_duration }}</em>{% endif %}</li>
+        {% endfor %}
+      </ol>
+      <div class="tl-totals">
+        <span class="tl-total" data-total="work" data-seconds="{{ phase_timeline.work_seconds }}"><span class="tl-total-label">{{ t.tl_work }}</span> <span class="tl-total-value">{{ phase_timeline.work_seconds | fmt_duration }}</span></span>
+        <span class="tl-total" data-total="waiting" data-seconds="{{ phase_timeline.wait_seconds }}"><span class="tl-total-label">{{ t.tl_waiting }}</span> <span class="tl-total-value">{{ phase_timeline.wait_seconds | fmt_duration }}</span></span>
+        <span class="tl-total" data-total="total" data-seconds="{{ phase_timeline.total_seconds }}"><span class="tl-total-label">{{ t.tl_total }}</span> <span class="tl-total-value">{{ phase_timeline.total_seconds | fmt_duration }}</span></span>
+      </div>
+    </div>
+    {% else %}
     <div class="phase-bar">
       {% for ph in detail.phases %}
       <span class="phase phase-{{ ph.status }}">{{ ph.name }}{% if ph.duration is not none %} <em>{{ ph.duration | fmt_duration }}</em>{% endif %}</span>
       {% endfor %}
     </div>
+    {% endif %}
   </header>
 
   <main class="detail">

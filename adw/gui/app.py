@@ -1143,8 +1143,83 @@ def _phase_bar(events, state_phase) -> list[dict]:
             status = "completed"
         else:
             status = "pending"
-        bar.append({"name": name, "status": status, "duration": duration})
+        # `start`/`end` are ADDITIVE (A6): the ISO-8601 timestamps already derived
+        # above, taken over verbatim from the event log, or None. `duration` is NOT
+        # re-derived from them, and an open phase's end stays None — the page-build
+        # instant is a display rule of the timeline, never an API phase end.
+        start = info.get("start") if info else None
+        end = info.get("end") if info else None
+        bar.append({"name": name, "status": status, "duration": duration,
+                    "start": start, "end": end})
     return bar
+
+
+def _phase_timeline(phases, now_epoch):
+    """Presentation-only geometry for the to-scale phase band (A5), derived at page
+    build from the phases' start/end timestamps. NOT part of the JSON contract.
+
+    Returns ``{"scaled": False}`` when the rail cannot be drawn — no phase has a
+    parsable start, ``T`` is not determinable, or ``T <= 0`` — so the header falls
+    back to the chip row. Otherwise it returns the per-phase segments (offset/width
+    as percentages of ``T``), the waiting segments (positive gaps between an end and
+    the next start), the full-phase legend (a phase that never ran stays visible,
+    dampened, without a segment) and the three numbers work/waiting/total. The 2 px
+    minimum width is a CSS-only floor; it never enters these seconds."""
+    parsed = []
+    for ph in phases:
+        s = _ts_epoch(ph.get("start"))
+        if s is None:
+            continue
+        e = _ts_epoch(ph.get("end"))
+        active = ph.get("status") == "active"
+        eff_end = e if e is not None else (now_epoch if active else None)
+        parsed.append({"name": ph["name"], "status": ph["status"],
+                       "duration": ph.get("duration"), "s": s, "e": eff_end,
+                       "open": active and e is None})
+    if len(parsed) < 1:
+        return {"scaled": False}
+    t_start = min(p["s"] for p in parsed)
+    ends = [p["e"] for p in parsed if p["e"] is not None]
+    if not ends:
+        return {"scaled": False}
+    t_total = max(ends) - t_start
+    if t_total <= 0:
+        return {"scaled": False}
+
+    segments, work = [], 0.0
+    for p in parsed:
+        if p["e"] is None:  # a start with no usable end and not active → no segment
+            continue
+        work += p["e"] - p["s"]
+        segments.append({
+            "name": p["name"], "status": p["status"], "duration": p["duration"],
+            "open": p["open"],
+            "offset": round((p["s"] - t_start) / t_total * 100.0, 4),
+            "width": round((p["e"] - p["s"]) / t_total * 100.0, 4),
+        })
+
+    ordered = sorted((p for p in parsed if p["e"] is not None), key=lambda p: p["s"])
+    waits, wait_total = [], 0.0
+    for prev, nxt in zip(ordered, ordered[1:], strict=False):
+        gap = nxt["s"] - prev["e"]
+        if gap > 0:
+            wait_total += gap
+            waits.append({
+                "offset": round((prev["e"] - t_start) / t_total * 100.0, 4),
+                "width": round(gap / t_total * 100.0, 4),
+            })
+
+    legend = [{"name": ph["name"], "status": ph["status"], "duration": ph.get("duration"),
+               "dead": _ts_epoch(ph.get("start")) is None} for ph in phases]
+    return {
+        "scaled": True,
+        "segments": segments,
+        "waits": waits,
+        "legend": legend,
+        "work_seconds": int(round(work)),
+        "wait_seconds": int(round(wait_total)),
+        "total_seconds": int(round(t_total)),
+    }
 
 
 def _is_span(node) -> bool:
@@ -2732,6 +2807,7 @@ def create_app(repos=None) -> FastAPI:
         events, _problems = _read_events(run_dir, runs_root)
         html = _TEMPLATES.get_template("run_detail.html").render({
             "detail": detail, "limit": limit, "focus_seq": focus_seq,
+            "phase_timeline": _phase_timeline(detail["phases"], time.time()),
             "raw_q": raw_q or "", "raw_type": raw_type or "",
             "raw_from_seq": raw_from_seq, "raw_to_seq": raw_to_seq,
             "raw_range_active": raw_range_active,
