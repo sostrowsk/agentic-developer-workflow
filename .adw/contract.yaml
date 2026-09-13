@@ -1,29 +1,34 @@
-# Interface contract — Run-Detail bleibt 200 bei Nicht-Mapping-Payload
+# Interface contract — GUI-Redesign 1/2: Gestaltungsfundament + Zeitachse
 #
-# Single-Lane-Projekt (nur backend). Der Contract pinnt ausschließlich die extern
-# beobachtbare Fläche: Statuscode und Form von GET /api/runs/{repo}/{run_id} bei
-# Events mit Nicht-Mapping-Payload. Interne Helfer-Signaturen und Modullayouts
-# sind KEINE Contract-Flächen.
+# Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Der Contract
+# pinnt ausschließlich die extern beobachtbare Fläche dieses Briefs: die
+# ADDITIVE Erweiterung der `phases`-Einträge von GET /api/runs/{repo}/{run_id}
+# um `start` und `end`, die Regression der übrigen Antwortform und das
+# beobachtbare Template-Verhalten (Zeitachse, Kostenformat). KEINE internen
+# Helfer-Signaturen, Klassennamen, Markup-/CSS-Wortlaut oder konkreten
+# Token-Werte — die sind ausdrücklich nicht Contract-Fläche (Contract-Hinweis
+# der Spec, AC 13).
 openapi: 3.0.3
 info:
-  title: ADW GUI — Run-Detail (change_scope robustness)
-  version: 0.21.1
+  title: ADW GUI — Run-Detail (phases mit start/end)
+  version: 1.0.0
   description: >-
-    Minimaler Contract für den einzigen Workstream backend. Er pinnt nur
-    das Verhalten des bestehenden Run-Detail-Endpunkts bei Nicht-Mapping-
-    Payloads und die unveränderte change_scope-Antwort. Interne Helfer,
-    Event-Schemas und weitere API-Flächen werden nicht spezifiziert.
+    Minimaler Contract für den einzigen Workstream backend. Er fixiert die
+    additive Erweiterung jedes `phases`-Eintrags um `start` und `end` und die
+    Regression der übrigen Antwortflächen (`tree`, `raw`, `latest_context`,
+    `problems`, Statuswerte). Die Version bezeichnet diesen Contract, keine
+    Paketversion.
 
 paths:
   /api/runs/{repo}/{run_id}:
     get:
-      summary: Run-Detail bleibt bei Nicht-Mapping-Payloads erfolgreich.
+      summary: Bestehendes Run-Detail mit additiven Phasen-Zeitstempeln.
       description: >-
-        Bei einem ansonsten erfolgreichen Detailabruf verursachen
-        lane/start- und snapshot-Events mit Nicht-Mapping-Payload keinen
-        5xx; die Antwort bleibt 200. Dies gilt insbesondere für nichtleere
-        Listen, nichtleere Strings und Zahlen ungleich null.
-        Bestehende Fehlerbedingungen außerhalb dieses Falls bleiben unverändert.
+        Ein erfolgreicher Detailabruf liefert unter `phases` je Eintrag
+        zusätzlich `start` und `end`. `name`, `status` und `duration` bleiben
+        wörtlich, wie sie sind; kein Feld wird entfernt, umbenannt oder in Typ
+        oder Bedeutung geändert. Bestehende Fehlerbedingungen und
+        Fehlerantworten bleiben unverändert.
       parameters:
         - name: repo
           in: path
@@ -38,95 +43,143 @@ paths:
       responses:
         "200":
           description: >-
-            Bestehende Run-Detail-Antwort mit unveränderter Form.
-            Nicht-Mapping-Payloads beeinflussen weder gültige Lanes noch
-            gültige Snapshot-Zuordnungen oder daraus abgeleitete Diffs.
+            Bestehende Run-Detail-Antwort; ausschließlich `phases[*].start`
+            und `phases[*].end` kommen hinzu.
           content:
             application/json:
               schema:
                 type: object
-                required: [change_scope]
+                required: [phases]
+                additionalProperties: true
                 description: >-
-                  Nur change_scope wird hier strukturell beschrieben.
-                  Alle weiteren bestehenden Antwortfelder bleiben unverändert;
-                  die offene Beschreibung erlaubt keine neuen Antwortfelder.
+                  Nur `phases` wird hier strukturell beschrieben. `tree`,
+                  `raw`, `latest_context`, `problems` und alle weiteren
+                  bestehenden Felder bleiben unverändert vorhanden; das offene
+                  Schema erlaubt keine weiteren Änderungen an der bestehenden
+                  API.
                 properties:
-                  change_scope:
-                    $ref: "#/components/schemas/ChangeScope"
+                  phases:
+                    type: array
+                    minItems: 7
+                    maxItems: 7
+                    description: >-
+                      Die sieben Workflow-Phasen in unveränderter Reihenfolge:
+                      spec, plan, build, integration, codex_review,
+                      final_review, ci. Keine zusätzlichen Einträge.
+                    items:
+                      $ref: "#/components/schemas/Phase"
 
 components:
   schemas:
-    ChangeScope:
+    Phase:
       type: object
       additionalProperties: false
-      required: [lanes, declared_scope]
+      required: [name, status, duration, start, end]
+      description: >-
+        Ein Phasen-Eintrag aus _phase_bar. `name`, `status`, `duration` sind
+        unverändert; `start` und `end` sind neu und additiv.
       properties:
-        lanes:
-          type: array
+        name:
+          type: string
+          enum: [spec, plan, build, integration, codex_review, final_review, ci]
+          description: Phasenname, unverändert wörtlich wie bisher.
+        status:
+          type: string
+          enum: [pending, active, awaiting, completed, failed]
           description: >-
-            Bestehende gültige Lane-Einträge in unveränderter Reihenfolge.
-            Nicht-Mapping-Payloads erzeugen keinen Eintrag. Enthält der Lauf
-            ausschließlich solche Events, ist diese Liste leer.
-          items:
-            $ref: "#/components/schemas/ChangeScopeLane"
-        declared_scope:
-          type: string
-          nullable: true
-          description: Nach den bisherigen Regeln unverändert abgeleiteter Wert.
-
-    ChangeScopeLane:
-      type: object
-      additionalProperties: false
-      required: [lane, diff_available, files]
-      properties:
-        lane:
-          type: string
-          minLength: 1
-        diff_available:
-          type: boolean
-          description: Bestehender Wert bleibt durch fehlerhafte Events unverändert.
-        files:
-          type: array
+            Phasenstatus, unveränderte Wertemenge; Statusableitung
+            einschließlich Approval- und Eskalationsverhalten bleibt
+            unverändert.
+        duration:
+          type: number
           nullable: true
           description: >-
-            Bestehendes Diff-Ergebnis einschließlich Reihenfolge und Zählwerten.
-            Weiterhin null bei nicht verfügbarem Diff und eine leere Liste
-            bei verfügbarem Diff ohne Änderungen.
-          items:
-            $ref: "#/components/schemas/ChangeScopeFile"
-
-    ChangeScopeFile:
-      type: object
-      additionalProperties: false
-      required: [path, additions, deletions]
-      properties:
-        path:
+            Phasendauer in Sekunden oder null, unverändert abgeleitet — wird
+            NICHT aus start/end neu berechnet; für eine offene Phase wird
+            keine bis zum Seitenaufbau verstrichene Dauer eingesetzt.
+        start:
           type: string
-        additions:
-          type: integer
           nullable: true
-        deletions:
-          type: integer
+          description: >-
+            NEU (additiv). ISO-8601-Zeitstempel des Phasenstarts wie im
+            Event-Log, unverändert übernommen, oder null bei fehlendem/nicht
+            parsebarem Start. Kein synthetischer Start.
+        end:
+          type: string
           nullable: true
+          description: >-
+            NEU (additiv). ISO-8601-Zeitstempel des Phasenendes wie im
+            Event-Log, oder null. Das Ende einer offenen aktiven Phase bleibt
+            null; der Seitenaufbau-Zeitpunkt ist reine DARSTELLUNGSREGEL der
+            Zeitachse und wird nie als API-Phasenende ausgegeben.
+
+x-adw-workstreams: [backend]
 
 x-adw-invariants:
   - >-
-    Nicht-Mapping-Payloads werden für Änderungsumfang-Ableitung und
-    Snapshot-Zuordnung still ignoriert: keine Lane, kein Snapshot-Beitrag,
-    kein Eintrag, kein Platzhalter, keine Fehlermeldung, kein Zusatzfeld,
-    kein Log-Eintrag und kein Zähler.
+    Rein additiv: kein bestehendes Feld wird entfernt, umbenannt oder in Typ
+    oder Bedeutung geändert. `name`, `status`, `duration` bleiben wörtlich;
+    Zahl und Reihenfolge der Phasen bleiben unverändert.
   - >-
-    Ein snapshot-Event mit Nicht-Mapping-Payload bracketiert keinen Knoten
-    und wird keiner Lane zugeordnet. Gültige Snapshots behalten ihre
-    Zuordnung und Wirkung; gültige Paare und Diff-Ergebnisse werden
-    weder ersetzt noch entfernt.
-  - >-
-    Gültige Lane-Einträge und declared_scope behalten ihre bestehenden
-    Felder und Werte. Fehlerhafte Events verdrängen keine gesunden Events
-    aus der Ableitung.
-  - >-
-    Das Ignorieren entfernt keine Events aus dem gespeicherten Event-Log
-    und verändert nicht die bestehende Trace-Darstellung.
-  - >-
-    Keine neue Route, kein neues Antwortfeld und keine Änderung einer
-    bestehenden Antwortform. Die GUI bleibt read-only.
+    Die Struktur von `tree` ist unverändert; `raw`, `latest_context`,
+    `problems` und alle Statuswerte bleiben unverändert. Keine neue Route,
+    kein neues Tab, kein neues Antwortfeld außer start/end, keine Änderung an
+    Blätterung (`?offset`, `?tools_offset`, Fenstergröße 100), SSE-Pfad,
+    Ereignistypen, Instrumentierung oder Retention.
+
+x-adw-template-behavior:
+  surface: "GET /runs/{repo}/{run_id} (Run-Detail-Seite)"
+  placement: >-
+    Genau ein Phasenband an der bisherigen Stelle im Run-Kopf: die
+    maßstäbliche Zeitachse bei bestimmbarem positivem T, sonst die bestehende
+    Chip-Reihe als Rückfallebene. Kein zweites Band; die Registerkarte
+    "Timeline" bleibt unangetastet.
+  timeline:
+    bounds: >-
+      T_start = kleinstes parsebares start; T_end = größtes end, bei aktiver
+      Phase ohne end der Seitenaufbau-Zeitpunkt; T = T_end − T_start.
+      Fallback auf die Chip-Reihe, wenn T nicht bestimmbar oder T ≤ 0 ist
+      oder weniger als eine Phase einen parsebaren start hat.
+    phase_segments: >-
+      Versatz (start − T_start)/T, Breite (end − start)/T; Mindestbreite 2 px
+      (bewusste geometrische Ausnahme, ändert Zeitwerte und Summen nicht);
+      Beschriftungslänge beeinflusst die Geometrie nicht. Eine aktive Phase
+      ohne end reicht bis zum rechten Rand und ist als offen markiert. Eine
+      Phase ohne parsebaren start bekommt kein Segment und bleibt in der
+      Legende gedämpft sichtbar; Phasennamen und Dauern bleiben lesbar.
+    waiting_segments: >-
+      Phasen nach start sortieren; ausschließlich eine positive Lücke zwischen
+      dem end einer Phase und dem start der nächsten erzeugt ein als "Warten"
+      beschriftetes Segment. Keine Ursachenklassifikation; keine erfundene
+      Wartezeit vor dem ersten Start oder nach dem letzten Ende.
+    totals: >-
+      Drei beschriftete Zahlen unter der Schiene: Arbeit = Summe der
+      Phasendauern (offene aktive Phase bis Seitenaufbau), Warten = Summe der
+      Lücken, Gesamt = T; Arbeit + Warten = Gesamt bis auf
+      Darstellungsrundung.
+    reference_cases:
+      "16f39431":
+        build_seconds: 2607
+        ci_seconds: 124
+        minimum_build_to_ci_width_ratio: 20
+        waiting_segment: true
+        work_seconds: 6084
+        waiting_seconds: 3289
+        total_seconds: 9372
+        totals_tolerance_seconds: 2
+      "81795e53":
+        work_seconds: 3656
+        waiting_seconds: 0
+        total_seconds: 3656
+        waiting_segment: false
+    localization: >-
+      Arbeit/Warten/Gesamt und Segment-Titel über die bestehende i18n-Mechanik
+      in beiden Sprachen; identische Schlüsselmengen, korrekte Pluralformen.
+  costs: >-
+    Kosten erscheinen in Run-Liste, Timeline-Kopf und Run-Kontext-Panel in
+    genau EINEM Format (_fmt_cost-Konvention, z. B. $47.16) — auch nach
+    Knotenauswahl und bestehender Live-Aktualisierung; die Client-Projektion
+    fällt nicht auf die sechsstellige Anzeige zurück. Ein fehlender Kostenwert
+    bleibt leer (bestehende "nie als 0"-Regel). Übrige Kontext-Zahlenfelder
+    (ctx_num), numerische API-Werte und getreu wiedergegebene Payload-Inhalte
+    bleiben unverändert.
