@@ -1,263 +1,199 @@
-# Spec — GUI-Redesign 2/2: Ein Lauf hat eine Wahrheit — und die Liste erzählt sie
+# Spec — GUI-Redesign 3: Das Arbeitsfeld zuerst
+
+Setzt auf dem gemergten Stand **0.23.0** auf. Tokens, Skalen, Signalfarbe,
+Dark Mode und die Zeitachse (Brief 1) sowie die Zeitgrößen und ihr Vokabular
+(Brief 2) werden **benutzt, nicht revidiert**. Die im Issue genannten Messwerte
+(vom 2026-09-13, Lauf `16f39431`, 1440 px) sind die Vergleichsbasis und vor dem
+Bauen gegen den dann aktuellen Stand zu prüfen. Rein darstellend — kein
+Vertragswechsel.
 
 ## Goal
 
-Die Oberfläche berichtet die Kennzahlen eines Laufs (Dauer, Kosten, Token)
-korrekt über den **ganzen** Lauf statt nur über die letzte CLI-Spanne, benennt
-die verschiedenen Zeitgrößen (Arbeit, Phasenzeit, Wartezeit, Gesamt) mit einem
-einheitlichen Vokabular, ohne sie zu verwechseln, und macht die Run-Liste zur
-Antwort auf „was braucht mich, was läuft, was hat es gekostet": einzeilige
-Titel, eine statt zwei redundanter Spalten, serverseitiges Sortieren und
-Filtern. Aufbauend auf Brief 1 (Lauf `4609107b`), dessen Tokens, Skalen und
-Zeitachse hier **benutzt, nicht revidiert** werden.
+Die Run-Detail-Seite so umräumen, dass das eigentliche Instrument — der
+Trace-Baum — unmittelbar unter dem Seitenkopf beginnt und mehr Platz bekommt,
+während die zwei bisher davorstehenden Zusammenfassungen darunter rücken und
+zugeklappt aussagekräftig bleiben. Die Timeline lernt dieselbe Regel wie die
+Zeitachse: Geometrie in die Spur, Wörter an eine Stelle, deren Lesbarkeit nicht
+von der Balkendauer abhängt. Die vollständige, ungefensterte Baum-Ausgabe wird
+als bewusste Entscheidung festgeschrieben und durch einen Test fixiert.
 
 ## Scope
 
-- **A1 — Kennzahlen über den ganzen Lauf.** `_summary` (`adw/gui/app.py:1014`)
-  summiert `duration`, `cost` und die im `totals`-Payload vorhandenen
-  Token-Zahlen über **alle abgeschlossenen `run`-Spannen** des Logs, statt sie
-  aus der letzten zu nehmen (`_run_span`, `adw/gui/app.py:938`). `start` bleibt
-  die erste Spanne; Status- und Phasenableitung bleiben unverändert. Run-Liste
-  und Run-Detail-Kopf speisen beide aus `_summary` und stimmen dadurch überein.
-- **A2 — Drei benannte Zeitgrößen, ein Vokabular.** Die Oberfläche benennt
-  **Arbeit**, **Gesamt** und die **Wartezeit** als drei verschiedene Größen;
-  für jede wird überall dasselbe Wort verwendet. Die Zeitachse aus Brief 1 wird
-  auf dieses Vokabular gebracht: farbige Segmente = **Phasenzeit**, Lücken =
-  **Wartezeit**. Der i18n-Schlüssel `tl_work` (heute „Arbeit"/„Work",
-  `adw/gui/i18n.py`) beschriftet die Summe der Phasendauern und wird deshalb
-  umbenannt und neu beschriftet; die echte Arbeitszeit aus A1 kommt als
-  zusätzlicher, eigener Schlüssel und eigene Zahl daneben. `tl_waiting` und
-  `tl_total` behalten Bedeutung und Wert.
-- **A3 — Titelzeile statt Roh-Markdown.** Die Issue-Spalte zeigt je Lauf eine
-  einzeilige, abgeschnittene Titelzeile (Ableitung siehe Normative
-  Definitionen); der vollständige rohe Issue-Text bleibt über das
-  `title`-Attribut erreichbar (als Attributtext korrekt escaped, nie als
-  Markdown oder HTML interpretiert).
-- **A4 — Phase und Status werden eine Spalte.** Eine Spalte, die den Status
-  nennt und die Phase nur dann zusätzlich, wenn sie etwas hinzufügt (laufender
-  oder wartender Lauf). Bei einem abgeschlossenen Lauf steht dort genau ein
-  Wort; `done`/`done` und `escalated`/`escalated` entfallen.
-- **A5 — Sortieren und Filtern, serverseitig.** Die Run-Liste erhält sichtbare
-  Steuerung für Sortierung nach Start, Dauer, Kosten und Ereigniszahl sowie
-  Filter nach Repo und Status, serverseitig über Query-Parameter wie beim
-  Raw-Tab (`?raw_q`/`?raw_type`) — kein Client-Zustand, keine Persistenz.
-  Dauer und Kosten sortieren nach den korrigierten Laufwerten aus A1,
-  Ereigniszahl nach `event_count`. Die bestehende Statusgruppierung
-  (`_status_rank`, `adw/gui/app.py:2546–2548`: `awaiting_approval`, dann
-  `running`, dann Rest; neueste zuerst innerhalb der Gruppe) bleibt
-  unangetastet und behält Vorrang vor jeder gewählten Sortierung.
-- **A6 — i18n.** Alle neuen Beschriftungen (Zeitgrößen, Spaltenköpfe,
-  Sortier-/Filtersteuerung, leere Ergebnismenge) liegen in `adw/gui/i18n.py`
-  in beiden Sprachen vor: identische Schlüsselmengen, korrekte Pluralformen.
-  Die Sprachumschaltung erhält Sortierung und Filterung, weil beide in der URL
-  stehen und der bestehende `switch_qs`-Mechanismus die Query weiterträgt.
-- **A7 — Doku und Changelog.** `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md`
-  beschreiben synchron die drei Zeitgrößen samt Rechenregeln, die Summierung
-  über alle Spannen, die bewusste Bedeutungsänderung der API-Kennzahlen samt
-  additiver Felder, die Titelableitung und die Sortier-/Filterparameter
-  einschließlich Rückfall- und Leerzuständen. `CHANGELOG.md`/`CHANGELOG.de.md`
-  werden synchron ergänzt; der A1-Eintrag steht unter `Fixed`/`Behoben` mit
-  dem Hinweis, dass frühere Werte für Läufe mit Gates zu niedrig waren.
-
-## Normative Definitionen (bindend, nicht neu herzuleiten)
-
-### Die drei Zeitgrößen
-
-- **Arbeit** = Summe von `totals.duration` über alle `run`-Spannen mit `end`.
-  Eine noch offene Spanne trägt nichts bei (sie hat noch keine `totals`).
-  Gibt es keine abgeschlossene Spanne, ist Arbeit unbestimmt und wird nicht
-  angezeigt — nie als 0 erfunden.
-- **Phasenzeit** = Summe der Phasen-Spannen mit parsebarem `start` und `end`.
-  Das ist die Fläche der farbigen Segmente der Zeitachse, **nicht** Arbeit.
-- **Gesamt** = kleinster Phasenstart bis größtes Phasenende; bei einer noch
-  aktiven Phase ohne Ende bis zum Zeitpunkt des Seitenaufbaus (der
-  Auswertungszeitpunkt ist ein Berechnungszeitpunkt, kein nachgetragenes
-  Phasenende).
-- **Wartezeit** = Gesamt − Phasenzeit, die Summe der Lücken zwischen den
-  Phasen. Die Zerlegung ist eindeutig: die Phasen-Spannen überlappen in keinem
-  der 20 vorhandenen Läufe.
-- Kosten und Token-Zahlen werden wie Arbeit über alle abgeschlossenen Spannen
-  summiert; ohne abgeschlossene Spanne bleiben sie leer.
-
-Verbindliches Vokabular (je Größe überall dasselbe Wort):
-Arbeit/Work · Phasenzeit/Phase time · Wartezeit/Waiting · Gesamt/Total.
-
-### Titelableitung aus dem Issue-Text (A3)
-
-Angewandt auf den rohen Issue-Text, in dieser Reihenfolge:
-
-1. Unter den ersten zwölf Zeilen die erste, die mit `#` beginnt; ihr Text ohne
-   führende `#` und ohne umgebende Leerzeichen. Eine Überschrift, die nur
-   „Issue" benennt (Regex `^issue\b`, ohne Beachtung der
-   Groß-/Kleinschreibung), wird übersprungen — die nächste Überschrift
-   gewinnt. Eine Überschrift außerhalb der ersten zwölf Zeilen erhält keinen
-   Vorrang.
-2. Gibt es keine solche Überschrift: die erste nicht-leere Zeile.
-3. Aus dem Ergebnis wird ein führendes `ADW-Issue:` oder `Issue:` entfernt.
-4. Länger als **90 Zeichen** wird auf 89 gekürzt und mit `…` markiert.
-5. Ist der Text leer oder fehlt er, bleibt die Zelle leer — nie ein
-   Platzhalter.
-
-Die Titelableitung ist Textverarbeitung, kein Rendering (E7).
-
-### Sortier- und Filterparameter (A5)
-
-- `?sort=` mit `start`, `duration`, `cost`, `events`; `?dir=` mit `asc` oder
-  `desc`. Unbekannte oder fehlende Werte fallen auf das heutige Verhalten
-  zurück (`start`, `desc`) — nie ein Fehler, nie eine leere Liste.
-- `?repo=` filtert auf einen Repo-Slug, `?status=` auf einen Statuswert.
-  Kombinierte Filter wirken als Schnittmenge. Unbekannte Werte ergeben eine
-  **leere Trefferliste mit erklärendem, lokalisiertem Hinweis**, nicht die
-  ungefilterte Liste und keinen Fehler.
-- Die Statusgruppierung (`awaiting_approval` zuerst, dann `running`, dann der
-  Rest) wird **vor** der gewählten Sortierung angewendet und ist durch sie
-  nicht abschaltbar. Diese Frage ist entschieden.
-- Alle Parameter überleben die Sprachumschaltung über den bestehenden
-  `switch_qs`-Mechanismus.
-
-## Contract
-
-Single-Lane-Projekt (`backend`, `.adw/config.yaml`).
-
-- **Bewusste Bedeutungsänderung:** `GET /api/runs` und
-  `GET /api/runs/{repo}/{run_id}` liefern `duration` und `cost` weiterhin
-  unter denselben Namen und Typen, aber mit korrigierter Bedeutung — sie
-  beziffern ab jetzt den **ganzen Lauf** statt nur der letzten CLI-Spanne.
-  Für Läufe mit Gates steigen die Werte; das ist der Zweck des Issues.
-- **Additiv:** neue Felder für die benannten Zeitgrößen an der
-  Laufzusammenfassung, `null` wenn unbestimmt (E6): `work_seconds`,
-  `phase_seconds`, `wait_seconds`, `total_seconds` (Zahl oder `null`, nach den
-  normativen Definitionen). Token-Summen werden additiv in der Form
-  ausgewiesen, die der `totals`-Payload hergibt — sofern vorhanden, nie als
-  erfundene 0.
-- Kein vorhandenes Feld wird entfernt, umbenannt oder umgedeutet; `start`,
-  `status`, `phase`, `issue`, `event_count`, `dry_run`, `has_trace` und
-  `repo_exists` bleiben wörtlich, wie sie sind. Insbesondere wird das
-  `issue`-Feld **nicht** zum 90-Zeichen-Anzeigetitel umgedeutet; der Titel ist
-  Darstellungsdatum der Liste.
-- Die Route `/` nimmt neue optionale Query-Parameter entgegen (`sort`, `dir`,
-  `repo`, `status`). Ohne Parameter ist das Verhalten unverändert — gemeint
-  sind Auswahl und Reihenfolge, nicht die ausdrücklich korrigierten Kennzahlen
-  oder die neue Listendarstellung. Die API-Routen erhalten keine
-  Sortier-/Filterparameter.
-- `tree`, `raw`, `latest_context` und `problems` bleiben unverändert.
-- Regressionstests fixieren beides: die neuen Felder sind da, und die
-  unveränderten Felder sind unverändert.
+- **A1 — Reihenfolge:** „Planned tasks" und „Change scope" rücken **hinter**
+  das dreispaltige Arbeitsfeld (Trace-Baum │ Detail-Panes │ Run-Kontext). Der
+  Trace-Baum beginnt damit unmittelbar unter dem Seitenkopf. Bindende
+  Endreihenfolge: Kopf (Titel, Zeitachse, Registerkarten) → Arbeitsfeld →
+  „Planned tasks" (zugeklappt) → „Change scope" (zugeklappt). Keine weitere
+  Umstellung.
+- **A1 — Zugeklappt:** Beide Blöcke rendern als native `<details>` **ohne**
+  `open`-Attribut, mit `<summary>` — wie die Sammelknoten des Trace-Baums.
+  Kein JavaScript, kein Client-Zustand, keine Persistenz, kein Query-Parameter.
+  Ein Klick auf die Zusammenfassungszeile ist die einzige Bedienung.
+- **A2 — Zusammenfassungszeile „Planned tasks":** Die `<summary>` nennt je Lane
+  deren Name, die Zahl der Aufgaben und den bestehenden Lane-Zustand, ohne
+  Aufklappen; der Zustand wird nicht neu hergeleitet. Beim Öffnen bleiben die
+  bisherigen Aufgaben je Lane zugänglich. Gibt es kein Plan-Skelett, wird der
+  Block **gar nicht** gerendert (wie heute) — kein leerer aufklappbarer Block.
+- **A2 — Zusammenfassungszeile „Change scope":** Die `<summary>` nennt die Zahl
+  der geänderten Dateien über alle beobachteten Lanes sowie die Summen der
+  Plus- und Minuszeilen. Binärdateien zählen bei der Dateizahl mit, tragen aber
+  nichts zu den Zeilensummen bei. Liegt kein verwertbarer Diff vor, sagt die
+  Zeile das (erklärende Zeile statt einer Null); ein verwertbarer Diff ohne
+  geänderte Dateien bleibt davon unterscheidbar. Der bisherige Blockinhalt
+  bleibt beim Öffnen zugänglich.
+- **A3 — Baum-Spalte bekommt Platz:** Das Verhältnis des `trace-layout`-Grids
+  wird so verschoben, dass die Baum-Spalte mindestens so breit ist wie die
+  Panes-Spalte. Die Kontext-Spalte behält ihre `minmax`-Untergrenze und bleibt
+  die schmalste. Spaltenzahl bleibt drei, Reihenfolge bleibt, `min-width: 0`
+  und die Überlauf-Regeln bleiben. Genaue Werte sind Gestaltungsspielraum.
+- **A4 — Timeline-Beschriftung:** Die Beschriftung eines Balkens verlässt den
+  proportional bemessenen Balken. Der Balken wird reine Geometrie; sein Name
+  (`_timeline_bar_label`) erscheint an einer Stelle, deren Lesbarkeit **nicht**
+  von der Balkenbreite abhängt (über, unter oder neben dem Balken —
+  Gestaltungsspielraum). In einer Spur mit vielen kurzen Balken überlagern sich
+  die Namen nicht, und die Zuordnung Name↔Balken bleibt erkennbar. Das
+  `title`-Attribut, die Spurbeschriftung links (`.tl-lane-label`, feste 7 rem),
+  `left`/`width` in Prozent als Geometriequelle und die Unterscheidung
+  aktiv / wartend / noch laufend bleiben unverändert.
+- **A5 — Baum-Größe ausgesagt und geprüft:** Ein Test fixiert je Knoten des
+  serialisierten Baums genau ein `data-tree-entry` in der gerenderten
+  Baum-Spalte, keine Dopplung, über mehrere Fixture-Größen — darunter ein Baum
+  jenseits von 200 Knoten. Ein der Verdichtung an seinen Aufruf gehängtes
+  Ergebnis behält seinen eigenen Marker (heutiger korrekter Stand: 844 Knoten =
+  844 Marker). Die Spec sagt ausdrücklich: die Baum-Spalte rendert vollständig,
+  die Lesbarkeit kommt von der Verdichtung, nicht von einem Schnitt, und die
+  Schranke „höchstens 200 Marker je Sammlung" gilt nur noch für die
+  Tools-Einträge (`data-tool-entry`). Der Kommentar in
+  `tests/test_gui_bounded_dom.py` wird auf diesen Stand gebracht.
+- **A6 — i18n:** Neue Beschriftungen (Zusammenfassungszeilen aus A2, etwaige
+  Timeline-Beschriftung aus A4) in `adw/gui/i18n.py` in beiden Sprachen,
+  identische Schlüsselmengen, Pluralformen korrekt.
+- **A7 — Doku und Changelog:** `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md`
+  synchron: neue Blockreihenfolge, die zugeklappten Zusammenfassungen, die
+  Timeline-Beschriftung, die Aussage zur Baum-Größe aus A5. `CHANGELOG.md` und
+  `CHANGELOG.de.md` synchron ergänzen.
 
 ## Non-Goals / Scope-Deckel
 
-- Keine neue Route, kein neues Tab, keine Persistenz, kein Polling, kein
-  neues Zustands-Subsystem, keine Änderung an Auswahl-, Pane-, `?focus`- oder
-  Deep-Link-Verhalten.
-- **E1** — Keine neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN,
-  keine Webfont; Vanilla JS, handgeschriebenes CSS, System-Schriften.
-- **E2** — Sortierung und Filterung ausschließlich serverseitig über
-  Query-Parameter; kein clientseitiges Sortieren, keine Tabellen-Bibliothek,
-  kein `localStorage`, keine Cookies, kein neuer Client-Zustand.
-- **E3** — Das Run-Detail wird nicht umgebaut: Blockreihenfolge,
-  Registerkarten, Detail-Panes, Run-Kontext-Panel, Trace-Baum samt
-  Eintragsmarkern, Verdichtung, Blätterung und Timeline-Registerkarte bleiben
-  exakt, wie Brief 1 sie hinterlässt. Berührt wird dort ausschließlich, was
-  A1/A2 an Zahlen und deren Beschriftung ändern — auch nicht als
-  Review-Finding.
-- **E4** — Gestaltungsentscheidungen aus Brief 1 (Tokens, Skalen, Signalfarbe,
-  Dark Mode, Aufbau der Zeitachse) werden benutzt, nicht revidiert; keine
-  neuen Farben, Schriftgrößen oder Abstandswerte.
-- **E5** — Phasenzeit wird nirgends als Arbeit beschriftet (die Größen gehen
-  in drei Läufen um das 7- bis 25-Fache auseinander).
-- **E6** — Eine unbestimmte Zahl bleibt leer, nie `0` (Linie des
-  Run-Kontext-Panels).
-- **E7** — Der Issue-Rohtext wird nicht als Markdown gerendert, weder in der
-  Liste noch im `title`.
-- **E8** — Keine Änderung an Ereignistypen, Instrumentierung, Event-Payloads,
-  `build_tree`, Verdichtungsschicht, Blätterung, SSE-Pfad oder Retention; die
-  A1-Korrektur geschieht ausschließlich bei der **Auswertung** des
-  vorhandenen Logs.
-- **E9** — Kein Responsive-Umbau, keine Breakpoints, keine Mobilansicht.
+- Keine neue Route, kein neues Tab, kein neuer Query-Parameter.
+- Keine Änderung an Auswahl-, Pane-, `?focus`- oder Deep-Link-Verhalten, an den
+  Registerkarten Artefakte und Raw, am Recovery-Karten-Verhalten, an der
+  Run-Liste, an der Zeitachse oder an den Kennzahlen aus Brief 2.
+- Keine Persistenz, kein Polling, kein neues Zustands-Subsystem, kein
+  JavaScript für das Auf-/Zuklappen.
+- **E1** Keine neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN, keine
+  Webfont.
+- **E2** Der Trace-Baum bekommt kein Fenster zurück: keine Blätterung, kein
+  Lazy-Rendering, keine Knotenobergrenze für die Baum-Spalte. `?offset` bleibt
+  für den Baum inert. Bindet auch den Review-Loop.
+- **E3** Die Verdichtung des Baums (Faltung, Wiederholungen, Gruppen, drei
+  Klappebenen, Standard-Faltung, `?focus`-Verhalten) wird nicht angefasst.
+- **E4** Keine neuen Farben, Schriftgrößen oder Abstandswerte; die Gestaltung
+  aus Brief 1 wird benutzt.
+- **E5** Zahlen und Vokabular aus Brief 2 werden benutzt, nicht revidiert; die
+  Run-Liste wird nicht angefasst.
+- **E6** Das Tools-Fenster (`_tool_entries` / `_tool_window` / `?tools_offset`),
+  seine 200er-Schranke und seine Blätter-Navigation bleiben unverändert.
+- **E7** Kein Responsive-Umbau, keine Breakpoints, keine Mobilansicht.
+- **E8** Keine Änderung an Ereignistypen, Instrumentierung, Event-Payloads,
+  `build_tree`, dem SSE-Pfad oder der Retention.
+- Nicht Teil des Contracts (frei änderbar): Klassennamen, Reihenfolge der
+  Blöcke im Markup, Markup- und CSS-Wortlaut, Grid-Verhältnisse.
 
-## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
+## Acceptance Criteria (messbar)
 
-Erkannt, begründet, aber nicht Gegenstand; wird im Codex-/Fix-Zyklus **nicht**
-nachgebaut:
-
-- Die Anordnung der Blöcke im Run-Detail (der Trace-Baum beginnt weit
-  unterhalb des Seitenanfangs).
-- Die Größe der gerenderten Baum-Spalte (`_tree_rows`, `adw/gui/app.py:131`):
-  bewusst vollständig gerendert, weil die Verdichtung den Schnitt ersetzt hat.
-  Was fehlt, ist eine Aussage darüber in der Spec und ein Test, der die
-  Zähldefinition fixiert.
-- Spur- und Balkenbeschriftung der Timeline-Registerkarte.
-- Volltextsuche über Läufe, gespeicherte Filter, Spaltenauswahl, Export.
-- Eine Kennzahl „Kosten pro Lauf gegen Kosten pro Phase" oder sonstige
-  Auswertung über mehrere Läufe hinweg.
-- Rückwirkende Korrektur oder Migration alter Logs — es wird nur anders
-  ausgewertet, nie geschrieben.
-- Neue Mechanismen zur Erkennung oder persistenten Kennzeichnung hypothetisch
-  überlappender Phasenspannen; die überlappungsfreie Zerlegung ist verifiziert
-  und wird zugrunde gelegt.
-
-## Akzeptanzkriterien (messbar)
-
-1. **Summierung:** Für ein Log mit drei abgeschlossenen `run`-Spannen
-   (`totals.duration` 100/200/300, `totals.cost` 1/2/3) meldet `_summary`
-   600 bzw. 6 — nicht 300 bzw. 3. `start` bleibt der erste Beginn.
-2. **Offene Spanne:** Für ein Log, dessen letzte `run`-Spanne noch offen ist,
-   zählen nur die abgeschlossenen Spannen; die offene trägt nichts bei, und
-   es entsteht keine Ausnahme.
-3. **Keine abgeschlossene Spanne:** Arbeit und Kosten bleiben leer, nicht `0`.
-4. **Ein Gate-Lauf stimmt:** Für den Lauf `16f39431` meldet die Run-Liste
-   $56.88 (heute $47.16); für `e4e70373` einen Wert größer null (heute
-   `$0.00`). Der automatisierte Regressionstest fixiert die Korrektur über
-   eine Mehrspannen-Fixture, da lokale Laufdaten der Retention unterliegen.
-5. **Zeitgrößen getrennt:** Für ein Log, in dem eine Phasenspanne eine
-   Unterbrechung überdauert (Phasenzeit deutlich größer als die Summe der
-   Spannen-Dauern), zeigt die Oberfläche beide Zahlen verschieden an, und
-   Phasenzeit trägt nirgends die Beschriftung „Arbeit"/„Work".
-6. **Zerlegung stimmt:** Phasenzeit + Wartezeit = Gesamt bis auf Rundung.
-   Beispiel: Phasen von Sekunde 0–100 und 300–500 ergeben 300 s Phasenzeit,
-   200 s Wartezeit, 500 s Gesamt.
-7. **Titelzeile:** Ein Issue mit `# Überschrift` liefert `Überschrift` ohne
-   `#`; eine Überschrift `# Issue (…)` wird übersprungen; ein Issue ohne
-   Überschrift liefert seine erste nicht-leere Zeile; nichts länger als 90
-   Zeichen; ein leerer Issue-Text liefert eine leere Zelle.
-8. **Zeilenhöhe:** Die Issue-Zelle rendert einzeilig, und der vollständige
-   Text steht im `title`-Attribut.
-9. **Eine Statusspalte:** Bei einem abgeschlossenen Lauf erscheint der
-   Statuswert genau einmal je Zeile.
-10. **Sortierung:** `?sort=cost&dir=desc` ordnet nach Kosten absteigend,
-    **aber** ein `awaiting_approval`-Lauf steht weiterhin über allen anderen.
-11. **Filter:** `?status=escalated` liefert nur eskalierte Läufe; ein
-    unbekannter Wert liefert eine leere Liste mit Hinweis, keinen Fehler und
-    nicht die ungefilterte Liste.
-12. **Robustheit:** Unbekannte `sort`/`dir`-Werte fallen auf `start`/`desc`
-    zurück, ohne Ausnahme und ohne leere Liste.
-13. **Sprachumschaltung:** Sortierung und Filter überleben den Wechsel der
-    Sprache.
-14. **Contract:** `/api/runs` und `/api/runs/{repo}/{run_id}` behalten alle
-    heutigen Feldnamen und -typen; die neuen Zeitgrößen (`work_seconds`,
-    `phase_seconds`, `wait_seconds`, `total_seconds`) sind zusätzlich da;
-    `issue` bleibt der bisherige Wert; `tree` ist strukturell unverändert.
-15. **Gates grün:** `uv run ruff check .` und `uv run pytest -x -q`. Keine
-    neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN.
+1. **Reihenfolge:** Im gerenderten Dokument steht der Trace-Baum
+   (`.trace-list`) vor „Planned tasks" und „Change scope"; zwischen Seitenkopf
+   und Arbeitsfeld steht keiner der beiden Blöcke. Weitere Bereiche werden
+   nicht umgeordnet.
+2. **Zugeklappt:** Beide Blöcke rendern als `<details>` ohne `open`; im
+   Ausgangszustand ist ihr Inhalt nicht sichtbar. Kein JavaScript, kein
+   Client-Zustand, keine Persistenz, kein Query-Parameter dafür.
+3. **Summary „Planned tasks":** Die `<summary>`-Zeile nennt Lane-Name,
+   Aufgabenzahl und Lane-Zustand, ohne dass der Block aufgeklappt werden muss;
+   der Zustand wird nicht neu hergeleitet. Ohne Plan-Skelett wird der Block
+   nicht gerendert.
+4. **Summary „Change scope":** Die `<summary>`-Zeile nennt die Zahl der
+   geänderten Dateien und die Summen der Plus- und Minuszeilen; Binärdateien
+   zählen bei der Dateizahl mit, nicht bei den Zeilensummen. Ein Lauf ohne
+   verwertbaren Diff bekommt eine erklärende Zeile statt einer Null; ein
+   verwertbarer Diff ohne geänderte Dateien bleibt davon unterscheidbar.
+5. **Spaltenbreite:** Die Baum-Spalte ist im `trace-layout`-Grid mindestens so
+   breit wie die Panes-Spalte (heute 434 px gegen 607 px bei 1440 px); die
+   Kontext-Spalte behält ihre `minmax`-Untergrenze und bleibt die schmalste.
+   Drei Spalten, Reihenfolge, `min-width: 0` und Überlauf-Regeln bleiben.
+6. **Umbrüche:** Der Anteil der Knotenbeschriftungen, die auf mehr als eine
+   Zeile umbrechen, sinkt messbar gegenüber dem heutigen Stand von 17,8 %
+   (103 von 577 bei `16f39431`, 1440 px, Stand 0.23.0). Verglichen wird bei
+   gleichem Faltungszustand; Beschriftungen oder Knoten zu entfernen zählt
+   nicht als Verbesserung.
+7. **Timeline lesbar:** Für `16f39431` ist die Beschriftung jedes der 31 Balken
+   lesbar, unabhängig von der Balkenbreite — insbesondere die 24 heute
+   abgeschnittenen (gemessen `scrollWidth > clientWidth`; u. a. `pytest` mit
+   6 px gegen 43 px Bedarf). In einer Spur mit vielen kurzen Balken überlagern
+   sich die Namen nicht. Das `title`-Attribut allein erfüllt dieses Kriterium
+   nicht.
+8. **Timeline-Geometrie unverändert:** `left` und `width` der Balken in Prozent
+   sind für identische Eingangsdaten unverändert; die Unterscheidung
+   aktiv / wartend / noch laufend, das `title`-Attribut und die
+   Spurbeschriftung links bleiben.
+9. **Zähldefinition:** Für mindestens drei verschiedene Fixture-Größen —
+   darunter ein Baum mit mehr als 200 Knoten — gilt: die Zahl der
+   `data-tree-entry`-Marker in der Baum-Spalte ist gleich der Zahl der Knoten
+   des serialisierten Baums — kein Knoten fehlt, keiner zählt doppelt. Ein an
+   seinen Aufruf gefaltetes Ergebnis behält seinen eigenen Marker.
+10. **Kein Fenster:** `?offset` verändert die Baum-Spalte nicht, und für sie
+    wird keine Blätter-Navigation gerendert (E2).
+11. **Tools-Fenster unberührt:** `?tools_offset`, die 200er-Schranke der
+    Tools-Einträge (`data-tool-entry`) und deren Blätter-Navigation verhalten
+    sich unverändert; die Schranke gilt nicht für `data-tree-entry`.
+12. **Contract:** Die Antwort von `GET /api/runs/{repo}/{run_id}` ist durch
+    dieses Feature in allen Feldern, Typen und Werten unverändert — inklusive
+    `tree`, `phases`, `raw`, `latest_context`, `problems` und der Kennzahlen
+    aus Brief 2; ebenso `GET /api/runs`. Keine neuen Routen, keine neuen
+    Query-Parameter. Ein Regressionstest fixiert die Unveränderlichkeit.
+13. **i18n:** Alle neuen Beschriftungen liegen in `adw/gui/i18n.py` in beiden
+    Sprachen mit identischer Schlüsselmenge und korrekten Pluralformen vor
+    (auch für null, eine und mehrere Aufgaben bzw. Dateien). Lane-Namen,
+    Dateipfade und Balkennamen sind Inhalte und werden nicht übersetzt.
+14. **Doku/Changelog:** `docs/GUI-SPEC.md`/`.de.md` beschreiben synchron die
+    neue Blockreihenfolge, die zugeklappten Zusammenfassungen samt
+    Leerzuständen, die dauerunabhängige Timeline-Beschriftung und die Aussage
+    zur Baum-Größe aus A5 (vollständiges Rendern; Lesbarkeit aus der
+    Verdichtung; 200er-Schranke nur für Tools). `CHANGELOG.md`/`.de.md` sind
+    synchron ergänzt. Der Kommentar in `tests/test_gui_bounded_dom.py`
+    entspricht diesem Stand.
 
 ## Definition of Done
 
-- Alle Akzeptanzkriterien 1–15 erfüllt und durch Tests belegt.
-- Neue Tests unter `tests/test_gui_*.py` (Richtwert ~14; deutlich mehr als
-  ~20 ist Scope-Drift); reines Client-Verhalten über
-  `tests/gui_js_harness.js`/`tests/gui_js_harness.py`. Die bestehenden
-  GUI-Tests bleiben grün.
-- Bestehende Tests, die für Läufe mit Gates die alten, zu niedrigen
-  Kennzahlen erwarten, werden auf die korrigierten Werte gehoben — mit
-  Kommentar, der das Warum nennt. Das ist die einzige erlaubte inhaltliche
-  Änderung an bestehenden Tests.
-- `adw/gui/i18n.py` hat für alle neuen Schlüssel beide Sprachen mit
-  identischen Schlüsselmengen und korrekten Pluralformen; das verbindliche
-  Zeitvokabular wird überall konsistent verwendet.
-- `docs/GUI-SPEC.md`, `docs/GUI-SPEC.de.md`, `CHANGELOG.md`, `CHANGELOG.de.md`
-  sind synchron und paarweise sprachgleich ergänzt (A7); der A1-Eintrag steht
-  unter `Fixed`/`Behoben`.
-- Gates grün: `uv run ruff check .` und `uv run pytest -x -q`. Der veraltete
-  Hinweis auf flake8/isort in `docs/GUI-SPEC.md` begründet keine weiteren
-  Gates; `ruff format` ist kein Gate.
-- Die Deferred-Punkte bleiben ungebaut, auch im Review-Loop.
+- Alle Acceptance Criteria 1–14 erfüllt und, soweit automatisiert prüfbar,
+  durch Tests belegt.
+- Die Messgrößen aus AC 6 und AC 7 (Umbruch-Anteil, Abschneiden der
+  Balkenbeschriftung) werden im **echten Browser** erhoben — Lauf `16f39431`,
+  Referenz-Viewport 1440 px, gleicher Faltungszustand wie die Ausgangsmessung —
+  und mit ihren Werten dokumentiert; eine protokollierte manuelle Messung
+  genügt. Der Harness `tests/gui_js_harness.js` / `tests/gui_js_harness.py`
+  läuft ohne Layout-Engine und bleibt reinem Client-Verhalten vorbehalten;
+  simulierte Layout-Assertions oder ein neues Browser-Test-Subsystem entstehen
+  nicht.
+- Gates grün: `uv run ruff check .` und `uv run pytest -x -q`. Kein flake8,
+  kein isort, kein black; `ruff format` ist kein Gate — der veraltete Hinweis
+  in `docs/GUI-SPEC.md` (Abnahmepunkt 10) begründet keine zusätzlichen Gates.
+- Richtwert **~11 neue Tests** unter `tests/test_gui_*.py`; deutlich mehr als
+  ~16 ist Scope-Drift. Bestehende GUI-Tests bleiben grün, ohne inhaltlich
+  umgeschrieben zu werden — erlaubte Ausnahme: Tests, die die heutige
+  Blockreihenfolge oder die heutige Timeline-Balkenbeschriftung festschreiben,
+  werden mit begründendem Kommentar auf den neuen Stand gehoben.
+- Keine neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN, keine
+  Webfont (E1).
+- Doku und Changelog in beiden Sprachen synchron.
+
+## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
+
+- Volltextsuche oder Filterchips über dem Trace-Baum.
+- Zusammenklappbare oder in der Breite ziehbare Spalten des Arbeitsfelds.
+- Ein Lazy-Rendering des Baums oder irgendeine andere Knotenschranke (E2).
+- Zoom, Schwenken oder Zeitlupe in der Timeline; Zusammenfassen von Balken.
+- Zusammenführen von Zeitachse und Timeline zu einer einzigen Darstellung.
+- Eine eigene Ansicht für die Reader-Probleme.
+- Persistieren des Auf-/Zuklappzustands der beiden Zusammenfassungsblöcke.
