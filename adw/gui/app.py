@@ -2077,23 +2077,15 @@ def _timeline(events, has_trace=None) -> dict:
             "width": round(width, 3),
         })
 
-    start_rec, end_rec = _run_span(events)
-    # A1/B3: the timeline header's run figures are the WHOLE run (summed over all
-    # closed spans), the same source the list and the run-detail head feed from —
-    # not the last span alone.
+    # A1/B3: the timeline header's run figures come from the corrected whole-run
+    # summary (summed over ALL closed spans) — the same source the list and the
+    # run-detail head use. There is NO elapsed-time or event-cost fallback: an
+    # unknown metric stays empty (E6), so a live run with no completed span shows an
+    # empty Work/cost, consistent with the summary. The bar geometry above keeps its
+    # own elapsed `t_end` for drawing open spans; that is separate and unaffected.
     totals = _run_totals(events)
     duration = totals["duration"]
-    if duration is None:
-        a = _ts_epoch((start_rec or {}).get("ts"))
-        # A finished run measures to its run-end; a live/open run measures the
-        # ELAPSED time to the current timeline endpoint, so the header shows a
-        # non-empty duration for a live run too (A4) — consistent with the open
-        # span bars, which also extend to `t_end`.
-        b = _ts_epoch(end_rec.get("ts")) if end_rec is not None else t_end
-        duration = (b - a) if (a is not None and b is not None) else None
     cost = totals["cost"]
-    if cost is None:
-        cost = _events_cost(events)
     return {
         "has_trace": True,
         "lanes": [lanes_map[k] for k in lane_order],

@@ -117,18 +117,41 @@ def test_header_shows_duration_cost_and_tokens_per_model(home, tmp_path):  # noq
     assert "1500" in panel         # tokens for that model (1000 in + 500 out)
 
 
-def test_live_run_header_shows_elapsed_duration(home, tmp_path):  # noqa: F811
-    """A4 (root cause): the timeline header shows total duration for a LIVE run too
-    — the elapsed time from the run start to the current timeline endpoint — not an
-    empty value just because no run-end record exists yet. Live and finished runs
-    stay observably consistent."""
+def test_live_run_header_work_is_empty_without_a_completed_span(home, tmp_path):  # noqa: F811
+    """B3 (supersedes the earlier A4 elapsed-fallback): the timeline header's run
+    metric is the corrected whole-run Work (summed over closed run spans), the SAME
+    source as the run list and the run-detail head. A LIVE run has no completed run
+    span, so its Work is unknown and renders EMPTY (E6) — never an elapsed-time
+    fallback that would contradict the summary's null. (The bars still draw the open
+    span to the current edge; only the header number changed.)"""
     panel = tab_panel(_detail_html(tmp_path, timeline_lines(running=True)), "timeline")
 
     m = re.search(r'class="tl-duration">([^<]*)</span>', panel)
     assert m, panel[:500]
-    # The rendered duration carries a real elapsed value (digits), not just its
-    # label (an empty duration would render the label alone).
-    assert re.search(r"\d", m.group(1)), m.group(1)
+    # Only the label renders — no numeric value (an elapsed fallback would add digits).
+    assert not re.search(r"\d", m.group(1)), m.group(1)
+
+
+def test_header_metrics_empty_when_completed_span_lacks_totals(home, tmp_path):  # noqa: F811
+    """B3: a run whose completed ``run`` span carries no ``totals`` has null summed
+    duration/cost — the header shows neither a duration value nor a cost, with no
+    elapsed-time or event-cost fallback."""
+    lines = [
+        rec(1, "run", "start", "R", None, sec=0, payload=run_start_payload("No totals")),
+        rec(2, "agent.run", "start", "A", "R", sec=1,
+            payload={"agent": "build_agent", "prompt": "p", "system_append": ""}),
+        # An agent cost exists in the events, but the run end carries NO totals — the
+        # header must not fall back to summing event costs.
+        rec(3, "agent.run", "end", "A", "R", sec=2,
+            payload={"result_text": "done", "cost_usd": 0.5, "is_error": False}),
+        rec(4, "run", "end", "R", None, sec=3, payload={"status": "done"}),  # no totals
+    ]
+    panel = tab_panel(_detail_html(tmp_path, lines), "timeline")
+
+    m = re.search(r'class="tl-duration">([^<]*)</span>', panel)
+    assert m, panel[:500]
+    assert not re.search(r"\d", m.group(1)), m.group(1)  # duration empty
+    assert "$" not in panel                               # no cost (no event-cost fallback)
 
 
 def test_dry_run_header_renders_cost_and_tokens_empty_never_zero(home, tmp_path):  # noqa: F811

@@ -804,16 +804,17 @@ Compute rules (binding):
   ascribed; no waiting is invented before the first start or after the last end.
 - A phase with no parsable `start` (never ran) gets no segment but stays visible
   in the legend, dampened; its name and duration stay readable.
-- Numbers beneath the rail name three DISTINCT time sizes with one vocabulary
-  (see 7.8): **Work** = the real work, the summed `run`-span durations from the
-  corrected summary (`work_seconds`); **Phase time** = the sum of the coloured
-  phase-band segments (an open active phase counts to the page-build instant) —
-  this is the rail's own area, **not** work, and it is never labelled "Work" (the
-  two diverge 7–25× when a phase span outlives an interruption); **Waiting** = the
-  sum of the gaps; **Total** = `T`. Phase time + Waiting = Total up to rounding.
-  The labels are localised (`Work`/`Arbeit`, `Phase time`/`Phasenzeit`,
-  `Waiting`/`Wartezeit`, `Total`/`Gesamt`). Work is omitted when undetermined (no
-  closed span), never shown as `0`.
+- Numbers beneath the rail name four DISTINCT time sizes with one vocabulary. Their
+  **values are the corrected summary metrics (7.8)** — **Work** (`work_seconds`),
+  **Phase time** (`phase_seconds`), **Waiting** (`wait_seconds`) and **Total**
+  (`total_seconds`) — so the same word means the same thing here and in the API. The
+  rail's segments and gaps are the DRAWING geometry only; in particular an active
+  open phase is drawn to the page-build instant but is **not** counted into Phase
+  time (it bounds Total). Phase time is never labelled "Work" (the two diverge 7–25×
+  when a phase span outlives an interruption). The labels are localised
+  (`Work`/`Arbeit`, `Phase time`/`Phasenzeit`, `Waiting`/`Wartezeit`,
+  `Total`/`Gesamt`). A value is omitted when undetermined (e.g. Work with no closed
+  run span), never shown as `0`.
 
 `duration`, `name` and `status` on each phase entry stay exactly as before; an
 open phase's API `end` stays `null` (the page-build instant is a display rule of

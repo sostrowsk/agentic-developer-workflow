@@ -377,14 +377,17 @@
         {% endfor %}
       </ol>
       <div class="tl-totals">
-        {#- A2/E5: the real WORK (summed run-span durations from the corrected
-            summary) is its own number; the coloured-segment sum beneath it is the
-            PHASE TIME, never labelled "Work". An unknown work value stays empty
-            (E6), never a fabricated 0. -#}
+        {#- A2/E5: the header's named numbers are the corrected SUMMARY metrics
+            (detail.run.*), so the same word means the same thing in the API and the
+            UI: Work = summed run-span durations, Phase time = closed phase spans (an
+            open active phase is excluded — the rail still DRAWS it, but it is not
+            counted here), Waiting = Total − Phase time. phase_timeline is used only
+            for the rail geometry above, never for these numbers. An unknown value
+            stays empty (E6), never a fabricated 0. -#}
         {% if detail.run.work_seconds is not none %}<span class="tl-total" data-total="realwork" data-seconds="{{ detail.run.work_seconds }}"><span class="tl-total-label">{{ t.tl_work }}</span> <span class="tl-total-value">{{ detail.run.work_seconds | fmt_duration }}</span></span>{% endif %}
-        <span class="tl-total" data-total="work" data-seconds="{{ phase_timeline.work_seconds }}"><span class="tl-total-label">{{ t.tl_phase_time }}</span> <span class="tl-total-value">{{ phase_timeline.work_seconds | fmt_duration }}</span></span>
-        <span class="tl-total" data-total="waiting" data-seconds="{{ phase_timeline.wait_seconds }}"><span class="tl-total-label">{{ t.tl_waiting }}</span> <span class="tl-total-value">{{ phase_timeline.wait_seconds | fmt_duration }}</span></span>
-        <span class="tl-total" data-total="total" data-seconds="{{ phase_timeline.total_seconds }}"><span class="tl-total-label">{{ t.tl_total }}</span> <span class="tl-total-value">{{ phase_timeline.total_seconds | fmt_duration }}</span></span>
+        {% if detail.run.phase_seconds is not none %}<span class="tl-total" data-total="work" data-seconds="{{ detail.run.phase_seconds }}"><span class="tl-total-label">{{ t.tl_phase_time }}</span> <span class="tl-total-value">{{ detail.run.phase_seconds | fmt_duration }}</span></span>{% endif %}
+        {% if detail.run.wait_seconds is not none %}<span class="tl-total" data-total="waiting" data-seconds="{{ detail.run.wait_seconds }}"><span class="tl-total-label">{{ t.tl_waiting }}</span> <span class="tl-total-value">{{ detail.run.wait_seconds | fmt_duration }}</span></span>{% endif %}
+        {% if detail.run.total_seconds is not none %}<span class="tl-total" data-total="total" data-seconds="{{ detail.run.total_seconds }}"><span class="tl-total-label">{{ t.tl_total }}</span> <span class="tl-total-value">{{ detail.run.total_seconds | fmt_duration }}</span></span>{% endif %}
       </div>
     </div>
     {% else %}

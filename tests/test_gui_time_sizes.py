@@ -48,15 +48,29 @@ def _by_id(entries, run_id):
     return next((e for e in entries if e.get("run_id") == run_id), None)
 
 
+def _header_raw(html: str) -> str:
+    """The run header markup (untouched), for reading the machine-readable
+    ``data-total``/``data-seconds`` markers."""
+    i = html.find("<header")
+    j = html.find("</header>", i)
+    assert i != -1 and j != -1, "run header not found"
+    return html[i:j]
+
+
 def _header_text(html: str) -> str:
     """The run header, tags stripped and whitespace collapsed — so a label and its
     value read as adjacent words. Scoped to the header so the Timeline TAB's own
     numbers are never counted."""
-    i = html.find("<header")
-    j = html.find("</header>", i)
-    assert i != -1 and j != -1, "run header not found"
-    seg = re.sub(r"<[^>]+>", " ", html[i:j])
-    return re.sub(r"\s+", " ", seg).strip()
+    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", _header_raw(html))).strip()
+
+
+def _header_seconds(header: str, kind: str):
+    """The ``data-seconds`` of the ``data-total="{kind}"`` marker (attribute order is
+    the implementation's choice), or None."""
+    m = re.search(r'data-total="' + kind + r'"[^>]*data-seconds="([\d.]+)"', header)
+    if m is None:
+        m = re.search(r'data-seconds="([\d.]+)"[^>]*data-total="' + kind + r'"', header)
+    return float(m.group(1)) if m else None
 
 
 _BASE = datetime(2026, 8, 5, 14, 0, 0)
@@ -154,6 +168,35 @@ def test_detail_head_labels_work_and_phase_time_distinctly(home, tmp_path):  # n
     assert re.search(r"Phase time\W{0,4}1h 23m 20s", head), head
     # E5: phase time is never the number labeled "Work".
     assert not re.search(r"\bWork\W{0,4}1h 23m 20s", head), "phase time labeled as Work"
+
+
+def test_detail_head_named_metrics_come_from_the_summary_for_active_phase(home, tmp_path):  # noqa: F811
+    """P2: the header's named numbers are the SUMMARY metrics, not the presentation
+    timeline. With a closed phase (0–100) and an active phase from 200, the summary
+    reports phase_seconds=100 (the active phase is excluded); the header must show
+    that 100 too — the timeline geometry would instead count the active phase to the
+    page-build instant. Work is empty because no run span completed."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    lines = [rec(1, "run", "start", "R", None, ts=ts_at(0),
+                 payload=run_start_payload("Active header"))]
+    lines += _phase(2, "S", "spec", 0, 100)                    # closed → phase time 100
+    lines.append(rec(4, "phase", "start", "PB", "R", ts=ts_at(200),
+                     payload={"name": "build", "from_phase": "build"}))  # active, open
+    write_run(repo, RUN_ID, lines, phase="build", issue="Active header")
+
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = _slug_for(repo)
+    api = client.get(f"/api/runs/{slug}/{RUN_ID}").json()["run"]
+    assert api["phase_seconds"] == 100  # the active phase is excluded from phase time
+
+    header = _header_raw(client.get(f"/runs/{slug}/{RUN_ID}").text)
+    # The header's Phase-time number is the summary's phase_seconds (100), not the
+    # timeline geometry (which would also count the active phase to now).
+    assert _header_seconds(header, "work") == api["phase_seconds"]
+    assert _header_seconds(header, "work") == 100
+    # Work (the real work) is empty — the run has no completed span.
+    assert 'data-total="realwork"' not in header
 
 
 # --- AC 15: the vocabulary exists in both languages ----------------------------

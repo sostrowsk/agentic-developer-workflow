@@ -859,17 +859,18 @@ Rechenregeln (bindend):
   keine Wartezeit erfunden.
 - Eine Phase ohne parsebaren `start` (nie gelaufen) bekommt kein Segment, bleibt
   aber in der Legende sichtbar, gedämpft; Name und Dauer bleiben lesbar.
-- Die Zahlen unter der Schiene benennen drei VERSCHIEDENE Zeitgrößen mit einem
-  Vokabular (siehe 7.8): **Arbeit** = die echte Arbeit, die Summe der
-  Spannen-Dauern aus der korrigierten Zusammenfassung (`work_seconds`);
-  **Phasenzeit** = die Summe der farbigen Phasenband-Segmente (eine offene aktive
-  Phase zählt bis zum Seitenaufbau) — das ist die Fläche der Schiene, **nicht**
-  Arbeit, und trägt nie die Beschriftung „Arbeit" (beide gehen um das 7- bis
-  25-Fache auseinander, wenn eine Phasenspanne eine Unterbrechung überdauert);
-  **Wartezeit** = die Summe der Lücken; **Gesamt** = `T`. Phasenzeit + Wartezeit =
-  Gesamt bis auf Rundung. Die Labels sind lokalisiert (`Arbeit`/`Work`,
-  `Phasenzeit`/`Phase time`, `Wartezeit`/`Waiting`, `Gesamt`/`Total`). Arbeit
-  entfällt, wenn unbestimmt (keine abgeschlossene Spanne), nie als `0`.
+- Die Zahlen unter der Schiene benennen vier VERSCHIEDENE Zeitgrößen mit einem
+  Vokabular. Ihre **Werte sind die korrigierten Kennzahlen der Zusammenfassung
+  (7.8)** — **Arbeit** (`work_seconds`), **Phasenzeit** (`phase_seconds`),
+  **Wartezeit** (`wait_seconds`) und **Gesamt** (`total_seconds`) —, sodass
+  dasselbe Wort hier und in der API dasselbe bedeutet. Die Segmente und Lücken der
+  Schiene sind nur die ZEICHEN-Geometrie; insbesondere wird eine offene aktive Phase
+  bis zum Seitenaufbau gezeichnet, aber **nicht** in die Phasenzeit gezählt (sie
+  begrenzt nur Gesamt). Phasenzeit trägt nie die Beschriftung „Arbeit" (beide gehen
+  um das 7- bis 25-Fache auseinander, wenn eine Phasenspanne eine Unterbrechung
+  überdauert). Die Labels sind lokalisiert (`Arbeit`/`Work`,
+  `Phasenzeit`/`Phase time`, `Wartezeit`/`Waiting`, `Gesamt`/`Total`). Ein Wert
+  entfällt, wenn unbestimmt (z. B. Arbeit ohne abgeschlossene Spanne), nie als `0`.
 
 `duration`, `name` und `status` je Phaseneintrag bleiben exakt wie zuvor; das
 API-`end` einer offenen Phase bleibt `null` (der Seitenaufbau-Zeitpunkt ist nur
