@@ -12,6 +12,43 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Fixed
+- **Run metrics now cover the whole run, not just the last CLI span.** `_summary`
+  sums `duration`, `cost` and `tokens` over **all** closed `run` spans. A gated run
+  is several CLI invocations and thus several `run` spans in one log, so the earlier
+  figures reported only the last section and were too low — e.g. a run whose last
+  span cost `$0.00` was shown as `$0.00` although the whole run cost more. `start`
+  still marks the first span; the status is still the last span's. This changes the
+  meaning (not the name or type) of `duration`/`cost` on `GET /api/runs` and
+  `GET /api/runs/{repo}/{run_id}`: an open span contributes nothing, and with no
+  closed span the value stays empty — never a fabricated `0` (a genuine `0` from the
+  payload is kept). The run list and the run-detail header feed from the same
+  summary and therefore agree.
+
+### Added
+- **Three named time sizes, one vocabulary.** Work (the summed run-span durations),
+  Phase time (the area of the coloured phase-band segments), Waiting (the gaps at
+  the approval gates) and Total (first phase start to last phase end) are named
+  consistently. The run-detail header now shows the real **Work** beside the
+  **Phase time** — the phase-time number is no longer mislabelled "Work" (the two
+  diverge 7–25× when a phase span outlives an interruption). New **additive**
+  summary fields: `work_seconds`, `phase_seconds`, `wait_seconds`, `total_seconds`
+  and `tokens` (`null` when undetermined; `phase_seconds + wait_seconds =
+  total_seconds` up to rounding).
+- **The run list answers its question.** The Issue column shows a one-line title
+  derived from the raw issue text (first `#` heading in the first twelve lines,
+  skipping an "Issue"-only heading; otherwise the first non-empty line; a leading
+  `ADW-Issue:`/`Issue:` removed; over 90 chars cut to 89 + `…`), with the full raw
+  text in the cell's `title`. Phase and Status collapse into one column — a finished
+  run shows one word, a running/waiting run adds its phase. Server-side sorting
+  (`?sort=start|duration|cost|events`, `?dir=asc|desc`) and filtering (`?repo=`,
+  `?status=`) via query params, with `awaiting_approval` kept above every sort and a
+  localized hint for an empty result. Unknown `sort`/`dir` fall back to
+  `start`/`desc`; an unknown filter value yields an empty result, never the
+  unfiltered list.
+
 ## [0.22.0] — 2026-09-13
 
 ### Changed

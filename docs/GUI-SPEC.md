@@ -324,12 +324,41 @@ adw gui [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--lang de|en
 
 **A — Run list (`/`)**
 
-Table across all registered repos: run ID · repo · issue (truncated) · phase ·
-status (running / awaiting approval / done / escalated) · start · duration ·
-cost · event count. Sortable, filter by repo and status. Runs are grouped by
-status: `awaiting_approval` first, then `running`, then the rest — the run that
-needs a person to act stays at the top instead of sinking below newer finished
-runs. Within each group the existing newest-first order is kept. Live-updating.
+Table across all registered repos: run ID · repo · issue title · status · start ·
+duration · cost · event count. The issue column shows a one-line **title** derived
+from the raw issue text (see below), not raw markdown; the full raw text is in the
+cell's `title` attribute. Phase and status are **one** column: it names the status
+and adds the phase only when that helps (a running or waiting run) — a finished run
+shows a single word (no more `done`/`done`).
+
+Sorting and filtering are **server-side, via query parameters** (like the Raw
+tab's `?raw_q`/`?raw_type` — no client state, no persistence):
+
+- `?sort=` ∈ {`start`, `duration`, `cost`, `events`} and `?dir=` ∈ {`asc`,
+  `desc`}. Duration and cost sort by the corrected whole-run values (see 7.8),
+  `events` by the event count. Unknown or missing values fall back to
+  `start`/`desc` — never an error, never a spuriously empty list; missing metrics
+  (`null`) sort to the end without raising.
+- `?repo=` filters by repo slug, `?status=` by status value; combined filters
+  intersect. An unknown value yields an **empty result with a localized hint** —
+  not the unfiltered list and not an error.
+
+Runs are grouped by status: `awaiting_approval` first, then `running`, then the
+rest — the run that needs a person to act stays at the top instead of sinking below
+newer finished runs. This grouping is applied **before** the chosen sort and keeps
+priority; it cannot be switched off. Within each group the existing newest-first
+order is kept. All parameters survive the language switch because they ride in the
+URL. Live-updating.
+
+**Issue title derivation** (pure text processing, never markdown/HTML rendering):
+(1) the first `#` heading among the first twelve lines, its text without the `#`; a
+heading that only names "Issue" (`^issue\b`, case-insensitive) is skipped so the
+next heading wins; a heading past line twelve does not win. (2) Otherwise the first
+non-empty line. (3) A leading `ADW-Issue:`/`Issue:` is removed. (4) Longer than 90
+characters → cut to 89 + `…`. (5) Empty or missing → an empty cell, never a
+placeholder. The title is display data of the list only; the API `issue` field
+(the raw, `_ISSUE_MAX`-truncated text) is unchanged and is **not** the source of
+the full-text `title` attribute.
 
 A dry run (`dry_run: true` in the `run` start payload) carries a short `Dry-Run`
 label on its row so a content-thin simulation is never mistaken for a real run
@@ -699,6 +728,18 @@ the GUI stays read-only.
 URL. Path traversal is impossible: only registry-known repos, only run IDs
 matching `RUN_ID_RE`, only a whitelist of artifact names.
 
+**Contract (run metrics).** On `GET /api/runs` and `GET /api/runs/{repo}/{run_id}`
+the fields `duration` and `cost` keep their names and types but their **meaning**
+is corrected: they cover the whole run (summed over all closed `run` spans), not
+the last CLI span — for gated runs the values rise (see 7.8). The named
+time-size fields `work_seconds`, `phase_seconds`, `wait_seconds`, `total_seconds`
+and the summed `tokens` are **additive**. Every other field stays verbatim; in
+particular `issue` stays the raw, truncated value and is **not** repurposed as the
+display title (the title lives only in the list markup). The route `/` accepts the
+optional `sort`/`dir`/`repo`/`status` query parameters (7.2 A); the API routes do
+**not** take sort/filter parameters. `tree`, `raw`, `latest_context`, `problems`
+and `phases` (including the `start`/`end` from the previous release) are unchanged.
+
 ### 7.5 i18n
 
 `adw/gui/i18n.py` holds a `dict[str, dict[str, str]]` for `de` and `en`. Label
@@ -762,14 +803,43 @@ Compute rules (binding):
   ascribed; no waiting is invented before the first start or after the last end.
 - A phase with no parsable `start` (never ran) gets no segment but stays visible
   in the legend, dampened; its name and duration stay readable.
-- Three numbers beneath the rail: **work** = sum of the phase durations (an open
-  active phase counts the time elapsed to the page-build instant), **waiting** =
-  sum of the gaps, **total** = `T`. Work + waiting = total up to rounding. The
-  labels are localised (`Work`/`Arbeit`, `Waiting`/`Warten`, `Total`/`Gesamt`).
+- Numbers beneath the rail name three DISTINCT time sizes with one vocabulary
+  (see 7.8): **Work** = the real work, the summed `run`-span durations from the
+  corrected summary (`work_seconds`); **Phase time** = the sum of the coloured
+  phase-band segments (an open active phase counts to the page-build instant) —
+  this is the rail's own area, **not** work, and it is never labelled "Work" (the
+  two diverge 7–25× when a phase span outlives an interruption); **Waiting** = the
+  sum of the gaps; **Total** = `T`. Phase time + Waiting = Total up to rounding.
+  The labels are localised (`Work`/`Arbeit`, `Phase time`/`Phasenzeit`,
+  `Waiting`/`Warten`, `Total`/`Gesamt`). Work is omitted when undetermined (no
+  closed span), never shown as `0`.
 
 `duration`, `name` and `status` on each phase entry stay exactly as before; an
 open phase's API `end` stays `null` (the page-build instant is a display rule of
 the timeline only, never an API phase end).
+
+### 7.8 Whole-run metrics and named time sizes
+
+The run summary (`_summary`, feeding both the run list and the run-detail header,
+so they agree) reports the metrics of the **whole run**. A gated run is several
+CLI invocations and thus several `run` spans in one log; `duration`, `cost` and
+`tokens` are summed over **all closed** `run` spans, not taken from the last one.
+`start` stays the first span; the status stays the last span's. An open span
+contributes nothing; with no closed span the value stays empty — never a
+fabricated `0` (a genuine `0` from the payload is kept).
+
+Four **additive** summary fields carry the named time sizes (each a number or
+`null`):
+
+- `work_seconds` — Work: sum of `totals.duration` over the closed `run` spans
+  (numerically identical to `duration`).
+- `phase_seconds` — Phase time: sum of the phase spans with a parsable
+  `start`/`end` (the rail area of 7.7); **not** work.
+- `total_seconds` — Total: smallest phase start to largest phase end (to the
+  page-build instant for an active open phase).
+- `wait_seconds` — Waiting: `total_seconds − phase_seconds`; the phase spans do
+  not overlap, so the split is unambiguous. `phase_seconds + wait_seconds =
+  total_seconds` up to rounding.
 
 ## 8. Security and data protection
 

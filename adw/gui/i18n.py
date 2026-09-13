@@ -104,12 +104,17 @@ _EN: dict[str, str] = {
     "tl_duration": "duration",
     "tl_cost": "cost",
     "tl_tokens": "tokens",
-    # The to-scale phase timeline (A5): the three numbers under the rail (work =
-    # sum of phase durations, waiting = sum of the gaps at the approval gates,
-    # total = the whole span) and the title of a waiting segment.
+    # The named time sizes under the rail (A2): the real WORK (summed run-span
+    # durations), the PHASE TIME (sum of the coloured phase segments — NOT work,
+    # E5), the WAITING (sum of the gaps at the approval gates) and the whole span.
     "tl_work": "Work",
+    "tl_phase_time": "Phase time",
     "tl_waiting": "Waiting",
     "tl_total": "Total",
+    # Run-list sort/filter controls and the empty-result hint (A5/A6).
+    "filter_all": "(all)",
+    "filter_apply": "Filter",
+    "list_no_matches": "No runs match the filter.",
     # Labels for the read-only run-context panel (§7.2): the run state at the seq of
     # the selected node (or the latest event when nothing is selected).
     "ctx_title": "Run context",
@@ -236,8 +241,12 @@ _DE: dict[str, str] = {
     "tl_cost": "Kosten",
     "tl_tokens": "Tokens",
     "tl_work": "Arbeit",
+    "tl_phase_time": "Phasenzeit",
     "tl_waiting": "Warten",
     "tl_total": "Gesamt",
+    "filter_all": "(alle)",
+    "filter_apply": "Filtern",
+    "list_no_matches": "Keine Läufe entsprechen dem Filter.",
     "ctx_title": "Lauf-Zustand",
     "ctx_phase": "Phase",
     "ctx_round": "Runde",

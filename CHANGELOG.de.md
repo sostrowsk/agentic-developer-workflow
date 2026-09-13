@@ -13,6 +13,47 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Behoben
+- **Die Kennzahlen eines Laufs erfassen jetzt den ganzen Lauf, nicht nur die
+  letzte CLI-Spanne.** `_summary` summiert `duration`, `cost` und `tokens` über
+  **alle** abgeschlossenen `run`-Spannen. Ein Lauf mit Freigabe-Gates besteht aus
+  mehreren CLI-Aufrufen und damit mehreren `run`-Spannen in einem Log; früher wurde
+  nur der letzte Abschnitt gemeldet, und die Werte waren zu niedrig — z. B. wurde
+  ein Lauf, dessen letzte Spanne `$0.00` kostete, als `$0.00` angezeigt, obwohl der
+  ganze Lauf mehr kostete. `start` bleibt die erste Spanne, der Status weiterhin der
+  der letzten. Das ändert die **Bedeutung** (nicht Name oder Typ) von
+  `duration`/`cost` bei `GET /api/runs` und `GET /api/runs/{repo}/{run_id}`: eine
+  offene Spanne trägt nichts bei, und ohne abgeschlossene Spanne bleibt der Wert
+  leer — nie eine erfundene `0` (ein echter `0`-Wert aus dem Payload bleibt
+  erhalten). Run-Liste und Run-Detail-Kopf speisen aus derselben Zusammenfassung und
+  stimmen dadurch überein.
+
+### Hinzugefügt
+- **Drei benannte Zeitgrößen, ein Vokabular.** Arbeit (Summe der Spannen-Dauern),
+  Phasenzeit (Fläche der farbigen Phasenband-Segmente), Warten (die Lücken an den
+  Freigabe-Gates) und Gesamt (erster Phasenstart bis letztes Phasenende) sind
+  einheitlich benannt. Der Run-Detail-Kopf zeigt jetzt die echte **Arbeit** neben
+  der **Phasenzeit** — die Phasenzeit trägt nicht mehr die Beschriftung „Arbeit"
+  (beide gehen um das 7- bis 25-Fache auseinander, wenn eine Phasenspanne eine
+  Unterbrechung überdauert). Neue **additive** Felder der Zusammenfassung:
+  `work_seconds`, `phase_seconds`, `wait_seconds`, `total_seconds` und `tokens`
+  (`null`, wenn unbestimmt; `phase_seconds + wait_seconds = total_seconds` bis auf
+  Rundung).
+- **Die Run-Liste beantwortet ihre Frage.** Die Issue-Spalte zeigt eine einzeilige
+  Titelzeile, abgeleitet aus dem rohen Issue-Text (erste `#`-Überschrift in den
+  ersten zwölf Zeilen, eine „Issue"-Überschrift übersprungen; sonst die erste
+  nicht-leere Zeile; führendes `ADW-Issue:`/`Issue:` entfernt; über 90 Zeichen auf
+  89 + `…` gekürzt), mit dem vollständigen Rohtext im `title` der Zelle. Phase und
+  Status werden eine Spalte — ein abgeschlossener Lauf zeigt ein Wort, ein
+  laufender/wartender Lauf ergänzt seine Phase. Serverseitiges Sortieren
+  (`?sort=start|duration|cost|events`, `?dir=asc|desc`) und Filtern (`?repo=`,
+  `?status=`) über Query-Parameter, wobei `awaiting_approval` über jeder Sortierung
+  bleibt und eine leere Treffermenge einen lokalisierten Hinweis zeigt. Unbekannte
+  `sort`/`dir` fallen auf `start`/`desc` zurück; ein unbekannter Filterwert ergibt
+  eine leere Treffermenge, nie die ungefilterte Liste.
+
 ## [0.22.0] — 2026-09-13
 
 ### Geändert

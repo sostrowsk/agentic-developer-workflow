@@ -333,13 +333,42 @@ adw gui [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--lang de|en
 
 **A — Run-Liste (`/`)**
 
-Tabelle über alle registrierten Repos: Run-ID · Repo · Issue (gekürzt) · Phase ·
-Status (läuft / wartet auf Approval / fertig / eskaliert) · Start · Dauer ·
-Kosten · Event-Zahl. Sortierbar, Filter nach Repo und Status. Läufe sind nach
-Status gruppiert: `awaiting_approval` zuerst, dann `running`, dann der Rest — der
-handlungsbedürftige Lauf bleibt oben, statt unter neuere fertige Läufe zu
-rutschen. Innerhalb jeder Gruppe bleibt die bestehende Reihenfolge „neueste
-zuerst". Live aktualisiert.
+Tabelle über alle registrierten Repos: Run-ID · Repo · Issue-Titel · Status ·
+Start · Dauer · Kosten · Event-Zahl. Die Issue-Spalte zeigt eine einzeilige
+**Titelzeile**, abgeleitet aus dem rohen Issue-Text (siehe unten), kein rohes
+Markdown; der vollständige Rohtext steht im `title`-Attribut der Zelle. Phase und
+Status sind **eine** Spalte: sie nennt den Status und ergänzt die Phase nur, wenn
+das hilft (ein laufender oder wartender Lauf) — ein abgeschlossener Lauf zeigt
+genau ein Wort (kein `fertig`/`fertig` mehr).
+
+Sortierung und Filterung sind **serverseitig über Query-Parameter** (wie beim
+Raw-Reiter mit `?raw_q`/`?raw_type` — kein Client-Zustand, keine Persistenz):
+
+- `?sort=` ∈ {`start`, `duration`, `cost`, `events`} und `?dir=` ∈ {`asc`,
+  `desc`}. Dauer und Kosten sortieren nach den korrigierten Laufwerten (siehe
+  7.8), `events` nach der Ereigniszahl. Unbekannte oder fehlende Werte fallen auf
+  `start`/`desc` zurück — nie ein Fehler, nie eine leere Liste; fehlende
+  Kennzahlen (`null`) sortieren ohne Ausnahme ans Ende.
+- `?repo=` filtert nach Repo-Slug, `?status=` nach Statuswert; kombinierte Filter
+  wirken als Schnittmenge. Ein unbekannter Wert ergibt eine **leere Treffermenge
+  mit lokalisiertem Hinweis** — nicht die ungefilterte Liste und kein Fehler.
+
+Läufe sind nach Status gruppiert: `awaiting_approval` zuerst, dann `running`, dann
+der Rest — der handlungsbedürftige Lauf bleibt oben, statt unter neuere fertige
+Läufe zu rutschen. Die Gruppierung wird **vor** der gewählten Sortierung angewendet
+und behält Vorrang; sie ist nicht abschaltbar. Innerhalb jeder Gruppe bleibt die
+bestehende Reihenfolge „neueste zuerst". Alle Parameter überleben die
+Sprachumschaltung, weil sie in der URL stehen. Live aktualisiert.
+
+**Titelableitung** (reine Textverarbeitung, nie Markdown-/HTML-Rendering): (1) die
+erste `#`-Überschrift unter den ersten zwölf Zeilen, ihr Text ohne `#`; eine
+Überschrift, die nur „Issue" benennt (`^issue\b`, ohne Groß-/Kleinschreibung), wird
+übersprungen, die nächste gewinnt; eine Überschrift nach Zeile zwölf gewinnt nicht.
+(2) Sonst die erste nicht-leere Zeile. (3) Ein führendes `ADW-Issue:`/`Issue:` wird
+entfernt. (4) Über 90 Zeichen → auf 89 + `…` gekürzt. (5) Leer oder fehlend → eine
+leere Zelle, nie ein Platzhalter. Der Titel ist reines Darstellungsdatum der Liste;
+das API-Feld `issue` (der rohe, auf `_ISSUE_MAX` gekürzte Text) bleibt unverändert
+und ist **nicht** die Quelle des vollständigen `title`-Attributs.
 
 Ein Trockenlauf (`dry_run: true` im `run`-Start-Payload) trägt ein kurzes
 `Dry-Run`-Label in seiner Zeile, damit eine inhaltsarme Simulation nie mit einem
@@ -748,6 +777,19 @@ und kein neuer Phasenwert; die GUI bleibt read-only.
 in der URL. Path Traversal ist ausgeschlossen: nur Registry-bekannte Repos, nur
 Run-IDs nach `RUN_ID_RE`, nur eine Whitelist von Artefaktnamen.
 
+**Contract (Laufkennzahlen).** Bei `GET /api/runs` und
+`GET /api/runs/{repo}/{run_id}` behalten `duration` und `cost` Name und Typ, ihre
+**Bedeutung** ist aber korrigiert: sie beziffern den ganzen Lauf (Summe über alle
+abgeschlossenen `run`-Spannen), nicht die letzte CLI-Spanne — für Läufe mit Gates
+steigen die Werte (siehe 7.8). Die benannten Zeitgrößen-Felder `work_seconds`,
+`phase_seconds`, `wait_seconds`, `total_seconds` und die summierten `tokens` sind
+**additiv**. Jedes andere Feld bleibt wörtlich; insbesondere bleibt `issue` der
+rohe, gekürzte Wert und wird **nicht** zum Anzeigetitel umgedeutet (der Titel lebt
+nur im Listen-Markup). Die Route `/` nimmt die optionalen Query-Parameter
+`sort`/`dir`/`repo`/`status` an (7.2 A); die API-Routen erhalten **keine**
+Sortier-/Filterparameter. `tree`, `raw`, `latest_context`, `problems` und `phases`
+(inkl. `start`/`end` aus dem vorigen Release) bleiben unverändert.
+
 ### 7.5 i18n
 
 `adw/gui/i18n.py` hält ein `dict[str, dict[str, str]]` für `de` und `en`.
@@ -816,15 +858,45 @@ Rechenregeln (bindend):
   keine Wartezeit erfunden.
 - Eine Phase ohne parsebaren `start` (nie gelaufen) bekommt kein Segment, bleibt
   aber in der Legende sichtbar, gedämpft; Name und Dauer bleiben lesbar.
-- Drei Zahlen unter der Schiene: **Arbeit** = Summe der Phasendauern (eine offene
-  aktive Phase zählt die bis zum Seitenaufbau verstrichene Zeit), **Warten** =
-  Summe der Lücken, **Gesamt** = `T`. Arbeit + Warten = Gesamt bis auf Rundung.
-  Die Labels sind lokalisiert (`Arbeit`/`Work`, `Warten`/`Waiting`,
-  `Gesamt`/`Total`).
+- Die Zahlen unter der Schiene benennen drei VERSCHIEDENE Zeitgrößen mit einem
+  Vokabular (siehe 7.8): **Arbeit** = die echte Arbeit, die Summe der
+  Spannen-Dauern aus der korrigierten Zusammenfassung (`work_seconds`);
+  **Phasenzeit** = die Summe der farbigen Phasenband-Segmente (eine offene aktive
+  Phase zählt bis zum Seitenaufbau) — das ist die Fläche der Schiene, **nicht**
+  Arbeit, und trägt nie die Beschriftung „Arbeit" (beide gehen um das 7- bis
+  25-Fache auseinander, wenn eine Phasenspanne eine Unterbrechung überdauert);
+  **Warten** = die Summe der Lücken; **Gesamt** = `T`. Phasenzeit + Warten = Gesamt
+  bis auf Rundung. Die Labels sind lokalisiert (`Arbeit`/`Work`,
+  `Phasenzeit`/`Phase time`, `Warten`/`Waiting`, `Gesamt`/`Total`). Arbeit entfällt,
+  wenn unbestimmt (keine abgeschlossene Spanne), nie als `0`.
 
 `duration`, `name` und `status` je Phaseneintrag bleiben exakt wie zuvor; das
 API-`end` einer offenen Phase bleibt `null` (der Seitenaufbau-Zeitpunkt ist nur
 eine Darstellungsregel der Zeitachse, nie ein API-Phasenende).
+
+### 7.8 Kennzahlen des ganzen Laufs und benannte Zeitgrößen
+
+Die Laufzusammenfassung (`_summary`, speist Run-Liste UND Run-Detail-Kopf, sodass
+beide einig sind) berichtet die Kennzahlen des **ganzen Laufs**. Ein Lauf mit
+Freigabe-Gates besteht aus mehreren CLI-Aufrufen und damit mehreren `run`-Spannen
+in einem Log; `duration`, `cost` und `tokens` werden über **alle abgeschlossenen**
+`run`-Spannen summiert, nicht aus der letzten genommen. `start` bleibt die erste
+Spanne, der Status der der letzten. Eine offene Spanne trägt nichts bei; ohne
+abgeschlossene Spanne bleibt der Wert leer — nie eine erfundene `0` (ein echter
+`0`-Wert aus dem Payload bleibt erhalten).
+
+Vier **additive** Felder der Zusammenfassung tragen die benannten Zeitgrößen (je
+eine Zahl oder `null`):
+
+- `work_seconds` — Arbeit: Summe von `totals.duration` über die abgeschlossenen
+  `run`-Spannen (numerisch identisch zu `duration`).
+- `phase_seconds` — Phasenzeit: Summe der Phasen-Spannen mit parsebarem
+  `start`/`end` (die Schienenfläche aus 7.7); **nicht** Arbeit.
+- `total_seconds` — Gesamt: kleinster Phasenstart bis größtes Phasenende (bis zum
+  Seitenaufbau für eine aktive offene Phase).
+- `wait_seconds` — Warten: `total_seconds − phase_seconds`; die Phasen-Spannen
+  überlappen nicht, die Zerlegung ist also eindeutig. `phase_seconds +
+  wait_seconds = total_seconds` bis auf Rundung.
 
 ## 8. Sicherheit und Datenschutz
 

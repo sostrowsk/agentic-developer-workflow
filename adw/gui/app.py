@@ -1011,11 +1011,45 @@ def _awaiting_gate_phase(events, state_phase):
     return None
 
 
-def _summary(slug, run_id, events, state, has_trace=None) -> dict:
+_RUN_TOTAL_KEYS = ("duration", "cost", "tokens")
+
+
+def _run_totals(events) -> dict:
+    """Sum ``totals.duration``/``cost``/``tokens`` over ALL closed ``run`` spans
+    (A1). A gated run is several CLI commands and thus several ``run`` spans in one
+    log; the whole-run figure is the SUM, not the last span's. Each ``run`` end
+    record marks one closed span; an open (unfinished) span has no end and no
+    ``totals``, so it contributes nothing. A metric stays ``None`` when no closed
+    span carries a numeric value — never a fabricated ``0`` (E6) — while a genuine
+    ``0`` from the payload is kept."""
+    sums = {key: None for key in _RUN_TOTAL_KEYS}
+    for e in events:
+        if e.get("type") == "run" and e.get("kind") == "end":
+            totals = _as_mapping(_mapping_payload(e).get("totals"))
+            for key in _RUN_TOTAL_KEYS:
+                v = totals.get(key)
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    sums[key] = v if sums[key] is None else sums[key] + v
+    return sums
+
+
+def _summary(slug, run_id, events, state, has_trace=None, now_epoch=None) -> dict:
     start_rec, end_rec = _run_span(events)
     start_payload = _mapping_payload(start_rec or {})
     end_payload = _mapping_payload(end_rec or {})
-    totals = _as_mapping(end_payload.get("totals"))
+    # Whole-run figures (A1): summed over every closed span, not the last one.
+    totals = _run_totals(events)
+    # The named time sizes (A2): the phase band's own geometry gives the phase time
+    # (sum of the coloured segments), the waiting time (the gaps) and the total; the
+    # summary reuses the same derivation the header rail uses so both agree.
+    phases = _phase_bar(events, state.phase if state is not None else None)
+    tl = _phase_timeline(phases, time.time() if now_epoch is None else now_epoch)
+    if tl.get("scaled"):
+        phase_seconds = tl["work_seconds"]  # the phase-band area — NOT work (E5)
+        wait_seconds = tl["wait_seconds"]
+        total_seconds = tl["total_seconds"]
+    else:
+        phase_seconds = wait_seconds = total_seconds = None
     issue = start_payload.get("issue")
     if issue is None and state is not None:
         # A run without an event log (Aufgabe G) still names its issue in state.
@@ -1059,8 +1093,16 @@ def _summary(slug, run_id, events, state, has_trace=None) -> dict:
         "phase": state.phase if state is not None else None,
         "status": status,
         "start": (start_rec or {}).get("ts"),
-        "duration": totals.get("duration"),
-        "cost": totals.get("cost"),
+        # BEDEUTUNGSÄNDERUNG (A1): duration/cost now sum the WHOLE run; work_seconds
+        # is numerically identical to duration and named as the real work (E5),
+        # distinct from phase_seconds. tokens is the summed scalar token total.
+        "duration": totals["duration"],
+        "cost": totals["cost"],
+        "work_seconds": totals["duration"],
+        "phase_seconds": phase_seconds,
+        "wait_seconds": wait_seconds,
+        "total_seconds": total_seconds,
+        "tokens": totals["tokens"],
         "event_count": len(events),
         # Aufgabe G: a clear indication whether a trace EXISTS for this run — the
         # presence of the event log, NOT whether the reader accepted a record. An
@@ -1996,8 +2038,11 @@ def _timeline(events, has_trace=None) -> dict:
         })
 
     start_rec, end_rec = _run_span(events)
-    totals = _as_mapping(_mapping_payload(end_rec or {}).get("totals"))
-    duration = totals.get("duration")
+    # A1/B3: the timeline header's run figures are the WHOLE run (summed over all
+    # closed spans), the same source the list and the run-detail head feed from —
+    # not the last span alone.
+    totals = _run_totals(events)
+    duration = totals["duration"]
     if duration is None:
         a = _ts_epoch((start_rec or {}).get("ts"))
         # A finished run measures to its run-end; a live/open run measures the
@@ -2006,7 +2051,7 @@ def _timeline(events, has_trace=None) -> dict:
         # span bars, which also extend to `t_end`.
         b = _ts_epoch(end_rec.get("ts")) if end_rec is not None else t_end
         duration = (b - a) if (a is not None and b is not None) else None
-    cost = totals.get("cost")
+    cost = totals["cost"]
     if cost is None:
         cost = _events_cost(events)
     return {
@@ -2493,7 +2538,92 @@ def _change_scope(events, snaps: dict, repo_path, run_dir: Path) -> dict:
     return {"lanes": lanes, "declared_scope": _declared_scope(run_dir)}
 
 
-def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
+_TITLE_MAX = 90
+
+
+def _raw_issue(events, state):
+    """The FULL, untruncated raw issue text of a run: the ``run`` start payload's
+    ``issue`` (or the state's ``issue`` for a run without a trace), or None. Unlike
+    the summary's ``issue`` field (truncated to ``_ISSUE_MAX``) this is the complete
+    text — the source of the list's ``title`` attribute (A3)."""
+    raw = _mapping_payload(_run_span(events)[0] or {}).get("issue")
+    if raw is None and state is not None:
+        raw = state.issue
+    return raw
+
+
+def _issue_title(raw) -> str:
+    """The one-line display title derived from the raw issue text (A3). Pure text
+    processing, never markdown/HTML rendering (E7):
+
+    1. the first ``#`` heading among the first twelve lines (its text without the
+       ``#``); a heading that only names "Issue" (``^issue\\b``, case-insensitive)
+       is skipped so the next heading wins; a heading past line twelve does not win;
+    2. otherwise the first non-empty line;
+    3. a leading ``ADW-Issue:`` / ``Issue:`` is removed;
+    4. longer than 90 chars → cut to 89 + ``…``;
+    5. empty / missing → an empty string (the caller renders an empty cell).
+    """
+    if not isinstance(raw, str):
+        return ""
+    lines = raw.splitlines()
+    title = None
+    for line in lines[:12]:
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            text = stripped.lstrip("#").strip()
+            if re.match(r"(?i)^issue\b", text):
+                continue  # an "Issue"-only heading names nothing — try the next one
+            if text:
+                title = text
+                break
+    if title is None:
+        for line in lines:
+            if line.strip():
+                title = line.strip()
+                break
+    if title is None:
+        return ""
+    title = re.sub(r"(?i)^(adw-issue|issue)\s*:\s*", "", title).strip()
+    if len(title) > _TITLE_MAX:
+        title = title[:89] + "…"
+    return title
+
+
+_LIST_SORT_KEYS = {"start": "start", "duration": "duration",
+                   "cost": "cost", "events": "event_count"}
+_LIST_STATUS_RANK = {"awaiting_approval": 0, "running": 1}
+
+
+def _apply_list_controls(entries, sort, direction, repo_f, status_f):
+    """Server-side filtering and sorting of the run list (A5). Filters intersect; an
+    unknown value simply matches nothing (an empty result — the caller shows a
+    hint). Unknown/absent ``sort``/``dir`` fall back to ``start``/``desc`` — never an
+    error, never a spuriously empty list. Missing metrics (null) sort to the end
+    without raising. The existing status grouping (``awaiting_approval`` first, then
+    ``running``, then the rest; newest first within a group) is applied AFTER the
+    chosen sort and keeps priority. Returns ``(ordered_entries, filter_active)``."""
+    filter_active = repo_f is not None or status_f is not None
+    result = list(entries)
+    if repo_f is not None:
+        result = [e for e in result if e.get("repo") == repo_f]
+    if status_f is not None:
+        result = [e for e in result if e.get("status") == status_f]
+    if sort not in _LIST_SORT_KEYS:
+        sort, direction = "start", "desc"
+    if direction not in ("asc", "desc"):
+        direction = "desc"
+    key = _LIST_SORT_KEYS[sort]
+    reverse = direction == "desc"
+    present = [e for e in result if e.get(key) is not None]
+    missing = [e for e in result if e.get(key) is None]
+    present.sort(key=lambda e: e.get(key), reverse=reverse)
+    ordered = present + missing  # null metrics rank last, in either direction
+    ordered.sort(key=lambda e: _LIST_STATUS_RANK.get(e.get("status"), 2))
+    return ordered, filter_active
+
+
+def _list_runs(refs: dict[str, RepoRef], for_html: bool = False) -> list[dict]:
     entries: list[dict] = []
     for ref in refs.values():
         if not ref.exists or not ref.path:
@@ -2536,10 +2666,16 @@ def _list_runs(refs: dict[str, RepoRef]) -> list[dict]:
                 # readable state, and that run must not vanish from the listing.
             except OSError:
                 continue  # one unreadable run must not drop the rest of the repo
-            entries.append(
-                _summary(ref.slug, child.name, events, state,
-                         has_trace=events_file is not None)
-            )
+            summary = _summary(ref.slug, child.name, events, state,
+                               has_trace=events_file is not None)
+            if for_html:
+                # Display-only enrichment for the list template (A3): the derived
+                # one-line title and the FULL raw text for the `title` attribute.
+                # These are NOT API fields — the JSON list stays unchanged.
+                raw = _raw_issue(events, state)
+                summary["issue_title"] = _issue_title(raw)
+                summary["issue_full"] = raw
+            entries.append(summary)
     # Stable ordering: newest start first, then grouped by status priority —
     # `awaiting_approval` (needs a human) ahead of `running` ahead of the rest.
     # A stable sort keeps the newest-first ordering within each group.
@@ -2737,8 +2873,26 @@ def create_app(repos=None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def run_list_page(request: Request):
         lang, t, switch_qs = _lang_context(request)
+        # A5: the list takes four OPTIONAL query params (sort, dir, repo, status),
+        # evaluated server-side like the Raw tab — no client state, no persistence.
+        entries = _list_runs(refs, for_html=True)
+        # Filter dropdowns are populated from the UNFILTERED set so every choice
+        # stays reachable regardless of the current filter.
+        repo_options = sorted({e["repo"] for e in entries if e.get("repo_exists")})
+        status_options = sorted({e["status"] for e in entries
+                                 if e.get("repo_exists") and e.get("status")})
+        sort = request.query_params.get("sort")
+        direction = request.query_params.get("dir")
+        repo_f = request.query_params.get("repo") or None
+        status_f = request.query_params.get("status") or None
+        shown, filter_active = _apply_list_controls(entries, sort, direction, repo_f, status_f)
         html = _TEMPLATES.get_template("run_list.html").render({
-            "entries": _list_runs(refs), "t": t, "lang": lang, "switch_qs": switch_qs,
+            "entries": shown, "t": t, "lang": lang, "switch_qs": switch_qs,
+            "repo_options": repo_options, "status_options": status_options,
+            "cur_sort": sort if sort in _LIST_SORT_KEYS else "start",
+            "cur_dir": direction if direction in ("asc", "desc") else "desc",
+            "cur_repo": repo_f or "", "cur_status": status_f or "",
+            "filter_active": filter_active,
         })
         return _apply_lang_cookie(request, HTMLResponse(html))
 

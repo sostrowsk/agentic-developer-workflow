@@ -10,13 +10,35 @@
     <h1>{{ t.runs_title }}</h1>
     <a class="lang-switch" href="?{{ switch_qs }}">{{ t.lang_switch }}</a>
   </header>
+  {#- A5: the sort links preserve the active filter; the filter form preserves the
+      active sort. Both ride in the URL (E2), so the language switch keeps them. -#}
+  {%- set filter_q %}{% if cur_repo %}&repo={{ cur_repo | urlencode }}{% endif %}{% if cur_status %}&status={{ cur_status | urlencode }}{% endif %}{% endset %}
+  {%- macro sort_th(key, label) %}
+        <th class="sortable"><a href="?sort={{ key }}&dir={% if cur_sort == key and cur_dir == 'asc' %}desc{% else %}asc{% endif %}{{ filter_q }}">{{ label }}{% if cur_sort == key %} {{ '▲' if cur_dir == 'asc' else '▼' }}{% endif %}</a></th>
+  {%- endmacro %}
+  <form class="run-filter" method="get">
+    <input type="hidden" name="sort" value="{{ cur_sort }}">
+    <input type="hidden" name="dir" value="{{ cur_dir }}">
+    <label>{{ t.col_repo }}
+      <select name="repo">
+        <option value="">{{ t.filter_all }}</option>
+        {% for r in repo_options %}<option value="{{ r }}"{% if r == cur_repo %} selected{% endif %}>{{ r }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>{{ t.col_status }}
+      <select name="status">
+        <option value="">{{ t.filter_all }}</option>
+        {% for s in status_options %}<option value="{{ s }}"{% if s == cur_status %} selected{% endif %}>{{ t.get("status_" + s, s) }}</option>{% endfor %}
+      </select>
+    </label>
+    <button type="submit">{{ t.filter_apply }}</button>
+  </form>
   <table class="run-list">
     <thead>
       <tr>
         <th>{{ t.col_run }}</th><th>{{ t.col_repo }}</th><th>{{ t.col_issue }}</th>
-        <th>{{ t.col_phase }}</th><th>{{ t.col_status }}</th>
-        <th>{{ t.col_start }}</th><th>{{ t.col_duration }}</th><th>{{ t.col_cost }}</th>
-        <th>{{ t.col_events }}</th>
+        <th>{{ t.col_status }}</th>
+        {{ sort_th("start", t.col_start) }}{{ sort_th("duration", t.col_duration) }}{{ sort_th("cost", t.col_cost) }}{{ sort_th("events", t.col_events) }}
       </tr>
     </thead>
     <tbody>
@@ -25,9 +47,8 @@
       <tr class="run-row{% if not e.has_trace %} no-trace{% endif %}">
         <td class="run-id"><a href="/runs/{{ e.repo }}/{{ e.run_id }}">{{ e.run_id }}</a>{% if e.dry_run %} <span class="dry-run-tag">{{ t.dry_run }}</span>{% endif %}</td>
         <td>{{ e.repo }}</td>
-        <td class="issue">{{ e.issue if e.issue is not none else "" }}</td>
-        <td>{{ e.phase if e.phase is not none else "" }}</td>
-        <td>{% if e.status is not none %}<span class="run-status status-{{ e.status }}">{{ t.get("status_" + e.status, e.status) }}</span>{% endif %}</td>
+        <td class="issue"{% if e.issue_full %} title="{{ e.issue_full }}"{% endif %}>{{ e.issue_title if e.issue_title is not none else "" }}</td>
+        <td class="status-cell">{% if e.status is not none %}<span class="run-status status-{{ e.status }}">{{ t.get("status_" + e.status, e.status) }}</span>{% endif %}{% if e.status in ("running", "awaiting_approval") and e.phase %} <span class="phase-note">{{ e.phase }}</span>{% endif %}</td>
         <td class="ts">{{ e.start | fmt_ts }}</td>
         <td class="dur">{{ e.duration | fmt_duration }}</td>
         <td class="cost">{{ e.cost | fmt_cost }}</td>
@@ -37,9 +58,11 @@
       <tr class="run-row missing-repo">
         <td>&mdash;</td>
         <td>{{ e.repo }}</td>
-        <td colspan="7">{{ t.repo_unavailable }} {{ e.hint }}</td>
+        <td colspan="6">{{ t.repo_unavailable }} {{ e.hint }}</td>
       </tr>
       {% endif %}
+    {% else %}
+      <tr class="no-matches"><td colspan="8">{% if filter_active %}{{ t.list_no_matches }}{% endif %}</td></tr>
     {% endfor %}
     </tbody>
   </table>
