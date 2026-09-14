@@ -400,14 +400,14 @@
   });
 
   // --- A1: keyboard path for the trace tree, built as an ARIA tree (role="tree" with
-  // role="treeitem" rows, so the aria-selected the selection sets is supported and a
-  // managed active descendant exposes the cursor). The column is exactly ONE tab stop
-  // (E2): the client makes the `.trace-list` the single sequential entry point and
-  // takes the REDUNDANT fold controls (their action is the ←/→ keys) out of the tab
-  // order — row ACTION links (raw-jump, recovery report) keep their native keyboard
-  // focus, so those actions stay reachable. The navigation cursor (`treeCursorId`) is
-  // kept SEPARATE from the selection (`selectedSeq`) — moving it never selects. No new
-  // server markup per row (E3), no persistence.
+  // role="treeitem" rows, so the aria-selected the selection sets is supported) with a
+  // ROVING TABINDEX: exactly ONE stop is tabbable at a time (E2/AC 4), and moving it
+  // manages real focus so the cursor scrolls into view and stays visible. A "stop" is
+  // a navigable row OR one of its inline row ACTIONS (a raw-jump / recovery-report
+  // link): the actions are reached with the arrow keys and activated in place — never
+  // a separate sequential Tab stop, never routed through node selection. The cursor
+  // (`treeCursorId`) is kept SEPARATE from the selection (`selectedSeq`) — moving it
+  // never selects. No new server markup per row (E3), no persistence.
   var treeCursorId = null;
   var treeItemSeq = 0;
 
@@ -442,6 +442,27 @@
     return out;
   }
 
+  // The inline ACTION links that belong to a row (its own, not a nested child row's):
+  // the raw-jump link and the recovery-report link. They are activated in place.
+  function rowActions(li) {
+    var out = [];
+    (li.querySelectorAll ? li.querySelectorAll("a") : []).forEach(function (a) {
+      if (a.closest && a.closest("li") === li) out.push(a);
+    });
+    return out;
+  }
+
+  // The flat list of keyboard STOPS in visual order: each visible row, immediately
+  // followed by that row's inline actions.
+  function treeStops() {
+    var stops = [];
+    navigableRows().forEach(function (row) {
+      stops.push(row);
+      rowActions(row).forEach(function (a) { stops.push(a); });
+    });
+    return stops;
+  }
+
   // A fold row is a phase OR a group/repetition wrapper; both open and close.
   function isExpandable(li) {
     return li.getAttribute("data-node-type") === "phase"
@@ -465,69 +486,71 @@
     }
   }
 
-  function cursorContext() {
-    var rows = navigableRows();
+  // The current cursor stop (row or action). Absent an explicit cursor (or after its
+  // element was hidden), follow the selected row.
+  function cursorStop() {
+    var stops = treeStops();
     var i = -1;
     if (treeCursorId !== null) {
-      for (var a = 0; a < rows.length; a++) {
-        if (rows[a].getAttribute("id") === treeCursorId) { i = a; break; }
+      for (var a = 0; a < stops.length; a++) {
+        if (stops[a].getAttribute("id") === treeCursorId) { i = a; break; }
       }
     }
-    // Absent an explicit cursor (or after its row was hidden), follow the selection.
     if (i === -1 && selectedSeq) {
-      for (var b = 0; b < rows.length; b++) {
-        if (rows[b].getAttribute("data-seq") === selectedSeq) { i = b; break; }
+      for (var b = 0; b < stops.length; b++) {
+        if (stops[b].getAttribute("data-seq") === selectedSeq) { i = b; break; }
       }
     }
-    if (i === -1 && rows.length) i = 0;
-    return { rows: rows, i: i };
+    if (i === -1 && stops.length) i = 0;
+    return i >= 0 ? stops[i] : null;
   }
 
-  function cursorLi() {
-    var c = cursorContext();
-    return c.i >= 0 ? c.rows[c.i] : null;
+  function isActionStop(elm) {
+    return !!elm && elm.tagName === "A";
   }
 
-  // Show the keyed row (B6: same visual language as focus) and expose it as the
-  // container's active descendant; bring it into view on an explicit move so the
-  // cursor stays visible in a tree taller than the viewport (finding: scroll).
-  function updateCursorMarker(scroll) {
+  // Move real focus onto the current stop (roving tabindex: only it is tabbable), show
+  // it (B6) and, on an explicit move, scroll it into view so it stays visible in a
+  // tree taller than the viewport. Focus is taken only on an actual keyboard move, not
+  // at init/selection (so the page does not steal focus on load).
+  function updateCursor(opts) {
+    opts = opts || {};
     var list = treeListEl();
     if (!list) return;
-    var li = cursorLi();
+    var stops = treeStops();
+    var cur = cursorStop();
+    stops.forEach(function (s) { s.setAttribute("tabindex", s === cur ? "0" : "-1"); });
     list.querySelectorAll(".tree-cursor").forEach(function (n) { n.classList.remove("tree-cursor"); });
-    if (li) {
-      li.classList.add("tree-cursor");
-      var id = li.getAttribute("id");
-      if (id) list.setAttribute("aria-activedescendant", id);
-      if (scroll && li.scrollIntoView) li.scrollIntoView({ block: "nearest", inline: "nearest" });
-    } else {
-      list.removeAttribute("aria-activedescendant");
-    }
+    if (!cur) return;
+    cur.classList.add("tree-cursor");
+    if (opts.focus && cur.focus) cur.focus();
+    if (opts.scroll && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest", inline: "nearest" });
   }
 
-  function setCursor(li) {
-    treeCursorId = li ? li.getAttribute("id") : null;
-    updateCursorMarker(true);
+  function setCursor(elm) {
+    treeCursorId = elm ? elm.getAttribute("id") : null;
+    updateCursor({ focus: true, scroll: true });
   }
 
   // Keep the cursor on the selected row (so the next arrow continues from there),
-  // WITHOUT scrolling and WITHOUT altering the selection.
+  // WITHOUT taking focus, scrolling or altering the selection.
   function syncTreeCursorToSelection() {
     var list = treeListEl();
     if (!list) return;
     var row = list.querySelector('.node[data-seq="' + selectedSeq + '"]');
     if (row) treeCursorId = row.getAttribute("id");
-    updateCursorMarker(false);
+    updateCursor({ focus: false, scroll: false });
   }
 
   function moveCursor(delta) {
-    var c = cursorContext();
-    if (c.i === -1) return;
-    var ni = c.i + delta;
+    var stops = treeStops();
+    var cur = cursorStop();
+    var i = cur ? stops.indexOf(cur) : -1;
+    if (i === -1) { if (stops.length) setCursor(stops[0]); return; }
+    var ni = i + delta;
     if (ni < 0) ni = 0;
-    if (ni > c.rows.length - 1) ni = c.rows.length - 1;
-    setCursor(c.rows[ni]);
+    if (ni > stops.length - 1) ni = stops.length - 1;
+    setCursor(stops[ni]);
   }
 
   function setPhaseOpenLi(li, open) {
@@ -563,22 +586,37 @@
     return null;
   }
 
-  function foldRight(li) {
+  // The row a stop belongs to (the stop itself if it is a row, else its owning li).
+  function stopRow(elm) {
+    if (!elm) return null;
+    if (elm.tagName === "LI") return elm;
+    return elm.closest ? elm.closest("li") : null;
+  }
+
+  function foldRight(stop) {
+    var li = stopRow(stop);
     if (!li || !isExpandable(li)) return;  // no fold mechanism: no-op, no error
     if (!foldIsOpen(li)) { setFoldOpen(li, true); return; }
     moveCursor(1);  // already open -> to the first child row
   }
 
-  function foldLeft(li) {
+  function foldLeft(stop) {
+    var li = stopRow(stop);
     if (!li) return;
     if (isExpandable(li) && foldIsOpen(li)) { setFoldOpen(li, false); return; }
     var parent = governingFoldRow(li);  // closed/leaf row -> to the parent fold row
     if (parent) setCursor(parent);
   }
 
+  // Activate a row action from the keyboard by routing through its OWN click path
+  // (raw-jump navigates; recovery opens the escalation report) — exactly a mouse
+  // click, never a node selection substituted for it.
+  function activateRowAction(link) { if (link && link.click) link.click(); }
+
   // Give every navigable row (visible or not, so hidden children are ready when
   // revealed) its treeitem role, a stable id and — for fold rows — an aria-expanded
-  // that mirrors the fold state.
+  // that mirrors the fold state; give each inline action a stable id so the roving
+  // cursor can address it.
   function decorateTreeItems() {
     var list = treeListEl();
     if (!list) return;
@@ -587,6 +625,9 @@
       li.setAttribute("role", "treeitem");
       if (li.getAttribute("id") === null) li.setAttribute("id", "adw-treeitem-" + (++treeItemSeq));
       if (isExpandable(li)) li.setAttribute("aria-expanded", foldIsOpen(li) ? "true" : "false");
+      rowActions(li).forEach(function (a) {
+        if (a.getAttribute("id") === null) a.setAttribute("id", "adw-treeaction-" + (++treeItemSeq));
+      });
     });
   }
 
@@ -594,17 +635,16 @@
     var list = treeListEl();
     if (!list) return;
     list.setAttribute("role", "tree");
-    if (list.getAttribute("tabindex") === null) list.setAttribute("tabindex", "0");
-    // Take the REDUNDANT fold controls out of the sequential tab order (their action
-    // is the ←/→ keys); the column is ONE tab stop. Row ACTION links keep their native
-    // focus so raw-range navigation and the escalation report stay keyboard-reachable.
+    // Take the REDUNDANT fold controls out of the tab order (their action is the ←/→
+    // keys). Row ACTION links are NOT removed here — the roving tabindex keeps exactly
+    // one stop tabbable, so the actions stay operable without adding a Tab stop.
     list.querySelectorAll("summary").forEach(function (s) { s.setAttribute("tabindex", "-1"); });
     list.querySelectorAll("button").forEach(function (b) {
       if (b.getAttribute("data-fold-toggle") !== null
         || (b.classList && b.classList.contains("fold-toggle"))) b.setAttribute("tabindex", "-1");
     });
     decorateTreeItems();
-    updateCursorMarker(false);  // show the current cursor (initially the selected row)
+    updateCursor({ focus: false, scroll: false });  // roving tabindex + the initial cursor
   }
 
   // A2: the whole Timeline row is a keyboard tab stop, in display order.
@@ -645,21 +685,27 @@
       return;
     }
 
-    // Trace tree (A1): navigation + fold + selection over the single entry point.
+    // Trace tree (A1): navigation + fold + selection/activation over the single entry
+    // point. The effective stop is the focused action link (real roving focus lands on
+    // it) or, absent that, the internal cursor stop.
     if (!t.closest(".trace-list")) return;
+    var focusedAction = t.closest("a");
+    if (focusedAction && !(focusedAction.closest && focusedAction.closest(".trace-list"))) focusedAction = null;
     if (key === "ArrowDown") { prevent(); moveCursor(1); }
     else if (key === "ArrowUp") { prevent(); moveCursor(-1); }
-    else if (key === "ArrowRight") { prevent(); foldRight(cursorLi()); }
-    else if (key === "ArrowLeft") { prevent(); foldLeft(cursorLi()); }
+    else if (key === "ArrowRight") { prevent(); foldRight(cursorStop()); }
+    else if (key === "ArrowLeft") { prevent(); foldLeft(cursorStop()); }
     else if (key === "Home") { prevent(); var rh = navigableRows(); if (rh.length) setCursor(rh[0]); }
     else if (key === "End") { prevent(); var re = navigableRows(); if (re.length) setCursor(re[re.length - 1]); }
     else if (key === "Enter" || key === " ") {
-      var li = cursorLi();
-      if (!li) return;
-      if (li.getAttribute("data-seq") !== null) {
-        prevent(); setCursor(li); selectNode(li.getAttribute("data-seq"));  // select the node
-      } else if (isExpandable(li)) {
-        prevent(); setFoldOpen(li, !foldIsOpen(li));  // a wrapper row: toggle its fold
+      var stop = focusedAction || cursorStop();
+      if (!stop) return;
+      if (isActionStop(stop)) {
+        prevent(); activateRowAction(stop);  // a row action: activate it, never select
+      } else if (stop.getAttribute("data-seq") !== null) {
+        prevent(); setCursor(stop); selectNode(stop.getAttribute("data-seq"));  // select the node
+      } else if (isExpandable(stop)) {
+        prevent(); setFoldOpen(stop, !foldIsOpen(stop));  // a wrapper row: toggle its fold
       }
     }
   });

@@ -80,9 +80,9 @@ def test_tree_column_is_a_single_tab_stop(tmp_path):
 def test_tree_uses_treeitem_roles_and_a_managed_cursor_scrolled_into_view(tmp_path):
     """Review findings (roles + cursor): the column is a real ARIA tree —
     ``role="tree"`` with ``role="treeitem"`` rows, so ``aria-selected`` on a row is
-    supported (a bare ``<li>`` would not support it). The navigation cursor is exposed
-    through the container's ``aria-activedescendant`` (managed focus reference) and is
-    scrolled into view when it moves, so it stays visible on a tree taller than the
+    supported (a bare ``<li>`` would not support it). The cursor is managed with a
+    roving tabindex — real focus moves onto the current row (the single tab stop) and
+    is scrolled into view when it moves, so it stays visible on a tree taller than the
     viewport."""
     r = run_scenario(tmp_path, "tree-keyboard")
 
@@ -92,20 +92,28 @@ def test_tree_uses_treeitem_roles_and_a_managed_cursor_scrolled_into_view(tmp_pa
     assert r["afterEnter"]["selected_role"] == "treeitem", (
         "the selected row does not carry a treeitem role, so aria-selected is unsupported"
     )
-    # The active descendant tracks the cursor, and moving it scrolls it into view.
-    assert r["activedescendant"]["matches_cursor"] is True, (
-        "aria-activedescendant does not reference the current cursor row"
-    )
-    assert r["activedescendant"]["scrolled"] is True, "the cursor is not scrolled into view"
+    # Real focus moves to the cursor row (roving), it is the tabbable stop, and it is
+    # scrolled into view on a move.
+    assert r["cursor"]["focused"] is True, "focus is not managed onto the cursor row"
+    assert r["cursor"]["tabindex"] == "0", "the cursor row is not the roving tab stop"
+    assert r["cursor"]["scrolled"] is True, "the cursor is not scrolled into view"
 
 
-def test_row_action_links_stay_keyboard_reachable(tmp_path):
-    """Review finding (row actions): taking the tree column down to one tab stop must
-    remove the REDUNDANT fold controls from the tab order, not the row ACTION links.
-    A raw-jump link (raw-range navigation) and a recovery-report link keep their
-    native keyboard focus (no ``tabindex="-1"``), so those actions stay reachable
-    without a mouse."""
+def test_row_actions_stay_keyboard_operable_within_one_tab_stop(tmp_path):
+    """Review findings (row actions): even with inline row actions present, the tree
+    column is exactly ONE sequential tab stop — the action links are managed by the
+    roving tabindex (``-1``), not extra stops (AC 4 / contract). Yet each action stays
+    keyboard-OPERABLE: activating the raw-jump link performs its raw-range navigation,
+    and activating the recovery link opens the Artifacts tab and reveals the escalation
+    report — its own behaviour, never swallowed by node selection."""
     r = run_scenario(tmp_path, "tree-actions")
 
-    assert r["raw_jump_tabindex"] != "-1", "the raw-jump link was removed from the tab order"
-    assert r["recovery_tabindex"] != "-1", "the recovery-report link was removed from the tab order"
+    assert r["tab_stops"] == 1, f"the tree column holds {r['tab_stops']} tab stops, not 1"
+    assert r["links_managed"] is True, "action links are not managed by the roving tabindex"
+
+    assert r["raw_navs"] == ["?raw_from_seq=5&raw_to_seq=9"], (
+        "keyboard activation did not perform the raw-jump's raw-range navigation"
+    )
+    assert r["recovery"]["artifacts_active"] is True, "recovery did not open the Artifacts tab"
+    assert r["recovery"]["escalation_open"] is True, "recovery did not reveal the escalation report"
+    assert r["recovery"]["trace_active"] is False, "the Trace tab stayed active after recovery"

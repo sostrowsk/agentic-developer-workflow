@@ -902,14 +902,18 @@ per row is set by the client at runtime.
 
 The column is a genuine ARIA tree: the client sets `role="tree"` on the list and
 `role="treeitem"` on each navigable row (so the `aria-selected` on the selected node
-is supported and not a bare `<li>` attribute), exposes the cursor through the
-container's `aria-activedescendant`, and scrolls the cursored row into view as it
-moves so it stays visible in a tall tree. The compaction's group and repetition
-wrappers are navigable fold rows too (not selectable): → opens them and reveals their
-children, ← closes them. Only the redundant fold controls (the fold buttons and the
-group/repetition `<summary>`) leave the tab order; existing row-action links
-(raw-range jump, escalation report) keep their native keyboard focus so those actions
-stay reachable without a mouse.
+is supported and not a bare `<li>` attribute). It is driven by a **roving tabindex** —
+exactly one stop is tabbable at a time — and moving the cursor manages real focus onto
+that stop and scrolls it into view, so it stays visible in a tall tree. The
+compaction's group and repetition wrappers are navigable fold rows too (not
+selectable): → opens them and reveals their children, ← closes them. A row's inline
+ACTIONS (the raw-range jump, the escalation report) are roving stops of their own,
+reached with the arrow keys after their row; the redundant fold controls (the fold
+buttons and the group/repetition `<summary>`) are taken out of the sequence entirely.
+Activating an action (Enter/Space) performs its own behaviour in place — the raw-range
+navigation, opening the escalation report — and is never routed through node
+selection, so those actions stay keyboard-operable while the column keeps exactly one
+sequential Tab stop.
 
 **Timeline row as the operable unit.** The whole `.tl-bar-row` (label + track +
 bar, all carrying the same `data-seq`) is clickable, keyboard-focusable in display

@@ -82,7 +82,21 @@ class El {
   }
   focus() { if (global.document) global.document.activeElement = this; }
   blur() { if (global.document && global.document.activeElement === this) global.document.activeElement = null; }
-  click() { synthClicks.push(this); }
+  // A programmatic click (as app.js uses to activate a focused row-action link from
+  // the keyboard) is recorded AND dispatched through the delegated document listeners,
+  // then — for an unprevented anchor — performs the anchor's navigation, mirroring a
+  // real browser so a test can observe the action actually happening.
+  click() {
+    synthClicks.push(this);
+    const self = this;
+    const ev = { target: this, defaultPrevented: false,
+      preventDefault() { ev.defaultPrevented = true; }, stopPropagation() {} };
+    (listeners.click || []).forEach((h) => h(ev));
+    if (!ev.defaultPrevented && self.tag === "A") {
+      const href = self.getAttribute("href");
+      if (href) navigations.push(href);
+    }
+  }
   scrollIntoView(opts) { scrollCalls.push({ el: this, opts: opts || null }); }
   get tabIndex() {
     var v = this.getAttribute("tabindex");
@@ -1178,22 +1192,22 @@ async function runTreeKeyboard() {
   await settle();  // initial applySelection selects the dummy first node (seq 1)
 
   const initial = selectedNodeSeq();
-  // A4/A11 (roles): the column is a role="tree" whose rows are role="treeitem", so
-  // aria-selected on a row is supported (a bare <li> would not support it).
+  // Roles: the column is a role="tree" whose rows are role="treeitem", so aria-selected
+  // on a row is supported (a bare <li> would not support it).
   const roles = { list: dom.list.getAttribute("role"), item: dom.n3.getAttribute("role") };
 
   // Pure Down/Down moves the navigation cursor but must NOT select (AC 1). The move
-  // scrolls the cursor into view (so it stays visible in a tall tree) and the active
-  // descendant tracks it.
+  // manages real focus onto the cursor row (roving tabindex) and scrolls it into view,
+  // so it stays visible in a tall tree.
   const scrollBefore = scrollCalls.length;
   fireKey(dom.list, "ArrowDown");  // seq 1 -> phase 2
   fireKey(dom.list, "ArrowDown");  // phase 2 -> visible child seq 3
   const afterMotion = selectedNodeSeq();
   const cursorEl = global.document.querySelector(".trace-list .tree-cursor");
-  const activedescendant = {
+  const cursor = {
     scrolled: scrollCalls.length > scrollBefore,
-    matches_cursor: !!(cursorEl && cursorEl.getAttribute("id")
-      && dom.list.getAttribute("aria-activedescendant") === cursorEl.getAttribute("id")),
+    focused: !!(cursorEl && global.document.activeElement === cursorEl),
+    tabindex: cursorEl ? cursorEl.getAttribute("tabindex") : null,
   };
 
   // Enter selects the cursored node exactly like a click — same pane, no synth click.
@@ -1222,7 +1236,7 @@ async function runTreeKeyboard() {
   fireKey(dom.list, "Home"); fireKey(dom.list, "Enter"); await settle();
   const afterHome = selectedNodeSeq();
 
-  return { ok: true, initial, roles, activedescendant,
+  return { ok: true, initial, roles, cursor,
     afterMotion, afterEnter, afterSpace, afterEnd, afterHome };
 }
 
@@ -1335,11 +1349,12 @@ async function runTreeGroups() {
 }
 
 function keyboardActionDom() {
-  // A `.trace-list` whose rows carry existing ROW ACTIONS: a raw-jump link (jump to
-  // the Raw tab pre-filtered to a seq range) on an aggregate node, and a
-  // recovery-artifact link (open the escalation report) on another. These must stay
-  // keyboard-reachable — the single-tab-stop rule takes the redundant FOLD controls
-  // out of the tab order, not the row actions.
+  // A run-level tab group (Trace active, Artifacts inactive) whose Trace panel holds a
+  // `.trace-list` with existing ROW ACTIONS: a raw-jump link (jump to the Raw tab
+  // pre-filtered to a seq range) on an aggregate node, and a recovery-artifact link
+  // (open the escalation report) on another. The Artifacts panel holds the
+  // escalation.md entry the recovery link reveals. These actions must stay
+  // keyboard-OPERABLE while the tree column keeps exactly one sequential tab stop.
   const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
   const rawJump = el("a", { classes: ["raw-jump"], attrs: { href: "?raw_from_seq=5&raw_to_seq=9" } });
   const n5 = el("li", { classes: ["node"],
@@ -1347,14 +1362,32 @@ function keyboardActionDom() {
     children: [el("span", { classes: ["label"] }), rawJump] });
   const recovery = el("a", { classes: ["recovery-artifact"],
     attrs: { "data-recovery-artifact": "escalation.md", href: "#" } });
+  const recoveryCard = el("section", { classes: ["recovery-card"],
+    attrs: { "data-recovery-card": "", "data-recovery-kind": "none" }, children: [recovery] });
   const n6 = el("li", { classes: ["node"],
     attrs: { "data-seq": "6", "data-node-type": "agent.tool.call", "style": "--depth:1" },
-    children: [el("span", { classes: ["label"] }), recovery] });
+    children: [el("span", { classes: ["label"] }), recoveryCard] });
   const list = el("ul", { classes: ["trace-list"], children: [n5, n6] });
   const trace = el("div", { classes: ["trace"], children: [list] });
   const panes = el("div", { classes: ["panes"], children: [treePane(5), treePane(6)] });
-  body.append(trace, panes);
-  return { body, list, rawJump, recovery };
+
+  const btnTrace = el("button", { classes: ["tab-btn", "active"], attrs: { type: "button", "data-tab": "trace" } });
+  const btnArt = el("button", { classes: ["tab-btn"], attrs: { type: "button", "data-tab": "artifacts" } });
+  const tabButtons = el("div", { classes: ["tab-buttons"], attrs: { role: "tablist" },
+    children: [btnTrace, btnArt] });
+  const tracePanel = el("section", { classes: ["tab", "tab-trace", "active"],
+    attrs: { "data-tab-panel": "trace" }, children: [trace, panes] });
+  const artSummary = el("summary", { classes: ["artifact-open"], attrs: { "data-artifact": "escalation.md" } });
+  const artMore = el("a", { attrs: { "data-artifact-more": "", href: "#" } }); artMore.hidden = true;
+  const artDetails = el("details", { classes: ["artifact-wrap"],
+    children: [artSummary, el("pre", { attrs: { "data-artifact-body": "" } }), artMore] });
+  const artPanel = el("section", { classes: ["tab", "tab-artifacts"],
+    attrs: { "data-tab-panel": "artifacts" }, children: [artDetails] });
+  const tabs = el("div", { classes: ["tabs", "run-tabs"], attrs: { "data-tabs": "" },
+    children: [tabButtons, tracePanel, artPanel] });
+  const main = el("main", { classes: ["detail"], children: [tabs] });
+  body.append(main);
+  return { body, trace, list, rawJump, recovery, artPanel, tracePanel, artDetails };
 }
 
 async function runTreeActions() {
@@ -1362,11 +1395,27 @@ async function runTreeActions() {
   installGlobals(el("html", { children: [dom.body] }), dom.body);
   loadAppJs(APP);
   await settle();
-  // The row-action links keep their native keyboard focusability (no tabindex="-1"),
-  // so raw-range navigation and the escalation report stay reachable without a mouse.
-  return { ok: true,
-    raw_jump_tabindex: dom.rawJump.getAttribute("tabindex"),
-    recovery_tabindex: dom.recovery.getAttribute("tabindex") };
+
+  // AC 4 / contract: even with action links present, the tree column is ONE tab stop
+  // — the links are managed (roving tabindex="-1"), not extra sequential stops.
+  const tab_stops = sequentialTabStops(dom.trace);
+  const links_managed = dom.rawJump.getAttribute("tabindex") === "-1"
+    && dom.recovery.getAttribute("tabindex") === "-1";
+
+  // Keyboard activation of the raw-jump link performs its raw-range navigation.
+  fireKey(dom.rawJump, "Enter"); await settle();
+  const raw_navs = navigations.slice();
+
+  // Keyboard activation of the recovery link opens the Artifacts tab and reveals the
+  // escalation entry — its existing behaviour, not swallowed by node selection.
+  fireKey(dom.recovery, "Enter"); await settle();
+  const recovery = {
+    artifacts_active: dom.artPanel.classes.has("active"),
+    trace_active: dom.tracePanel.classes.has("active"),
+    escalation_open: dom.artDetails.open,
+  };
+
+  return { ok: true, tab_stops, links_managed, raw_navs, recovery };
 }
 
 function timelineRowDom() {

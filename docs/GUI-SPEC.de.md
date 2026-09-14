@@ -966,15 +966,19 @@ Weitere je Zeile setzt der Client zur Laufzeit.
 
 Die Spalte ist ein echter ARIA-Baum: Der Client setzt `role="tree"` auf die Liste
 und `role="treeitem"` auf jede navigierbare Zeile (damit das `aria-selected` des
-ausgewählten Knotens getragen wird und nicht an einem bloßen `<li>` hängt), weist den
-Cursor über das `aria-activedescendant` des Containers aus und scrollt die
-angesteuerte Zeile beim Bewegen in den sichtbaren Bereich, damit sie in einem hohen
-Baum sichtbar bleibt. Die Gruppen- und Wiederholungs-Hüllen der Verdichtung sind
-ebenfalls navigierbare Falt-Zeilen (nicht auswählbar): → öffnet sie und zeigt ihre
-Kinder, ← schließt sie. Nur die redundanten Falt-Bedienelemente (die Falt-Knöpfe und
-die Gruppen-/Wiederholungs-`<summary>`) verlassen die Tab-Reihenfolge; vorhandene
-Zeilen-Aktionslinks (Roh-Bereich-Sprung, Eskalationsbericht) behalten ihren nativen
-Tastaturfokus, damit diese Aktionen ohne Maus erreichbar bleiben.
+ausgewählten Knotens getragen wird und nicht an einem bloßen `<li>` hängt). Sie wird
+von einem **Roving-Tabindex** gesteuert — genau ein Halt ist jeweils tabbierbar — und
+das Bewegen des Cursors führt den echten Fokus auf diesen Halt und scrollt ihn in den
+sichtbaren Bereich, damit er in einem hohen Baum sichtbar bleibt. Die Gruppen- und
+Wiederholungs-Hüllen der Verdichtung sind ebenfalls navigierbare Falt-Zeilen (nicht
+auswählbar): → öffnet sie und zeigt ihre Kinder, ← schließt sie. Die Zeilen-AKTIONEN
+(Roh-Bereich-Sprung, Eskalationsbericht) sind eigene Roving-Halte, die per Pfeiltaste
+hinter ihrer Zeile erreicht werden; die redundanten Falt-Bedienelemente (die
+Falt-Knöpfe und die Gruppen-/Wiederholungs-`<summary>`) verlassen die Reihenfolge
+ganz. Eine Aktion auszulösen (Enter/Leertaste) führt ihr eigenes Verhalten an Ort und
+Stelle aus — die Roh-Bereich-Navigation, das Öffnen des Eskalationsberichts — und wird
+nie über die Knotenauswahl geleitet, sodass diese Aktionen per Tastatur bedienbar
+bleiben, während die Spalte genau einen sequenziellen Tab-Halt behält.
 
 **Timeline-Zeile als bedienbare Einheit.** Die ganze `.tl-bar-row` (Beschriftung +
 Spur + Balken, alle mit demselben `data-seq`) ist anklickbar, per Tastatur in
