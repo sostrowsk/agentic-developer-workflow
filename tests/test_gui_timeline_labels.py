@@ -263,3 +263,66 @@ def test_bar_geometry_and_state_are_unchanged(home, tmp_path):  # noqa: F811
             assert f"bar-{b['state']}" in got["class"], (name, key, got["class"])
             assert ("bar-running" in got["class"]) == bool(b["running"]), (name, key)
             assert got["title"] is not None, f"{name}: bar {key} lost its title"
+
+
+# --- Regression: the label column must not move the track ------------------------
+
+
+def _flex_parts(joined: str):
+    """``(grow, shrink, basis)`` for the ``.tl-bar-label`` column, from the ``flex``
+    shorthand or the longhands, whichever the stylesheet uses. ``None`` for a part the
+    stylesheet does not set."""
+    grow = shrink = basis = None
+    short = re.findall(r"(?<![\w-])flex\s*:\s*([^;]+)", joined)
+    if short:
+        parts = short[-1].split()
+        if len(parts) == 1 and re.fullmatch(r"[\d.]+", parts[0]):
+            grow, shrink, basis = parts[0], "1", "0%"
+        elif len(parts) == 2:
+            grow, shrink = parts
+        elif len(parts) >= 3:
+            grow, shrink, basis = parts[0], parts[1], parts[2]
+    for name, pat in (("grow", "flex-grow"), ("shrink", "flex-shrink"),
+                      ("basis", "flex-basis")):
+        found = re.findall(rf"(?<![\w-]){pat}\s*:\s*([^;]+)", joined)
+        if found:
+            if name == "grow":
+                grow = found[-1].strip()
+            elif name == "shrink":
+                shrink = found[-1].strip()
+            else:
+                basis = found[-1].strip()
+    return grow, shrink, basis
+
+
+def test_every_timeline_track_starts_at_the_same_x(home, tmp_path):  # noqa: F811
+    """Regression (run f56b5ee8, Codex P2): a timeline is only readable if equal
+    timestamps sit above each other and equal durations are equally long. Both hold
+    only when every track has the SAME origin and the SAME width — that is, when the
+    label column beside it is a FIXED width and does not size itself from its text.
+
+    ``flex: 0 1 auto`` sizes the column from its content, so a longer bar name pushes
+    its own track to the right while the others stay put. Measured on the branch of
+    run f56b5ee8: all 31 tracks of run ``16f39431`` happened to align at x=275px only
+    because the longest label of every existing run is ``codex.author`` (12 chars),
+    which fits inside the ``min-width``. Substituting a longer name moved that row's
+    track by 163px and produced two different origins. A gate named
+    ``integration-tests`` in ``.adw/config.yaml`` is enough to trigger it.
+
+    The label column therefore neither grows nor shrinks and has a length basis. The
+    name still stays fully readable by WRAPPING inside that fixed column — see
+    ``test_bar_label_css_never_truncates_the_name``, which stays green."""
+    css = TestClient(create_app(repos=[])).get("/static/app.css").text
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    bodies = [b for sel, b in re.findall(r"([^{}]*)\{([^}]*)\}", css)
+              if re.search(r"\.tl-bar-label\b", sel)]
+    assert bodies, "no .tl-bar-label rule in app.css"
+    grow, shrink, basis = _flex_parts(" ".join(bodies))
+
+    assert grow is not None and float(grow) == 0, \
+        f"the timeline label column may grow (flex-grow={grow}) and shifts its track"
+    assert shrink is not None and float(shrink) == 0, \
+        f"the timeline label column may shrink (flex-shrink={shrink}) and shifts its track"
+    assert basis is not None and re.fullmatch(r"[\d.]+(rem|em|px|ch|%)", basis.strip()), \
+        (f"the timeline label column sizes itself from its text (flex-basis={basis}); "
+         "a longer bar name then moves its track and the timeline stops being comparable")

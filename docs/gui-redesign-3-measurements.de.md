@@ -101,15 +101,15 @@ Panes-Spalte, Kontext am schmalsten; `wrapPct` liegt **unter der Ausgangsquote v
 entfernen/kürzen zählt nicht); `clipped` ist **leer** für alle 31 Balken (die nicht
 abschneidende, umbrechende Beschriftungsregel).
 
-### Operator-Ergebnisse (auf echter Hardware eintragen)
+### Operator-Ergebnisse (gemessen 2026-09-14, Chrome @ 1440 px, Lauf `16f39431`)
 
-Die Konsolenausgabe hier eintragen, sobald in beiden Editionen ausgeführt:
+Gemessen an der gemergten Änderung, Standard-Faltung, Lauf `16f39431`:
 
 | Metrik | Ausgangslage 0.23.0 | Diese Änderung |
 | --- | --- | --- |
-| Trace / Panes / Kontext-Breite (px @ 1440) | 434 / 607 / 304 | _Operator_ |
-| Umgebrochene Knotenbeschriftungen (von 577) | 103 (17,8 %) | _Operator_ |
-| Timeline-Balken, die ihren Namen abschneiden (von 31) | 24 | _Operator (erwartet 0)_ |
+| Trace / Panes / Kontext-Breite (px @ 1440) | 434 / 607 / 304 | **642 / 402 / 281** |
+| Umgebrochene Knotenbeschriftungen (von 577) | 103 (17,8 %) | **62 (10,7 %)** |
+| Timeline-Balken, die ihren Namen abschneiden (von 31) | 24 | **0** |
 
 Die automatisierten Ergebnisse oben stehen für sich; diese Tabelle ist die
 Browser-Bestätigung der genauen px-Deltas durch den Operator.

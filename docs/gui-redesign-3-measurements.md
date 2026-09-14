@@ -92,15 +92,15 @@ panes column with context smallest; `wrapPct` is **below the 17.8 % baseline** (
 trace column, same folding, same content — removing/shortening labels does not count);
 `clipped` is **empty** for all 31 bars (the non-truncating, wrapped label rule).
 
-### Operator results (fill on real hardware)
+### Operator results (measured 2026-09-14, Chrome @ 1440 px, run `16f39431`)
 
-Record the console output here on both editions once run:
+Measured on the merged change, default folding state, run `16f39431`:
 
 | Metric | Baseline 0.23.0 | This change |
 | --- | --- | --- |
-| Trace / panes / context width (px @ 1440) | 434 / 607 / 304 | _operator_ |
-| Node labels wrapped (of 577) | 103 (17.8 %) | _operator_ |
-| Timeline bars clipping their name (of 31) | 24 | _operator (expected 0)_ |
+| Trace / panes / context width (px @ 1440) | 434 / 607 / 304 | **642 / 402 / 281** |
+| Node labels wrapped (of 577) | 103 (17.8 %) | **62 (10.7 %)** |
+| Timeline bars clipping their name (of 31) | 24 | **0** |
 
 The automated results above stand on their own; this table is the operator's browser
 confirmation of the exact pixel deltas.
