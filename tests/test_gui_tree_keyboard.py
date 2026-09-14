@@ -67,6 +67,15 @@ def test_right_and_left_open_and_close_a_fold_and_no_op_on_a_leaf(tmp_path):
     assert r["afterLeft"] == {"phase_open": False, "child_hidden": True}, "Left did not close"
     assert r["leaf_no_error"] is True, "Right/Left on a leaf row raised an error"
 
+    # E2/AC 4: revealing a hidden row's action link on fold-open — by keyboard OR by
+    # the mouse caret — must not add a sequential tab stop (before any further move).
+    assert r["tab_stops_after_kbd_open"] == 1, (
+        f"{r['tab_stops_after_kbd_open']} tab stops after a keyboard fold-open, not 1"
+    )
+    assert r["tab_stops_after_mouse_open"] == 1, (
+        f"{r['tab_stops_after_mouse_open']} tab stops after a mouse fold-open, not 1"
+    )
+
 
 def test_tree_column_is_a_single_tab_stop(tmp_path):
     """AC 4/E2: after client initialization the tree column is exactly ONE sequential

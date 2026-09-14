@@ -1173,7 +1173,12 @@ function keyboardTreeDom() {
   const p2 = treePhase(2, 1);
   const n3 = treeNode(3, 2);
   const p8 = treePhase(8, 1);
-  const n9 = treeNode(9, 2);
+  // The hidden child (inside the collapsed phase 8) carries a raw-jump ACTION link —
+  // a native <a href> that, once the fold opens, must not become a stray tab stop.
+  const n9RawJump = el("a", { classes: ["raw-jump"], attrs: { href: "?raw_from_seq=9&raw_to_seq=9" } });
+  const n9 = el("li", { classes: ["node"],
+    attrs: { "data-seq": "9", "data-node-type": "agent.tool.call", "style": "--depth:2" },
+    children: [el("span", { classes: ["label"] }), n9RawJump] });
   const n20 = treeNode(20, 1);
   const list = el("ul", { classes: ["trace-list"], attrs: { "data-default-phase": "2" },
     children: [n1, p2, n3, p8, n9, n20] });
@@ -1181,7 +1186,7 @@ function keyboardTreeDom() {
   const panes = el("div", { classes: ["panes"],
     children: [treePane(1), treePane(3), treePane(9), treePane(20)] });
   body.append(trace, panes);
-  return { body, trace, list, n1, p2, n3, p8, n9, n20,
+  return { body, trace, list, n1, p2, n3, p8, n9, n9RawJump, n20,
     pane3: panes.children[1], pane9: panes.children[2], pane20: panes.children[3] };
 }
 
@@ -1257,18 +1262,29 @@ async function runTreeFoldKeys() {
   fireKey(dom.list, "ArrowRight", { ctrl: true });
   const afterCtrlRight = { phase_open: dom.p8.classes.has("phase-open") };
 
-  fireKey(dom.list, "ArrowRight");  // opens the collapsed phase
+  fireKey(dom.list, "ArrowRight");  // opens the collapsed phase (keyboard)
   const afterRight = { phase_open: dom.p8.classes.has("phase-open"), child_hidden: dom.n9.classes.has("fold-hidden") };
+  // E2/AC 4: opening the fold must NOT create an extra sequential tab stop from the
+  // revealed row's action link — checked BEFORE any further cursor move.
+  const tab_stops_after_kbd_open = sequentialTabStops(dom.trace);
 
   fireKey(dom.list, "ArrowLeft");   // closes it again
   const afterLeft = { phase_open: dom.p8.classes.has("phase-open"), child_hidden: dom.n9.classes.has("fold-hidden") };
+
+  // The same must hold when the fold is opened by the MOUSE phase caret (no arrow-key
+  // move follows to re-normalise the roving tabindex).
+  const caret = dom.p8.querySelector("[data-fold-toggle]");
+  dispatch("click", { target: caret });
+  const tab_stops_after_mouse_open = sequentialTabStops(dom.trace);
+  dispatch("click", { target: caret });  // close again for the leaf check
 
   // On a leaf row (End -> seq 20) Right/Left change nothing and raise no error.
   fireKey(dom.list, "End");
   let leafError = false;
   try { fireKey(dom.list, "ArrowRight"); fireKey(dom.list, "ArrowLeft"); } catch (e) { leafError = true; }
 
-  return { ok: true, start, afterCtrlRight, afterRight, afterLeft, leaf_no_error: !leafError };
+  return { ok: true, start, afterCtrlRight, afterRight, afterLeft,
+    tab_stops_after_kbd_open, tab_stops_after_mouse_open, leaf_no_error: !leafError };
 }
 
 function keyboardGroupDom() {

@@ -615,8 +615,11 @@
 
   // Give every navigable row (visible or not, so hidden children are ready when
   // revealed) its treeitem role, a stable id and — for fold rows — an aria-expanded
-  // that mirrors the fold state; give each inline action a stable id so the roving
-  // cursor can address it.
+  // that mirrors the fold state; give each inline action a stable id and take it OUT
+  // of the sequential tab order up front. Because this visits hidden rows too, an
+  // action link on a row inside a collapsed fold is already non-tabbable when the fold
+  // opens — it never becomes a stray sequential tab stop before the roving cursor
+  // (updateCursor) next runs (E2/AC 4). updateCursor promotes exactly the current stop.
   function decorateTreeItems() {
     var list = treeListEl();
     if (!list) return;
@@ -627,6 +630,7 @@
       if (isExpandable(li)) li.setAttribute("aria-expanded", foldIsOpen(li) ? "true" : "false");
       rowActions(li).forEach(function (a) {
         if (a.getAttribute("id") === null) a.setAttribute("id", "adw-treeaction-" + (++treeItemSeq));
+        a.setAttribute("tabindex", "-1");  // managed by the roving cursor, never a stray stop
       });
     });
   }
