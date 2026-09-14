@@ -1190,6 +1190,114 @@ function keyboardTreeDom() {
     pane3: panes.children[1], pane9: panes.children[2], pane20: panes.children[3] };
 }
 
+function actionsTreeDom() {
+  // Fixture for the three follow-ups of run 0283ed75:
+  //  * phase 2 is OPEN and carries its OWN raw-jump action link, followed by child 3
+  //    -> ArrowRight on it must reach the CHILD ROW, not the row's action link.
+  //  * phase 8 is COLLAPSED and holds child 9, which carries a raw-jump link
+  //    -> opening it must not leave a stray tab stop behind.
+  //  * a `li.recovery-abort[data-seq]` sits in the list and is NOT a `.node`
+  //    -> it must never become a navigable/selectable tree row.
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  const n1 = treeNode(1, 1);
+  const p2RawJump = el("a", { classes: ["raw-jump"], attrs: { href: "?raw_from_seq=2&raw_to_seq=7" } });
+  const p2 = el("li", { classes: ["node"],
+    attrs: { "data-seq": "2", "data-node-type": "phase", "style": "--depth:1" },
+    children: [
+      el("button", { classes: ["fold-toggle"], attrs: { "data-fold-toggle": "", "aria-expanded": "true" } }),
+      el("span", { classes: ["label"] }), p2RawJump] });
+  const n3 = treeNode(3, 2);
+  const abort = el("li", { classes: ["recovery-abort"], attrs: { "data-seq": "99" } });
+  const p8 = treePhase(8, 1);
+  const n9RawJump = el("a", { classes: ["raw-jump"], attrs: { href: "?raw_from_seq=9&raw_to_seq=9" } });
+  const n9 = el("li", { classes: ["node"],
+    attrs: { "data-seq": "9", "data-node-type": "agent.tool.call", "style": "--depth:2" },
+    children: [el("span", { classes: ["label"] }), n9RawJump] });
+  const n20 = treeNode(20, 1);
+  // A CHILDLESS but open phase (seq 30) directly followed by a sibling row (seq 31):
+  // Arrow-Right on it must not step sideways onto the sibling.
+  const p30 = treePhase(30, 1);
+  const n31 = treeNode(31, 1);
+  const list = el("ul", { classes: ["trace-list"], attrs: { "data-default-phase": "2" },
+    children: [n1, p2, n3, abort, p8, n9, n20, p30, n31] });
+  const trace = el("div", { classes: ["trace"], children: [list] });
+  const panes = el("div", { classes: ["panes"],
+    children: [treePane(1), treePane(3), treePane(9), treePane(20)] });
+  body.append(trace, panes);
+  return { body, list, n1, p2, p2RawJump, n3, abort, p8, n9, n9RawJump, n20, p30, n31 };
+}
+
+// A tab stop = reachable with plain Tab: tabindex="0", or a natively focusable
+// element (<a href>, <button>) that carries no tabindex="-1".
+function tabStopsIn(list) {
+  const out = [];
+  list.querySelectorAll("*").forEach(function (e) {
+    const ti = e.getAttribute("tabindex");
+    if (ti === "0") { out.push(describeStop(e)); return; }
+    if (ti !== null) return;  // -1 or anything else: not a plain-Tab stop
+    const tag = (e.tagName || "").toLowerCase();
+    if (tag === "button" || (tag === "a" && e.getAttribute("href") !== null)) out.push(describeStop(e));
+  });
+  return out;
+}
+function describeStop(e) {
+  return (e.tagName || "?").toLowerCase() + "." + [...(e.classes || [])].join(".")
+    + "[" + (e.getAttribute("data-seq") || "-") + "]";
+}
+function cursorDesc(list) {
+  const c = list.querySelector(".tree-cursor");
+  return c ? describeStop(c) : null;
+}
+
+async function runTreeKeyboardActions() {
+  const dom = actionsTreeDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();
+
+  // (3) The recovery-abort entry must not be a tree row at all.
+  const abortIsTreeitem = dom.abort.getAttribute("role") === "treeitem";
+  const abortTabindex = dom.abort.getAttribute("tabindex");
+
+  // (1) Exactly one tab stop while everything is in its initial state ...
+  const stopsInitial = tabStopsIn(dom.list);
+
+  // ... and still exactly one after a keyboard fold reveals hidden content.
+  // Cursor to the collapsed phase 8, open it with ArrowRight.
+  fireKey(dom.list, "Home");
+  // Walk down until the cursor sits on the collapsed phase 8 — independent of how
+  // many rows the implementation considers navigable on the way.
+  for (let i = 0; i < 10 && dom.p8.getAttribute("tabindex") !== "0"; i++) {
+    fireKey(dom.list, "ArrowDown");
+  }
+  const cursorBeforeOpen = cursorDesc(dom.list);
+  fireKey(dom.list, "ArrowRight");  // open phase 8 -> reveals node 9 + its raw-jump
+  await settle();
+  const stopsAfterOpen = tabStopsIn(dom.list);
+
+  // (2) ArrowRight on an OPEN phase that owns an action link must reach its first
+  // CHILD ROW, not the link.
+  fireKey(dom.list, "Home");
+  fireKey(dom.list, "ArrowDown");   // -> phase 2 (open by default)
+  fireKey(dom.list, "ArrowRight");  // -> first child row
+  const cursorAfterRight = cursorDesc(dom.list);
+
+  // Arrow-Right on an OPEN but CHILDLESS phase must not move sideways onto its
+  // sibling — "to the first child row" means a child, or nothing.
+  fireKey(dom.list, "End");
+  for (let i = 0; i < 10 && dom.p30.getAttribute("tabindex") !== "0"; i++) {
+    fireKey(dom.list, "ArrowUp");
+  }
+  fireKey(dom.list, "ArrowRight");   // first Right OPENS the collapsed phase
+  const cursorOnChildless = cursorDesc(dom.list);
+  fireKey(dom.list, "ArrowRight");   // second Right: it is open but has no children
+  const cursorAfterRightChildless = cursorDesc(dom.list);
+
+  return { ok: true, abortIsTreeitem, abortTabindex, cursorBeforeOpen,
+    stopsInitial, stopsAfterOpen, cursorAfterRight,
+    cursorOnChildless, cursorAfterRightChildless };
+}
+
 async function runTreeKeyboard() {
   const dom = keyboardTreeDom();
   installGlobals(el("html", { children: [dom.body] }), dom.body);
@@ -1658,6 +1766,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "timeline-focus") result = await runTimelineFocus();
   else if (SCENARIO === "trace-focus-fold") result = await runTraceFocusFold();
   else if (SCENARIO === "tree-keyboard") result = await runTreeKeyboard();
+  else if (SCENARIO === "tree-keyboard-actions") result = await runTreeKeyboardActions();
   else if (SCENARIO === "tree-fold-keys") result = await runTreeFoldKeys();
   else if (SCENARIO === "tree-tabstop") result = await runTreeTabStop();
   else if (SCENARIO === "tree-groups") result = await runTreeGroups();

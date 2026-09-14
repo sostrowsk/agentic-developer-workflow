@@ -416,7 +416,12 @@
   // A tree row is navigable if it is a selectable node (`data-seq`) OR a collapsible
   // group/repetition wrapper (`.trace-wrap`, no data-seq but a fold row).
   function isNavigableRow(li) {
-    return li.getAttribute("data-seq") !== null
+    // Only real tree NODES and the synthetic group/repeat wrappers are rows. Other
+    // `li[data-seq]` inside the list are informational entries of the recovery card
+    // (`li.recovery-abort`) — they own no pane, so selecting one would fall back to
+    // the first node, and stepping over one would swallow an Arrow-Down.
+    return (li.classList && li.classList.contains("node")
+            && li.getAttribute("data-seq") !== null)
       || (li.classList && li.classList.contains("trace-wrap"));
   }
 
@@ -593,11 +598,29 @@
     return elm.closest ? elm.closest("li") : null;
   }
 
+  // The first navigable CHILD row of an open fold row, or null when it has none.
+  // A child is either nested inside the row (a group/repetition wrapper holds its
+  // members in its own <details>) or, for a phase in the flat list, the next row at
+  // a GREATER depth. A childless open phase followed by a sibling therefore yields
+  // null instead of stepping sideways.
+  function firstChildRow(li) {
+    var rows = navigableRows();
+    var i = rows.indexOf(li);
+    if (i === -1 || i === rows.length - 1) return null;
+    var next = rows[i + 1];
+    if (li.contains && li.contains(next)) return next;
+    return rowDepth(next) > rowDepth(li) ? next : null;
+  }
+
   function foldRight(stop) {
     var li = stopRow(stop);
     if (!li || !isExpandable(li)) return;  // no fold mechanism: no-op, no error
     if (!foldIsOpen(li)) { setFoldOpen(li, true); return; }
-    moveCursor(1);  // already open -> to the first child row
+    // Already open -> to the first child ROW. Not `moveCursor(1)`: `treeStops`
+    // interleaves every row with its own inline action links, so one step forward
+    // lands on this row's `raw-jump` link whenever it has one.
+    var child = firstChildRow(li);
+    if (child) setCursor(child);
   }
 
   function foldLeft(stop) {
