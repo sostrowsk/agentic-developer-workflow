@@ -1,199 +1,237 @@
-# Spec — GUI-Redesign 3: Das Arbeitsfeld zuerst
+# Spec — GUI-Redesign 4: Ohne Maus bedienbar
 
-Setzt auf dem gemergten Stand **0.23.0** auf. Tokens, Skalen, Signalfarbe,
-Dark Mode und die Zeitachse (Brief 1) sowie die Zeitgrößen und ihr Vokabular
-(Brief 2) werden **benutzt, nicht revidiert**. Die im Issue genannten Messwerte
-(vom 2026-09-13, Lauf `16f39431`, 1440 px) sind die Vergleichsbasis und vor dem
-Bauen gegen den dann aktuellen Stand zu prüfen. Rein darstellend — kein
-Vertragswechsel.
+Setzt auf dem gemergten Stand **0.24.0** auf (Briefe 1 bis 3). Tokens und Skalen
+(Brief 1), Zahlen und Vokabular (Brief 2), Blockreihenfolge und
+Timeline-Beschriftung (Brief 3) werden **benutzt, nicht revidiert**. Die im
+Issue genannten Messwerte (2026-09-14, Lauf `16f39431`, 840 KB HTML, 577
+Baumzeilen, 31 Timeline-Balken) sind Referenzwerte genau dieses Laufs — keine
+allgemeingültigen Fixture-Größen — und vor dem Bauen gegen den dann aktuellen
+Stand zu prüfen. Rein bedienend: kein Vertragswechsel, keine Änderung daran,
+was die Seite zeigt.
 
 ## Goal
 
-Die Run-Detail-Seite so umräumen, dass das eigentliche Instrument — der
-Trace-Baum — unmittelbar unter dem Seitenkopf beginnt und mehr Platz bekommt,
-während die zwei bisher davorstehenden Zusammenfassungen darunter rücken und
-zugeklappt aussagekräftig bleiben. Die Timeline lernt dieselbe Regel wie die
-Zeitachse: Geometrie in die Spur, Wörter an eine Stelle, deren Lesbarkeit nicht
-von der Balkendauer abhängt. Die vollständige, ungefensterte Baum-Ausgabe wird
-als bewusste Entscheidung festgeschrieben und durch einen Test fixiert.
+Die Hauptinteraktion der Run-Detail-Seite — einen Trace-Knoten auswählen und
+lesen — ohne Maus erreichbar machen und diesen Weg sichtbar führen. Vier
+verifizierte Lücken werden geschlossen: der Trace-Baum bekommt einen
+Tastaturpfad, die Timeline-Zeile (statt des bis zu 6 px schmalen Balkens) wird
+die bedienbare Einheit, ein einheitlicher sichtbarer Fokusindikator entsteht in
+beiden Themes, und das mit `role="tablist"` bereits angekündigte
+Registerkarten-Muster wird eingelöst. Die Knotenauswahl wird zusätzlich
+maschinenlesbar ausgezeichnet. Was die Seite zeigt und welche Daten sie
+liefert, ändert sich nicht.
 
 ## Scope
 
-- **A1 — Reihenfolge:** „Planned tasks" und „Change scope" rücken **hinter**
-  das dreispaltige Arbeitsfeld (Trace-Baum │ Detail-Panes │ Run-Kontext). Der
-  Trace-Baum beginnt damit unmittelbar unter dem Seitenkopf. Bindende
-  Endreihenfolge: Kopf (Titel, Zeitachse, Registerkarten) → Arbeitsfeld →
-  „Planned tasks" (zugeklappt) → „Change scope" (zugeklappt). Keine weitere
-  Umstellung.
-- **A1 — Zugeklappt:** Beide Blöcke rendern als native `<details>` **ohne**
-  `open`-Attribut, mit `<summary>` — wie die Sammelknoten des Trace-Baums.
-  Kein JavaScript, kein Client-Zustand, keine Persistenz, kein Query-Parameter.
-  Ein Klick auf die Zusammenfassungszeile ist die einzige Bedienung.
-- **A2 — Zusammenfassungszeile „Planned tasks":** Die `<summary>` nennt je Lane
-  deren Name, die Zahl der Aufgaben und den bestehenden Lane-Zustand, ohne
-  Aufklappen; der Zustand wird nicht neu hergeleitet. Beim Öffnen bleiben die
-  bisherigen Aufgaben je Lane zugänglich. Gibt es kein Plan-Skelett, wird der
-  Block **gar nicht** gerendert (wie heute) — kein leerer aufklappbarer Block.
-- **A2 — Zusammenfassungszeile „Change scope":** Die `<summary>` nennt die Zahl
-  der geänderten Dateien über alle beobachteten Lanes sowie die Summen der
-  Plus- und Minuszeilen. Binärdateien zählen bei der Dateizahl mit, tragen aber
-  nichts zu den Zeilensummen bei. Liegt kein verwertbarer Diff vor, sagt die
-  Zeile das (erklärende Zeile statt einer Null); ein verwertbarer Diff ohne
-  geänderte Dateien bleibt davon unterscheidbar. Der bisherige Blockinhalt
-  bleibt beim Öffnen zugänglich.
-- **A3 — Baum-Spalte bekommt Platz:** Das Verhältnis des `trace-layout`-Grids
-  wird so verschoben, dass die Baum-Spalte mindestens so breit ist wie die
-  Panes-Spalte. Die Kontext-Spalte behält ihre `minmax`-Untergrenze und bleibt
-  die schmalste. Spaltenzahl bleibt drei, Reihenfolge bleibt, `min-width: 0`
-  und die Überlauf-Regeln bleiben. Genaue Werte sind Gestaltungsspielraum.
-- **A4 — Timeline-Beschriftung:** Die Beschriftung eines Balkens verlässt den
-  proportional bemessenen Balken. Der Balken wird reine Geometrie; sein Name
-  (`_timeline_bar_label`) erscheint an einer Stelle, deren Lesbarkeit **nicht**
-  von der Balkenbreite abhängt (über, unter oder neben dem Balken —
-  Gestaltungsspielraum). In einer Spur mit vielen kurzen Balken überlagern sich
-  die Namen nicht, und die Zuordnung Name↔Balken bleibt erkennbar. Das
-  `title`-Attribut, die Spurbeschriftung links (`.tl-lane-label`, feste 7 rem),
-  `left`/`width` in Prozent als Geometriequelle und die Unterscheidung
-  aktiv / wartend / noch laufend bleiben unverändert.
-- **A5 — Baum-Größe ausgesagt und geprüft:** Ein Test fixiert je Knoten des
-  serialisierten Baums genau ein `data-tree-entry` in der gerenderten
-  Baum-Spalte, keine Dopplung, über mehrere Fixture-Größen — darunter ein Baum
-  jenseits von 200 Knoten. Ein der Verdichtung an seinen Aufruf gehängtes
-  Ergebnis behält seinen eigenen Marker (heutiger korrekter Stand: 844 Knoten =
-  844 Marker). Die Spec sagt ausdrücklich: die Baum-Spalte rendert vollständig,
-  die Lesbarkeit kommt von der Verdichtung, nicht von einem Schnitt, und die
-  Schranke „höchstens 200 Marker je Sammlung" gilt nur noch für die
-  Tools-Einträge (`data-tool-entry`). Der Kommentar in
-  `tests/test_gui_bounded_dom.py` wird auf diesen Stand gebracht.
-- **A6 — i18n:** Neue Beschriftungen (Zusammenfassungszeilen aus A2, etwaige
-  Timeline-Beschriftung aus A4) in `adw/gui/i18n.py` in beiden Sprachen,
-  identische Schlüsselmengen, Pluralformen korrekt.
+- **A1 — Tastaturpfad im Trace-Baum:** Die Baum-Spalte bekommt einen
+  Tastaturpfad mit der bindenden Tastenbelegung (siehe unten): Auf/Ab bewegt
+  zwischen **sichtbaren** Zeilen (zugeklappte Inhalte übersprungen),
+  Rechts/Links bedient die vorhandenen Faltungen, Enter und Leertaste wählen
+  den Knoten aus — mit demselben Ergebnis wie ein Klick —, Pos1/Ende springen
+  zur ersten/letzten sichtbaren Zeile. Die reine Auf-/Ab-Bewegung löst keine
+  Auswahl aus. Es entstehen keine neuen auswählbaren Knoten; navigiert wird
+  über die vorhandenen Zeilen. Die Baum-Spalte ist genau **ein** Halt in der
+  Tab-Reihenfolge, nicht 577 (E2).
+- **A2 — Timeline-Zeile als bedienbare Einheit:** Die ganze Zeile
+  (`div.tl-bar-row`, die bereits das richtige `data-seq` trägt und Beschriftung
+  wie Spur umfasst) wird anklickbar, per Tastatur fokussierbar und auslösbar.
+  Enter und Leertaste bewirken dasselbe wie ein Klick, einschließlich der
+  bestehenden `?focus`-Umleitung für Knoten, die die Seite nicht zeigen kann.
+  Die Fokus-Reihenfolge folgt der Darstellung. Ein Klick auf den Balken selbst
+  wirkt weiterhin; seine Geometrie bleibt unverändert.
+- **A3 — Sichtbarer Fokus, überall:** Ein einheitlicher, deutlich sichtbarer
+  Fokusindikator für jedes fokussierbare Element — native Links, Knöpfe,
+  Eingabefelder und `summary` ebenso wie die neuen Tastaturziele —, in beiden
+  Themes. Er benutzt ein eigenes Token (Quelle darf `--busy` sein) und
+  **nicht** `--signal` (E5). Bei Navigation über den zentralen Baum-Einstieg
+  bleibt die aktuell angesteuerte Zeile sichtbar erkennbar.
+- **A4 — Registerkarten-Muster eingelöst:** Die `tab-btn`-Knöpfe jeder
+  `role="tablist"`-Gruppe bekommen `role="tab"`, gepflegtes `aria-selected` und
+  die Verknüpfung zu ihrem Panel (`aria-controls`); das Panel bekommt
+  `role="tabpanel"`. Links/Rechts wechselt innerhalb einer Gruppe, nur die
+  aktive Karte ist ein Tab-Halt. `aria-selected` wandert bei jedem Wechsel mit
+  — auch bei einer serverseitigen Vorauswahl (etwa Landung auf dem Raw-Tab
+  über einen `raw_from_seq`-Link). Klasse `active` und serverseitige
+  Vorauswahl bleiben, wie sie sind; die ARIA-Auszeichnung tritt daneben, sie
+  ersetzt nichts. Die Rolle wird nicht entfernt (E4).
+- **A5 — Auswahl maschinenlesbar:** Der ausgewählte Knoten wird zusätzlich zur
+  unverändert weiterverwendeten CSS-Klasse `selected` maschinenlesbar
+  ausgezeichnet, damit unterstützende Technik den Zustand kennt.
+- **A6 — i18n:** Jeder neue sichtbare oder vorgelesene Text (Bezeichnung der
+  Baum-Region, etwaige Bedienhinweise) liegt in `adw/gui/i18n.py` in beiden
+  Sprachen mit identischer Schlüsselmenge vor. Ein neuer sichtbarer
+  Hinweisblock ist nicht erforderlich (E7).
 - **A7 — Doku und Changelog:** `docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md`
-  synchron: neue Blockreihenfolge, die zugeklappten Zusammenfassungen, die
-  Timeline-Beschriftung, die Aussage zur Baum-Größe aus A5. `CHANGELOG.md` und
-  `CHANGELOG.de.md` synchron ergänzen.
+  beschreiben synchron den Tastaturpfad des Baums, die Tastenbelegung, den
+  Fokusindikator und das Registerkarten-Muster. `CHANGELOG.md` und
+  `CHANGELOG.de.md` synchron ergänzt.
+
+### Bindende Tastenbelegung im Trace-Baum (A1)
+
+| Taste | Wirkung |
+|---|---|
+| ↓ / ↑ | nächste / vorige **sichtbare** Zeile |
+| → | Falt-Zeile aufklappen; ist sie offen, zur ersten Kindzeile |
+| ← | Falt-Zeile zuklappen; ist sie zu, zur übergeordneten Falt-Zeile |
+| Enter, Leertaste | Knoten auswählen (wie ein Klick) |
+| Pos1 / Ende | erste / letzte sichtbare Zeile |
+
+„Sichtbar" heißt: nicht innerhalb einer zugeklappten Phase, Gruppe oder
+Wiederholung. Die Leertaste darf die Seite nicht scrollen, wenn sie im Baum
+etwas auswählt. Tastenkombinationen mit Strg, Alt oder Meta werden nicht
+abgefangen. Auf einer Zeile ohne Klappmechanik bewirken Rechts/Links keine
+Zustandsänderung und keinen Fehler.
+
+### Bindendes DOM-Gewicht (A1)
+
+Die **serverseitig gerenderte** Baum-Spalte bekommt höchstens **einen** neuen
+Tastatur-Einstiegspunkt; alles Weitere, was das Muster je Zeile braucht, setzt
+der Client zur Laufzeit (E3). Die Zahl der `data-tree-entry`-Marker und die
+Zahl der gerenderten Elemente der Baum-Spalte bleiben unverändert —
+Fortschreibung von Brief 1, E4: keine neue Hülle je Eintrag.
+
+### Bindender Fokusindikator (A3)
+
+- Eigenes Token, in beiden Themes definiert, mit mindestens **3:1** Kontrast
+  gegen `--paper` **und** gegen `--surface`. `--busy` (6,41 hell, 6,92 dunkel)
+  darf die Quelle sein.
+- Nicht allein Farbe: eigene Kontur, die auch bei Farbenblindheit trägt.
+- Erscheint bei Tastaturnutzung zuverlässig; Unterdrückung bei reiner
+  Mausnutzung (`:focus-visible`) ist Gestaltungsspielraum.
+- Nirgends `outline: none` ohne Ersatz.
 
 ## Non-Goals / Scope-Deckel
 
-- Keine neue Route, kein neues Tab, kein neuer Query-Parameter.
-- Keine Änderung an Auswahl-, Pane-, `?focus`- oder Deep-Link-Verhalten, an den
-  Registerkarten Artefakte und Raw, am Recovery-Karten-Verhalten, an der
-  Run-Liste, an der Zeitachse oder an den Kennzahlen aus Brief 2.
-- Keine Persistenz, kein Polling, kein neues Zustands-Subsystem, kein
-  JavaScript für das Auf-/Zuklappen.
+- Keine neue Route, kein neues Tab, keine Änderung an Layout, Kennzahlen,
+  Verdichtung, Run-Liste oder Timeline-Geometrie.
+- Keine Persistenz, kein Polling, kein neues Zustands-Subsystem, keine neuen
+  Query-Parameter. Der flüchtige Navigationszustand des Tastaturpfads gehört
+  zur vorhandenen Client-Bedienung und ist kein neues Subsystem.
+- Keine Änderung am `?focus`-Verhalten außer der Erreichbarkeit über die
+  Tastatur.
 - **E1** Keine neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN, keine
-  Webfont.
-- **E2** Der Trace-Baum bekommt kein Fenster zurück: keine Blätterung, kein
-  Lazy-Rendering, keine Knotenobergrenze für die Baum-Spalte. `?offset` bleibt
-  für den Baum inert. Bindet auch den Review-Loop.
-- **E3** Die Verdichtung des Baums (Faltung, Wiederholungen, Gruppen, drei
-  Klappebenen, Standard-Faltung, `?focus`-Verhalten) wird nicht angefasst.
-- **E4** Keine neuen Farben, Schriftgrößen oder Abstandswerte; die Gestaltung
-  aus Brief 1 wird benutzt.
-- **E5** Zahlen und Vokabular aus Brief 2 werden benutzt, nicht revidiert; die
-  Run-Liste wird nicht angefasst.
-- **E6** Das Tools-Fenster (`_tool_entries` / `_tool_window` / `?tools_offset`),
-  seine 200er-Schranke und seine Blätter-Navigation bleiben unverändert.
-- **E7** Kein Responsive-Umbau, keine Breakpoints, keine Mobilansicht.
-- **E8** Keine Änderung an Ereignistypen, Instrumentierung, Event-Payloads,
-  `build_tree`, dem SSE-Pfad oder der Retention.
-- Nicht Teil des Contracts (frei änderbar): Klassennamen, Reihenfolge der
-  Blöcke im Markup, Markup- und CSS-Wortlaut, Grid-Verhältnisse.
+  Webfont, keine Barrierefreiheits-Bibliothek. Vanilla JS, handgeschriebenes
+  CSS.
+- **E2** Die Baum-Spalte ist **ein** Tab-Halt, nicht 577; ein eigener Tab-Halt
+  je Zeile ist ausdrücklich nicht gewollt.
+- **E3** Das serverseitige Markup wächst **nicht** um ein Attribut je
+  Baumzeile; was das Muster je Zeile braucht, setzt der Client zur Laufzeit.
+- **E4** Das Registerkarten-Muster wird umgesetzt, nicht durch Entfernen von
+  `role="tablist"` aufgelöst.
+- **E5** Der Fokusindikator benutzt **nicht** `--signal`; diese Farbe bleibt
+  für „ein Mensch muss handeln" reserviert.
+- **E6** Gestaltung (Brief 1), Zahlen (Brief 2), Anordnung (Brief 3) werden
+  benutzt, nicht revidiert: keine neuen Farben außer dem Fokus-Token, keine
+  neuen Schriftgrößen, keine neuen Abstandswerte.
+- **E7** Was die Seite **zeigt**, ändert sich nicht: keine neue Information,
+  keine neue Spalte, kein neuer Block, keine geänderte Reihenfolge.
+- **E8** Keine Änderung an Ereignistypen, Instrumentierung, `build_tree`, der
+  Verdichtung, der Blätterung, dem SSE-Pfad oder der Retention.
+- **E9** Kein vollständiges WCAG-Audit, keine Zertifizierungsaussage; dieses
+  Issue schließt die vier benannten Lücken, weitergehende Prüfungen sind
+  Deferred.
+- **Unangetastet:** `<label>` um den Typfilter, `aria-label` am Suchfeld,
+  `aria-expanded` am Falt-Knopf, `aria-hidden` an den Statusglyphen und
+  `aria-label` am Run-Kontext-Panel bleiben wörtlich erhalten.
+- Nicht Teil des Contracts (frei änderbar): Klassennamen, ARIA-Attribute,
+  Markup- und CSS-Wortlaut, Tastenbelegung.
+
+Die Vorentscheidungen E1–E9 sind entschieden — kein Finding, auch nicht im
+Review-Loop.
 
 ## Acceptance Criteria (messbar)
 
-1. **Reihenfolge:** Im gerenderten Dokument steht der Trace-Baum
-   (`.trace-list`) vor „Planned tasks" und „Change scope"; zwischen Seitenkopf
-   und Arbeitsfeld steht keiner der beiden Blöcke. Weitere Bereiche werden
-   nicht umgeordnet.
-2. **Zugeklappt:** Beide Blöcke rendern als `<details>` ohne `open`; im
-   Ausgangszustand ist ihr Inhalt nicht sichtbar. Kein JavaScript, kein
-   Client-Zustand, keine Persistenz, kein Query-Parameter dafür.
-3. **Summary „Planned tasks":** Die `<summary>`-Zeile nennt Lane-Name,
-   Aufgabenzahl und Lane-Zustand, ohne dass der Block aufgeklappt werden muss;
-   der Zustand wird nicht neu hergeleitet. Ohne Plan-Skelett wird der Block
-   nicht gerendert.
-4. **Summary „Change scope":** Die `<summary>`-Zeile nennt die Zahl der
-   geänderten Dateien und die Summen der Plus- und Minuszeilen; Binärdateien
-   zählen bei der Dateizahl mit, nicht bei den Zeilensummen. Ein Lauf ohne
-   verwertbaren Diff bekommt eine erklärende Zeile statt einer Null; ein
-   verwertbarer Diff ohne geänderte Dateien bleibt davon unterscheidbar.
-5. **Spaltenbreite:** Die Baum-Spalte ist im `trace-layout`-Grid mindestens so
-   breit wie die Panes-Spalte (heute 434 px gegen 607 px bei 1440 px); die
-   Kontext-Spalte behält ihre `minmax`-Untergrenze und bleibt die schmalste.
-   Drei Spalten, Reihenfolge, `min-width: 0` und Überlauf-Regeln bleiben.
-6. **Umbrüche:** Der Anteil der Knotenbeschriftungen, die auf mehr als eine
-   Zeile umbrechen, sinkt messbar gegenüber dem heutigen Stand von 17,8 %
-   (103 von 577 bei `16f39431`, 1440 px, Stand 0.23.0). Verglichen wird bei
-   gleichem Faltungszustand; Beschriftungen oder Knoten zu entfernen zählt
-   nicht als Verbesserung.
-7. **Timeline lesbar:** Für `16f39431` ist die Beschriftung jedes der 31 Balken
-   lesbar, unabhängig von der Balkenbreite — insbesondere die 24 heute
-   abgeschnittenen (gemessen `scrollWidth > clientWidth`; u. a. `pytest` mit
-   6 px gegen 43 px Bedarf). In einer Spur mit vielen kurzen Balken überlagern
-   sich die Namen nicht. Das `title`-Attribut allein erfüllt dieses Kriterium
-   nicht.
-8. **Timeline-Geometrie unverändert:** `left` und `width` der Balken in Prozent
-   sind für identische Eingangsdaten unverändert; die Unterscheidung
-   aktiv / wartend / noch laufend, das `title`-Attribut und die
-   Spurbeschriftung links bleiben.
-9. **Zähldefinition:** Für mindestens drei verschiedene Fixture-Größen —
-   darunter ein Baum mit mehr als 200 Knoten — gilt: die Zahl der
-   `data-tree-entry`-Marker in der Baum-Spalte ist gleich der Zahl der Knoten
-   des serialisierten Baums — kein Knoten fehlt, keiner zählt doppelt. Ein an
-   seinen Aufruf gefaltetes Ergebnis behält seinen eigenen Marker.
-10. **Kein Fenster:** `?offset` verändert die Baum-Spalte nicht, und für sie
-    wird keine Blätter-Navigation gerendert (E2).
-11. **Tools-Fenster unberührt:** `?tools_offset`, die 200er-Schranke der
-    Tools-Einträge (`data-tool-entry`) und deren Blätter-Navigation verhalten
-    sich unverändert; die Schranke gilt nicht für `data-tree-entry`.
-12. **Contract:** Die Antwort von `GET /api/runs/{repo}/{run_id}` ist durch
-    dieses Feature in allen Feldern, Typen und Werten unverändert — inklusive
-    `tree`, `phases`, `raw`, `latest_context`, `problems` und der Kennzahlen
-    aus Brief 2; ebenso `GET /api/runs`. Keine neuen Routen, keine neuen
-    Query-Parameter. Ein Regressionstest fixiert die Unveränderlichkeit.
-13. **i18n:** Alle neuen Beschriftungen liegen in `adw/gui/i18n.py` in beiden
-    Sprachen mit identischer Schlüsselmenge und korrekten Pluralformen vor
-    (auch für null, eine und mehrere Aufgaben bzw. Dateien). Lane-Namen,
-    Dateipfade und Balkennamen sind Inhalte und werden nicht übersetzt.
-14. **Doku/Changelog:** `docs/GUI-SPEC.md`/`.de.md` beschreiben synchron die
-    neue Blockreihenfolge, die zugeklappten Zusammenfassungen samt
-    Leerzuständen, die dauerunabhängige Timeline-Beschriftung und die Aussage
-    zur Baum-Größe aus A5 (vollständiges Rendern; Lesbarkeit aus der
-    Verdichtung; 200er-Schranke nur für Tools). `CHANGELOG.md`/`.de.md` sind
-    synchron ergänzt. Der Kommentar in `tests/test_gui_bounded_dom.py`
-    entspricht diesem Stand.
+1. **Auswahl ohne Maus:** Im Harness wählt eine Folge aus Tab bis in die
+   Baum-Spalte, Ab-Taste und Enter einen Knoten aus, und der zugehörige
+   Detail-Pane wird sichtbar — ohne ein einziges Klick-Ereignis. Die Leertaste
+   erreicht dieselbe Auswahl wie Enter, ohne die Seite zu scrollen; die reine
+   Auf-/Ab-Bewegung löst keine Auswahl aus.
+2. **Bewegung überspringt Verborgenes:** Steht der Cursor auf einer
+   zugeklappten Phase, führt die Ab-Taste zur nächsten sichtbaren Zeile, nicht
+   in den verborgenen Teilbaum.
+3. **Auf- und Zuklappen:** Rechts öffnet eine geschlossene Falt-Zeile; ist sie
+   offen, bewegt Rechts zur ersten Kindzeile. Links schließt eine geöffnete;
+   ist sie zu, bewegt Links zur übergeordneten Falt-Zeile. Auf einer Zeile
+   ohne Klappmechanik bleibt der Zustand unverändert und es entsteht kein
+   Fehler.
+4. **Ein Tab-Halt:** Die Zahl der Elemente mit einem sequenziellen Tab-Halt in
+   der Baum-Spalte ist nach Client-Initialisierung 1, nicht 577 (E2); auch
+   bereits nativ fokussierbare Elemente innerhalb der Spalte (etwa `summary`)
+   erzeugen keine zusätzlichen sequenziellen Tab-Halte.
+5. **Timeline:** Eine Timeline-Zeile ist als Ganzes per Tastatur fokussierbar
+   und mit Enter/Leertaste auslösbar, und ein Klick auf ihre **Beschriftung**
+   wählt denselben Knoten aus wie ein Klick auf den Balken — einschließlich
+   der `?focus`-Umleitung für einen Knoten, den die Seite nicht zeigen kann,
+   auch bei Tastaturauslösung. Das Klickziel ist nicht mehr auf den 6 px
+   schmalen Balken beschränkt; der Balken selbst bleibt anklickbar.
+6. **Fokus sichtbar:** `app.css` enthält mindestens eine `:focus`- oder
+   `:focus-visible`-Regel, die einen sichtbaren Indikator setzt (heute:
+   keine); nirgends steht `outline: none` ohne Ersatz.
+7. **Fokusfarbe:** Der Fokusindikator benutzt nicht `--signal` (E5) und
+   erreicht mindestens 3:1 gegen `--paper` und gegen `--surface`, in beiden
+   Themes.
+8. **Registerkarten:** Jeder Knopf einer `role="tablist"`-Gruppe trägt
+   `role="tab"` und verweist per `aria-controls` auf sein Panel mit
+   `role="tabpanel"`; genau ein Knopf je Gruppe trägt `aria-selected="true"`
+   (die übrigen `"false"`), und der Wert wandert beim Wechsel mit — auch bei
+   einer serverseitigen Vorauswahl (etwa Landung auf dem Raw-Tab über
+   `raw_from_seq`). Klasse `active`, sichtbares Panel und ARIA-Zustand stimmen
+   überein.
+9. **Pfeiltasten in den Karten:** Links/Rechts wechselt die aktive
+   Registerkarte innerhalb ihrer Gruppe; nur die aktive Karte ist ein
+   sequenzieller Tab-Halt, und Auswahlzustand, Tab-Halt, Klasse `active` und
+   sichtbares Panel wechseln gemeinsam — auch bei einem Wechsel per Klick.
+10. **Auswahl ausgezeichnet:** Der ausgewählte Knoten ist maschinenlesbar als
+    solcher erkennbar, nicht nur über die Klasse `selected`. Ein Wechsel nimmt
+    die Auszeichnung am vorherigen Knoten zurück; sie greift bei Auswahl über
+    Baum wie Timeline, per Maus wie Tastatur, sowie bei `?focus`-Landung.
+    Bloßer Navigationsfokus wird nicht als Auswahl ausgezeichnet.
+11. **DOM-Gewicht:** Die Zahl der `data-tree-entry`-Marker und die Zahl der
+    gerenderten Elemente der Baum-Spalte sind gegenüber dem Stand vor diesem
+    Issue bei gleicher Eingabe unverändert; die serverseitige Baum-Spalte hat
+    höchstens einen neuen Tastatur-Einstiegspunkt (E3).
+12. **Bestand erhalten:** `<label>` am Typfilter, `aria-label` am Suchfeld,
+    `aria-expanded` am Falt-Knopf und `aria-hidden` an den Statusglyphen sind
+    unverändert vorhanden.
+13. **Contract:** Die Antworten von `GET /api/runs` und
+    `GET /api/runs/{repo}/{run_id}` sind durch dieses Feature in allen
+    Feldern, Typen und Werten unverändert; keine neuen Routen, keine neuen
+    Query-Parameter. Ein Regressionstest fixiert diese Unveränderlichkeit.
+14. **Gates grün:** `uv run ruff check .` und `uv run pytest -x -q`. Keine
+    neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN.
 
 ## Definition of Done
 
 - Alle Acceptance Criteria 1–14 erfüllt und, soweit automatisiert prüfbar,
   durch Tests belegt.
-- Die Messgrößen aus AC 6 und AC 7 (Umbruch-Anteil, Abschneiden der
-  Balkenbeschriftung) werden im **echten Browser** erhoben — Lauf `16f39431`,
-  Referenz-Viewport 1440 px, gleicher Faltungszustand wie die Ausgangsmessung —
-  und mit ihren Werten dokumentiert; eine protokollierte manuelle Messung
-  genügt. Der Harness `tests/gui_js_harness.js` / `tests/gui_js_harness.py`
-  läuft ohne Layout-Engine und bleibt reinem Client-Verhalten vorbehalten;
-  simulierte Layout-Assertions oder ein neues Browser-Test-Subsystem entstehen
-  nicht.
+- Das Tastatur- und Auswahlverhalten (AC 1–5, 8–10) wird im vorhandenen
+  Harness `tests/gui_js_harness.js` / `tests/gui_js_harness.py` gegen das
+  ausgelieferte `app.js` geprüft; die ARIA-, DOM- und CSS-Aussagen
+  (AC 6, 7, 11, 12) und der Contract (AC 13) in den üblichen
+  `tests/test_gui_*.py`. Der Harness ist ein reiner `node`-Prozess ohne
+  Browser und ohne Layout-Engine (Entwicklungswerkzeug, keine
+  Laufzeit-Dependency); simulierte Layout-Assertions oder ein neues
+  Browser-Test-Subsystem entstehen nicht.
+- Richtwert **~12 neue Tests** unter `tests/`; deutlich mehr als ~17 ist
+  Scope-Drift. Bestehende GUI-Tests bleiben grün, ohne inhaltlich
+  umgeschrieben zu werden.
 - Gates grün: `uv run ruff check .` und `uv run pytest -x -q`. Kein flake8,
   kein isort, kein black; `ruff format` ist kein Gate — der veraltete Hinweis
   in `docs/GUI-SPEC.md` (Abnahmepunkt 10) begründet keine zusätzlichen Gates.
-- Richtwert **~11 neue Tests** unter `tests/test_gui_*.py`; deutlich mehr als
-  ~16 ist Scope-Drift. Bestehende GUI-Tests bleiben grün, ohne inhaltlich
-  umgeschrieben zu werden — erlaubte Ausnahme: Tests, die die heutige
-  Blockreihenfolge oder die heutige Timeline-Balkenbeschriftung festschreiben,
-  werden mit begründendem Kommentar auf den neuen Stand gehoben.
 - Keine neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN, keine
-  Webfont (E1).
-- Doku und Changelog in beiden Sprachen synchron.
+  Webfont, keine Barrierefreiheits-Bibliothek (E1).
+- i18n vollständig in beiden Sprachen mit identischer Schlüsselmenge (A6);
+  Doku und Changelog in beiden Sprachen synchron (A7).
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-- Volltextsuche oder Filterchips über dem Trace-Baum.
-- Zusammenklappbare oder in der Breite ziehbare Spalten des Arbeitsfelds.
-- Ein Lazy-Rendering des Baums oder irgendeine andere Knotenschranke (E2).
-- Zoom, Schwenken oder Zeitlupe in der Timeline; Zusammenfassen von Balken.
-- Zusammenführen von Zeitachse und Timeline zu einer einzigen Darstellung.
-- Eine eigene Ansicht für die Reader-Probleme.
-- Persistieren des Auf-/Zuklappzustands der beiden Zusammenfassungsblöcke.
+- Vollständiges WCAG-2.2-Audit, Screenreader-Testprotokoll, Zertifizierung
+  (E9).
+- Sprungmarken („zum Inhalt springen"), Landmark-Überarbeitung der ganzen
+  Seite, Überschriftenhierarchie-Revision.
+- Tastaturkürzel jenseits der Navigation im Baum (etwa „springe zum ersten
+  Fehler", Schnellsuche, Befehlspalette).
+- Tastaturpfad für die Run-Liste über die vorhandenen Links hinaus.
+- Anpassbare Tastenbelegung, Vim-artige Bewegungen.
+- `aria-live`-Ansagen für den SSE-Pfad.
+- Hoher-Kontrast-Modus oder `prefers-contrast`.
