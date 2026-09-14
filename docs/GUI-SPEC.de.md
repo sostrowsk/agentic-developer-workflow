@@ -937,6 +937,58 @@ eine Zahl oder `null`):
   überlappen nicht, die Zerlegung ist also eindeutig. `phase_seconds +
   wait_seconds = total_seconds` bis auf Rundung.
 
+### 7.9 Bedienung per Tastatur, Fokus und Registerkarten
+
+Die Hauptinteraktion — einen Trace-Knoten auswählen und lesen — ist ohne Maus
+erreichbar. Die Ergänzungen sind rein bedienend: **was** die Seite zeigt, ändert
+sich nicht.
+
+**Tastaturpfad im Trace-Baum.** Die Baum-Spalte ist genau **ein** Halt in der
+Tab-Reihenfolge (nicht einer je Zeile). Der Client macht die `.trace-list` zum
+einzigen sequenziellen Einstiegspunkt und nimmt jedes native fokussierbare Element
+darin (Falt-Knöpfe, Gruppen-`<summary>`, Roh-Log-Links) aus der Reihenfolge; die
+Zeilen werden über einen flüchtigen Navigationscursor erreicht, der von der Auswahl
+getrennt bleibt — den Cursor zu bewegen wählt nie aus. Die bindende Tastenbelegung:
+
+| Taste | Wirkung |
+|---|---|
+| ↓ / ↑ | nächste / vorige **sichtbare** Zeile |
+| → | Falt-Zeile aufklappen; ist sie offen, zur ersten Kindzeile |
+| ← | Falt-Zeile zuklappen; ist sie zu, zur übergeordneten Falt-Zeile |
+| Enter, Leertaste | Knoten auswählen (wie ein Klick) |
+| Pos1 / Ende | erste / letzte sichtbare Zeile |
+
+„Sichtbar" heißt: nicht innerhalb einer zugeklappten Phase, Gruppe oder
+Wiederholung. Die Leertaste scrollt die Seite nicht, wenn sie auswählt.
+Kombinationen mit Strg, Alt oder Meta werden nicht abgefangen. Es wächst kein
+serverseitiges Markup je Zeile (höchstens ein serverseitiger Einstiegspunkt); alles
+Weitere je Zeile setzt der Client zur Laufzeit.
+
+**Timeline-Zeile als bedienbare Einheit.** Die ganze `.tl-bar-row` (Beschriftung +
+Spur + Balken, alle mit demselben `data-seq`) ist anklickbar, per Tastatur in
+Darstellungsreihenfolge fokussierbar und mit Enter/Leertaste auslösbar — sie erreicht
+denselben Knoten wie der Balken, einschließlich der bestehenden `?focus`-Umleitung
+für einen Knoten, den die Seite nicht zeigen kann. Der 6 px schmale Balken bleibt
+anklickbar; ein Balkenklick, der durch die Zeile bubbelt, löst genau einmal aus.
+
+**Fokusindikator.** Ein einheitlicher, deutlich sichtbarer Fokusindikator für jedes
+fokussierbare Element, in beiden Themes. Er benutzt ein **eigenes** Token
+(`--focus`, aus `--busy`) — nie `--signal`, das für „ein Mensch muss handeln"
+reserviert bleibt — mit einer eigenen Kontur (eine Outline, nicht Farbe allein) mit
+mindestens 3:1 gegen `--paper` **und** `--surface`. Er wird nirgends durch ein bloßes
+`outline: none` entfernt; `:focus-visible` hält ihn bei reiner Mausnutzung zurück.
+
+**Registerkarten-Muster.** Die Knöpfe jeder `role="tablist"`-Gruppe tragen
+`role="tab"`, ein gepflegtes `aria-selected` und `aria-controls` auf ihr Panel mit
+`role="tabpanel"`; Links/Rechts wechselt innerhalb der nächstgelegenen Gruppe, und
+nur die aktive Karte ist ein sequenzieller Tab-Halt (Roving-Tabindex). Die
+bestehende Klasse `active` und die serverseitige Vorauswahl (etwa eine
+Raw-Tab-Landung über `raw_from_seq`) bleiben, wie sie sind — die ARIA-Auszeichnung
+tritt daneben, sie ersetzt nichts. Der ausgewählte Trace-Knoten ist zusätzlich
+maschinenlesbar ausgezeichnet (`aria-selected` am Knoten) und wandert bei jeder
+Auswahl über Baum oder Timeline, per Maus wie Tastatur; ein bloßer Navigationscursor
+ist keine Auswahl.
+
 ## 8. Sicherheit und Datenschutz
 
 Konsequenz der Entscheidung „roher Mitschnitt, keine Redaction":

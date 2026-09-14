@@ -430,7 +430,7 @@
             directly under the head. The two summaries — "Planned tasks" and "Change
             scope" — drop BELOW it, collapsed (see after this grid). -#}
         <div class="trace-layout">
-          <section class="trace">
+          <section class="trace" aria-label="{{ t.tree_region }}">
             {% if not detail.run.has_trace %}
             <p class="no-trace-hint">{{ t.no_trace_line }}</p>
             {% endif %}

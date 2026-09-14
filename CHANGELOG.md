@@ -12,6 +12,24 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Added
+- **Run-detail page: operable without a mouse.** The main interaction —
+  selecting a trace node and reading it — now has a keyboard path. The trace tree
+  is a single tab stop with arrow-key navigation over the visible rows (Up/Down
+  move, Right/Left open/close folds, Enter/Space select, Home/End jump to the
+  first/last visible row); collapsed content is skipped and Space does not scroll
+  the page. The whole timeline **row** (label, track and bar) becomes the operable
+  unit — clickable, keyboard-focusable and activatable, reaching the same node as
+  the up-to-6 px bar, including the `?focus` redirect for an out-of-window target.
+  A uniform, clearly visible focus indicator (its own `--focus` token, never
+  `--signal`, ≥ 3:1 in both themes) marks every focusable element. The announced
+  tab pattern is fulfilled — `role="tab"`/`aria-selected`/`aria-controls` with
+  Left/Right switching and a roving tab stop, adopting the server preselection —
+  and the selected node is exposed machine-readably (`aria-selected`). Purely
+  operational: what the page shows and the JSON API are unchanged.
+
 ## [0.24.0] — 2026-09-14
 
 ### Fixed

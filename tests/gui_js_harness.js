@@ -70,7 +70,23 @@ class El {
     while (n) { if (matchesCompound(n, sel)) return n; n = n.parent; }
     return null;
   }
-  addEventListener() { /* elements need no listeners in these scenarios */ }
+  // --- Brief 4 (keyboard operability): elements MAY carry their own listeners so
+  // the keydown scenarios work whether app.js delegates on `document` or attaches a
+  // handler to the tree/tab container. `focus()` records the active element and
+  // `click()` counts any synthesised click so a test can prove selection happened
+  // via the keyboard WITHOUT a synthetic click (AC 1).
+  addEventListener(type, handler) {
+    if (typeof handler !== "function") return;
+    (this._listeners = this._listeners || {});
+    (this._listeners[type] = this._listeners[type] || []).push(handler);
+  }
+  focus() { if (global.document) global.document.activeElement = this; }
+  blur() { if (global.document && global.document.activeElement === this) global.document.activeElement = null; }
+  click() { synthClicks.push(this); }
+  get tabIndex() {
+    var v = this.getAttribute("tabindex");
+    return v === null ? -1 : parseInt(v, 10);
+  }
 }
 
 function el(tag, opts = {}) {
@@ -143,6 +159,7 @@ let timerQ = [];
 const deferred = [];       // pending fetch() promises: {url, resolve, reject}
 const listeners = {};      // document event listeners by type
 const navigations = [];    // URLs passed to window.location.assign
+const synthClicks = [];    // elements on which app.js called .click() (must stay empty, AC 1)
 let eventSource = null;    // the EventSource the client opens (to drive live refresh)
 let nextParsedDoc = null;  // what DOMParser.parseFromString returns (the "fresh" swap DOM)
 
@@ -181,6 +198,7 @@ function installGlobals(rootDoc, body, search) {
   };
   global.document = {
     body,
+    activeElement: body,
     querySelector: (sel) => qsa(rootDoc, sel)[0] || null,
     querySelectorAll: (sel) => qsa(rootDoc, sel),
     addEventListener: (type, handler) => {
@@ -188,6 +206,94 @@ function installGlobals(rootDoc, body, search) {
     },
     createElement: (tag) => new El(tag),
   };
+}
+
+// Brief 4: dispatch a `keydown` to app.js — whether it listens on `document`
+// (delegation, as it does for click/toggle) or on the tree/tab container. The event
+// bubbles from `target` up its ancestors, then to the document listeners; a
+// `preventDefault()` sets `defaultPrevented` so a test can prove the space key does
+// not scroll the page (AC 1). Ctrl/Alt/Meta chords are passed through so a test can
+// assert they are NOT intercepted (spec key table).
+function fireKey(target, key, mods) {
+  mods = mods || {};
+  const ev = {
+    type: "keydown", key, target,
+    ctrlKey: !!mods.ctrl, altKey: !!mods.alt, metaKey: !!mods.meta, shiftKey: !!mods.shift,
+    defaultPrevented: false,
+    preventDefault() { ev.defaultPrevented = true; },
+    stopPropagation() {},
+  };
+  const chain = [];
+  let n = target;
+  while (n) { chain.push(n); n = n.parent; }
+  chain.forEach((node) => (node._listeners && node._listeners.keydown || []).forEach((h) => h(ev)));
+  (listeners.keydown || []).forEach((h) => h(ev));
+  return ev;
+}
+
+// The `data-seq` of the currently selected node (the node carrying the `.selected`
+// class app.js maintains), or null.
+function selectedNodeSeq() {
+  const n = global.document.querySelector(".node.selected");
+  return n ? n.getAttribute("data-seq") : null;
+}
+
+// The data-seq values of the nodes the client has marked machine-readably selected
+// (A5/AC 10) — beyond the `.selected` class — via `aria-selected="true"`.
+function ariaSelectedSeqs() {
+  return global.document.querySelectorAll('.node[aria-selected="true"]')
+    .map((n) => n.getAttribute("data-seq")).sort();
+}
+
+// Count the elements in `root` that are a SEQUENTIAL tab stop (AC 4): a natively
+// focusable tag not opted out with tabindex="-1", or any element with tabindex >= 0.
+function sequentialTabStops(root) {
+  const NATIVE = { A: 1, BUTTON: 1, INPUT: 1, SELECT: 1, TEXTAREA: 1, SUMMARY: 1 };
+  let count = 0;
+  (function walk(node) {
+    node.children.forEach((c) => {
+      const ti = c.getAttribute("tabindex");
+      if (ti !== null) { if (parseInt(ti, 10) >= 0) count++; }
+      else if (NATIVE[c.tag]) count++;
+      walk(c);
+    });
+  })(root);
+  return count;
+}
+
+// The data-tab a group's selected tab reports (aria-selected="true"), the count of
+// such tabs, and the count of buttons that are a sequential tab stop (roving).
+function tabGroupState(group) {
+  let selected = null;
+  let selectedCount = 0;
+  let tabStops = 0;
+  group.querySelectorAll(".tab-btn").forEach((b) => {
+    if (b.closest("[data-tabs]") !== group) return;  // nested group: not ours
+    if (b.getAttribute("aria-selected") === "true") { selectedCount++; if (!selected) selected = b.getAttribute("data-tab"); }
+    const ti = b.getAttribute("tabindex");
+    if (ti === null || parseInt(ti, 10) >= 0) tabStops++;
+  });
+  return { selected, selectedCount, tabStops };
+}
+
+function activePanelName(group) {
+  let name = null;
+  group.querySelectorAll("[data-tab-panel]").forEach((p) => {
+    if (p.closest("[data-tabs]") === group && p.classList.contains("active") && !name) {
+      name = p.getAttribute("data-tab-panel");
+    }
+  });
+  return name;
+}
+
+function activeButtonTab(group) {
+  let name = null;
+  group.querySelectorAll(".tab-btn").forEach((b) => {
+    if (b.closest("[data-tabs]") === group && b.classList.contains("active") && !name) {
+      name = b.getAttribute("data-tab");
+    }
+  });
+  return name;
 }
 
 // deterministic drivers ------------------------------------------------------
@@ -1018,6 +1124,343 @@ async function runTraceFocusFold() {
 }
 
 // ---------------------------------------------------------------------------
+// Brief 4 scenarios: keyboard operability of the trace tree, the timeline row, the
+// tab pattern, and the machine-readable selection. All observed through the served
+// app.js — the harness only dispatches keydown/click and reads the resulting DOM
+// state (selection class, aria-*, tabindex, navigations); it is not a browser and
+// simulates no layout.
+// ---------------------------------------------------------------------------
+
+function keyboardTreeDom() {
+  // A `.trace-list` with a dummy first node (seq 1, its own pane so the initial
+  // applySelection selects it WITHOUT a fetch), a default-open phase (seq 2) holding
+  // one visible child (seq 3), a collapsed phase (seq 8) holding one child (seq 9,
+  // hidden after the default fold), a collapsible GROUP wrapper (a <summary> that
+  // must not become an extra tab stop) and a trailing plain node (seq 20). Depth
+  // rides in the inline style as the server renders it.
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  function node(seq, depth, extra) {
+    const attrs = Object.assign({ "data-seq": String(seq), "data-node-type": "agent.tool.call",
+      "style": "--depth:" + depth }, extra || {});
+    return el("li", { classes: ["node"], attrs,
+      children: [el("span", { classes: ["label"] })] });
+  }
+  function phase(seq, depth) {
+    return el("li", { classes: ["node"],
+      attrs: { "data-seq": String(seq), "data-node-type": "phase", "style": "--depth:" + depth },
+      children: [
+        el("button", { classes: ["fold-toggle"], attrs: { "data-fold-toggle": "", "aria-expanded": "true" } }),
+        el("span", { classes: ["label"] })] });
+  }
+  const n1 = node(1, 1);
+  const p2 = phase(2, 1);
+  const n3 = node(3, 2);
+  const p8 = phase(8, 1);
+  const n9 = node(9, 2);
+  const groupSummary = el("summary", { classes: ["trace-summary"] });
+  const group = el("li", { classes: ["trace-wrap", "trace-group"], attrs: { "style": "--depth:1" },
+    children: [el("details", { classes: ["trace-collapse"],
+      children: [groupSummary, el("ul", { classes: ["trace-sublist"] })] })] });
+  const n20 = node(20, 1);
+  const list = el("ul", { classes: ["trace-list"], attrs: { "data-default-phase": "2" },
+    children: [n1, p2, n3, p8, n9, group, n20] });
+  const trace = el("div", { classes: ["trace"], children: [list] });
+  function pane(seq) { return el("div", { classes: ["pane"], attrs: { "data-seq": String(seq) } }); }
+  const panes = el("div", { classes: ["panes"], children: [pane(1), pane(3), pane(9), pane(20)] });
+  body.append(trace, panes);
+  return { body, trace, list, n1, p2, n3, p8, n9, n20, groupSummary,
+    pane3: panes.children[1], pane9: panes.children[2], pane20: panes.children[3] };
+}
+
+async function runTreeKeyboard() {
+  const dom = keyboardTreeDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();  // initial applySelection selects the dummy first node (seq 1)
+
+  const initial = selectedNodeSeq();
+
+  // Pure Down/Down moves the navigation cursor but must NOT select (AC 1).
+  fireKey(dom.list, "ArrowDown");  // seq 1 -> phase 2
+  fireKey(dom.list, "ArrowDown");  // phase 2 -> visible child seq 3
+  const afterMotion = selectedNodeSeq();
+
+  // Enter selects the cursored node exactly like a click — same pane, no synth click.
+  fireKey(dom.list, "Enter");
+  await settle();
+  const afterEnter = {
+    sel: selectedNodeSeq(),
+    pane3_selected: dom.pane3.classes.has("selected"),
+    measures: countMeasure("adw:select"),
+    synth_clicks: synthClicks.length,
+  };
+
+  // From seq 3: Down -> collapsed phase 8, Down -> seq 20 (the hidden child seq 9 is
+  // SKIPPED, AC 2). Space selects and must prevent the page scroll (AC 1).
+  fireKey(dom.list, "ArrowDown");  // seq 3 -> phase 8
+  fireKey(dom.list, "ArrowDown");  // phase 8 -> seq 20 (skips hidden seq 9)
+  const space = fireKey(dom.list, " ");
+  await settle();
+  const afterSpace = { sel: selectedNodeSeq(), space_default_prevented: space.defaultPrevented };
+
+  // Home / End jump to the first / last VISIBLE row (AC 2 key table).
+  fireKey(dom.list, "End"); fireKey(dom.list, "Enter"); await settle();
+  const afterEnd = selectedNodeSeq();
+  fireKey(dom.list, "Home"); fireKey(dom.list, "Enter"); await settle();
+  const afterHome = selectedNodeSeq();
+
+  return { ok: true, initial, afterMotion, afterEnter, afterSpace, afterEnd, afterHome };
+}
+
+async function runTreeFoldKeys() {
+  const dom = keyboardTreeDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();
+
+  // Move the cursor onto the collapsed phase (seq 8): Down -> phase 2, Down -> seq 3,
+  // Down -> phase 8.
+  fireKey(dom.list, "ArrowDown");
+  fireKey(dom.list, "ArrowDown");
+  fireKey(dom.list, "ArrowDown");
+  const start = { phase_open: dom.p8.classes.has("phase-open"), child_hidden: dom.n9.classes.has("fold-hidden") };
+
+  // A Ctrl chord must NOT be intercepted (no fold change).
+  fireKey(dom.list, "ArrowRight", { ctrl: true });
+  const afterCtrlRight = { phase_open: dom.p8.classes.has("phase-open") };
+
+  fireKey(dom.list, "ArrowRight");  // opens the collapsed phase
+  const afterRight = { phase_open: dom.p8.classes.has("phase-open"), child_hidden: dom.n9.classes.has("fold-hidden") };
+
+  fireKey(dom.list, "ArrowLeft");   // closes it again
+  const afterLeft = { phase_open: dom.p8.classes.has("phase-open"), child_hidden: dom.n9.classes.has("fold-hidden") };
+
+  // On a leaf row (End -> seq 20) Right/Left change nothing and raise no error.
+  fireKey(dom.list, "End");
+  let leafError = false;
+  try { fireKey(dom.list, "ArrowRight"); fireKey(dom.list, "ArrowLeft"); } catch (e) { leafError = true; }
+
+  return { ok: true, start, afterCtrlRight, afterRight, afterLeft, leaf_no_error: !leafError };
+}
+
+async function runTreeTabStop() {
+  const dom = keyboardTreeDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();
+  // After client init the whole tree column is exactly ONE sequential tab stop, and
+  // the natively focusable fold buttons / group <summary> inside it add none (AC 4).
+  return { ok: true, tab_stops: sequentialTabStops(dom.trace) };
+}
+
+function timelineRowDom() {
+  // A dummy in-tree node/pane (initial selection, no fetch), an IN-window timeline
+  // row whose node has a pane (seq 10) and an OUT-of-window row whose node has
+  // neither pane nor tree row (seq 99). Each row is `.tl-bar-row` > label + track >
+  // bar, all carrying data-seq, as the server renders it.
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  const tree = el("div", { classes: ["trace"],
+    children: [el("li", { classes: ["node"], attrs: { "data-seq": "1" } }),
+      el("li", { classes: ["node"], attrs: { "data-seq": "10" } })] });
+  function row(seq) {
+    const label = el("span", { classes: ["tl-bar-label"], attrs: { "data-seq": String(seq) } });
+    const bar = el("span", { classes: ["tl-bar"], attrs: { "data-seq": String(seq) } });
+    const track = el("span", { classes: ["tl-track"], children: [bar] });
+    const r = el("div", { classes: ["tl-bar-row"], attrs: { "data-seq": String(seq) },
+      children: [label, track] });
+    return { row: r, label, bar };
+  }
+  const rin = row(10);
+  const rout = row(99);
+  const laneBody = el("div", { classes: ["tl-lane-body"], children: [rin.row, rout.row] });
+  const lane = el("div", { classes: ["tl-lane"], children: [laneBody] });
+  const lanes = el("div", { classes: ["timeline-lanes"], children: [lane] });
+  const panes = el("div", { classes: ["panes"],
+    children: [el("div", { classes: ["pane"], attrs: { "data-seq": "1" } }),
+      el("div", { classes: ["pane"], attrs: { "data-seq": "10" } })] });
+  body.append(tree, lanes, panes);
+  return { body, rowIn: rin.row, labelIn: rin.label, barIn: rin.bar, rowOut: rout.row,
+    pane10: panes.children[1] };
+}
+
+async function runTimelineActivate() {
+  const dom = timelineRowDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();
+
+  // A click on the LABEL (not the 6px bar) selects the in-window node in place.
+  dispatch("click", { target: dom.labelIn }); await settle();
+  const afterLabel = { pane10_selected: dom.pane10.classes.has("selected"), navs: navigations.slice() };
+
+  // Enter on the OUT-of-window row navigates via ?focus (its node has no pane/row).
+  fireKey(dom.rowOut, "Enter"); await settle();
+  const afterKeyOut = { navs: navigations.slice() };
+
+  // Space on the in-window row triggers the same in-place selection and must not
+  // scroll the page.
+  const space = fireKey(dom.rowIn, " "); await settle();
+  const afterKeySpace = { pane10_selected: dom.pane10.classes.has("selected"),
+    space_default_prevented: space.defaultPrevented };
+
+  // A click on the bar INSIDE the row selects once — no double activation.
+  const before = countMeasure("adw:select");
+  dispatch("click", { target: dom.barIn }); await settle();
+  const barClickMeasures = countMeasure("adw:select") - before;
+
+  return { ok: true, row_tabindex: dom.rowIn.getAttribute("tabindex"),
+    afterLabel, afterKeyOut, afterKeySpace, bar_click_measures: barClickMeasures };
+}
+
+function tabPatternDom() {
+  // The run-level tab group with the RAW tab pre-selected server-side (as a
+  // raw_from_seq landing does): `active` on the raw button and its panel. The client
+  // must adopt THAT selection, not reset to the first tab. Inside the (hidden) trace
+  // panel sits a nested agent.run tab group (prompt/answer/tools) so a test can prove
+  // arrow-key switching stays inside its nearest group.
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  function btn(name, active) {
+    return el("button", { classes: active ? ["tab-btn", "active"] : ["tab-btn"],
+      attrs: { "type": "button", "data-tab": name } });
+  }
+  function panel(name, active, kids) {
+    return el("section", { classes: active ? ["tab", "active"] : ["tab"],
+      attrs: { "data-tab-panel": name }, children: kids || [] });
+  }
+  // nested (agent.run) group, prompt active.
+  const innerButtons = el("div", { classes: ["tab-buttons"], attrs: { "role": "tablist" },
+    children: [btn("prompt", true), btn("answer", false), btn("tools", false)] });
+  const innerGroup = el("div", { classes: ["tabs"], attrs: { "data-tabs": "" },
+    children: [innerButtons, panel("prompt", true), panel("answer", false), panel("tools", false)] });
+  const traceInner = el("div", { classes: ["trace"],
+    children: [el("li", { classes: ["node"], attrs: { "data-seq": "1" } })] });
+  const panesInner = el("div", { classes: ["panes"],
+    children: [el("div", { classes: ["pane"], attrs: { "data-seq": "1" } })] });
+  const tracePanel = panel("trace", false, [traceInner, panesInner, innerGroup]);
+  const outerButtons = el("div", { classes: ["tab-buttons"], attrs: { "role": "tablist" },
+    children: [btn("trace", false), btn("timeline", false), btn("artifacts", false), btn("raw", true)] });
+  const outer = el("div", { classes: ["tabs", "run-tabs"], attrs: { "data-tabs": "" },
+    children: [outerButtons, tracePanel, panel("timeline", false), panel("artifacts", false),
+      panel("raw", true)] });
+  body.append(outer);
+  return { body, outer, outerButtons, innerGroup, innerButtons };
+}
+
+function outerButton(dom, name) {
+  let found = null;
+  dom.outerButtons.querySelectorAll(".tab-btn").forEach((b) => {
+    if (!found && b.getAttribute("data-tab") === name) found = b;
+  });
+  return found;
+}
+function innerButton(dom, name) {
+  let found = null;
+  dom.innerButtons.querySelectorAll(".tab-btn").forEach((b) => {
+    if (!found && b.getAttribute("data-tab") === name) found = b;
+  });
+  return found;
+}
+
+async function runTabPattern() {
+  const dom = tabPatternDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();
+
+  // --- AC 8: roles, single selected tab (the server-preselected RAW), aria-controls
+  // pointing at a role="tabpanel".
+  const roles = ["trace", "timeline", "artifacts", "raw"].map((n) => outerButton(dom, n).getAttribute("role"));
+  const rawBtn = outerButton(dom, "raw");
+  const controls = rawBtn.getAttribute("aria-controls");
+  let controlsPanelName = null;
+  let controlsPanelRole = null;
+  dom.outer.querySelectorAll("[data-tab-panel]").forEach((p) => {
+    if (controls && p.closest("[data-tabs]") === dom.outer && p.getAttribute("id") === controls) {
+      controlsPanelName = p.getAttribute("data-tab-panel");
+      controlsPanelRole = p.getAttribute("role");
+    }
+  });
+  const initial = tabGroupState(dom.outer);
+  const outerInit = { roles, selected: initial.selected, selected_count: initial.selectedCount,
+    tab_stops: initial.tabStops, controls_panel: controlsPanelName, controls_role: controlsPanelRole };
+
+  // --- AC 9: ArrowLeft moves the active tab (raw -> artifacts); selection class,
+  // visible panel, roving tab stop and aria-selected all travel together.
+  fireKey(rawBtn, "ArrowLeft"); await settle();
+  const afterArrow = { selected: tabGroupState(dom.outer).selected,
+    active_button: activeButtonTab(dom.outer), visible_panel: activePanelName(dom.outer),
+    tab_stops: tabGroupState(dom.outer).tabStops,
+    roving_at: (function () {
+      let at = null;
+      dom.outerButtons.querySelectorAll(".tab-btn").forEach((b) => {
+        if (b.closest("[data-tabs]") === dom.outer && (b.getAttribute("tabindex") === "0") && !at) at = b.getAttribute("data-tab");
+      });
+      return at;
+    })() };
+
+  // A CLICK switch updates aria-selected too (not only the arrow keys).
+  dispatch("click", { target: outerButton(dom, "timeline") }); await settle();
+  const afterClick = { selected: tabGroupState(dom.outer).selected };
+
+  // --- AC 9 nesting: an arrow inside the inner group switches only the inner group;
+  // the outer group's selection is untouched.
+  const innerBefore = tabGroupState(dom.innerGroup).selected;
+  const outerBefore = tabGroupState(dom.outer).selected;
+  fireKey(innerButton(dom, "prompt"), "ArrowRight"); await settle();
+  const nested = { inner_before: innerBefore, inner_after: tabGroupState(dom.innerGroup).selected,
+    outer_before: outerBefore, outer_after: tabGroupState(dom.outer).selected };
+
+  return { ok: true, outerInit, afterArrow, afterClick, nested };
+}
+
+function selectionMarkedDom() {
+  // A tree with a dummy first node (seq 1), two selectable nodes (seq 10, seq 20) and
+  // a timeline row/bar for seq 10 — enough to exercise selection over the tree AND
+  // the timeline, by mouse AND keyboard.
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  function node(seq) {
+    return el("li", { classes: ["node"], attrs: { "data-seq": String(seq),
+      "data-node-type": "agent.tool.call", "style": "--depth:1" },
+      children: [el("span", { classes: ["label"] })] });
+  }
+  const n1 = node(1); const n10 = node(10); const n20 = node(20);
+  const list = el("ul", { classes: ["trace-list"], children: [n1, n10, n20] });
+  const trace = el("div", { classes: ["trace"], children: [list] });
+  const bar10 = el("span", { classes: ["tl-bar"], attrs: { "data-seq": "10" } });
+  const row10 = el("div", { classes: ["tl-bar-row"], attrs: { "data-seq": "10" },
+    children: [el("span", { classes: ["tl-bar-label"], attrs: { "data-seq": "10" } }),
+      el("span", { classes: ["tl-track"], children: [bar10] })] });
+  const lanes = el("div", { classes: ["timeline-lanes"], children: [row10] });
+  function pane(seq) { return el("div", { classes: ["pane"], attrs: { "data-seq": String(seq) } }); }
+  const panes = el("div", { classes: ["panes"], children: [pane(1), pane(10), pane(20)] });
+  body.append(trace, lanes, panes);
+  return { body, list, n10, n20, bar10 };
+}
+
+async function runSelectionMarked() {
+  const dom = selectionMarkedDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();
+
+  const initial = ariaSelectedSeqs();                        // the initial selection is marked
+
+  dispatch("click", { target: dom.n10 }); await settle();
+  const afterMouse = ariaSelectedSeqs();                     // mouse selection marks seq 10
+
+  fireKey(dom.list, "ArrowDown");                            // nav cursor seq 10 -> seq 20 (no select)
+  const afterNavOnly = ariaSelectedSeqs();                   // still seq 10 — a cursor is not a selection
+
+  fireKey(dom.list, "Enter"); await settle();
+  const afterKeyboard = ariaSelectedSeqs();                  // keyboard selection marks seq 20
+
+  dispatch("click", { target: dom.bar10 }); await settle();
+  const afterTimeline = ariaSelectedSeqs();                  // timeline selection marks seq 10
+
+  return { ok: true, initial, afterMouse, afterNavOnly, afterKeyboard, afterTimeline };
+}
+
+// ---------------------------------------------------------------------------
 const APP = process.argv[2];
 const SCENARIO = process.argv[3];
 const ARG = process.argv[4];
@@ -1033,6 +1476,12 @@ const ARG = process.argv[4];
   else if (SCENARIO === "refresh-window") result = await runRefreshWindow(ARG || "");
   else if (SCENARIO === "timeline-focus") result = await runTimelineFocus();
   else if (SCENARIO === "trace-focus-fold") result = await runTraceFocusFold();
+  else if (SCENARIO === "tree-keyboard") result = await runTreeKeyboard();
+  else if (SCENARIO === "tree-fold-keys") result = await runTreeFoldKeys();
+  else if (SCENARIO === "tree-tabstop") result = await runTreeTabStop();
+  else if (SCENARIO === "timeline-activate") result = await runTimelineActivate();
+  else if (SCENARIO === "tab-pattern") result = await runTabPattern();
+  else if (SCENARIO === "selection-marked") result = await runSelectionMarked();
   else if (SCENARIO === "context-panel") result = await runContextPanel();
   else if (SCENARIO === "context-live-swap") result = await runContextLiveSwap();
   else if (SCENARIO === "cost-format") result = await runCostFormat(ARG);

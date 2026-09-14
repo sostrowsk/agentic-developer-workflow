@@ -21,6 +21,12 @@
   --dry: #8a4b00;
   --dry-ink: #ffffff;
 
+  /* A3: the keyboard focus indicator has its OWN token — never --signal, which is
+     reserved for "a human must act" (E5). --busy is the admissible source (6.41
+     light, 6.92 dark against the page, well above the 3:1 minimum vs --paper AND
+     --surface). */
+  --focus: var(--busy);
+
   /* Aliases kept so existing markup that references the old names still resolves;
      new rules use the new names. */
   --fg: var(--ink);
@@ -58,6 +64,7 @@
     --wait: #8b93a1;
     --dry: #c67a2a;
     --dry-ink: #1a1207;
+    --focus: var(--busy);
   }
 }
 
@@ -68,6 +75,23 @@ a, .tab-btn, .fold-toggle, .load-more {
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
+}
+
+/* A3: a uniform, clearly visible focus indicator for EVERY focusable element — native
+   links, buttons, inputs and <summary> as well as the new keyboard targets (the tree
+   column entry point and the timeline rows). The contour is its OWN outline (not a
+   colour change alone, so it carries under colour blindness), drawn in --focus, in
+   both themes. It is nowhere removed with a bare `outline: none`. `:focus-visible`
+   keeps it out of the way of pure mouse use (design latitude, spec A3). */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+/* The tree column is ONE tab stop; the currently keyed row is shown in the SAME
+   visual language even though focus sits on the container (B6). */
+.node.tree-cursor {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 
 /* Aufgabe F: the page itself never scrolls horizontally — wide children scroll

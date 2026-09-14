@@ -53,6 +53,9 @@ _EN: dict[str, str] = {
     "tab_prompt": "Prompt",
     "tab_answer": "Answer",
     "tab_tools": "Tools",
+    # The accessible name of the keyboard-operable trace-tree region (A6/§7). It
+    # names the region for assistive technology; the node labels inside stay content.
+    "tree_region": "Trace tree",
     "tab_diff": "Diff",
     "tab_details": "Details",
     "nav_previous": "previous",
@@ -201,6 +204,7 @@ _DE: dict[str, str] = {
     "tab_prompt": "Prompt",
     "tab_answer": "Antwort",
     "tab_tools": "Tools",
+    "tree_region": "Trace-Baum",
     "tab_diff": "Diff",
     "tab_details": "Details",
     "nav_previous": "zurück",

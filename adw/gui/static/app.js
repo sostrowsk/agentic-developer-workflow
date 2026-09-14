@@ -207,7 +207,12 @@
       p.classList.toggle("selected", p.getAttribute("data-seq") === selectedSeq);
     });
     document.querySelectorAll(".node[data-seq]").forEach(function (node) {
-      node.classList.toggle("selected", node.getAttribute("data-seq") === selectedSeq);
+      var on = node.getAttribute("data-seq") === selectedSeq;
+      node.classList.toggle("selected", on);
+      // A5/AC 10: the selection is exposed machine-readably (beyond the .selected
+      // class) so assistive technology knows it. A mere navigation cursor never sets
+      // this — only applySelection does, and it runs solely for an actual selection.
+      node.setAttribute("aria-selected", on ? "true" : "false");
     });
     var generic = document.querySelector("[data-generic-pane]");
     var useGeneric = !!(selectedSeq && !pane && row);
@@ -242,51 +247,54 @@
     return Promise.resolve();
   }
 
-  // Delegated on document so it keeps working after main.detail is swapped. A
-  // timeline bar (Aufgabe A) carries its target node's data-seq: clicking it
-  // navigates to that node in the Trace tab (switch to Trace, then select it),
-  // reusing the same data-seq selection path (A5). Node selection is instrumented
-  // with the adw:select measure (Aufgabe C).
-  document.addEventListener("click", function (event) {
-    var target = event.target;
-    if (!target || !target.closest) return;
-    // A5: the phase fold caret toggles collapse only — it must not select the node
-    // it sits on (original-node clicks stay unchanged).
-    if (target.closest("[data-fold-toggle]")) return;
-    var bar = target.closest(".tl-bar[data-seq]");
-    var node = target.closest(".node[data-seq]");
-    if (!bar && !node) return;
-    // P2: a Timeline bar may target a node this page cannot show — neither an own
-    // pane nor a tree row. Selecting it in place would silently fall back to the
-    // first visible node (the WRONG node). Instead navigate to it via ?focus, which
-    // materialises it on load. A point node HAS a tree row and is shown through the
-    // shared pane, so it selects in place — no reload.
-    if (bar) {
-      var barSeq = bar.getAttribute("data-seq");
-      if (!ownPaneFor(barSeq) && !treeRowFor(barSeq)) {
-        window.location.assign(detailUrl + "?focus=" + encodeURIComponent(barSeq));
-        return;
-      }
-    }
-    // Latest-interaction-wins (Aufgabe B): capture this selection's generation; its
-    // async work applies only while it stays current.
+  // Select a node in place, instrumented with the adw:select measure (Aufgabe C) and
+  // the latest-interaction-wins generation (Aufgabe B): the async work applies only
+  // while this selection stays current. Used by every entry point — a tree/timeline
+  // click AND the keyboard (A1/A2) — so the keyboard reaches the identical result as
+  // a click, with no synthesised click event.
+  function selectNode(seq) {
     var gen = ++selectionGen;
     var isCurrent = function () { return gen === selectionGen; };
     perfMark("adw:select:start");
-    if (bar) {
-      selectedSeq = bar.getAttribute("data-seq");
-      activateRunTab("trace");  // reveal the node in the Trace tab
-    } else {
-      selectedSeq = node.getAttribute("data-seq");
-    }
+    selectedSeq = seq;
     // The chosen node now drives the read-only context panel (time travel).
     contextPinned = true;
     updateContextPanel();
     // Complete the measure only after the (possibly fetched) detail pane content is
-    // rendered — applySelection returns the tool-body load promise when the
-    // selected node lazy-loads its payload (C1) — and only if this selection is
-    // still the current one (B2).
+    // rendered — applySelection returns the tool-body load promise when the selected
+    // node lazy-loads its payload (C1) — and only if this selection is still current.
     perfEndAfterContent("adw:select:start", "adw:select:end", "adw:select", applySelection(), isCurrent);
+  }
+
+  // A2: activate a Timeline row (the whole `.tl-bar-row`, its label or its bar all
+  // resolve here). A row may target a node this page cannot show — neither an own
+  // pane nor a tree row. Selecting it in place would silently fall back to the first
+  // visible node (the WRONG node), so navigate to it via ?focus, which materialises
+  // it on load (P2) — the same for a click and for the keyboard. A point node HAS a
+  // tree row and is shown through the shared pane, so it selects in place — no reload.
+  function activateTimelineSeq(seq) {
+    if (!ownPaneFor(seq) && !treeRowFor(seq)) {
+      window.location.assign(detailUrl + "?focus=" + encodeURIComponent(seq));
+      return;
+    }
+    activateRunTab("trace");  // reveal the node in the Trace tab
+    selectNode(seq);
+  }
+
+  // Delegated on document so it keeps working after main.detail is swapped. A5: the
+  // phase fold caret toggles collapse only — it must not select the node it sits on.
+  document.addEventListener("click", function (event) {
+    var target = event.target;
+    if (!target || !target.closest) return;
+    if (target.closest("[data-fold-toggle]")) return;
+    // A2: the whole Timeline ROW is the operable unit — its label, its track and its
+    // 6px bar all resolve to the row's data-seq (a single activation, no double
+    // trigger when a bar click bubbles through the row). A page without rows (older
+    // markup) still resolves the bar itself.
+    var row = target.closest(".tl-bar-row[data-seq]") || target.closest(".tl-bar[data-seq]");
+    if (row) { activateTimelineSeq(row.getAttribute("data-seq")); return; }
+    var node = target.closest(".node[data-seq]");
+    if (node) selectNode(node.getAttribute("data-seq"));
   });
 
   // --- switchable tabs (Aufgabe D + the run-level Raw / node-level Diff tabs):
@@ -306,12 +314,68 @@
       panel.classList.toggle("active", on);
       if (on) active = panel;
     });
+    // A4: the machine-readable tab state (aria-selected) and the single roving tab
+    // stop travel with the active class on every switch — click OR arrow key.
+    syncTabAria(tabs);
     // The Diff patch is fetched on demand from the read-only diff endpoint so a
     // large patch never inlines into the initial page (Aufgabe B7). Return the
     // load's promise so the adw:tab measure completes only after the patch renders;
     // a tab with no fetch returns an already-resolved promise (immediate).
     if (active && name === "diff") return loadDiff(active);
     return Promise.resolve();
+  }
+
+  // --- A4: fulfil the announced tab pattern (E4 — the role is completed, never
+  // removed). The buttons of each role="tablist" group become role="tab" with a
+  // maintained aria-selected and aria-controls to their role="tabpanel"; exactly the
+  // active tab is aria-selected and the single sequential tab stop (roving). Set on
+  // the client (arrow-switching is client-only anyway), so it also covers the panels
+  // swapped in on a live refresh, without touching the server preselection.
+  var tabPanelSeq = 0;
+
+  function groupButtons(group) {
+    var out = [];
+    group.querySelectorAll(".tab-btn").forEach(function (b) {
+      if (b.closest("[data-tabs]") === group) out.push(b);
+    });
+    return out;
+  }
+
+  function panelForTab(group, name) {
+    var found = null;
+    group.querySelectorAll("[data-tab-panel]").forEach(function (panel) {
+      if (!found && panel.closest("[data-tabs]") === group
+        && panel.getAttribute("data-tab-panel") === name) found = panel;
+    });
+    return found;
+  }
+
+  // Mirror the visible active state (the server-preselected `active` class) into the
+  // ARIA state and the roving tab stop — the ARIA joins the class, it does not
+  // replace it (E4).
+  function syncTabAria(group) {
+    groupButtons(group).forEach(function (b) {
+      var on = b.classList.contains("active");
+      b.setAttribute("aria-selected", on ? "true" : "false");
+      b.setAttribute("tabindex", on ? "0" : "-1");
+    });
+  }
+
+  function initTabs() {
+    document.querySelectorAll(".tab-buttons[role='tablist']").forEach(function (tablist) {
+      var group = tablist.closest("[data-tabs]");
+      if (!group) return;
+      groupButtons(group).forEach(function (b) {
+        b.setAttribute("role", "tab");
+        var panel = panelForTab(group, b.getAttribute("data-tab"));
+        if (!panel) return;
+        var id = panel.getAttribute("id");
+        if (!id) { id = "tabpanel-" + (++tabPanelSeq); panel.setAttribute("id", id); }
+        panel.setAttribute("role", "tabpanel");
+        b.setAttribute("aria-controls", id);
+      });
+      syncTabAria(group);  // adopt the server preselection, do not reset to the first
+    });
   }
 
   // Switch the run-level tab group (used by timeline bar-click navigation).
@@ -330,6 +394,181 @@
     // activateTab returns the diff load promise for the Diff tab, else resolves
     // immediately (C1).
     perfEndAfterContent("adw:tab:start", "adw:tab:end", "adw:tab", activateTab(tabs, btn.getAttribute("data-tab")));
+  });
+
+  // --- A1: keyboard path for the trace tree. The column is exactly ONE tab stop (E2):
+  // the client makes the `.trace-list` the single sequential entry point and takes
+  // every native focusable inside it (fold buttons, group <summary>, raw-log links)
+  // out of the sequence; the rows are reached with a transient navigation cursor
+  // (`treeCursorSeq`), which is kept SEPARATE from the selection (`selectedSeq`) —
+  // moving it never selects. No new server markup per row (E3), no persistence.
+  var treeCursorSeq = null;
+
+  function treeListEl() { return document.querySelector(".trace-list"); }
+
+  // A row is navigable/selectable only while it is VISIBLE: not inside a collapsed
+  // phase (fold-hidden) and not inside a closed <details> group/repeat wrapper.
+  function rowVisible(li) {
+    var n = li;
+    while (n && n !== document.body && n !== null) {
+      if (n.classList && n.classList.contains("fold-hidden")) return false;
+      if (n.tagName === "DETAILS" && !n.open) return false;
+      n = parentOf(n);
+    }
+    return true;
+  }
+
+  // The visible selectable rows in document order (the tree's `.node[data-seq]` — the
+  // synthetic group/repeat wrappers carry no data-seq and are not cursor stops).
+  function navigableRows() {
+    var out = [];
+    var list = treeListEl();
+    if (!list) return out;
+    list.querySelectorAll(".node[data-seq]").forEach(function (li) {
+      if (rowVisible(li)) out.push(li);
+    });
+    return out;
+  }
+
+  function cursorContext() {
+    var rows = navigableRows();
+    var seq = treeCursorSeq !== null ? treeCursorSeq : selectedSeq;
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].getAttribute("data-seq") === seq) return { rows: rows, i: i };
+    }
+    return { rows: rows, i: rows.length ? 0 : -1 };
+  }
+
+  function cursorLi() {
+    var c = cursorContext();
+    return c.i >= 0 ? c.rows[c.i] : null;
+  }
+
+  // Mark the keyed row (B6: shown in the same visual language as focus) without
+  // touching the selection.
+  function setCursor(li) {
+    treeCursorSeq = li ? li.getAttribute("data-seq") : null;
+    var list = treeListEl();
+    if (list) {
+      list.querySelectorAll(".node.tree-cursor").forEach(function (n) { n.classList.remove("tree-cursor"); });
+    }
+    if (li) li.classList.add("tree-cursor");
+  }
+
+  function moveCursor(delta) {
+    var c = cursorContext();
+    if (c.i === -1) return;
+    var ni = c.i + delta;
+    if (ni < 0) ni = 0;
+    if (ni > c.rows.length - 1) ni = c.rows.length - 1;
+    setCursor(c.rows[ni]);
+  }
+
+  function setPhaseOpenLi(li, open) {
+    var list = li.closest(".trace-list");
+    if (!list) return;
+    var rows = directRows(list);
+    var idx = rows.indexOf(li);
+    if (idx !== -1) setPhaseOpen(rows, idx, open);
+  }
+
+  // The phase whose range contains `li` (its governing fold row), or null.
+  function governingPhase(li) {
+    var list = li.closest(".trace-list");
+    if (!list) return null;
+    var rows = directRows(list);
+    var ri = rows.indexOf(li);
+    if (ri === -1) return null;
+    for (var p = ri - 1; p >= 0; p--) {
+      if (rows[p].getAttribute("data-node-type") !== "phase") continue;
+      if (ri < phaseEnd(rows, p, rowDepth(rows[p]))) return rows[p];
+    }
+    return null;
+  }
+
+  function foldRight(li) {
+    if (!li || li.getAttribute("data-node-type") !== "phase") return;  // no fold: no-op
+    if (!li.classList.contains("phase-open")) { setPhaseOpenLi(li, true); return; }
+    moveCursor(1);  // already open -> to the first child row
+  }
+
+  function foldLeft(li) {
+    if (!li) return;
+    if (li.getAttribute("data-node-type") === "phase" && li.classList.contains("phase-open")) {
+      setPhaseOpenLi(li, false);  // open phase -> close
+      return;
+    }
+    var parent = governingPhase(li);  // closed/leaf row -> to the parent fold row
+    if (parent) setCursor(parent);
+  }
+
+  function initTreeKeyboard() {
+    var list = treeListEl();
+    if (!list) return;
+    if (list.getAttribute("tabindex") === null) list.setAttribute("tabindex", "0");
+    list.setAttribute("role", "tree");
+    // Take every native focusable inside the column out of the sequential tab order:
+    // the column is ONE tab stop, its content is reached with the arrow keys (AC 4).
+    ["summary", "button", "a"].forEach(function (tag) {
+      list.querySelectorAll(tag).forEach(function (elm) { elm.setAttribute("tabindex", "-1"); });
+    });
+    // Restore the cursor mark for the current cursor row after a live-refresh swap.
+    if (treeCursorSeq !== null) {
+      var cur = list.querySelector('.node[data-seq="' + treeCursorSeq + '"]');
+      if (cur) cur.classList.add("tree-cursor");
+    }
+  }
+
+  // A2: the whole Timeline row is a keyboard tab stop, in display order.
+  function initTimelineKeyboard() {
+    document.querySelectorAll(".tl-bar-row[data-seq]").forEach(function (r) {
+      if (r.getAttribute("tabindex") === null) r.setAttribute("tabindex", "0");
+      r.setAttribute("role", "button");
+    });
+  }
+
+  // One delegated keydown handler for the whole operable surface. Chords with Ctrl,
+  // Alt or Meta are NEVER intercepted (spec key table).
+  document.addEventListener("keydown", function (event) {
+    if (event.ctrlKey || event.altKey || event.metaKey) return;
+    var t = event.target;
+    if (!t || !t.closest) return;
+    var key = event.key;
+    var prevent = function () { if (event.preventDefault) event.preventDefault(); };
+
+    // Registerkarten (A4): Left/Right move the active tab within the nearest group.
+    var tabBtn = t.closest(".tab-btn");
+    if (tabBtn && (key === "ArrowLeft" || key === "ArrowRight")) {
+      var grp = tabBtn.closest("[data-tabs]");
+      if (!grp) return;
+      prevent();
+      var buttons = groupButtons(grp);
+      var cur = buttons.indexOf(tabBtn);
+      var next = buttons[(cur + (key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length];
+      activateTab(grp, next.getAttribute("data-tab"));
+      if (next.focus) next.focus();  // roving: focus moves to the new active tab
+      return;
+    }
+
+    // Timeline row (A2): Enter/Space activate the whole row (same as a click).
+    var tlrow = t.closest(".tl-bar-row[data-seq]");
+    if (tlrow) {
+      if (key === "Enter" || key === " ") { prevent(); activateTimelineSeq(tlrow.getAttribute("data-seq")); }
+      return;
+    }
+
+    // Trace tree (A1): navigation + fold + selection over the single entry point.
+    if (!t.closest(".trace-list")) return;
+    if (key === "ArrowDown") { prevent(); moveCursor(1); }
+    else if (key === "ArrowUp") { prevent(); moveCursor(-1); }
+    else if (key === "ArrowRight") { prevent(); foldRight(cursorLi()); }
+    else if (key === "ArrowLeft") { prevent(); foldLeft(cursorLi()); }
+    else if (key === "Home") { prevent(); var rh = navigableRows(); if (rh.length) setCursor(rh[0]); }
+    else if (key === "End") { prevent(); var re = navigableRows(); if (re.length) setCursor(re[re.length - 1]); }
+    else if (key === "Enter" || key === " ") {
+      var li = cursorLi();
+      if (li) { prevent(); setCursor(li); selectNode(li.getAttribute("data-seq")); }
+    }
   });
 
   // --- A5: default-fold of phases (pure client state, no persistence). The tree
@@ -793,12 +1032,18 @@
     applySelection();
     updateContextPanel();  // re-project the context onto the swapped-in panel
     initTreeFold();        // re-apply the default fold to the swapped-in tree (A5)
+    initTabs();            // re-apply the tab pattern to the swapped-in panels (A4)
+    initTreeKeyboard();    // re-wire the single tree tab stop + cursor (A1)
+    initTimelineKeyboard(); // re-wire the timeline rows as tab stops (A2)
   }
 
   ++selectionGen;
   applySelection(); // initial: select the root node's pane
   updateContextPanel(); // initial: latest_context (no explicit selection yet)
   initTreeFold(); // initial: phases collapsed except the default-open / focused one
+  initTabs(); // initial: fulfil the tab pattern, adopting the server preselection (A4)
+  initTreeKeyboard(); // initial: the tree column is one tab stop with a cursor (A1)
+  initTimelineKeyboard(); // initial: the timeline rows are keyboard tab stops (A2)
 
   function refresh() {
     if (inFlight) { repeat = true; return; }

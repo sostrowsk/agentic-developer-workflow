@@ -13,6 +13,26 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Hinzugefügt
+- **Run-Detailseite: ohne Maus bedienbar.** Die Hauptinteraktion — einen
+  Trace-Knoten auswählen und lesen — hat jetzt einen Tastaturpfad. Der Trace-Baum
+  ist ein einziger Tab-Halt mit Pfeiltasten-Navigation über die sichtbaren Zeilen
+  (Auf/Ab bewegt, Rechts/Links klappt auf/zu, Enter/Leertaste wählt aus, Pos1/Ende
+  springt zur ersten/letzten sichtbaren Zeile); zugeklappte Inhalte werden
+  übersprungen und die Leertaste scrollt die Seite nicht. Die ganze
+  Timeline-**Zeile** (Beschriftung, Spur und Balken) wird die bedienbare Einheit —
+  anklickbar, per Tastatur fokussierbar und auslösbar — und erreicht denselben
+  Knoten wie der bis zu 6 px schmale Balken, einschließlich der `?focus`-Umleitung
+  für ein Ziel außerhalb des Fensters. Ein einheitlicher, deutlich sichtbarer
+  Fokusindikator (eigenes `--focus`-Token, nie `--signal`, ≥ 3:1 in beiden Themes)
+  markiert jedes fokussierbare Element. Das angekündigte Registerkarten-Muster wird
+  eingelöst — `role="tab"`/`aria-selected`/`aria-controls` mit Links/Rechts-Wechsel
+  und Roving-Tab-Halt, unter Übernahme der serverseitigen Vorauswahl — und der
+  ausgewählte Knoten ist maschinenlesbar ausgezeichnet (`aria-selected`). Rein
+  bedienend: was die Seite zeigt und die JSON-API bleiben unverändert.
+
 ## [0.24.0] — 2026-09-14
 
 ### Behoben

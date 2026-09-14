@@ -874,6 +874,56 @@ Four **additive** summary fields carry the named time sizes (each a number or
   not overlap, so the split is unambiguous. `phase_seconds + wait_seconds =
   total_seconds` up to rounding.
 
+### 7.9 Keyboard operability, focus and tabs
+
+The main interaction — selecting a trace node and reading it — is reachable
+without a mouse. The additions are purely operational: nothing about **what** the
+page shows changes.
+
+**Trace tree keyboard path.** The tree column is exactly **one** stop in the tab
+order (not one per row). The client makes the `.trace-list` the single sequential
+entry point and takes every native focusable inside it (fold buttons, group
+`<summary>`, raw-log links) out of the sequence; the rows are reached with a
+transient navigation cursor kept separate from the selection — moving the cursor
+never selects. The binding key table:
+
+| Key | Effect |
+|---|---|
+| ↓ / ↑ | next / previous **visible** row |
+| → | open a fold row; if already open, move to the first child |
+| ← | close a fold row; if already closed, move to the enclosing fold row |
+| Enter, Space | select the node (same result as a click) |
+| Home / End | first / last visible row |
+
+"Visible" means not inside a collapsed phase, group or repetition. Space does not
+scroll the page when it selects. Chords with Ctrl, Alt or Meta are not intercepted.
+No new server markup grows per row (at most one server-side entry point); everything
+per row is set by the client at runtime.
+
+**Timeline row as the operable unit.** The whole `.tl-bar-row` (label + track +
+bar, all carrying the same `data-seq`) is clickable, keyboard-focusable in display
+order and activatable with Enter/Space — reaching the same node as the bar,
+including the existing `?focus` redirect for a node the page cannot show. The 6 px
+bar stays clickable; a bar click that bubbles through the row triggers a single
+activation.
+
+**Focus indicator.** A uniform, clearly visible focus indicator for every focusable
+element, in both themes. It uses its **own** token (`--focus`, sourced from `--busy`)
+— never `--signal`, which stays reserved for "a human must act" — with a contour of
+its own (an outline, not colour alone) reaching at least 3:1 against both `--paper`
+and `--surface`. It is nowhere removed with a bare `outline: none`; `:focus-visible`
+keeps it out of the way of pure mouse use.
+
+**Tab pattern.** Each `role="tablist"` group's buttons carry `role="tab"`, a
+maintained `aria-selected` and `aria-controls` to their `role="tabpanel"` panel;
+Left/Right switch within the nearest group, and only the active tab is a sequential
+tab stop (roving tabindex). The existing `active` class and the server-side
+preselection (e.g. a Raw-tab landing via `raw_from_seq`) stay as they are — the ARIA
+markup joins them, it does not replace them. The selected trace node is additionally
+exposed machine-readably (`aria-selected` on the node), moving with every selection
+over tree or timeline, by mouse or keyboard; a bare navigation cursor is not a
+selection.
+
 ## 8. Security and data protection
 
 Consequence of the decision "raw capture, no redaction":
