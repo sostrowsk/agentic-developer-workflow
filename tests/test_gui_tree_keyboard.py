@@ -75,3 +75,37 @@ def test_tree_column_is_a_single_tab_stop(tmp_path):
     r = run_scenario(tmp_path, "tree-tabstop")
 
     assert r["tab_stops"] == 1, f"the tree column holds {r['tab_stops']} tab stops, not 1"
+
+
+def test_tree_uses_treeitem_roles_and_a_managed_cursor_scrolled_into_view(tmp_path):
+    """Review findings (roles + cursor): the column is a real ARIA tree —
+    ``role="tree"`` with ``role="treeitem"`` rows, so ``aria-selected`` on a row is
+    supported (a bare ``<li>`` would not support it). The navigation cursor is exposed
+    through the container's ``aria-activedescendant`` (managed focus reference) and is
+    scrolled into view when it moves, so it stays visible on a tree taller than the
+    viewport."""
+    r = run_scenario(tmp_path, "tree-keyboard")
+
+    assert r["roles"]["list"] == "tree", "the tree container is not role=tree"
+    assert r["roles"]["item"] == "treeitem", "the tree rows are not role=treeitem"
+    # aria-selected rides on a treeitem (supported), not a plain listitem.
+    assert r["afterEnter"]["selected_role"] == "treeitem", (
+        "the selected row does not carry a treeitem role, so aria-selected is unsupported"
+    )
+    # The active descendant tracks the cursor, and moving it scrolls it into view.
+    assert r["activedescendant"]["matches_cursor"] is True, (
+        "aria-activedescendant does not reference the current cursor row"
+    )
+    assert r["activedescendant"]["scrolled"] is True, "the cursor is not scrolled into view"
+
+
+def test_row_action_links_stay_keyboard_reachable(tmp_path):
+    """Review finding (row actions): taking the tree column down to one tab stop must
+    remove the REDUNDANT fold controls from the tab order, not the row ACTION links.
+    A raw-jump link (raw-range navigation) and a recovery-report link keep their
+    native keyboard focus (no ``tabindex="-1"``), so those actions stay reachable
+    without a mouse."""
+    r = run_scenario(tmp_path, "tree-actions")
+
+    assert r["raw_jump_tabindex"] != "-1", "the raw-jump link was removed from the tab order"
+    assert r["recovery_tabindex"] != "-1", "the recovery-report link was removed from the tab order"

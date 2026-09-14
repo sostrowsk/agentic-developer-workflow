@@ -900,6 +900,17 @@ scroll the page when it selects. Chords with Ctrl, Alt or Meta are not intercept
 No new server markup grows per row (at most one server-side entry point); everything
 per row is set by the client at runtime.
 
+The column is a genuine ARIA tree: the client sets `role="tree"` on the list and
+`role="treeitem"` on each navigable row (so the `aria-selected` on the selected node
+is supported and not a bare `<li>` attribute), exposes the cursor through the
+container's `aria-activedescendant`, and scrolls the cursored row into view as it
+moves so it stays visible in a tall tree. The compaction's group and repetition
+wrappers are navigable fold rows too (not selectable): → opens them and reveals their
+children, ← closes them. Only the redundant fold controls (the fold buttons and the
+group/repetition `<summary>`) leave the tab order; existing row-action links
+(raw-range jump, escalation report) keep their native keyboard focus so those actions
+stay reachable without a mouse.
+
 **Timeline row as the operable unit.** The whole `.tl-bar-row` (label + track +
 bar, all carrying the same `data-seq`) is clickable, keyboard-focusable in display
 order and activatable with Enter/Space — reaching the same node as the bar,

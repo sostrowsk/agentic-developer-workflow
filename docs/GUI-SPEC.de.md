@@ -964,6 +964,18 @@ Kombinationen mit Strg, Alt oder Meta werden nicht abgefangen. Es wächst kein
 serverseitiges Markup je Zeile (höchstens ein serverseitiger Einstiegspunkt); alles
 Weitere je Zeile setzt der Client zur Laufzeit.
 
+Die Spalte ist ein echter ARIA-Baum: Der Client setzt `role="tree"` auf die Liste
+und `role="treeitem"` auf jede navigierbare Zeile (damit das `aria-selected` des
+ausgewählten Knotens getragen wird und nicht an einem bloßen `<li>` hängt), weist den
+Cursor über das `aria-activedescendant` des Containers aus und scrollt die
+angesteuerte Zeile beim Bewegen in den sichtbaren Bereich, damit sie in einem hohen
+Baum sichtbar bleibt. Die Gruppen- und Wiederholungs-Hüllen der Verdichtung sind
+ebenfalls navigierbare Falt-Zeilen (nicht auswählbar): → öffnet sie und zeigt ihre
+Kinder, ← schließt sie. Nur die redundanten Falt-Bedienelemente (die Falt-Knöpfe und
+die Gruppen-/Wiederholungs-`<summary>`) verlassen die Tab-Reihenfolge; vorhandene
+Zeilen-Aktionslinks (Roh-Bereich-Sprung, Eskalationsbericht) behalten ihren nativen
+Tastaturfokus, damit diese Aktionen ohne Maus erreichbar bleiben.
+
 **Timeline-Zeile als bedienbare Einheit.** Die ganze `.tl-bar-row` (Beschriftung +
 Spur + Balken, alle mit demselben `data-seq`) ist anklickbar, per Tastatur in
 Darstellungsreihenfolge fokussierbar und mit Enter/Leertaste auslösbar — sie erreicht

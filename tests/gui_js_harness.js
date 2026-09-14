@@ -83,6 +83,7 @@ class El {
   focus() { if (global.document) global.document.activeElement = this; }
   blur() { if (global.document && global.document.activeElement === this) global.document.activeElement = null; }
   click() { synthClicks.push(this); }
+  scrollIntoView(opts) { scrollCalls.push({ el: this, opts: opts || null }); }
   get tabIndex() {
     var v = this.getAttribute("tabindex");
     return v === null ? -1 : parseInt(v, 10);
@@ -160,6 +161,7 @@ const deferred = [];       // pending fetch() promises: {url, resolve, reject}
 const listeners = {};      // document event listeners by type
 const navigations = [];    // URLs passed to window.location.assign
 const synthClicks = [];    // elements on which app.js called .click() (must stay empty, AC 1)
+const scrollCalls = [];    // elements app.js scrolled into view (the cursor must stay visible)
 let eventSource = null;    // the EventSource the client opens (to drive live refresh)
 let nextParsedDoc = null;  // what DOMParser.parseFromString returns (the "fresh" swap DOM)
 
@@ -1131,44 +1133,41 @@ async function runTraceFocusFold() {
 // simulates no layout.
 // ---------------------------------------------------------------------------
 
+function treeNode(seq, depth, type) {
+  return el("li", { classes: ["node"],
+    attrs: { "data-seq": String(seq), "data-node-type": type || "agent.tool.call",
+      "style": "--depth:" + depth },
+    children: [el("span", { classes: ["label"] })] });
+}
+function treePhase(seq, depth) {
+  return el("li", { classes: ["node"],
+    attrs: { "data-seq": String(seq), "data-node-type": "phase", "style": "--depth:" + depth },
+    children: [
+      el("button", { classes: ["fold-toggle"], attrs: { "data-fold-toggle": "", "aria-expanded": "true" } }),
+      el("span", { classes: ["label"] })] });
+}
+function treePane(seq) { return el("div", { classes: ["pane"], attrs: { "data-seq": String(seq) } }); }
+
 function keyboardTreeDom() {
   // A `.trace-list` with a dummy first node (seq 1, its own pane so the initial
   // applySelection selects it WITHOUT a fetch), a default-open phase (seq 2) holding
-  // one visible child (seq 3), a collapsed phase (seq 8) holding one child (seq 9,
-  // hidden after the default fold), a collapsible GROUP wrapper (a <summary> that
-  // must not become an extra tab stop) and a trailing plain node (seq 20). Depth
-  // rides in the inline style as the server renders it.
+  // one visible child (seq 3), a collapsed phase (seq 8) holding one hidden child
+  // (seq 9) and a trailing plain node (seq 20). Depth rides in the inline style as
+  // the server renders it.
   const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
-  function node(seq, depth, extra) {
-    const attrs = Object.assign({ "data-seq": String(seq), "data-node-type": "agent.tool.call",
-      "style": "--depth:" + depth }, extra || {});
-    return el("li", { classes: ["node"], attrs,
-      children: [el("span", { classes: ["label"] })] });
-  }
-  function phase(seq, depth) {
-    return el("li", { classes: ["node"],
-      attrs: { "data-seq": String(seq), "data-node-type": "phase", "style": "--depth:" + depth },
-      children: [
-        el("button", { classes: ["fold-toggle"], attrs: { "data-fold-toggle": "", "aria-expanded": "true" } }),
-        el("span", { classes: ["label"] })] });
-  }
-  const n1 = node(1, 1);
-  const p2 = phase(2, 1);
-  const n3 = node(3, 2);
-  const p8 = phase(8, 1);
-  const n9 = node(9, 2);
-  const groupSummary = el("summary", { classes: ["trace-summary"] });
-  const group = el("li", { classes: ["trace-wrap", "trace-group"], attrs: { "style": "--depth:1" },
-    children: [el("details", { classes: ["trace-collapse"],
-      children: [groupSummary, el("ul", { classes: ["trace-sublist"] })] })] });
-  const n20 = node(20, 1);
+  const n1 = treeNode(1, 1);
+  const p2 = treePhase(2, 1);
+  const n3 = treeNode(3, 2);
+  const p8 = treePhase(8, 1);
+  const n9 = treeNode(9, 2);
+  const n20 = treeNode(20, 1);
   const list = el("ul", { classes: ["trace-list"], attrs: { "data-default-phase": "2" },
-    children: [n1, p2, n3, p8, n9, group, n20] });
+    children: [n1, p2, n3, p8, n9, n20] });
   const trace = el("div", { classes: ["trace"], children: [list] });
-  function pane(seq) { return el("div", { classes: ["pane"], attrs: { "data-seq": String(seq) } }); }
-  const panes = el("div", { classes: ["panes"], children: [pane(1), pane(3), pane(9), pane(20)] });
+  const panes = el("div", { classes: ["panes"],
+    children: [treePane(1), treePane(3), treePane(9), treePane(20)] });
   body.append(trace, panes);
-  return { body, trace, list, n1, p2, n3, p8, n9, n20, groupSummary,
+  return { body, trace, list, n1, p2, n3, p8, n9, n20,
     pane3: panes.children[1], pane9: panes.children[2], pane20: panes.children[3] };
 }
 
@@ -1179,20 +1178,34 @@ async function runTreeKeyboard() {
   await settle();  // initial applySelection selects the dummy first node (seq 1)
 
   const initial = selectedNodeSeq();
+  // A4/A11 (roles): the column is a role="tree" whose rows are role="treeitem", so
+  // aria-selected on a row is supported (a bare <li> would not support it).
+  const roles = { list: dom.list.getAttribute("role"), item: dom.n3.getAttribute("role") };
 
-  // Pure Down/Down moves the navigation cursor but must NOT select (AC 1).
+  // Pure Down/Down moves the navigation cursor but must NOT select (AC 1). The move
+  // scrolls the cursor into view (so it stays visible in a tall tree) and the active
+  // descendant tracks it.
+  const scrollBefore = scrollCalls.length;
   fireKey(dom.list, "ArrowDown");  // seq 1 -> phase 2
   fireKey(dom.list, "ArrowDown");  // phase 2 -> visible child seq 3
   const afterMotion = selectedNodeSeq();
+  const cursorEl = global.document.querySelector(".trace-list .tree-cursor");
+  const activedescendant = {
+    scrolled: scrollCalls.length > scrollBefore,
+    matches_cursor: !!(cursorEl && cursorEl.getAttribute("id")
+      && dom.list.getAttribute("aria-activedescendant") === cursorEl.getAttribute("id")),
+  };
 
   // Enter selects the cursored node exactly like a click — same pane, no synth click.
   fireKey(dom.list, "Enter");
   await settle();
+  const selEl = global.document.querySelector('.node[aria-selected="true"]');
   const afterEnter = {
     sel: selectedNodeSeq(),
     pane3_selected: dom.pane3.classes.has("selected"),
     measures: countMeasure("adw:select"),
     synth_clicks: synthClicks.length,
+    selected_role: selEl ? selEl.getAttribute("role") : null,
   };
 
   // From seq 3: Down -> collapsed phase 8, Down -> seq 20 (the hidden child seq 9 is
@@ -1209,7 +1222,8 @@ async function runTreeKeyboard() {
   fireKey(dom.list, "Home"); fireKey(dom.list, "Enter"); await settle();
   const afterHome = selectedNodeSeq();
 
-  return { ok: true, initial, afterMotion, afterEnter, afterSpace, afterEnd, afterHome };
+  return { ok: true, initial, roles, activedescendant,
+    afterMotion, afterEnter, afterSpace, afterEnd, afterHome };
 }
 
 async function runTreeFoldKeys() {
@@ -1243,14 +1257,116 @@ async function runTreeFoldKeys() {
   return { ok: true, start, afterCtrlRight, afterRight, afterLeft, leaf_no_error: !leafError };
 }
 
+function keyboardGroupDom() {
+  // A `.trace-list` with a dummy node (seq 1), a default-open phase (seq 2, so a fold
+  // <button> is present) and TWO collapsible wrappers — a group and a repetition,
+  // each a <summary> plus a closed <details.trace-collapse> holding one child node
+  // (seq 30 / seq 31). The wrappers carry no data-seq (not selectable) but ARE fold
+  // rows: the keyboard must navigate to them and open them to reach their children.
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  function wrapper(cls, child) {
+    const summary = el("summary", { classes: ["trace-summary"] });
+    const details = el("details", { classes: ["trace-collapse"],
+      children: [summary, el("ul", { classes: ["trace-sublist"], children: [child] })] });
+    const li = el("li", { classes: ["trace-wrap", cls], attrs: { "style": "--depth:1" },
+      children: [details] });
+    return { li, details, summary };
+  }
+  const n1 = treeNode(1, 1);
+  const p2 = treePhase(2, 1);
+  const gChild = treeNode(30, 2);
+  const g = wrapper("trace-group", gChild);
+  const rChild = treeNode(31, 2);
+  const r = wrapper("trace-repeat", rChild);
+  const list = el("ul", { classes: ["trace-list"], attrs: { "data-default-phase": "2" },
+    children: [n1, p2, g.li, r.li] });
+  const trace = el("div", { classes: ["trace"], children: [list] });
+  const panes = el("div", { classes: ["panes"],
+    children: [treePane(1), treePane(30), treePane(31)] });
+  body.append(trace, panes);
+  return { body, trace, list, group: g.li, groupDetails: g.details,
+    repeat: r.li, repeatDetails: r.details, gChild, rChild };
+}
+
 async function runTreeTabStop() {
-  const dom = keyboardTreeDom();
+  const dom = keyboardGroupDom();
   installGlobals(el("html", { children: [dom.body] }), dom.body);
   loadAppJs(APP);
   await settle();
   // After client init the whole tree column is exactly ONE sequential tab stop, and
-  // the natively focusable fold buttons / group <summary> inside it add none (AC 4).
+  // the natively focusable fold buttons / group <summary>s inside it add none (AC 4).
   return { ok: true, tab_stops: sequentialTabStops(dom.trace) };
+}
+
+async function runTreeGroups() {
+  const dom = keyboardGroupDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();
+
+  // Navigate to the group wrapper: Down (seq 1 -> phase 2), Down (phase 2 -> group).
+  fireKey(dom.list, "ArrowDown");
+  fireKey(dom.list, "ArrowDown");
+  const groupBefore = { expanded: dom.group.getAttribute("aria-expanded"), open: dom.groupDetails.open };
+
+  fireKey(dom.list, "ArrowRight");  // open the group
+  const groupAfterOpen = { expanded: dom.group.getAttribute("aria-expanded"), open: dom.groupDetails.open };
+
+  fireKey(dom.list, "ArrowRight");  // move to the first child
+  fireKey(dom.list, "Enter"); await settle();  // select the revealed child
+  const selChild = selectedNodeSeq();
+
+  // Left from the child returns to the group row; Left again closes it.
+  fireKey(dom.list, "ArrowLeft");
+  fireKey(dom.list, "ArrowLeft");
+  const groupAfterClose = { expanded: dom.group.getAttribute("aria-expanded"), open: dom.groupDetails.open };
+
+  // The repetition wrapper opens the same way and its child is then selectable.
+  fireKey(dom.list, "End");         // to the last visible row (the repeat wrapper)
+  fireKey(dom.list, "ArrowRight");  // open it
+  const repeatExpanded = dom.repeat.getAttribute("aria-expanded");
+  fireKey(dom.list, "ArrowRight");  // to the first child
+  fireKey(dom.list, "Enter"); await settle();
+  const selRepeatChild = selectedNodeSeq();
+
+  return { ok: true, groupBefore, groupAfterOpen, sel_child: selChild,
+    groupAfterClose, repeat_expanded: repeatExpanded, sel_repeat_child: selRepeatChild,
+    tab_stops: sequentialTabStops(dom.trace), synth_clicks: synthClicks.length };
+}
+
+function keyboardActionDom() {
+  // A `.trace-list` whose rows carry existing ROW ACTIONS: a raw-jump link (jump to
+  // the Raw tab pre-filtered to a seq range) on an aggregate node, and a
+  // recovery-artifact link (open the escalation report) on another. These must stay
+  // keyboard-reachable — the single-tab-stop rule takes the redundant FOLD controls
+  // out of the tab order, not the row actions.
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  const rawJump = el("a", { classes: ["raw-jump"], attrs: { href: "?raw_from_seq=5&raw_to_seq=9" } });
+  const n5 = el("li", { classes: ["node"],
+    attrs: { "data-seq": "5", "data-node-type": "phase", "style": "--depth:1" },
+    children: [el("span", { classes: ["label"] }), rawJump] });
+  const recovery = el("a", { classes: ["recovery-artifact"],
+    attrs: { "data-recovery-artifact": "escalation.md", href: "#" } });
+  const n6 = el("li", { classes: ["node"],
+    attrs: { "data-seq": "6", "data-node-type": "agent.tool.call", "style": "--depth:1" },
+    children: [el("span", { classes: ["label"] }), recovery] });
+  const list = el("ul", { classes: ["trace-list"], children: [n5, n6] });
+  const trace = el("div", { classes: ["trace"], children: [list] });
+  const panes = el("div", { classes: ["panes"], children: [treePane(5), treePane(6)] });
+  body.append(trace, panes);
+  return { body, list, rawJump, recovery };
+}
+
+async function runTreeActions() {
+  const dom = keyboardActionDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();
+  // The row-action links keep their native keyboard focusability (no tabindex="-1"),
+  // so raw-range navigation and the escalation report stay reachable without a mouse.
+  return { ok: true,
+    raw_jump_tabindex: dom.rawJump.getAttribute("tabindex"),
+    recovery_tabindex: dom.recovery.getAttribute("tabindex") };
 }
 
 function timelineRowDom() {
@@ -1479,6 +1595,8 @@ const ARG = process.argv[4];
   else if (SCENARIO === "tree-keyboard") result = await runTreeKeyboard();
   else if (SCENARIO === "tree-fold-keys") result = await runTreeFoldKeys();
   else if (SCENARIO === "tree-tabstop") result = await runTreeTabStop();
+  else if (SCENARIO === "tree-groups") result = await runTreeGroups();
+  else if (SCENARIO === "tree-actions") result = await runTreeActions();
   else if (SCENARIO === "timeline-activate") result = await runTimelineActivate();
   else if (SCENARIO === "tab-pattern") result = await runTabPattern();
   else if (SCENARIO === "selection-marked") result = await runSelectionMarked();
