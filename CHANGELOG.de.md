@@ -13,7 +13,20 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [Unreleased]
+## [0.24.0] — 2026-09-14
+
+### Behoben
+- **Timeline-Spuren teilen Ursprung und Breite.** `.tl-bar-label` war
+  `flex: 0 1 auto` mit `min-width`, die Beschriftungsspalte bemaß sich also aus
+  ihrem Text und verschob den Anfang der Spur daneben — gleiche Zeitpunkte standen
+  nicht mehr untereinander, gleiche Dauern waren nicht mehr gleich lang. Die Spalte
+  hat jetzt eine feste Breite (`flex: 0 0 7rem`, wie `.tl-lane-label` schon zuvor);
+  ein langer Name bricht darin um und bleibt vollständig lesbar. Der Defekt war
+  latent: die 31 Spuren des Laufs `16f39431` lagen nur deshalb bündig, weil die
+  längste Balkenbeschriftung aller vorhandenen Läufe `codex.author` (12 Zeichen)
+  ist und unter der `min-width` bleibt — ein längerer Name verschob die betroffene
+  Spur um 163 px, und ein Gate namens `integration-tests` in `.adw/config.yaml`
+  hätte genügt.
 
 ### Geändert
 - **Run-Detail-Seite: das Arbeitsfeld zuerst.** Der Trace-Baum beginnt jetzt
@@ -895,6 +908,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.24.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.4...v0.22.0
 [0.21.4]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.3...v0.21.4

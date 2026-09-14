@@ -12,7 +12,19 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [Unreleased]
+## [0.24.0] — 2026-09-14
+
+### Fixed
+- **Timeline tracks share one origin and one width.** `.tl-bar-label` was
+  `flex: 0 1 auto` with a `min-width`, so the label column sized itself from its
+  text and pushed its own track sideways — equal timestamps no longer sat above
+  each other and equal durations were no longer equally long. The column is now a
+  fixed width (`flex: 0 0 7rem`, as `.tl-lane-label` already was); a long name
+  wraps inside it and stays fully readable. The defect was latent: all 31 tracks of
+  run `16f39431` happened to align because the longest bar label of every existing
+  run is `codex.author` (12 chars), which fits inside the `min-width` — a longer
+  name moved that row's track by 163 px, and a gate named `integration-tests` in
+  `.adw/config.yaml` would have been enough to trigger it.
 
 ### Changed
 - **Run-detail page: the work field comes first.** The trace tree now begins
@@ -828,6 +840,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.24.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.4...v0.22.0
 [0.21.4]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.3...v0.21.4
