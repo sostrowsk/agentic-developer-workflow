@@ -65,6 +65,9 @@ and 30 % viewer.
 - **Redaction** of secrets in the log (explicit decision, see §9).
 - **Remote/multi-user operation.** Binds to loopback, no auth, no TLS.
 - **Replacing `adw status`.** The CLI stays the primary control surface.
+- **Live updating of the run list.** The list page carries no `EventSource` and
+  there is no list-level SSE route; it refreshes on navigation only. The run
+  detail page is live (§7.3).
 
 ## 3. Architecture
 
