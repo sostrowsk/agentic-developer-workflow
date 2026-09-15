@@ -1,250 +1,258 @@
-# Interface contract — GUI-Redesign 4: Ohne Maus bedienbar
+# Interface contract — GUI-Redesign 5: Die Seite überträgt, was niemand sieht
 #
-# Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Dieser Brief ist
-# REIN BEDIENEND. Der Contract pinnt genau zwei Dinge:
+# Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Dieser Contract
+# pinnt ausschließlich extern beobachtbare Flächen — genau drei Dinge:
 #
-#   1. die UNVERÄNDERLICHKEIT der beiden JSON-Routen `/api/runs` und
-#      `/api/runs/{repo}/{run_id}` in allen Feldern, Typen und Werten — keine
-#      neuen Routen, keine neuen Query-Parameter; und
-#   2. das extern beobachtbare BEDIEN-Verhalten der bestehenden HTML-Route
-#      `GET /runs/{repo}/{run_id}` (x-adw-template-behavior).
+#   1. die BEWUSSTE Verhaltensänderung an der bestehenden HTML-Route
+#      `GET /runs/{repo}/{run_id}` (Fragment bei `X-Requested-With: fetch`,
+#      sonst unverändert Vollantwort; Pane-Reduktion in beiden Modi),
+#   2. die UNVERÄNDERLICHKEIT aller Routen unter `/api` in Feldern, Typen und
+#      Werten — keine neue Route, kein neuer Query-Parameter,
+#   3. das extern beobachtbare BEDIEN-ERGEBNIS des Nachladens
+#      (x-adw-template-behavior) — als Ergebnis, nicht als Attribut- oder
+#      Funktionsname.
 #
-# NICHT Teil des Contracts (frei änderbar, Spec „Nicht Teil des Contracts"):
-# Klassennamen, ARIA-Attribute, Markup- und CSS-Wortlaut, Tastenbelegung.
-# Der Vertrag beschreibt das beobachtbare BEDIENERGEBNIS, nicht Attribut-,
-# Token- oder Tastennamen; die bindende Tastenbelegung und die konkreten
-# ARIA-Namen stehen in Spec und Plan und bleiben dort verbindlich.
+# NICHT Teil des Contracts (frei änderbar): Klassennamen, ARIA- und
+# `data-*`-Attributnamen, Markup-Wortlaut, interne Helfer und ihre Signaturen
+# (`_pane_nodes`, `loadToolBody`, `swapRegions`, `_loadPromise`, `stillOurs`,
+# `REGIONS`), die Wahl zwischen Fragment-Template und Regionen-Partial sowie
+# die flüchtigen Client-Zustandsstrukturen.
 openapi: 3.0.3
 info:
-  title: ADW GUI — Ohne Maus bedienbar (rein bedienend)
-  version: 4.0.0
+  title: ADW GUI — Teilantworten und Pane-Nachladen
+  version: 5.0.0
   description: >-
-    Minimaler Contract für den einzigen Workstream backend, Basis ist der
-    gemergte Stand 0.24.0. Er fixiert, dass dieses Feature die JSON-API NICHT
-    verändert (Regression über alle Felder, Typen und Werte), und pinnt das
-    beobachtbare Bedien-Verhalten der Run-Detail-Seite. Die Schemas
-    beschreiben nur die vorhandenen äußeren Antwortformen; die vollständige
-    Bestandsgleichheit der JSON-Antworten ist zusätzlich verbindlich. Die
-    Version bezeichnet dieses Vertragsdokument, keine Paket- oder API-Version.
+    Minimaler externer Contract für den einzigen Workstream backend,
+    basierend auf .adw/spec.md und dem gemergten Stand 0.25.0.
+    Die Version bezeichnet dieses Vertragsdokument, keine API-Version.
+    Geändert werden ausschließlich die HTML-Auslieferung und das beobachtbare
+    Nachladen der Span-Panes. Bestehende API-Antworten bleiben unverändert.
+    Interne Helfersignaturen und Zustandsstrukturen sind nicht
+    Vertragsbestandteil.
 
 paths:
-  /api/runs:
-    get:
-      summary: Run-Liste — durch dieses Feature unverändert.
-      description: >-
-        Bei identischen Eingaben und identischem Auswertungszeitpunkt bleibt
-        die vollständige Antwort gegenüber 0.24.0 unverändert — Einträge,
-        Reihenfolge, Felder, Typen, Werte und die Bedingungen für fehlende
-        oder nullwertige Felder. Keine neuen Query-Parameter. Ein
-        Regressionstest fixiert die Unveränderlichkeit (AC 13).
-      responses:
-        "200":
-          description: Bestehende Run-Listen-Antwort, unverändert.
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-                  additionalProperties: true
-
-  /api/runs/{repo}/{run_id}:
-    parameters:
-      - $ref: "#/components/parameters/Repo"
-      - $ref: "#/components/parameters/RunId"
-    get:
-      summary: Run-Detail — durch dieses Feature unverändert.
-      description: >-
-        Bei identischen Eingaben und identischem Auswertungszeitpunkt bleibt
-        die vollständige Antwort gegenüber 0.24.0 in allen Feldern, Typen und
-        Werten unverändert, einschließlich verschachtelter Inhalte,
-        Listenreihenfolgen und der Bedingungen für vorhandene, fehlende und
-        nullwertige Felder. Tastatur-, Fokus- oder Auswahlzustände werden
-        NICHT in die JSON-Antwort aufgenommen. Keine neue Route, kein neuer
-        Query-Parameter. Ein Regressionstest fixiert die Unveränderlichkeit
-        auch nach einem vorausgehenden HTML-Abruf (AC 13).
-      responses:
-        "200":
-          description: Bestehende Run-Detail-Antwort, unverändert.
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: true
-
   /runs/{repo}/{run_id}:
     parameters:
-      - $ref: "#/components/parameters/Repo"
-      - $ref: "#/components/parameters/RunId"
+      - name: repo
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Bestehender Repository-Slug; Auflösung unverändert.
+      - name: run_id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Bestehende Run-ID; Validierung und Auflösung unverändert.
     get:
-      summary: Run-Detail-Seite — bestehende HTML-Route, neues Bedien-Verhalten.
+      summary: Vollständige Run-Detailseite oder ihre beiden Live-Regionen.
       description: >-
-        Bestehende HTML-Route mit unveränderten Query-Parametern,
-        unveränderten angezeigten Informationen und unveränderten Status- und
-        Fehlerantworten. Bestehende Fokus-Navigation und serverseitige
-        Tab-Vorauswahl behalten ihre Bedeutung. Das neue beobachtbare
-        Bedien-Verhalten ist unter x-adw-template-behavior beschrieben; was
-        die Seite ZEIGT, ändert sich nicht.
+        Allein X-Requested-With mit dem Wert fetch wählt das Fragment.
+        Ohne diesen Wert bleibt der vollständige Dokumentmodus erhalten.
+        Bestehende Query-Parameter und ihre Auswertung bleiben erhalten;
+        die nachfolgende Parameterliste beschreibt nur die für diese Änderung
+        wesentlichen vorhandenen Parameter und schränkt weitere nicht ein.
+      parameters:
+        - name: X-Requested-With
+          in: header
+          required: false
+          schema:
+            type: string
+          description: Der Wert fetch fordert ausschließlich die Live-Regionen an.
+        - name: focus
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Bestehender seq-Fokus mit unveränderter toleranter Auswertung und
+            Fokusauflösung, einschließlich Zuordnung eines gefalteten
+            Tool-Ergebnisses zu seinem Aufruf. Kein neuer Parameter.
+        - name: tools_offset
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >-
+            Bestehender Start des Tools-Fensters; Auswertung, Fensterverhalten
+            und 200er-Schranke bleiben unverändert.
       responses:
         "200":
-          description: Serverseitig gerenderte Run-Detail-Seite.
+          description: >-
+            text/html als Vollantwort oder Fragment gemäß Header.
+            Die Pane-Reduktion gilt in beiden Modi.
           content:
             text/html:
               schema:
                 type: string
+        default:
+          description: Bestehende Status- und Fehlerantworten bleiben unverändert.
 
-components:
-  parameters:
-    Repo:
-      name: repo
-      in: path
-      required: true
-      schema:
-        type: string
-    RunId:
-      name: run_id
-      in: path
-      required: true
-      schema:
-        type: string
+x-adw-workstreams:
+  - backend
 
-x-adw-workstreams: [backend]
-
-x-adw-invariants:
-  - >-
-    Rein bedienend: Die JSON-Routen `/api/runs` und
-    `/api/runs/{repo}/{run_id}` bleiben in allen Feldern, Typen und Werten
-    unverändert; die offenen Objektschemas erlauben KEINE featurebedingte
-    API-Erweiterung. Keine neue Route, kein neues Tab, kein neuer
-    Query-Parameter (AC 13).
-  - >-
-    Was die Seite ZEIGT, ändert sich nicht: keine neue Information, keine
-    neue Spalte, kein neuer Block, keine geänderte Reihenfolge, keine
-    Änderung an Layout, Kennzahlen, Verdichtung, Run-Liste oder
-    Timeline-Geometrie (E7). Keine Änderung an Ereignistypen, Event-Payloads,
-    Instrumentierung, `build_tree`, der Verdichtung, der Blätterung, dem
-    SSE-Pfad oder der Retention (E8). Auswahl-, Pane- und `?focus`-Verhalten
-    bleiben inhaltlich unverändert; nur ihre Erreichbarkeit über die Tastatur
-    kommt hinzu. Keine Persistenz, kein Polling.
-  - >-
-    Kein DOM-Wachstum je Baumzeile (E3): die Zahl der Baum-Eintragsmarker und
-    der gerenderten Elemente der serverseitigen Baum-Spalte bleibt für
-    gleiche Eingabe unverändert; die Baum-Spalte erhält höchstens EINEN neuen
-    serverseitigen Tastatur-Einstiegspunkt. Alles Weitere je Zeile setzt der
-    Client zur Laufzeit.
-  - >-
-    Keine neue Laufzeit-Dependency, kein Frontend-Paket, kein CDN, keine
-    Webfont, keine Barrierefreiheits-Bibliothek (E1): die Seite lädt keine
-    neuen externen Ressourcen.
-  - >-
-    Bestand bleibt wörtlich erhalten: `<label>` um den Typfilter,
-    `aria-label` am Suchfeld, `aria-expanded` am Falt-Knopf, `aria-hidden`
-    an den Statusglyphen und `aria-label` am Run-Kontext-Panel (AC 12).
-
-# Beobachtbares Bedien-Ergebnis der Run-Detail-Seite. Bindend ist das
-# ERGEBNIS, nicht die konkrete Tastenbelegung oder ARIA-Attributnamen (beide
-# ausdrücklich NICHT Contract); die normativen Tabellen stehen in Spec und Plan.
 x-adw-template-behavior:
-  tree:
-    navigation: >-
-      Die Baum-Spalte ist nach Client-Initialisierung genau EIN sequenzieller
-      Tab-Halt, nicht einer je Zeile (E2); auch nativ fokussierbare Elemente
-      innerhalb der Spalte erzeugen keinen zusätzlichen sequenziellen
-      Tab-Halt. Über diesen Zugang sind die vorhandenen sichtbaren Zeilen per
-      Tastatur navigierbar; Inhalte geschlossener Phasen, Gruppen und
-      Wiederholungen werden übersprungen. Die vorhandenen Faltungen sind per
-      Tastatur bedienbar; auf einer Zeile ohne Klappmechanik entsteht keine
-      Zustandsänderung und kein Fehler. Tastenkombinationen mit Strg, Alt
-      oder Meta werden nicht abgefangen.
-    selection: >-
-      Vorhandene auswählbare Knoten sind ohne Maus auswählbar — ohne ein
-      einziges Klick-Ereignis — und zeigen denselben Detail-Pane wie bei
-      einem Klick. Die Auswahl-Auslösung über die zweite gebundene Taste
-      erreicht dieselbe Auswahl und scrollt die Seite dabei nicht. Reine
-      Auf-/Ab-Bewegung löst KEINE Auswahl aus; es entstehen keine neuen
-      auswählbaren Knoten. Der flüchtige Navigationszustand ist Teil der
-      vorhandenen Client-Bedienung — kein neues Subsystem, keine Persistenz,
-      kein Query-Parameter.
+  response_modes:
+    fragment:
+      trigger:
+        header: X-Requested-With
+        value: fetch
+      regions_in_document_order:
+        - header.run-header
+        - main.detail
+      document_wrapper: false
+      description: >-
+        Genau diese beiden Regionen, ohne html, head, body oder sonstigen
+        Dokumentrahmen. Keine außerhalb der Regionen stehenden Inhalte.
+        Der Client parst und tauscht das Fragment wie bisher.
+    full:
+      description: >-
+        Vollständiges Dokument einschließlich html, head und body.
+        Bisheriges Produktverhalten bleibt bestehen; Byteidentität zu 0.25.0
+        ist wegen der ausdrücklich geforderten Pane-Reduktion nicht zugesagt.
+    equivalence: >-
+      Bei identischen Renderdaten, Parametern und Auswertungszeitpunkten
+      entspricht der Inhalt beider Fragmentregionen dem entsprechenden
+      Ausschnitt der Vollantwort. Beide verwenden denselben Renderpfad und
+      dieselbe Markup-Erzeugung; es entsteht keine zweite Render-Wahrheit
+      für die Regionen.
+    selection_mechanism: >-
+      Nur der vorhandene Header bestimmt den Dokumentmodus; kein zusätzlicher
+      Query-Parameter, keine neue Route und kein Content-Negotiation-Verfahren
+      (E3).
+
+  span_panes:
+    maximum_bodies_per_response: 1
+    without_focus: >-
+      Kein Span-Pane-Körper in der ausgelieferten Voll- oder Teilantwort.
+    with_focus: >-
+      Bei aufgelöstem Span-Fokus ausschließlich dessen Pane-Körper.
+      Bestehende Fokusauflösung und Deep-Link-Verhalten bleiben erhalten.
+      Ein Punktknoten erfordert keinen zusätzlichen Span-Pane-Körper.
+    excluded_from_body_count:
+      - Leere Span-Pane-Hüllen.
+      - Der vorhandene gemeinsame Pane für Punktknoten.
+    initial_behavior: >-
+      Die bestehende automatische Auswahl des ersten Knotens bleibt erhalten;
+      ihr fehlender Span-Inhalt wird bei Bedarf nachgeladen. Ohne explizite
+      Auswahl bleibt das Kontext-Panel beim neuesten Run-Kontext.
+
+  latest_context:
+    description: >-
+      Der neueste Kontextwert bleibt in einer Teilantwort erreichbar.
+      Nach Regionentausch zeigt das Kontext-Panel ohne explizite Auswahl
+      diesen Wert statt des Werts vom ersten Seitenaufruf. Bestehende
+      Kontextfelder, Typen, Werte und Darstellung bleiben unverändert.
+      Die genaue Platzierung des Transportattributs ist nicht festgelegt.
+
+  lazy_selection:
+    request: >-
+      GET derselben /runs/{repo}/{run_id}-Seite mit dem vorhandenen
+      focus=<seq> und X-Requested-With: fetch. Keine neue Route, kein neuer
+      Query-Parameter.
+    query_preservation: >-
+      Bestehende relevante URL-Parameter bleiben wirksam, insbesondere
+      tools_offset; der Abruf setzt den Fokus auf den ausgewählten Knoten.
     rendering: >-
-      Bei identischen Eingaben bleiben die Zahl serverseitig gerenderter
-      Elemente und die Zahl vorhandener Baum-Eintragsmarker unverändert.
-      Höchstens ein neuer serverseitiger Tastatur-Einstiegspunkt;
-      zeilenbezogene Ergänzungen des Bedienmusters erfolgen clientseitig (E3).
+      Der Client übernimmt den passenden servergerenderten Pane-Inhalt.
+      Während des Abrufs erscheint ein lokalisierter Ladezustand, kein
+      leerer Kasten. Ein nachgeladener Pane-Körper verhält sich nach der
+      Übernahme wie ein servergerendert ausgelieferter: seine Registerkarten
+      behalten Rollen, Panel-Zuordnungen und Tastaturbedienung, und ein vor
+      einem Regionentausch geöffneter Abschnitt in ihm ist nach Tausch und
+      abgeschlossenem Nachladen weiterhin offen — der festgehaltene
+      Klappzustand geht durch das asynchrone Nachladen nicht verloren.
+    deduplication: >-
+      Für denselben Knoten in derselben angezeigten Pane-Instanz wird eine
+      laufende Anfrage wiederverwendet, auch bei A → B → A.
+    stale_responses: >-
+      Antworten schreiben keinen Inhalt und keinen Fehlerhinweis, wenn ihr
+      Knoten nicht mehr ausgewählt oder ihr Ziel-Pane inzwischen durch einen
+      Regionentausch ersetzt ist. Es bleibt kein halber Ladezustand zurück.
+    loaded_lifetime: >-
+      Ein erfolgreich geladener Pane wird bis zum Austausch seiner Region
+      nicht erneut abgerufen. Ein fehlgeschlagener Abruf gilt nicht als
+      geladen.
+    failure: >-
+      Die letzte gute übrige Ansicht bleibt erhalten. Der noch aktuelle
+      Ziel-Pane zeigt einen lokalisierten Fehlerhinweis statt eines leeren
+      Kastens oder dauerhaften Ladehinweises und kann erneut geladen werden.
+    input_methods: >-
+      Klick und Tastaturauswahl verwenden denselben Nachladeweg.
+      Bloße Tastaturnavigation ohne Auswahl löst keinen Pane-Abruf aus.
+    existing_tool_body_request: >-
+      GET /api/runs/{repo}/{run_id}/events?from_seq=X&to_seq=X bleibt
+      für den vorhandenen Einzelereignis-Abruf erhalten; das Span-Pane-
+      Nachladen ergänzt ihn und ersetzt ihn nicht.
 
-  timeline:
-    activation: >-
-      Die ganze bestehende Timeline-Zeile einschließlich Beschriftung und
-      Spur ist die bedienbare Einheit: anklickbar, in Darstellungsreihenfolge
-      per Tastatur fokussierbar und auslösbar. Beschriftung, Balken und
-      Tastaturauslösung wählen denselben Knoten — das Klickziel ist nicht
-      mehr auf den schmalen Balken beschränkt. Der Balken selbst bleibt
-      anklickbar und geometrisch unverändert.
-    focus_navigation: >-
-      Kann die Seite den Zielknoten nicht darstellen, führt auch die
-      Tastaturauslösung zur bestehenden `?focus`-Navigation; Zielauflösung
-      und Verhalten der anschließenden Landung bleiben unverändert.
+  preserved_behavior:
+    - Auswahl und focus-Deep-Links aus der Timeline.
+    - Klappzustand und Wiederanwendung der Auswahl nach Regionentausch.
+    - Bestehende Standard-Faltung.
+    - Tools-Fenster mit tools_offset und 200er-Schranke.
+    - Gestaltung, Zeitachse, Kennzahlen und Blockreihenfolge.
+    - Vollständiger Trace-Baum mit bestehender Verdichtung.
+    - Registerkarten, Run-Kontext-Panel und Tastaturpfad.
+    - Alle neuen sichtbaren Hinweise sind in Deutsch und Englisch mit
+      identischer Schlüsselmenge verfügbar.
 
-  focus:
-    visibility: >-
-      Jedes fokussierbare Element erhält bei Tastaturnutzung einen
-      einheitlichen sichtbaren Fokusindikator in BEIDEN Themes; er wird
-      nirgends ersatzlos entfernt. Der Indikator ist nicht allein eine
-      Farbänderung, sondern hat eine eigene Kontur. Auch die über den
-      zentralen Baum-Einstieg angesteuerte Zeile bleibt sichtbar erkennbar.
-      Unterdrückung bei reiner Mausnutzung ist Gestaltungsspielraum.
-    contrast: >-
-      Die Fokusfarbe ist ein eigenes, in beiden Themes definiertes Token und
-      erreicht mindestens 3:1 Kontrast gegen Seiten- UND
-      Oberflächenhintergrund. Die für „ein Mensch muss handeln" reservierte
-      Signalfarbe wird NICHT verwendet (E5).
+  deferred_note: >-
+    Die Zusage „Live-updating" der Run-Liste (§7.2 A) wird als noch nicht
+    umgesetzt gekennzeichnet und in die Deferred-Liste aufgenommen; sie wird
+    nicht gebaut (E5). Kein inkrementelles Patchen des Baums (E2).
 
-  tabs:
-    semantics: >-
-      Das angekündigte Registerkarten-Muster wird eingelöst, nicht durch
-      Entfernen der Rolle aufgelöst (E4): jede vorhandene Gruppe bietet
-      maschinenlesbar Registerkarten, Auswahlzustand und die Zuordnung zu
-      ihren Panels. Genau eine Karte je Gruppe ist als ausgewählt markiert
-      und ein sequenzieller Tab-Halt.
-    switching: >-
-      Tastatur- und Klickwechsel aktualisieren innerhalb derselben
-      nächstgelegenen Gruppe gemeinsam aktive Karte, Auswahlzustand,
-      Tab-Halt und sichtbares Panel; verschachtelte Gruppen bleiben
-      unabhängig. Die bestehende aktive Auszeichnung und die serverseitige
-      Vorauswahl bleiben; die maschinenlesbare Auszeichnung tritt daneben
-      und ersetzt nichts.
-    initial_state: >-
-      Die bestehende serverseitige Vorauswahl wird übernommen —
-      einschließlich einer Raw-Tab-Landung über `raw_from_seq` — und
-      sichtbarer wie maschinenlesbarer Zustand stimmen bereits initial
-      überein.
+x-adw-api-invariance:
+  baseline: Gemergter Stand 0.25.0 bei identischen Eingaben und Auswertungszeitpunkten.
+  routes:
+    - GET /api/runs
+    - GET /api/runs/{repo}/{run_id}
+    - GET /api/runs/{repo}/{run_id}/events
+    - GET /api/runs/{repo}/{run_id}/diff
+    - GET /api/runs/{repo}/{run_id}/artifacts/{name}
+    - GET /api/runs/{repo}/{run_id}/stream
+  guarantee: >-
+    Vollständige bestehende Antworten bleiben in Feldern, Typen, Werten,
+    Reihenfolgen und Fehlerverhalten unverändert, auch nach vorausgehendem
+    Voll- oder Fragment-HTML-Abruf. Artefaktantworten behalten ihre
+    vollständigen Bytes. Bestehende Query-Parameter, Ereignisschemas und
+    SSE-Daten bleiben unverändert. Keine neue Route, kein neuer
+    Query-Parameter und keine zusätzlichen API-Felder (AC 13, E3). Die
+    verkürzte Bezeichnung „artifact" im Issue begründet keine zusätzliche
+    Route — `artifacts/{name}` ist die vorhandene Artifact-Route.
 
-  selected_node:
-    semantics: >-
-      Der ausgewählte Knoten ist zusätzlich zur unveränderten visuellen
-      Auszeichnung maschinenlesbar als ausgewählt erkennbar. Ein
-      Auswahlwechsel nimmt die Auszeichnung am vorherigen Knoten zurück.
-      Dies gilt für Baum wie Timeline, Maus wie Tastatur, die Initialauswahl
-      und `?focus`-Landungen. Bloßer Navigationsfokus ist keine Auswahl.
+x-adw-events:
+  endpoint: /api/runs/{repo}/{run_id}/stream
+  transport: text/event-stream
+  schema: Unverändert gegenüber 0.25.0; keine neuen Ereignistypen.
+  refresh: >-
+    Der vorhandene Ereignisstrom löst den um 200 ms entprellten HTML-Neuabruf
+    und Regionentausch aus. Kein inkrementelles Patchen des Baums, kein
+    Polling, keine Ratenbegrenzung als Ersatz (E2/E4).
+  reconnect: Unverändert über Last-Event-ID mit der letzten seq.
+  run_end: >-
+    Bestehenden abschließenden Refresh ausführen und den Stream beim
+    Lauf-Ende wie bisher schließen.
 
-  localization:
-    text: >-
-      Jeder neue sichtbare oder vorgelesene Text liegt in Deutsch und
-      Englisch vor; beide Sprachkataloge haben identische Schlüsselmengen.
-      Ein neuer sichtbarer Hinweisblock ist nicht erforderlich (E7).
-      Lane-Namen, Knotenlabels und Balkennamen sind Inhalte und werden nicht
-      übersetzt.
+x-adw-response-size:
+  reference_run: "16f39431"
+  reference_date: "2026-09-15"
+  request: GET /runs/{repo}/16f39431 ohne focus und ohne Fetch-Header.
+  measurement: Unkomprimierte vollständige HTTP-Antwort in Byte.
+  reference_bytes: 847791
+  maximum_bytes: 551064
+  minimum_reduction_percent: 35
+  baseline_rule: >-
+    Aktuelle Ausgangsmessung vor dem Bauen prüfen und Abweichungen ausweisen.
+    Weder Referenzwert noch Abnahmeziel stillschweigend ersetzen. Ein
+    fehlender oder nicht reproduzierbarer Referenzlauf ist als fehlender
+    Abnahmenachweis auszuweisen; eine synthetische Fixture ersetzt ihn nicht.
 
 x-adw-contract-boundary:
-  excluded:
-    - Klassennamen.
-    - ARIA-Attributnamen und -Werte.
-    - Markup- und CSS-Wortlaut, Token-Namen.
-    - Die konkrete Tastenbelegung.
-    - Interne Helfer, Signaturen, Darstellungsdatentypen und flüchtige
-      Client-Zustandsstrukturen.
-  note: >-
-    Die ausgeschlossenen Details werden nicht als Schnittstelle
-    festgeschrieben. Die bindende Tastenbelegung, die konkreten ARIA-Namen,
-    das DOM-Gewicht, die Fokus-Kontrastschranke und die Testabnahme aus Spec
-    und Plan bleiben für Implementierung und Abnahme verbindlich — sie stehen
-    dort, nicht in diesem Vertrag.
+  description: >-
+    Dieser Single-Workstream-Contract pinnt ausschließlich HTTP-Antworten,
+    bestehende Ereignisse und beobachtbares Template-/Client-Verhalten.
+    Er definiert keine internen Helfersignaturen, neuen Anwendungstypen
+    oder neuen Ereignisschemas; Klassennamen, ARIA- und data-*-Attributnamen
+    und Markup-Wortlaut sind frei änderbar. .adw/spec.md bleibt für Scope,
+    Vorentscheidungen E1–E8 und Deferred verbindlich.

@@ -1,314 +1,348 @@
-# Plan — GUI-Redesign 4: Ohne Maus bedienbar
+# Plan — GUI-Redesign 5: Die Seite überträgt, was niemand sieht
 
 Single-Lane-Projekt (`.adw/config.yaml`): nur der Workstream **backend**. Er
-umfasst hier auch Templates, Client-JS, CSS, i18n, den JS-Harness und die Doku —
-die GUI-Assets sind Teil des Python-Pakets; es gibt keinen frontend-Lane.
+umfasst hier auch Templates, Client-JS, i18n, den JS-Harness und die Doku — die
+GUI-Assets sind Teil des Python-Pakets; es gibt keinen frontend-Lane.
 
-Setzt auf dem gemergten Stand **0.24.0** auf (Briefe 1 bis 3). Tokens und Skalen
-(Brief 1), Zahlen und Vokabular (Brief 2), Blockreihenfolge und
-Timeline-Beschriftung (Brief 3) werden **benutzt, nicht revidiert** (E6). Rein
-bedienend — kein Vertragswechsel; was die Seite zeigt und welche Daten sie
-liefert, ändert sich nicht (E7/E8).
+Setzt auf dem gemergten Stand **0.25.0** auf (Briefe 1 bis 4). Gestaltung
+(Brief 1), Zahlen (Brief 2), Anordnung (Brief 3) und Tastaturpfad (Brief 4)
+werden **benutzt, nicht revidiert** (E7). Dieser Brief ändert den **Live-Pfad**:
+was während eines laufenden Laufs über die Leitung geht, nicht das, was die
+Seite zeigt (E6). Zwei verifizierte Verschwendungen werden beseitigt — die
+Vollantwort auf einen entprellten Refresh (A1) und die 62 unsichtbaren
+Detail-Panes (A2) — und die Spec wird an den Code angeglichen (A3).
 
 Betroffene Dateien (aus der Spec, abschließend):
-`adw/gui/static/app.js` (Tastaturpfad Baum, Timeline-Zeile, Registerkarten,
-maschinenlesbare Auswahl, client-gesetzte Per-Zeile-Attribute),
-`adw/gui/static/app.css` (Fokus-Token + `:focus`/`:focus-visible`-Regeln),
-`adw/gui/templates/run_detail.html` (höchstens **ein** neuer serverseitiger
-Tastatur-Einstiegspunkt der Baum-Spalte; `role`/`aria-*` der Registerkarten und
-`role="tabpanel"` — server- oder client-seitig, kein Zwang), `adw/gui/i18n.py`
-(neue Strings), `tests/gui_js_harness.js` / `tests/gui_js_harness.py` (um
-Tastatur-Dispatch und neue Szenarien erweitert — Entwicklungswerkzeug, keine
-Laufzeit-Dependency), neue `tests/test_gui_*.py`, `docs/GUI-SPEC.md`,
-`docs/GUI-SPEC.de.md`, `CHANGELOG.md`, `CHANGELOG.de.md`.
-`adw/gui/app.py` dient nur zur Prüfung der bestehenden HTTP- und Render-Pfade;
-Änderungen an Datenableitung oder API sind nicht erforderlich.
+`adw/gui/app.py` (Header-Auswertung in `run_detail_page`, Teilantwort als
+engerer Ausschnitt desselben Renderpfads, Steuerung welcher Pane-Körper
+gerendert wird), `adw/gui/templates/run_detail.html` (die beiden Regionen
+`header.run-header` und `main.detail` als gemeinsam genutzte Bausteine für Voll-
+und Teilantwort; Trennung von Pane-Hülle und Pane-Körper; `data-latest-context`
+in der Teilantwort erreichbar; ggf. ein kleines Fragment-Template bzw. eine
+Regionen-Partial), `adw/gui/static/app.js` (`swapRegions` verträgt das Fragment
+und liest `data-latest-context` aus der Region; neuer Pane-Nachladeweg nach dem
+`loadToolBody`-Muster; Verdrahtung in `applySelection`), `adw/gui/i18n.py`
+(Lade-/Fehlertexte des Panes), `tests/gui_js_harness.js` /
+`tests/gui_js_harness.py` (Pane-Nachladen samt Wettlauf, Doppelanfrage,
+Fehlerfall — Entwicklungswerkzeug, keine Laufzeit-Dependency), neue
+`tests/test_gui_*.py`, `docs/GUI-SPEC.md`, `docs/GUI-SPEC.de.md`,
+`CHANGELOG.md`, `CHANGELOG.de.md`.
+Die Datenableitung (`_run_detail`, `_summary`, `build_tree`, Verdichtung, die
+`/api`-Routen) bleibt **unberührt** (E8); `_pane_nodes` bestimmt weiterhin, wer
+einen Span-Pane bekommt — geändert wird nur, welcher Körper mit ausgeliefert
+wird.
 
 ## Contract-Fläche (`.adw/contract.yaml`)
 
-Der Contract pinnt für diesen Brief **die Unveränderlichkeit** der beiden
-JSON-Routen `/api/runs` und `/api/runs/{repo}/{run_id}` in allen Feldern, Typen
-und Werten (AC 13) — keine neue Route, kein neuer Query-Parameter — sowie das
-extern beobachtbare **Bedien-Verhalten** der Run-Detail-Seite
-`GET /runs/{repo}/{run_id}`: Knotenauswahl per Tastatur ohne Maus, die
-Timeline-**Zeile** (nicht nur der Balken) als Klick-/Fokus-/Auslöse-Einheit
-einschließlich `?focus`-Umleitung, ein sichtbarer Fokusindikator in beiden
-Themes, das eingelöste Registerkarten-Muster und die maschinenlesbare Auswahl.
+Der Contract pinnt für diesen Brief drei Dinge:
 
-**Ausdrücklich NICHT Contract (frei änderbar, Spec „Nicht Teil des Contracts"):**
-Klassennamen, **ARIA-Attribute**, Markup- und CSS-Wortlaut, **Tastenbelegung**.
-Der Contract beschreibt darum das *beobachtbare Bedienergebnis*, nicht
-Attribut-, Token- oder Tastennamen; die bindende Tastenbelegung und die
-konkreten ARIA-Namen stehen in Spec und Plan, nicht im Vertrag.
+1. Die **bewusste Verhaltensänderung** an der HTML-Route
+   `GET /runs/{repo}/{run_id}`: **mit** dem Header `X-Requested-With: fetch`
+   antwortet sie mit einem Fragment (genau die Regionen `header.run-header` und
+   `main.detail`, in Dokumentreihenfolge, ohne `<html>`/`<head>`/`<body>`);
+   **ohne** den Header unverändert mit einem vollständigen Dokument
+   (unveränderter Dokumentmodus). Allein der Header entscheidet. Mit
+   `?focus=<seq>` enthält die Antwort den durch die bestehende Fokusauflösung
+   adressierten Pane-Körper; die Pane-Reduktion aus A2 gilt in beiden Modi.
+2. Die **Unveränderlichkeit** aller Routen unter `/api` in Feldern, Typen und
+   Werten (AC 13) — keine neue Route, kein neuer Query-Parameter.
+3. Das extern beobachtbare **Bedien-Ergebnis** des Nachladens (Panes bei Bedarf,
+   Ladezustand, Wettlauf-Sieger, keine Doppelanfrage, Fehlerhinweis,
+   Kontext-Panel folgt der Teilantwort) — beschrieben als Ergebnis, nicht als
+   Attribut- oder Funktionsname.
 
-**Bindender Architektur-Fakt (AC 13, E3):** Die JSON-Antworten bleiben
-wörtlich; es kommen keine neuen Bedien-, Auswahl- oder Fokus-Daten hinzu. Das
-serverseitige Markup der Baum-Spalte wächst **nicht** um ein Attribut je
-Baumzeile: die Zahl der `data-tree-entry`-Marker und der gerenderten Elemente
-bleibt gegenüber dem Stand vor diesem Issue unverändert; die Baum-Spalte erhält
-höchstens **einen** neuen Tastatur-Einstiegspunkt. Alles Weitere je Zeile
-(Rollen, `tabindex`, Auswahl-Markierung) setzt der Client zur Laufzeit.
+**Ausdrücklich NICHT Contract (frei änderbar):** Klassennamen, ARIA- und
+`data-*`-Attributnamen, Markup-Wortlaut, interne Helfer und ihre Signaturen
+(`_pane_nodes`, `loadToolBody`, `swapRegions`, `_loadPromise`, `stillOurs`,
+`REGIONS`), die konkrete Wahl zwischen Fragment-Template und Regionen-Partial
+sowie die flüchtigen Client-Zustandsstrukturen. Diese Namen stehen zur
+Orientierung in Spec und Plan, nicht im Vertrag.
+
+**Bindender Architektur-Fakt (A1, E3):** Voll- und Teilantwort verwenden
+denselben Renderpfad und dieselbe Markup-Erzeugung; die Teilantwort ist deren
+engerer Ausschnitt (dieselben Regionen), und bei gleichen Eingabedaten und
+Parametern entspricht der Regionsinhalt dem der Vollantwort. Es entsteht
+**keine** zweite Render-Wahrheit für die Regionen. Ausgelöst wird die
+Teilantwort **allein** vom vorhandenen Header, das Nachladen **allein** vom
+vorhandenen `?focus` — keine neue Route, kein neuer Query-Parameter, kein
+Content-Negotiation-Verfahren.
 
 ## Workstream: backend
 
 ### B1 — Messbasis prüfen (vor dem Bauen)
 
-Die Issue-Messwerte (2026-09-14, Lauf `16f39431`, 840 KB HTML, 577 Baumzeilen,
-31 Timeline-Balken, `tabindex` null Mal, keine `:focus`-Regel, keine
-`keydown`-Handler) sind **Referenzwerte genau dieses Laufs**, keine
-allgemeingültigen Fixture-Größen. Vor dem Bauen gegen den dann aktuellen Stand
-prüfen: die Zahlen der `.node[data-seq]`, `.tl-bar-row[data-seq]`, `tab-btn`
-sowie das Fehlen von `tabindex`/`:focus`/Tastatur-Handlern protokollieren und
-Abweichungen festhalten. Ist der Referenzlauf lokal nicht verfügbar, diese
-Einschränkung dokumentieren und **keine Messwerte erfinden**.
+Die Referenzwerte (2026-09-15, Lauf `16f39431`, Stand 0.25.0: **847 791 Byte**
+HTML, **62** Span-Panes mit zusammen **384 044 Byte = 45,3 %**, ~481 Refreshes)
+sind Referenzwerte **genau dieses Laufs**, keine allgemeingültigen
+Fixture-Größen. Vor dem Bauen gegen den dann aktuellen Stand prüfen und
+protokollieren: Revision, Anfrageparameter, die unkomprimierte Seitengröße ohne
+`?focus`, Zahl und gemeinsamer Byteumfang der ausgelieferten
+Span-Pane-Körper, die Auswertung des `X-Requested-With`-Headers (heute null
+Fundstellen in `adw/gui/app.py`); Abweichungen zu den Referenzwerten
+festhalten. Die ~481 Refreshes sind Kontext, kein neues Mess- oder
+Telemetrievorhaben. Das Abnahmeziel bleibt höchstens **551 064 Byte** für die
+vollständige Antwort ohne `?focus`; eine abweichende aktuelle Ausgangsmessung
+wird kenntlich gemacht und ersetzt weder Referenzwert noch Abnahmeziel (AC 5).
+Ein fehlender oder nicht reproduzierbarer Referenzlauf ist als fehlender
+Abnahmenachweis auszuweisen; eine ähnlich benannte synthetische Fixture ersetzt
+ihn nicht, und Messwerte werden **nicht** erfunden.
 
-Für AC 11 vor der Änderung mit deterministischen Fixtures die Zahl der
-serverseitig gerenderten Elemente und `data-tree-entry`-Marker der Baum-Spalte
-als unabhängige Vorher-Basis sichern.
-
-Für AC 13 existiert bereits `tests/test_gui_display_only_contract.py`: beide
-JSON-Routen werden vor **und nach** einem HTML-Abruf gegen eine unabhängige,
-eingefrorene Baseline (Revision `cc201f1`, 0.23.0, in
-`tests/fixtures/contract_baseline_api.json`) verglichen. Vor dem Bauen
-bestätigen, dass diese Baseline gegen 0.24.0 noch grün ist; Erwartungswerte
-niemals aus dem gerade geänderten Antwortpfad neu erzeugen. Braucht AC 13 eine
-Ergänzung, gewinnt sie ihre Erwartungen ausschließlich aus dieser geprüften
-Basis und bleibt im Testbudget.
+Für AC 13 vor der Änderung bestätigen, dass die bestehende API-Regression
+(`tests/test_gui_display_only_contract.py` bzw. das dortige eingefrorene
+Baseline-Fixture) gegen 0.25.0 grün ist; Erwartungswerte niemals aus dem gerade
+geänderten Antwortpfad neu erzeugen.
 
 ### B2 — Tests zuerst (`tdd: true`)
 
 Das `pytest`-Gate trägt `tdd: true` (`.adw/config.yaml`): neue/geänderte
 Verhaltenstests erst RED bestätigen, dann implementieren; Invarianten-Tests
-(DOM-Gewicht, Bestand, API-Regression) dürfen sofort grün sein. Tastatur- und
-Auswahlverhalten (AC 1–5, 8–10) gehört in den Node-Harness
-`tests/gui_js_harness.js` / `tests/gui_js_harness.py`; die ARIA-, DOM- und
-CSS-Aussagen (AC 6, 7, 11, 12) und der Contract (AC 13) in die üblichen
-`tests/test_gui_*.py`. Keine Tests für Deferred-Themen. Deckt die
-automatisierbaren Akzeptanzkriterien:
+(Seitengröße, Pane-Zahl, API-Regression) dürfen sofort grün sein. Vorhandene
+Helfer in `tests/gui_app_helpers.py`, bestehende API-Fixtures und der Harness
+`tests/gui_js_harness.js` / `tests/gui_js_harness.py` (reiner `node`-Prozess
+gegen das ausgelieferte `app.js`, kein Browser) werden verwendet. Keine Tests
+für Deferred-Themen. Richtwert **~13 neue Tests**:
 
-1. **Auswahl ohne Maus (AC 1).** Harness-Szenario: Fokus in die Baum-Spalte,
-   Ab-Taste, dann Enter wählt einen Knoten aus und macht den zugehörigen
-   Detail-Pane sichtbar — **ohne** ein `click`-Ereignis, auch kein synthetisch
-   erzeugtes. Die Leertaste erreicht dieselbe Auswahl wie Enter und scrollt die
-   Seite nicht (verhinderte Standardaktion belegt); die reine Auf-/Ab-Bewegung
-   löst **keine** Auswahl aus.
-2. **Bewegung überspringt Verborgenes (AC 2).** Auf einer zugeklappten Phase
-   führt die Ab-Taste zur nächsten **sichtbaren** Zeile, nicht in den
-   verborgenen Teilbaum; auch Pos1/Ende verwenden ausschließlich sichtbare
-   Zeilen. Fixture mit Phase/Gruppe/Wiederholung in zugeklapptem Zustand.
-3. **Auf- und Zuklappen (AC 3).** Rechts öffnet eine geschlossene Falt-Zeile;
-   ist sie offen, bewegt Rechts zur ersten Kindzeile. Links schließt eine
-   geöffnete; ist sie zu, bewegt Links zur übergeordneten Falt-Zeile. Auf einer
-   Zeile ohne Klappmechanik bleibt der Zustand unverändert und es entsteht kein
-   Fehler. Kombinationen mit Strg/Alt/Meta werden nicht abgefangen.
-4. **Ein Tab-Halt (AC 4).** Nach Client-Initialisierung ist die Zahl der
-   Elemente mit sequenziellem Tab-Halt (`tabindex >= 0` bzw. nativ, ohne
-   `tabindex="-1"`) in der Baum-Spalte **1**, nicht 577; auch bereits nativ
-   fokussierbare Elemente innerhalb der Spalte (etwa `summary`) erzeugen keinen
-   zusätzlichen sequenziellen Tab-Halt.
-5. **Timeline (AC 5).** Eine Timeline-Zeile (`.tl-bar-row`) ist als Ganzes per
-   Tastatur fokussierbar (Reihenfolge = Darstellung) und mit Enter/Leertaste
-   auslösbar; Beschriftung, Balken und Tastaturauslösung wählen denselben
-   Knoten — ohne Doppel-Auslösung beim Klick auf Balken innerhalb der Zeile —
-   einschließlich der `?focus`-Umleitung für einen Knoten ohne eigene
-   Pane/Baumzeile, auch bei Tastaturauslösung.
-6. **Fokus sichtbar (AC 6).** `app.css` enthält mindestens eine `:focus`- oder
-   `:focus-visible`-Regel mit sichtbarem Indikator (heute: keine); nirgends
-   steht `outline: none` ohne kompensierenden Ersatz. Quelltext-/CSS-Assertion.
-7. **Fokusfarbe (AC 7).** Der Fokusindikator benutzt **nicht** `--signal`, ist
-   in **beiden** Themes als eigenes Token definiert und erreicht rechnerisch
-   ≥ 3:1 gegen `--paper` **und** gegen `--surface`. Der Kontrast wird aus den
-   Token-Werten berechnet (reiht sich in die bestehenden Token-Tests,
-   vgl. `tests/test_gui_design_tokens.py`); `--busy` als Quelle ist zulässig.
-8. **Registerkarten-Zustand (AC 8).** Jeder Knopf einer `role="tablist"`-Gruppe
-   trägt `role="tab"` und verweist per `aria-controls` auf sein Panel mit
-   `role="tabpanel"`; genau ein Knopf je Gruppe trägt `aria-selected="true"`
-   (die übrigen `"false"`), und der Wert wandert beim Wechsel mit — auch bei
-   serverseitiger Vorauswahl (Landung auf dem Raw-Tab über `raw_from_seq`).
-   Klasse `active`, sichtbares Panel und ARIA-Zustand stimmen überein.
-9. **Pfeiltasten in den Karten (AC 9).** Links/Rechts wechselt die aktive
-   Registerkarte nur innerhalb ihrer nächstgelegenen Gruppe (verschachtelte
-   Gruppen bleiben unabhängig); nur die aktive Karte ist ein sequenzieller
-   Tab-Halt, und Auswahlzustand, Tab-Halt, Klasse `active` und sichtbares
-   Panel wechseln gemeinsam — auch bei einem Wechsel per Klick.
-10. **Auswahl ausgezeichnet (AC 10).** Der ausgewählte Knoten ist
-    maschinenlesbar (eigenes ARIA-/State-Attribut, nicht nur Klasse
-    `selected`). Ein Wechsel nimmt die Auszeichnung am vorherigen Knoten
-    zurück; sie greift über Baum **wie** Timeline, per Maus **wie** Tastatur,
-    bei der Initialauswahl und bei `?focus`-Landung. Bloßer Navigationsfokus
-    wird **nicht** als Auswahl ausgezeichnet.
-11. **DOM-Gewicht (AC 11).** Für gleiche Eingabe sind die Zahl der
-    `data-tree-entry`-Marker und die Zahl der gerenderten Elemente der
-    **serverseitigen** Baum-Spalte unverändert gegenüber der in B1 gesicherten
-    Vorher-Basis; höchstens ein neuer Tastatur-Einstiegspunkt, kein neues
-    Attribut je Baumzeile (E3).
-12. **Bestand erhalten (AC 12).** `<label>` am Typfilter, `aria-label` am
-    Suchfeld, `aria-expanded` am Falt-Knopf und `aria-hidden` an den
-    Statusglyphen sind wörtlich unverändert vorhanden.
-13. **Contract-Regression (AC 13).** Die in B1 verifizierte API-Regression
-    (`tests/test_gui_display_only_contract.py`) bleibt grün: beide JSON-Routen
-    unverändert in allen Feldern, Typen und Werten, auch nach vorherigem
-    HTML-Abruf; keine featurebedingten Unterschiede weg-normalisieren. Keine
-    neue Route, kein neuer Query-Parameter.
+| Nr. | Nachweis | Ort / AC |
+| --- | --- | --- |
+| 1 | Fetch-Header liefert genau die beiden Regionen in Dokumentreihenfolge, ohne `<html>`/`<head>`/`<body>`; der Regionsinhalt entspricht bei gleichen Daten und Parametern der Vollantwort; der aktuelle Kontextwert steht an einem Element **innerhalb** des Fragments | `tests/test_gui_*.py`; AC 1, 3 |
+| 2 | Ohne Header vollständiger Dokumentmodus und bisheriges Produktverhalten unter A2 (Byteidentität zu 0.25.0 wird **nicht** verlangt — mit A2 unvereinbar) | `tests/test_gui_*.py`; AC 2, 13 |
+| 3 | Beide Modi liefern ohne `?focus` **null** und mit Span-Fokus genau **einen** Span-Pane-Körper; leere Hüllen und der gemeinsame Punktknoten-Pane zählen nicht; die bestehende Fokusauflösung einschließlich der Umleitung eines foldbaren Tool-Ergebnisses auf seinen Call bleibt korrekt (mit und ohne Header) | `tests/test_gui_*.py`; AC 4, 10 |
+| 4 | Referenzlauf `16f39431`: Vollantwort ohne `?focus` höchstens 551 064 unkomprimierte Byte; Lauf, Anfrageparameter und Bytezahl im Nachweis | `tests/test_gui_*.py`; AC 5 |
+| 5 | Alle sechs `/api`-Routen unverändert in Feldern, Typen und Werten — auch nach vorausgehendem Voll- und Fragment-Abruf; nutzt die in B1 verifizierte Baseline, keine featurebedingten Unterschiede weg-normalisieren | `tests/test_gui_*.py`; AC 13 |
+| 6 | Fragment mit neuerem Kontextwert aktualisiert das Kontext-Panel ohne Auswahl nach dem Regionentausch; kein Einfrieren auf dem Wert des Seitenaufrufs | Node-Harness; AC 3 |
+| 7 | Auswahl eines ungeladenen Span-Panes fordert die vorhandene Seite mit `?focus=<seq>`, dem Header und erhaltenen Parametern (insb. `?tools_offset`) an; Ladezustand wird durch den Zielinhalt ersetzt, kein leerer Kasten; die Registerkarten des eingesetzten Körpers tragen Tab-Rollen, Panel-Zuordnungen und Tastaturbedienung wie ein servergerendert ausgelieferter Pane | Node-Harness; AC 6, 12 |
+| 8 | Späte Antwort nach Auswahl eines anderen Knotens schreibt nichts; der zuletzt gewählte Knoten zeigt seinen eigenen Inhalt | Node-Harness; AC 7 |
+| 9 | Späte Antwort auf einen inzwischen durch Regionentausch ersetzten Ziel-Pane schreibt weder Inhalt noch Fehlerhinweis | Node-Harness; AC 7 |
+| 10 | Zweimalige Auswahl und A → B → A teilen den laufenden Abruf; ein geladener Pane wird bis zum Regionentausch nicht erneut geholt | Node-Harness; AC 8 |
+| 11 | Fehlgeschlagener Abruf erhält die übrige Ansicht, zeigt den Fehlerhinweis statt eines dauerhaften Ladehinweises und gilt nicht als geladen (Retry möglich) | Node-Harness; AC 9 |
+| 12 | Tastaturauswahl nutzt denselben Nachladeweg wie ein Klick; bloße Navigation ohne Auswahl fordert keinen Pane an | Node-Harness; AC 11 |
+| 13 | Nach einem Regionentausch verhalten sich Klappzustand, Auswahl, Standard-Faltung und Tools-Fenster (samt 200er-Schranke) unverändert; der ausgewählte Pane wird gegen die frischen Hüllen erneut nachgeladen. Szenario ausdrücklich: Abschnitt (Tool/Raw) **innerhalb** eines nachgeladenen Panes öffnen, Refresh auslösen, Pane-Abruf abschließen lassen — der Abschnitt ist danach weiterhin offen (Klappzustand überlebt den asynchronen Nachladevorgang) | Node-Harness (+ Serverassertions); AC 12 |
 
-### B3 — Harness um Tastatur-Dispatch erweitern
+Für API-Vergleiche unveränderte Felder, Typen, Werte und Reihenfolgen prüfen;
+bei Artefakten die vollständigen Bytes, beim Stream die bestehenden Ereignisse
+und Reconnect-/Endbedingungen; zeitabhängige Antworten unter gleichen
+Auswertungsbedingungen vergleichen. Vorhandene Route-Tests weiterverwenden,
+keine neue umfassende API-Testmatrix aufbauen. Nur die für die Szenarien
+erforderlichen DOM-/Fetch-Simulationen im Harness ergänzen; kein
+Browser-Test-Subsystem.
 
-Der Node-Harness stubt heute nur `click`/`toggle`/`input`/`change` und hat
-einen No-op-`addEventListener` auf Elementen (`gui_js_harness.js:73`). Für
-AC 1–3, 5, 9 bekommt der Harness (Entwicklungswerkzeug, **keine**
-Laufzeit-Dependency, kein Browser) das Minimum: Registrieren und Auslösen von
-`keydown` auf dem Einstiegspunkt/`document`, ein
-`document.activeElement`-Äquivalent samt sequenzieller Tab-Navigation und
-`preventDefault`-Beobachtung (für den „Leertaste scrollt nicht"-Beleg). Der
-Harness belegt Ereignis- und Fokuszustände sowie verhinderte Standardaktionen —
-keine Layout-Engine, keine simulierten Layout-Assertions, kein neues
-Browser-Test-Subsystem. Neue Szenarien reihen sich in den bestehenden
-`SCENARIO`-Dispatch (z. B. `tree-keyboard`, `timeline-activate`, `tab-arrows`,
-`selection-marked`).
+### B3 — A1 serverseitig: Teilantwort auf den vorhandenen Header
 
-### B4 — Tastaturpfad im Trace-Baum (A1, AC 1–4)
+In `run_detail_page` (`adw/gui/app.py`) den Header `X-Requested-With: fetch`
+auswerten (Groß-/Kleinschreibung wie beim Client). Ist er gesetzt, liefert die
+Route ein HTML-Fragment aus genau den Regionen `header.run-header` und
+`main.detail`, in Dokumentreihenfolge, **ohne** `<html>`, `<head>`, `<body>`
+oder sonstigen Dokumentrahmen; ist er nicht gesetzt, unverändert das
+vollständige Dokument. Ausgelöst **allein** durch den Header — kein neuer
+Query-Parameter, keine neue Route, keine Content-Negotiation (E3). Bestehende
+Sprachwahl, Query-Auswertung sowie Status- und Fehlerantworten (`require_run`,
+404) bleiben unverändert.
 
-In `app.js` einen Tastaturpfad für die Baum-Spalte ergänzen. Die Baum-Spalte
-erhält genau **einen** sequenziellen Tab-Halt (Roving-Tabindex oder ein
-Container-Einstiegspunkt mit intern nachgeführter „aktueller Zeile"); die 577
-Zeilen werden **nicht** je einzeln in die Tab-Reihenfolge genommen (E2). Nativ
-fokussierbare Elemente in der Spalte (`summary`) werden client-seitig aus der
-sequenziellen Reihenfolge genommen (`tabindex="-1"` o. ä.), ohne ihr
-Aufklappverhalten zu ändern. Die bindende Tastenbelegung (Spec-Tabelle):
-Auf/Ab zwischen **sichtbaren** Zeilen (zugeklappte Inhalte übersprungen),
-Rechts/Links bedient die vorhandenen Faltungen (auf klapplosen Zeilen
-wirkungslos und fehlerfrei), Enter/Leertaste wählen aus, Pos1/Ende springen zur
-ersten/letzten sichtbaren Zeile. Reine Auf-/Ab-Bewegung wählt **nicht** aus;
-der Navigationscursor bleibt von `selectedSeq` getrennt und ist flüchtiger
-Teil der vorhandenen Client-Bedienung — kein neues Subsystem, keine
-Persistenz, kein Query-Parameter. Die Tastaturauswahl ruft den bestehenden
-Auswahlpfad direkt auf (identisches Ergebnis wie ein Klick, inkl.
-`adw:select`-Instrumentierung und Detail-Pane), ohne ein Klick-Ereignis zu
-synthetisieren. Die Leertaste verhindert das Seiten-Scrollen
-(`preventDefault`), wenn sie auswählt; Kombinationen mit Strg/Alt/Meta werden
-**nicht** abgefangen. Die „sichtbar"-Berechnung nutzt den bestehenden
-Faltungszustand (`build_tree`/Verdichtung unangetastet, E8); nach einer
-Faltung bleibt der Cursor auf einer sichtbaren Zeile. Falt-Zeilen sind
-navigierbar, aber es entstehen keine neuen auswählbaren Knoten. Die aktuell
-angesteuerte Zeile ist sichtbar erkennbar (B6), unabhängig von ihrer Auswahl.
+Voll- und Teilantwort **müssen denselben Renderpfad und dieselbe
+Markup-Erzeugung teilen** (A1): die beiden Regionen werden aus **einem**
+gemeinsamen Template-Baustein erzeugt (empfohlen: die Region-Markup je in eine
+Jinja-Partial/Makro heben, die sowohl `run_detail.html` als auch ein schlankes
+Fragment-Template aufruft). Ein serverseitiges Nach-Parsen des gerenderten
+Voll-HTML (neue Parser-Abhängigkeit) ist ausgeschlossen (E1). Die konkrete
+Mechanik ist Gestaltungsspielraum und **nicht** vom Contract gepinnt; bindend
+ist, dass bei gleichen Eingabedaten und Parametern der Regionsinhalt der
+Teilantwort dem der Vollantwort entspricht und keine zweite Regionsvorlage mit
+abweichender Darstellung entsteht.
 
-### B5 — Timeline-Zeile als bedienbare Einheit (A2, AC 5)
+Das `data-latest-context`-Attribut, das der Client heute vom `<body>` liest und
+das **nicht** Teil der getauschten Regionen ist, muss in der Teilantwort
+erreichbar bleiben — an einem Element **innerhalb** einer Region (empfohlen:
+`main.detail`). Auf der Vollseite bleibt es zusätzlich am `<body>` (der
+Erstaufruf und bisherige Verbraucher lesen es dort). Ohne das friert das
+Kontext-Panel ohne Auswahl auf dem Wert des Seitenaufrufs ein (AC 3).
 
-Die ganze Zeile `div.tl-bar-row` (trägt bereits das richtige `data-seq`,
-umfasst Beschriftung und Spur) wird anklickbar, per Tastatur fokussierbar und
-mit Enter/Leertaste auslösbar — dasselbe Ergebnis wie der heutige Balkenklick
-über denselben Auswahlpfad, einschließlich der bestehenden `?focus`-Umleitung
-für Knoten ohne eigene Pane bzw. Baumzeile (`app.js:256–270`), auch bei
-Tastaturauslösung. Der delegierte Click-Handler schließt zusätzlich auf
-`.tl-bar-row[data-seq]` (statt nur `.tl-bar`); Beschriftung und Balken
-erreichen denselben Pfad **ohne doppelte Auslösung**, wenn der Balkenklick
-durch die Zeile bubbelt. Der Balken selbst bleibt anklickbar, seine Geometrie
-unverändert (E7); der bestehende Schutz gegen überholte asynchrone Auswahl
-bleibt erhalten. Die Fokus-Reihenfolge folgt der Darstellung; den
-Fokus-Einstieg je Zeile setzt der Client.
+### B4 — A2 serverseitig: Detail-Panes bei Bedarf
 
-### B6 — Sichtbarer Fokus, überall (A3, AC 6, AC 7)
+Die ausgelieferte Voll- oder Teilantwort enthält höchstens den **Körper** des
+Panes des durch `?focus` aufgelösten Knotens; ohne `?focus` keinen. Betroffen
+sind die Span-Knoten-Panes aus `_pane_nodes` (`_pane_nodes` selbst und die
+Menge der Panes bleiben unverändert — jeder Span-Knoten bekommt weiterhin seine
+**Hülle**). Geändert wird ausschließlich, dass der **Körper** (Tabs,
+`node_body`, Tools-Fenster, Prompt-Diff, Findings-Tabelle usw.) nur für den
+fokussierten Knoten gerendert wird; alle übrigen Panes bleiben als **leere
+Hülle** stehen, maschinenlesbar als „noch nicht geladen" markiert und für die
+Auswahl weiterhin von Punktknoten unterscheidbar. **Keine** Körper durch bloßes
+CSS-Verstecken in der Antwort behalten — sie dürfen gar nicht erst ausgeliefert
+werden. Leere Hüllen und der gemeinsame Punktknoten-Pane zählen nicht als
+Span-Pane-Körper.
 
-In `app.css` ein **neues** Fokus-Token in beiden Themes definieren (Quelle darf
-`--busy` sein, nicht `--signal`, E5) und `:focus`/`:focus-visible`-Regeln für
-**jedes** fokussierbare Element ergänzen — native Links, Knöpfe, Eingabefelder,
-`summary` sowie die neuen Tastaturziele (Baum-Einstieg, Timeline-Zeile). Der
-Indikator ist nicht allein Farbe: eigene Kontur (Outline/Box-Shadow), ≥ 3:1
-gegen `--paper` und `--surface` in beiden Themes. `:focus-visible` zur
-Unterdrückung bei reiner Mausnutzung ist erlaubt. Nirgends `outline: none`
-ohne Ersatz. Bei Navigation über den zentralen Baum-Einstieg bleibt die
-aktuell angesteuerte Zeile in derselben visuellen Sprache sichtbar erkennbar.
-Vorhandene Größen- und Abstandsskalen verwenden; keine neuen Farben außer dem
-Fokus-Token, keine neuen Schriftgrößen/Abstände (E6).
+Die bestehende Fokusauflösung (`_focus_index`, die Umleitung eines foldbaren
+Tool-Ergebnisses auf seinen Call) bleibt unverändert und bestimmt, welcher Pane
+seinen Körper erhält (AC 10). `?tools_offset` samt 200er-Schranke und alle
+übrigen bestehenden URL-Parameter bleiben wirksam (der ausgelieferte
+Pane-Körper trägt sein bestehendes Tools-Fenster). Der Renderpfad des
+Pane-Körpers ist unverändert — es entsteht kein neues Markup für den Körper
+selbst, nur die leeren Hüllen und ihr Marker kommen hinzu. Die anfängliche
+Auto-Auswahl des ersten Knotens (heute `applySelection()` beim Init) bleibt
+erhalten und läuft über den Nachladeweg, ohne dadurch das Kontext-Panel ohne
+explizite Auswahl an den ersten Knoten zu binden. Weder Baumaufbau und
+Verdichtung noch JSON-Detaildaten ändern (E8).
 
-### B7 — Registerkarten-Muster eingelöst (A4, AC 8, AC 9)
+### B5 — A1/A2 clientseitig: Fragment-Tausch und Pane-Nachladen
 
-Die `tab-btn`-Knöpfe jeder `role="tablist"`-Gruppe bekommen `role="tab"`,
-gepflegtes `aria-selected` und `aria-controls` auf ihr Panel; die Panels
-bekommen eindeutige IDs und `role="tabpanel"`. Ob diese Attribute serverseitig
-im Template (`run_detail.html`) oder client-seitig gesetzt werden, ist
-Gestaltungsspielraum (E3 begrenzt nur die **Baum-Spalte**, nicht die ~30
-Tab-Gruppen). Links/Rechts wechselt innerhalb der nächstgelegenen Gruppe
-(verschachtelte Gruppen bleiben getrennt, wie der bestehende
-`data-tabs`-Scope in `activateTab`); nur die aktive Karte ist sequenzieller
-Tab-Halt (Roving-Tabindex), Pfeiltasten bewegen den Fokus auf die neu aktive
-Karte. `aria-selected`, Klasse `active`, Tab-Halt und sichtbares Panel wandern
-bei jedem Wechsel gemeinsam — bei Klick **wie** Pfeiltaste. Die serverseitige
-Vorauswahl bleibt maßgeblich und wird übernommen (Landung auf dem Raw-Tab über
-`raw_from_seq`); **keine** pauschale Initialisierung auf den ersten Tab. Die
-Initialisierung der neuen Auszeichnung schließt an die vorhandenen
-Initialisierungsstellen an, einschließlich bestehender DOM-Ersetzungen beim
-Live-Refresh, ohne den SSE-Pfad zu ändern (E8). Klasse `active` und
-serverseitige Vorauswahl bleiben unverändert; die ARIA-Auszeichnung tritt
-daneben und ersetzt nichts (E4). `role="tablist"` wird **nicht** entfernt.
+In `adw/gui/static/app.js`:
 
-### B8 — Auswahl maschinenlesbar (A5, AC 10)
+- **`swapRegions` verträgt das Fragment (A1).** Der `DOMParser` parst das
+  Fragment wie bisher; die Regionen werden wie bisher getauscht
+  (`REGIONS`-Reihenfolge). Da das Fragment kein `<body>` mit
+  `data-latest-context` trägt, wird der Wert aus dem Element der Teilantwort
+  gelesen (empfohlen: `main.detail`) und auf das Live-`<body>` übernommen —
+  der bisherige Body-Lesepfad kann als Rückfall bestehen bleiben; sonst friert
+  das unausgewählte Kontext-Panel ein (AC 3). Der bestehende
+  Klappzustand-Erhalt, `applySelection`, `updateContextPanel`, `initTreeFold`,
+  `initTabs` und die Tastatur-Init nach dem Tausch bleiben unverändert (AC 12).
+  **Achtung (Review-Finding):** `captureOpenState`/`reapplyOpenState` laufen
+  heute um den Tauschzeitpunkt herum — mit nachgeladenen Panes existieren die
+  `<details>`-Elemente eines noch nicht geladenen Pane-Körpers zu diesem
+  Zeitpunkt nicht. Der festgehaltene Klappzustand wird deshalb über den
+  asynchronen Nachladevorgang hinweg aufbewahrt und beim Einsetzen des
+  Pane-Körpers auf diesen angewandt (siehe Nachladeweg unten); er darf beim
+  Tausch nicht verworfen werden, nur weil sein Ziel noch fehlt (AC 12).
+  Auslöser und 200-ms-Entprellung von `refresh()` bleiben unverändert (E4);
+  `refresh()` schickt den Header bereits heute.
+- **Pane-Körper bei Bedarf nachladen (A2).** Ein neuer, nach dem
+  `loadToolBody`-Muster gebauter Weg lädt den Körper eines noch nicht geladenen
+  Span-Panes: er fordert die **vorhandene** Seite mit dem bestehenden
+  `?focus=<seq>` und dem Header aus A1 an (bestehende URL-Parameter,
+  insbesondere `?tools_offset`, bleiben erhalten; nur `focus` wird auf den
+  Zielknoten gesetzt), parst die Teilantwort, entnimmt den Körper des
+  Ziel-Panes und setzt ihn in die vorhandene Hülle ein. **Kein** vollständiger
+  Regionentausch für ein Pane-Nachladen. Übernommen werden die erprobten
+  Absicherungen (nicht neu erfunden):
+  - Eine bereits laufende Anfrage für denselben Knoten und dieselbe
+    Pane-Instanz wird wiederverwendet (`_loadPromise`), nicht verdoppelt —
+    auch bei A → B → A (AC 8).
+  - Vor jeder sichtbaren Änderung prüfen, ob derselbe Knoten noch ausgewählt
+    und der Ziel-Pane noch im aktuellen Dokument ist
+    (`stillOurs`/Knoten-Identität). Überholte Antworten schreiben weder Inhalt
+    noch Fehlerhinweis und hinterlassen keinen halben Zustand — auch wenn die
+    Ziel-Hülle inzwischen durch einen Regionentausch ersetzt wurde (AC 7).
+  - Während des Ladens zeigt der Pane einen Ladezustand (i18n), keinen leeren
+    Kasten (AC 6).
+  - **Nach erfolgreichem Einsetzen wird der eingesetzte Körper initialisiert
+    (Review-Finding):** die Tab-Initialisierung (`initTabs`: Tab-Rollen,
+    Panel-Zuordnungen, Roving-Tabindex) läuft heute nur beim Seiten-Init und
+    beim Regionentausch — also bevor nachgeladener Inhalt ankommt. Sie wird
+    nach dem Einsetzen auf den frischen Pane-Körper (erneut) angewandt, damit
+    dessen Registerkarten Barrierefreiheit und Tastaturbedienung behalten.
+    Ebenso wird der über den Nachladevorgang aufbewahrte Klappzustand dieses
+    Panes jetzt auf die eingesetzten `<details>`-Elemente angewandt (AC 12).
+  - Erst die erfolgreiche Übernahme gilt als geladen; ein geladener Pane wird
+    bis zum Austausch seiner Region nicht erneut geholt, ein fehlgeschlagener
+    Abruf gilt nicht als geladen (AC 8).
+  - Netzwerkfehler, nicht erfolgreiche HTTP-Antworten oder fehlender
+    Zielinhalt erhalten die letzte gute übrige Ansicht; der noch aktuelle
+    Ziel-Pane sagt, dass er nicht geladen werden konnte (i18n), und bleibt
+    erneut ladbar — wie `refresh()` es heute mit `/* transient read error:
+    keep the last good view */` hält (AC 9).
+- **Verdrahtung in `applySelection`.** Klick, Timeline-Auswahl und
+  Tastaturauswahl laufen weiter durch den gemeinsamen Auswahlpfad
+  (`selectNode`; keine synthetischen Klicks); wählt ein Knoten seinen eigenen
+  Span-Pane, wird dessen Körper bei Bedarf über den neuen Weg nachgeladen. Die
+  anfängliche Auto-Auswahl des ersten Knotens zeigt dessen Pane weiterhin —
+  jetzt über das Nachladen; das sichtbare Verhalten bleibt gleich (E6). Bloße
+  Tastaturnavigation ohne Auswahl löst **keinen** Abruf aus (AC 11). Nach
+  einem Regionentausch sind die Hüllen frisch und leer, sodass der ausgewählte
+  Pane erneut nachgeladen wird (AC 12) — das ist genau das gewünschte
+  Live-Verhalten des ausgewählten Panes.
+- **Punktknoten-Pane und Einzelereignis-Abruf unverändert.** Der gemeinsame
+  Punktknoten-Pane und der bestehende `loadToolBody`-Abruf über
+  `GET …/events?from_seq=X&to_seq=X` bleiben erhalten; A2 **ergänzt** das
+  Nachladen der Span-Panes und ersetzt diesen Weg nicht. SSE-Auslöser,
+  Reconnect über `Last-Event-ID` und der abschließende Refresh samt
+  Stream-Schließen beim Lauf-Ende bleiben unverändert (E8).
 
-Der ausgewählte Knoten wird zusätzlich zur unveränderten Klasse `selected`
-maschinenlesbar ausgezeichnet (eigenes, zum gewählten Rollenmodell passendes
-ARIA-/State-Attribut, client-seitig gesetzt). Der Wechsel nimmt die
-Auszeichnung am vorherigen Knoten zurück; sie greift überall dort, wo
-`selectedSeq`/`applySelection` heute die Klasse setzt — Auswahl über Baum wie
-Timeline, per Maus wie Tastatur, Initialauswahl und `?focus`-Landung. Bloßer
-Navigationsfokus im Baum (Auf/Ab ohne Enter) wird **nicht** als Auswahl
-ausgezeichnet.
+### B6 — A3: Die Spec sagt, was der Code tut
 
-### B9 — i18n (A6)
+`docs/GUI-SPEC.md` §7.3 auf den tatsächlichen Mechanismus bringen: SSE als
+Auslöser des um 200 ms entprellten Neuabrufs, **Regionentausch** (nicht
+inkrementelles Patchen — die Aussage zum inkrementellen Patchen entfällt), die
+Teilantwort aus A1 auf den `X-Requested-With: fetch`-Header, das Nachladen der
+Detail-Panes aus A2 sowie den **unveränderten** Reconnect über `Last-Event-ID`
+und das **unveränderte** Verhalten beim Lauf-Ende. Die Zusage „Live-updating"
+der Run-Liste in §7.2 A wird als **noch nicht umgesetzt** gekennzeichnet und in
+die Deferred-Liste der Spec/Doku aufgenommen; sie wird in diesem Issue
+**nicht** gebaut (E5). Deferred-Funktionen werden nicht als umgesetzt
+dargestellt.
 
-Jeder neue sichtbare oder vorgelesene Text (Bezeichnung der Baum-Region,
-etwaige Bedienhinweise) in `adw/gui/i18n.py` in **beiden** Sprachen mit
-identischer Schlüsselmenge. Ein neuer sichtbarer Hinweisblock ist **nicht**
-erforderlich (E7). Lane-Namen, Knotenlabels und Balkennamen sind Inhalte und
-werden nicht übersetzt. Der bestehende Sprach-Paritätstest
-(`tests/test_gui_language.py`) bleibt grün und wird weiterverwendet.
+### B7 — A4: i18n
 
-### B10 — Doku, Changelog, Gates (A7, AC 14, DoD)
+Jeder neue sichtbare Text (Ladezustand und Fehlerhinweis eines Span-Panes)
+liegt in `adw/gui/i18n.py` in **beiden** Sprachen mit identischer
+Schlüsselmenge vor. Passende bestehende Texte (`hint_loading`,
+`hint_load_failed_*`) dürfen wiederverwendet werden — aber nur, wenn ihr
+Wortlaut zum Pane passt: die bestehenden Fehlertexte sagen „erneut
+aufklappen"/„erneut öffnen", was für einen Pane, der per Auswahl erneut geladen
+wird, nicht zutrifft; in dem Fall eigener Schlüssel statt unpassender
+Wiederverwendung. Der bestehende Sprach-Paritätstest
+(`tests/test_gui_language.py`) bleibt grün. Keine weiteren sichtbaren
+Informationen oder gestalterischen Änderungen (E6).
 
-`docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md` synchron: Tastaturpfad des Baums
-samt bindender Tastenbelegung, die Timeline-Zeile als bedienbare Einheit, der
-Fokusindikator (eigenes Token, beide Themes) und das eingelöste
-Registerkarten-Muster. `CHANGELOG.md` und `CHANGELOG.de.md` synchron ergänzen.
-Der veraltete „flake8 + isort"-Hinweis (Abnahmepunkt 10 in `docs/GUI-SPEC.md`)
-begründet **keine** zusätzlichen Gates und wird nicht befolgt. Gates grün:
-`uv run ruff check .` und `uv run pytest -x -q`. Keine neue
-Laufzeit-Dependency, kein Frontend-Paket, kein CDN, keine Webfont, keine
-Barrierefreiheits-Bibliothek (E1).
+### B8 — A5: Doku, Changelog, Nachmessung, Gates (DoD)
+
+`docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md` synchron nach B6. `CHANGELOG.md`
+und `CHANGELOG.de.md` synchron ergänzen — einschließlich der **bewusst
+geänderten** HTML-Antwort (Teilantwort auf den Header, Panes bei Bedarf) und
+der **unveränderten** API. Die Referenzmessung aus B1 nach der Änderung
+wiederholen und die Größenabnahme belegen (AC 5). Der veraltete
+„flake8 + isort"-Hinweis (Abnahmepunkt 10 in `docs/GUI-SPEC.md`) begründet
+**keine** zusätzlichen Gates und wird nicht befolgt; `ruff format` ist kein
+Gate. Gates grün: `uv run ruff check .` und `uv run pytest -x -q`. Keine neue
+Laufzeit-Dependency, kein Frontend-Paket, kein CDN (E1).
 
 ## Testumfang
 
-Richtwert **~12 neue Tests** unter `tests/`; deutlich mehr als **~17** ist
-Scope-Drift. Parametrisierte Fälle zählen zum Budget; zusammengehörige Fälle
-in Szenarien bündeln, keine kombinatorische Vervielfachung.
-Tastatur-/Auswahlverhalten (AC 1–5, 8–10) im Node-Harness gegen das
-ausgelieferte `app.js`; ARIA-/DOM-/CSS-Aussagen (AC 6, 7, 11, 12) und der
-Contract (AC 13) in `tests/test_gui_*.py`. Fixtures reproduzierbar über die
-bestehenden `tests/gui_app_helpers.py`-Konventionen, nicht aus lokalen
-Run-Verzeichnissen (Retention). Bestehende GUI-Tests bleiben grün, ohne
-inhaltlich umgeschrieben zu werden.
+Richtwert **~13 neue Tests** unter `tests/` (Tabelle in B2); deutlich mehr als
+**~18** ist Scope-Drift. Parametrisierte Fälle zählen zum Budget;
+zusammengehörige Fälle in Szenarien bündeln. Serverseitig die Teilantwort, die
+Pane-Zahl, die Seitengröße, den Deep-Link und die API-Regression (AC 1–5, 10,
+13) in `tests/test_gui_*.py`; der Größentest weist Referenzlauf,
+Anfrageparameter und unkomprimierte Bytezahl aus. Das Client-Verhalten —
+Nachladen, Ladezustand, Wettlauf, Doppelanfrage, Fehlerfall, Tastaturauslösung,
+Zustand über den Tausch (AC 6–9, 11–12) — im vorhandenen Harness
+`tests/gui_js_harness.js` / `tests/gui_js_harness.py` gegen das ausgelieferte
+`app.js`. Der Harness bleibt ein reiner `node`-Prozess ohne Browser; kein neues
+Browser-Test-Subsystem entsteht. Fixtures reproduzierbar über die bestehenden
+`tests/gui_app_helpers.py`-Konventionen, nicht aus lokalen Run-Verzeichnissen
+(Retention).
+
+**Einzige erlaubte inhaltliche Änderung an bestehenden Tests:** Tests, die
+heute voraussetzen, dass jeder Span-Pane-Körper im ausgelieferten HTML steht,
+werden auf den Nachladeweg bzw. die fokussierte Antwort gehoben — mit einem
+Kommentar, der sagt warum. Alle übrigen bestehenden GUI-Tests bleiben grün,
+ohne inhaltlich umgeschrieben zu werden.
 
 ## Grenzen
 
-Keine neue Route, kein neues Tab, keine Änderung an Layout, Kennzahlen,
-Verdichtung, Run-Liste oder Timeline-Geometrie. Keine Persistenz, kein Polling,
-kein neues Zustands-Subsystem, keine neuen Query-Parameter. Keine Änderung am
-`?focus`-Verhalten außer der Erreichbarkeit über die Tastatur. Keine Änderung
-an Ereignistypen, Instrumentierung, `build_tree`, der Verdichtung, der
-Blätterung, dem SSE-Pfad oder der Retention (E8). Was die Seite zeigt, ändert
-sich nicht (E7). `<label>` um den Typfilter, `aria-label` am Suchfeld,
-`aria-expanded` am Falt-Knopf, `aria-hidden` an den Statusglyphen und
-`aria-label` am Run-Kontext-Panel bleiben wörtlich erhalten. Die
-Vorentscheidungen E1–E9 sind entschieden — kein Finding, auch nicht im
-Review-Loop.
+Keine neue Route, kein neuer Query-Parameter, kein neues Tab, keine neue
+Ansicht, keine Änderung an der Run-Liste, keine Persistenz, kein neues
+Zustands-Subsystem, keine Änderung an den Routen unter `/api`. Kein
+inkrementelles Patchen des Baums — der Regionentausch bleibt der Mechanismus
+(E2). Entprellung bleibt 200 ms, Auslöser bleibt der Ereignisstrom (E4); kein
+Polling, keine Ratenbegrenzung als Ersatz für A1/A2. Keine Kompression, kein
+ETag/Caching-Header-Tuning, keine bedingten Anfragen — die Seite soll weniger
+enthalten, nicht dasselbe kleiner verpackt. Keine Änderung an Ereignistypen,
+Instrumentierung, `build_tree`, der Verdichtung, dem Tools-Fenster, der
+Retention oder der Reconnect-Logik über `Last-Event-ID` (E8). Was die Seite
+**zeigt**, ändert sich nicht — ausgenommen die geforderten vorübergehenden
+Lade- und Fehlerhinweise (E6). Gestaltung, Zahlen, Anordnung und Tastaturpfad
+(Briefe 1–4) werden benutzt, nicht revidiert (E7). Auswahl per Klick und per
+Tastatur, `?focus`-Deep-Links, das Tools-Fenster samt 200er-Schranke,
+`captureOpenState` / `reapplyOpenState`, `applySelection`, `initTreeFold`
+bleiben in Verhalten und Aussehen unverändert. Die Vorentscheidungen E1–E8
+sind entschieden — kein Finding, auch nicht im Review-Loop.
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-- Vollständiges WCAG-2.2-Audit, Screenreader-Testprotokoll, Zertifizierung
-  (E9).
-- Sprungmarken („zum Inhalt springen"), Landmark-Überarbeitung der ganzen
-  Seite, Überschriftenhierarchie-Revision.
-- Tastaturkürzel jenseits der Navigation im Baum (etwa „springe zum ersten
-  Fehler", Schnellsuche, Befehlspalette).
-- Tastaturpfad für die Run-Liste über die vorhandenen Links hinaus.
-- Anpassbare Tastenbelegung, Vim-artige Bewegungen.
-- `aria-live`-Ansagen für den SSE-Pfad.
-- Hoher-Kontrast-Modus oder `prefers-contrast`.
+- Live-Aktualisierung der Run-Liste (E5).
+- Inkrementelles Patchen des Trace-Baums (E2).
+- Virtualisiertes Rendern der Baum-Spalte, Lazy-Rendering nach Sichtbarkeit.
+- Kompression, ETags, bedingte Anfragen, Caching-Strategie.
+- Nachladen weiterer Flächen (Artefakte, Raw-Tab, Change-Scope).
+- Vorausladen des wahrscheinlich nächsten Panes.
+- Messpunkte oder Telemetrie über die Nutzlast im Betrieb.
