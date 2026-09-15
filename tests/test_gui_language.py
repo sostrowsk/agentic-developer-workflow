@@ -31,7 +31,8 @@ def test_agent_run_answer_tab_is_english(home, tmp_path):  # noqa: F811
     client = TestClient(create_app(repos=[str(repo)]))
     slug = client.get("/api/runs").json()[0]["repo"]
 
-    html = client.get(f"/runs/{slug}/aaaa1111").text
+    # A2: the answer tab renders only for the focused agent.run pane (seq 5).
+    html = client.get(f"/runs/{slug}/aaaa1111", params={"focus": 5}).text
     assert "Prompt" in html and "Tools" in html
     assert "Answer" in html
     assert "Antwort" not in html

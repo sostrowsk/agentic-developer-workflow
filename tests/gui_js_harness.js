@@ -198,8 +198,10 @@ function installGlobals(rootDoc, body, search) {
   };
   global.requestAnimationFrame = (cb) => { rafQ.push(cb); return rafQ.length; };
   global.setTimeout = (cb) => { timerQ.push(cb); return timerQ.length; };
-  global.fetch = (url) => new Promise((resolve, reject) => {
-    deferred.push({ url: String(url), resolve, reject });
+  global.fetch = (url, opts) => new Promise((resolve, reject) => {
+    // `opts` is captured so a scenario can assert the request HEADERS (Brief 5: the
+    // span-pane lazy load must send `X-Requested-With: fetch`, like refresh()).
+    deferred.push({ url: String(url), opts: opts || null, resolve, reject });
   });
   global.EventSource = function EventSource() {
     this.onmessage = null;
@@ -340,6 +342,36 @@ function resolveDetailFetch(html) {
   const d = deferred.splice(idx, 1)[0];
   d.resolve(textResponse(html));
 }
+function rejectFetch(match, err) {
+  const idx = deferred.findIndex((d) => d.url.indexOf(match) !== -1);
+  if (idx === -1) throw new Error("no pending fetch matching " + match);
+  const d = deferred.splice(idx, 1)[0];
+  d.reject(err || new Error("network"));
+}
+// The SSE-triggered live-refresh GET of the detail page: the "/runs/..." fetch that
+// is NOT the "/api/..." events route and NOT a focused span-pane load (`focus=`).
+function resolveRefreshDetail(html) {
+  const idx = deferred.findIndex(
+    (d) => d.url.indexOf("/runs/") !== -1 && d.url.indexOf("/api/") === -1
+      && d.url.indexOf("focus=") === -1);
+  if (idx === -1) throw new Error("no pending refresh detail-page fetch");
+  const d = deferred.splice(idx, 1)[0];
+  d.resolve(textResponse(html));
+}
+// The pending focused span-pane load for `seq` (Brief 5): a "/runs/..." fetch (not
+// the "/api/..." events route) carrying `focus=<seq>`. Returns {url, opts} or null.
+function pendingPaneLoad(seq) {
+  const d = deferred.find(
+    (x) => x.url.indexOf("/runs/") !== -1 && x.url.indexOf("/api/") === -1
+      && x.url.indexOf("focus=" + seq) !== -1);
+  return d ? { url: d.url, opts: d.opts } : null;
+}
+function paneLoadCount(seq) {
+  return deferred.filter(
+    (x) => x.url.indexOf("/runs/") !== -1 && x.url.indexOf("/api/") === -1
+      && x.url.indexOf("focus=" + seq) !== -1).length;
+}
+function paneBySeq(seq) { return global.document.querySelector('.pane[data-seq="' + seq + '"]'); }
 function eventsResponse(records) {
   return { ok: true, status: 200, json: () => Promise.resolve(records) };
 }
@@ -1750,6 +1782,324 @@ async function runSelectionMarked() {
 }
 
 // ---------------------------------------------------------------------------
+// GUI-Redesign 5 (Brief 5) scenarios: the span-pane LAZY LOAD (A2). A span node's
+// pane is delivered as an empty SHELL marked `data-pane-unloaded`; selecting the node
+// fetches the SAME detail page with `focus=<seq>` and the `X-Requested-With: fetch`
+// header (A1), inserts the fetched pane BODY into the shell, and drops the marker.
+// The marker/attribute NAMES are this harness's agreement with the B4/B5 implementation
+// (.adw/contract.yaml leaves data-* names free); the OBSERVABLE contract — request URL
+// and header, loading state, dedup, stale discard, error hint, keyboard parity, open
+// state across a swap — is what the pytest side asserts (AC 6–9, 11–12).
+// ---------------------------------------------------------------------------
+function spanPaneDom() {
+  // A dummy loaded node/pane (seq 1) so the IIFE's initial applySelection selects it
+  // WITHOUT a fetch, plus two SPAN nodes A (seq 10) and B (seq 20) whose panes are
+  // UNLOADED shells (`data-pane-unloaded`).
+  var body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  var nodeDummy = el("div", { classes: ["node"], attrs: { "data-seq": "1" } });
+  var nodeA = el("div", { classes: ["node"], attrs: { "data-seq": "10" } });
+  var nodeB = el("div", { classes: ["node"], attrs: { "data-seq": "20" } });
+  var trace = el("div", { classes: ["trace"], children: [nodeDummy, nodeA, nodeB] });
+  var paneDummy = el("div", { classes: ["pane"], attrs: { "data-seq": "1" } });
+  var paneA = el("div", { classes: ["pane"], attrs: { "data-seq": "10", "data-pane-unloaded": "" } });
+  var paneB = el("div", { classes: ["pane"], attrs: { "data-seq": "20", "data-pane-unloaded": "" } });
+  var panes = el("div", { classes: ["panes"], children: [paneDummy, paneA, paneB] });
+  var main = el("main", { classes: ["detail"], children: [trace, panes] });
+  body.append(el("header", { classes: ["run-header"] }), main);
+  return { body: body, nodeA: nodeA, nodeB: nodeB };
+}
+
+// A fetched partial-response document carrying the pane body for `seq`. Its body holds
+// a `[data-pane-marker]` element (text `marker`) so a test can prove the RIGHT body was
+// inserted; with `withTabs` it also carries a tab group so tab initialisation on the
+// inserted body is observable (AC 6/12). Returns {doc, details?}.
+function spanPaneFragmentDoc(seq, marker, opts) {
+  opts = opts || {};
+  var kids = [el("h3")];
+  var markerEl = el("pre", { attrs: { "data-pane-marker": "" } });
+  markerEl.textContent = marker;
+  var details = null;
+  if (opts.withTabs) {
+    var btn = el("button", { classes: ["tab-btn", "active"], attrs: { type: "button", "data-tab": "prompt" } });
+    var buttons = el("div", { classes: ["tab-buttons"], attrs: { role: "tablist" }, children: [btn] });
+    var panel = el("section", { classes: ["tab", "active"], attrs: { "data-tab-panel": "prompt" },
+      children: [markerEl] });
+    kids.push(el("div", { classes: ["tabs"], attrs: { "data-tabs": "" }, children: [buttons, panel] }));
+  } else if (opts.withSection) {
+    var pre = el("pre", { attrs: { "data-load-seq": "5" } });
+    details = el("details", { classes: ["raw-full-wrap"], children: [el("summary"), pre] });
+    kids.push(details, markerEl);
+  } else {
+    kids.push(markerEl);
+  }
+  var pane = el("div", { classes: ["pane"], attrs: { "data-seq": String(seq) }, children: kids });
+  var panes = el("div", { classes: ["panes"], children: [pane] });
+  var main = el("main", { classes: ["detail"], children: [panes] });
+  var doc = el("html", { children: [el("header", { classes: ["run-header"] }), main] });
+  return { doc: doc, details: details };
+}
+
+async function runPaneLazyLoad(search) {
+  var dom = spanPaneDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body, search || "");
+  loadAppJs(APP);
+
+  dispatch("click", { target: dom.nodeA }); await drain();
+  var req = pendingPaneLoad(10);
+  var loadingPane = paneBySeq(10);
+  var loading = loadingPane ? loadingPane.textContent : null;
+
+  nextParsedDoc = spanPaneFragmentDoc(10, "PANE_A_BODY", { withTabs: true }).doc;
+  resolveFetch("focus=10", textResponse("<fragment/>")); await settle();
+
+  var pane = paneBySeq(10);
+  var marker = pane ? pane.querySelector("[data-pane-marker]") : null;
+  var tabBtn = pane ? pane.querySelector(".tab-btn") : null;
+  return {
+    ok: true,
+    request_url: req ? req.url : null,
+    request_header: req && req.opts && req.opts.headers ? req.opts.headers["X-Requested-With"] : null,
+    loading_text: loading,
+    body_text: marker ? marker.textContent : null,
+    unloaded_after: pane ? pane.getAttribute("data-pane-unloaded") : "MISSING",
+    selected: pane ? pane.classes.has("selected") : false,
+    tab_role: tabBtn ? tabBtn.getAttribute("role") : null,
+    tab_selected: tabBtn ? tabBtn.getAttribute("aria-selected") : null,
+  };
+}
+
+async function runPaneLazyStaleSelect() {
+  var dom = spanPaneDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: dom.nodeA }); await drain();  // load A (in flight)
+  dispatch("click", { target: dom.nodeB }); await drain();  // select B (A superseded)
+
+  nextParsedDoc = spanPaneFragmentDoc(10, "STALE_A", {}).doc;
+  resolveFetch("focus=10", textResponse("x")); await settle();  // A late -> discarded
+  nextParsedDoc = spanPaneFragmentDoc(20, "FRESH_B", {}).doc;
+  resolveFetch("focus=20", textResponse("x")); await settle();  // B current -> renders
+
+  var pa = paneBySeq(10);
+  var pb = paneBySeq(20);
+  var paMark = pa ? pa.querySelector("[data-pane-marker]") : null;
+  var pbMark = pb ? pb.querySelector("[data-pane-marker]") : null;
+  return {
+    ok: true,
+    paneA_marker: paMark ? paMark.textContent : null,
+    paneA_unloaded: pa ? pa.getAttribute("data-pane-unloaded") : "MISSING",
+    paneB_marker: pbMark ? pbMark.textContent : null,
+    paneB_selected: pb ? pb.classes.has("selected") : false,
+  };
+}
+
+function spanPaneFreshMain(loadedMarker) {
+  // A fresh `main.detail` region for a live swap: dummy node/pane (seq 1), span node A
+  // (seq 10) whose pane is ALREADY LOADED (`loadedMarker`, no unloaded marker) and span
+  // node B (seq 20) still unloaded. Isolates the "answer to a swapped-away pane" case.
+  var nodeDummy = el("div", { classes: ["node"], attrs: { "data-seq": "1" } });
+  var nodeA = el("div", { classes: ["node"], attrs: { "data-seq": "10" } });
+  var nodeB = el("div", { classes: ["node"], attrs: { "data-seq": "20" } });
+  var trace = el("div", { classes: ["trace"], children: [nodeDummy, nodeA, nodeB] });
+  var pre = el("pre", { attrs: { "data-pane-marker": "" } });
+  pre.textContent = loadedMarker;
+  var paneDummy = el("div", { classes: ["pane"], attrs: { "data-seq": "1" } });
+  var paneA = el("div", { classes: ["pane"], attrs: { "data-seq": "10" }, children: [pre] });
+  var paneB = el("div", { classes: ["pane"], attrs: { "data-seq": "20", "data-pane-unloaded": "" } });
+  var panes = el("div", { classes: ["panes"], children: [paneDummy, paneA, paneB] });
+  return el("main", { classes: ["detail"], children: [trace, panes] });
+}
+
+async function runPaneLazyStaleSwap() {
+  var dom = spanPaneDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: dom.nodeA }); await drain();  // load A#1 (old shell), in flight
+
+  // A live refresh swaps in a fresh region whose pane A is already loaded.
+  var freshBody = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" },
+    children: [el("header", { classes: ["run-header"] }), spanPaneFreshMain("FRESH_MARK")] });
+  nextParsedDoc = el("html", { children: [freshBody] });
+  eventSource.onmessage({ data: JSON.stringify({ type: "phase", kind: "point" }) });
+  await drain(); flushTimers(); await drain();
+  resolveRefreshDetail("<html></html>"); await settle();
+
+  // A#1 (for the now-replaced shell) resolves LAST — it must write neither body nor error.
+  nextParsedDoc = spanPaneFragmentDoc(10, "STALE_A", {}).doc;
+  resolveFetch("focus=10", textResponse("x")); await settle();
+
+  var pa = paneBySeq(10);
+  var mark = pa ? pa.querySelector("[data-pane-marker]") : null;
+  return {
+    ok: true,
+    paneA_marker: mark ? mark.textContent : null,
+    paneA_own_text: pa ? pa.textContent : null,  // "" — no stale error hint written
+  };
+}
+
+async function runPaneLazyDedup() {
+  var dom = spanPaneDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: dom.nodeA }); await drain();  // load A
+  dispatch("click", { target: dom.nodeA }); await drain();  // re-select A: reuse in-flight
+  var afterDouble = paneLoadCount(10);
+  dispatch("click", { target: dom.nodeB }); await drain();  // load B
+  dispatch("click", { target: dom.nodeA }); await drain();  // A->B->A: reuse A's in-flight
+  var afterAba = paneLoadCount(10);
+
+  nextParsedDoc = spanPaneFragmentDoc(10, "A_BODY", {}).doc;
+  resolveFetch("focus=10", textResponse("x")); await settle();  // A renders (A is current)
+  if (paneLoadCount(20)) {
+    nextParsedDoc = spanPaneFragmentDoc(20, "B_BODY", {}).doc;
+    resolveFetch("focus=20", textResponse("x")); await settle();
+  }
+  dispatch("click", { target: dom.nodeA }); await drain();  // A already loaded -> no fetch
+  return { ok: true, after_double: afterDouble, after_aba: afterAba, reload_count: paneLoadCount(10) };
+}
+
+async function runPaneLazyError() {
+  var dom = spanPaneDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: dom.nodeA }); await drain();
+  rejectFetch("focus=10", new Error("boom")); await settle();
+
+  var pa = paneBySeq(10);
+  var errored = pa ? pa.textContent : null;
+  var stillUnloaded = pa ? pa.getAttribute("data-pane-unloaded") : "MISSING";
+  var markerPresent = !!(pa && pa.querySelector("[data-pane-marker]"));
+
+  dispatch("click", { target: dom.nodeA }); await drain();  // retry -> a NEW fetch
+  return { ok: true, error_text: errored, still_unloaded: stillUnloaded,
+    marker_present: markerPresent, retried: paneLoadCount(10) > 0 };
+}
+
+function spanPaneKeyboardDom() {
+  var body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" } });
+  var n1 = treeNode(1, 1);
+  var n10 = treeNode(10, 1, "agent.run");
+  var list = el("ul", { classes: ["trace-list"], children: [n1, n10] });
+  var trace = el("div", { classes: ["trace"], children: [list] });
+  var paneDummy = el("div", { classes: ["pane"], attrs: { "data-seq": "1" } });
+  var pane10 = el("div", { classes: ["pane"], attrs: { "data-seq": "10", "data-pane-unloaded": "" } });
+  var panes = el("div", { classes: ["panes"], children: [paneDummy, pane10] });
+  var main = el("main", { classes: ["detail"], children: [trace, panes] });
+  body.append(main);
+  return { body: body, list: list };
+}
+
+async function runPaneLazyKeyboard() {
+  var dom = spanPaneKeyboardDom();
+  installGlobals(el("html", { children: [dom.body] }), dom.body);
+  loadAppJs(APP);
+  await settle();  // initial applySelection selects the dummy first node (no fetch)
+
+  var initialFetch = paneLoadCount(10);
+  fireKey(dom.list, "ArrowDown");           // cursor onto node 10 — pure navigation
+  var afterNav = paneLoadCount(10);
+  fireKey(dom.list, "Enter"); await drain(); // Enter selects: the SAME lazy-load path
+  var req = pendingPaneLoad(10);
+  return {
+    ok: true,
+    initial_fetch: initialFetch,
+    after_nav: afterNav,
+    after_enter: paneLoadCount(10),
+    synth_clicks: synthClicks.length,
+    request_header: req && req.opts && req.opts.headers ? req.opts.headers["X-Requested-With"] : null,
+  };
+}
+
+function openSurviveMain(paneLoaded) {
+  // A `main.detail` with a dummy node/pane and span node A (seq 10). When `paneLoaded`,
+  // pane A carries an expandable section (`details.raw-full-wrap`); otherwise it is an
+  // unloaded shell.
+  var nodeDummy = el("div", { classes: ["node"], attrs: { "data-seq": "1" } });
+  var nodeA = el("div", { classes: ["node"], attrs: { "data-seq": "10" } });
+  var trace = el("div", { classes: ["trace"], children: [nodeDummy, nodeA] });
+  var paneDummy = el("div", { classes: ["pane"], attrs: { "data-seq": "1" } });
+  var details = null;
+  var paneA;
+  if (paneLoaded) {
+    var pre = el("pre", { attrs: { "data-load-seq": "5" } });
+    details = el("details", { classes: ["raw-full-wrap"], children: [el("summary"), pre] });
+    paneA = el("div", { classes: ["pane"], attrs: { "data-seq": "10" }, children: [details] });
+  } else {
+    paneA = el("div", { classes: ["pane"], attrs: { "data-seq": "10", "data-pane-unloaded": "" } });
+  }
+  var panes = el("div", { classes: ["panes"], children: [paneDummy, paneA] });
+  var main = el("main", { classes: ["detail"], children: [trace, panes] });
+  return { main: main, nodeA: nodeA, details: details };
+}
+
+async function runPaneOpenSurvivesSwap() {
+  var cur = openSurviveMain(true);
+  var body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" },
+    children: [el("header", { classes: ["run-header"] }), cur.main] });
+  installGlobals(el("html", { children: [body] }), body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: cur.nodeA }); await settle();  // select A (loaded, no fetch)
+  cur.details.open = true;                                    // the user opens the section
+
+  // A live refresh swaps in a fresh region whose pane A is an UNLOADED shell.
+  var fresh = openSurviveMain(false);
+  nextParsedDoc = el("html", { children: [el("body", {
+    children: [el("header", { classes: ["run-header"] }), fresh.main] })] });
+  eventSource.onmessage({ data: JSON.stringify({ type: "phase", kind: "point" }) });
+  await drain(); flushTimers(); await drain();
+  resolveRefreshDetail("<html></html>"); await settle();  // -> swap -> re-select A -> re-load
+
+  // The re-load of A's fresh shell resolves with the section CLOSED by default. The
+  // captured open state must survive the async load and re-open it.
+  var frag = spanPaneFragmentDoc(10, "A_BODY", { withSection: true });
+  nextParsedDoc = frag.doc;
+  resolveFetch("focus=10", textResponse("x")); await settle();
+
+  return { ok: true, section_open_after: frag.details ? frag.details.open : null };
+}
+
+async function runContextFragmentSwap() {
+  // AC 3 under A1: a live swap whose fetched partial response is a bare FRAGMENT (no
+  // <body> wrapper) must still refresh the UNSELECTED context panel — the no-selection
+  // fallback (`data-latest-context`) now travels on a REGION element (main.detail), not
+  // on <body>. Without reading it from the region the panel freezes at the open value.
+  var L1 = { phase: "spec", round: null, limit_hits: null, circuit_breakers: null,
+    cost_usd: null, followups: null };
+  var L2 = { phase: "build", round: null, limit_hits: 2, circuit_breakers: null,
+    cost_usd: null, followups: null };
+
+  var body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111",
+    "data-latest-context": JSON.stringify(L1) },
+    children: [el("header", { classes: ["run-header"] }), contextSwapMain()] });
+  installGlobals(el("html", { children: [body] }), body);
+  loadAppJs(APP);
+
+  function readField(f) {
+    var e = document.querySelector('[data-context-field="' + f + '"]');
+    return e ? e.textContent : null;
+  }
+  var before = { phase: readField("phase"), limit_hits: readField("limit_hits") };
+
+  // The fetched partial response: header + main.detail carrying the UPDATED context on
+  // the region itself, and NO <body> element.
+  var freshMain = contextSwapMain();
+  freshMain.setAttribute("data-latest-context", JSON.stringify(L2));
+  nextParsedDoc = el("html", { children: [el("header", { classes: ["run-header"] }), freshMain] });
+
+  eventSource.onmessage({ data: JSON.stringify({ type: "phase", kind: "point" }) });
+  await drain(); flushTimers(); await drain();
+  resolveRefreshDetail("<html></html>"); await drain();
+
+  var after = { phase: readField("phase"), limit_hits: readField("limit_hits") };
+  return { ok: true, before: before, after: after };
+}
+
+// ---------------------------------------------------------------------------
 const APP = process.argv[2];
 const SCENARIO = process.argv[3];
 const ARG = process.argv[4];
@@ -1776,6 +2126,14 @@ const ARG = process.argv[4];
   else if (SCENARIO === "selection-marked") result = await runSelectionMarked();
   else if (SCENARIO === "context-panel") result = await runContextPanel();
   else if (SCENARIO === "context-live-swap") result = await runContextLiveSwap();
+  else if (SCENARIO === "context-fragment-swap") result = await runContextFragmentSwap();
+  else if (SCENARIO === "pane-lazy-load") result = await runPaneLazyLoad(ARG || "");
+  else if (SCENARIO === "pane-lazy-stale-select") result = await runPaneLazyStaleSelect();
+  else if (SCENARIO === "pane-lazy-stale-swap") result = await runPaneLazyStaleSwap();
+  else if (SCENARIO === "pane-lazy-dedup") result = await runPaneLazyDedup();
+  else if (SCENARIO === "pane-lazy-error") result = await runPaneLazyError();
+  else if (SCENARIO === "pane-lazy-keyboard") result = await runPaneLazyKeyboard();
+  else if (SCENARIO === "pane-open-survives-swap") result = await runPaneOpenSurvivesSwap();
   else if (SCENARIO === "cost-format") result = await runCostFormat(ARG);
   else if (SCENARIO === "pretty-payload") result = await runPrettyPayload(ARG);
   else if (SCENARIO === "lazy-pane") result = await runLazyPane();

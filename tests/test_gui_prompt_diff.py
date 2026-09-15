@@ -266,11 +266,15 @@ def test_prompt_tab_shows_three_distinguishable_states(home, tmp_path):  # noqa:
     'no predecessor' (A1), 'identical prompt' (A3) or the visible diff (A2, whose
     changed line is rendered). The full prompt itself stays present."""
     client, slug = _client(tmp_path, _predecessor_lines())
-    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+    # A2: each agent.run pane body is delivered only when its node is focused, so the
+    # three prompt-diff states (seq 4 none, seq 8 identical, seq 6 diff) are fetched
+    # one per request.
+    def html_focus(seq):
+        return client.get(f"/runs/{slug}/{RUN_ID}", params={"focus": seq}).text
 
-    assert 'data-prompt-diff-state="none"' in _pane(html, 4)
-    assert 'data-prompt-diff-state="identical"' in _pane(html, 8)
+    assert 'data-prompt-diff-state="none"' in _pane(html_focus(4), 4)
+    assert 'data-prompt-diff-state="identical"' in _pane(html_focus(8), 8)
 
-    diff_pane = _pane(html, 6)
+    diff_pane = _pane(html_focus(6), 6)
     assert 'data-prompt-diff-state="diff"' in diff_pane
     assert "line TWO changed" in diff_pane          # the visible diff content

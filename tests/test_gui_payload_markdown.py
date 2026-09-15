@@ -104,7 +104,8 @@ def test_the_run_pane_renders_its_issue_as_markdown(home, tmp_path):  # noqa: F8
     write_run(repo, RUN_ID, lines, phase="done")
     client = TestClient(create_app(repos=[str(repo)]))
 
-    html = client.get(f"/runs/{_slug_for(repo)}/{RUN_ID}").text
+    # A2: the run node's pane body (seq 1) is delivered on focus.
+    html = client.get(f"/runs/{_slug_for(repo)}/{RUN_ID}", params={"focus": 1}).text
     i, j = html.find('class="panes"'), html.find('class="problems"')
     panes = html[i:j]
 
@@ -129,8 +130,10 @@ def _agent_run_lines(prompt, answer, message):
     ]
 
 
-def _panes(client, slug):
-    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+def _panes(client, slug, focus=None):
+    # A2: a span pane's body is delivered only when focused; the agent.run markdown
+    # tests request the agent.run node (seq 2).
+    html = client.get(f"/runs/{slug}/{RUN_ID}", params={"focus": focus} if focus else None).text
     i, j = html.find('class="panes"'), html.find('class="problems"')
     return html[i:j]
 
@@ -146,7 +149,7 @@ def test_agent_run_prompt_answer_and_messages_render_as_markdown(home, tmp_path)
     ), phase="done")
     client = TestClient(create_app(repos=[str(repo)]))
 
-    panes = _panes(client, _slug_for(repo))
+    panes = _panes(client, _slug_for(repo), focus=2)  # the agent.run pane body
 
     assert "<h1>Aufgabe</h1>" in panes and "<li>eins</li>" in panes       # prompt
     assert "<h2>Ergebnis</h2>" in panes and "<li>fertig</li>" in panes    # answer
@@ -214,7 +217,8 @@ def test_single_line_blocks_keep_their_semantic_classes(home, tmp_path):  # noqa
     write_run(repo, RUN_ID, _single_line_run_lines(), phase="done")
     client = TestClient(create_app(repos=[str(repo)]))
 
-    html = client.get(f"/runs/{_slug_for(repo)}/{RUN_ID}").text
+    # A2: the answer block (`<pre class="final">`) lives in the agent.run pane (seq 2).
+    html = client.get(f"/runs/{_slug_for(repo)}/{RUN_ID}", params={"focus": 2}).text
 
     assert "class=&#34;" not in html
     assert '<pre class="final">' in html

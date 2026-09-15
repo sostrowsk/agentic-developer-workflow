@@ -127,7 +127,9 @@ def test_tools_window_is_capped_while_the_tree_is_uncapped(home, tmp_path):  # n
     ``data-tree-entry``."""
     lines = many_tool_nodes_lines(2000, nodes=8)
     client, slug = _client(tmp_path, lines)
-    html = _detail_html(client, slug)
+    # A2: the Tools entries render in the focused pane's Tools tab (bounded by the same
+    # 200 cap); the trace tree stays fully rendered regardless of focus.
+    html = _detail_html(client, slug, focus=2)
 
     tool_markers = html.count(TOOL_ENTRY_MARKER)
     assert 1 <= tool_markers <= CAP, tool_markers

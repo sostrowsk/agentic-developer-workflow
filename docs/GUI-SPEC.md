@@ -349,7 +349,9 @@ rest — the run that needs a person to act stays at the top instead of sinking 
 newer finished runs. This grouping is applied **before** the chosen sort and keeps
 priority; it cannot be switched off. Within each group the existing newest-first
 order is kept. All parameters survive the language switch because they ride in the
-URL. Live-updating.
+URL. Live-updating of the run **list** is **not yet implemented** (deferred): the
+list page carries no `EventSource` and there is no list-level SSE route, so it
+refreshes only on navigation. (The run **detail** page is live; see §7.3.)
 
 **Issue title derivation** (pure text processing, never markdown/HTML rendering):
 (1) the first `#` heading among the first twelve lines, its text without the `#`; a
@@ -740,10 +742,30 @@ column widths / label wrapping (AC 6) and the timeline label readability / non-o
 - `GET /api/runs/{repo}/{run_id}/stream` — SSE. Server tails `events.jsonl` by
   byte offset (poll interval 500 ms; no filesystem-watch dependency), sends
   each new complete line as an event.
-- The client patches the tree incrementally; the GUI never re-renders the whole
-  page. Reconnect via `Last-Event-ID` = last `seq`.
-- A finished run closes the stream after `run` end. A GUI opened later sees no
-  difference — same rendering path.
+- The SSE stream is a **change signal**, not a patch feed. On each new record the
+  client debounces 200 ms and then **re-fetches the same server-rendered detail
+  page and swaps its live regions in place** (`header.run-header`, `main.detail`) —
+  a wholesale region swap, no page reload. The client does **not** patch the tree
+  incrementally and does **not** re-implement the tree/panes in JS: since the trace
+  compaction (0.17.0) a single event can change the membership and counters of whole
+  collapsed nodes, so a client-side patcher would have to re-implement the compaction.
+  The region swap stays the mechanism.
+- **Partial response (fetch header).** The refresh (and the pane load below) send
+  `X-Requested-With: fetch`; on that header `GET /runs/{repo}/{run_id}` returns
+  **only the two live regions** as a bare HTML fragment — same render path, same
+  markup, no `<html>`/`<head>`/`<body>` wrapper. Without the header the response is
+  the unchanged full document. The no-selection context (`data-latest-context`)
+  rides on `main.detail` so the fragment keeps it reachable.
+- **Detail panes on demand.** The delivered page carries the pane **body** only for
+  the `?focus`-resolved node; every other span pane is an empty shell the client
+  loads on selection — it re-requests the same page with that node's `?focus` and the
+  fetch header, then inserts the returned pane body. The load reuses the proven
+  `loadToolBody` safeguards: an in-flight request is shared, a superseded or
+  swapped-away answer writes nothing, a loading state shows meanwhile, and a failure
+  keeps the last good view and stays re-loadable.
+- Reconnect via `Last-Event-ID` = last `seq` (unchanged). A finished run closes the
+  stream after `run` end (unchanged). A GUI opened later sees no difference — same
+  rendering path.
 
 ### 7.4 API
 

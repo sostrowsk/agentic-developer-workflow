@@ -137,6 +137,9 @@ _EN: dict[str, str] = {
     "hint_payload_missing": "(payload not found)",
     "hint_load_failed_expand": "(failed to load — expand again to retry)",
     "hint_load_failed_open": "(failed to load — open again to retry)",
+    # A2: a span pane loads its body on selection; a re-selection retries it, so the
+    # wording says "select" — the "expand again"/"open again" hints do not fit here.
+    "hint_pane_load_failed": "(failed to load — select this node again to retry)",
     # Labels for the recovery card (§7.2): the next step a run that needs human
     # intervention points to. The command line itself, event values, run_id and repo
     # path are CONTENT and stay untranslated — only these chrome labels switch.
@@ -273,6 +276,7 @@ _DE: dict[str, str] = {
     "hint_payload_missing": "(kein Inhalt gefunden)",
     "hint_load_failed_expand": "(Laden fehlgeschlagen — erneut aufklappen)",
     "hint_load_failed_open": "(Laden fehlgeschlagen — erneut öffnen)",
+    "hint_pane_load_failed": "(Laden fehlgeschlagen — Knoten erneut auswählen)",
     "recovery_title": "Recovery",
     "recovery_reason": "Grund",
     "recovery_phase": "Betroffene Phase",

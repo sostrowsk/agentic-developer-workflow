@@ -274,9 +274,12 @@ def test_aggregate_panes_expose_cost_and_derived_outcome(home, tmp_path):  # noq
     assert lane["cost"] == 0.4 and lane["outcome"] == "completed"
     assert rnd["cost"] == 0.4 and rnd["outcome"] == "ok"
 
-    html = client.get(f"/runs/{slug}/abcdef12").text
-    assert "cost: $0.40" in html  # aggregated cost is rendered, readably (Aufgabe E)
-    assert "outcome: done" in html and "outcome: completed" in html  # non-empty
+    # A2: each aggregate pane's body is delivered only when that node is focused, so
+    # the phase (seq 2) and lane (seq 3) panes are requested individually.
+    phase_html = client.get(f"/runs/{slug}/abcdef12", params={"focus": 2}).text
+    lane_html = client.get(f"/runs/{slug}/abcdef12", params={"focus": 3}).text
+    assert "cost: $0.40" in phase_html  # aggregated cost is rendered, readably (Aufgabe E)
+    assert "outcome: done" in phase_html and "outcome: completed" in lane_html  # non-empty
 
 
 # --- P3: codex.review findings table has a Key column ---------------------------
@@ -286,7 +289,8 @@ def test_codex_findings_table_has_key_column(home, tmp_path):  # noqa: F811
     """AC 14/§7: the findings table carries the pinned Key column (file|issue, the
     same key phases.py uses)."""
     client, slug, _ = _client_with(tmp_path, "abcdef12", comprehensive_lines(), phase="done")
-    html = client.get(f"/runs/{slug}/abcdef12").text
+    # A2: the codex.review findings table (seq 12) is a pane body — request its node.
+    html = client.get(f"/runs/{slug}/abcdef12", params={"focus": 12}).text
     assert "<th>key</th>" in html
     assert "parser.py|Missing null check before parse" in html
 

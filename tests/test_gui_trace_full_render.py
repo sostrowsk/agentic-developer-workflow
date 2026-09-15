@@ -108,7 +108,9 @@ def test_pane_raw_payload_is_pretty_printed(home, tmp_path):  # noqa: F811
     tests/test_gui_payload_pretty.py for the format itself."""
     client, slug = _client(tmp_path, many_tool_entries_lines(2))
 
-    html = _detail_html(client, slug)
+    # A2: the payload field block lives in the run node's pane body (seq 1), delivered
+    # on focus.
+    html = _detail_html(client, slug, focus=1)
 
     open_tag = '<pre class="raw-fields">'
     i = html.find(open_tag)

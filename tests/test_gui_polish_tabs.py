@@ -21,13 +21,15 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
 )
 
 
-def _detail_html(tmp_path, run_id="aaaa1111"):
+def _detail_html(tmp_path, run_id="aaaa1111", focus=None):
+    # A2: the agent.run pane's tabs (Prompt/Answer/Tools) render only for the focused
+    # node; the tab-body assertions request that node.
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
     write_run(repo, run_id, comprehensive_lines(), phase="done")
     client = TestClient(create_app(repos=[str(repo)]))
     slug = client.get("/api/runs").json()[0]["repo"]
-    resp = client.get(f"/runs/{slug}/{run_id}")
+    resp = client.get(f"/runs/{slug}/{run_id}", params={"focus": focus} if focus else None)
     assert resp.status_code == 200
     return resp.text
 
@@ -36,7 +38,7 @@ def test_agent_run_offers_prompt_answer_tools_tabs(home, tmp_path):  # noqa: F81
     """D1/D2/E9: the three tabs Prompt/Answer/Tools; the run-detail view is
     uniformly English, so "Antwort" no longer appears. A snapshot-less run offers
     no Diff tab."""
-    html = _detail_html(tmp_path)
+    html = _detail_html(tmp_path, focus=5)  # the agent.run pane body
 
     assert "Prompt" in html
     assert "Answer" in html

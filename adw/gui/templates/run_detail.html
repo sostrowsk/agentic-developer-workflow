@@ -1,10 +1,15 @@
-<!DOCTYPE html>
+{#- A1: the SAME render path serves the full document and the fetch-header fragment.
+    With ``fragment`` set the document wrapper (doctype/head/body/script) is skipped
+    and ONLY the two live regions (`header.run-header`, `main.detail`) are emitted —
+    the client parses and swaps them exactly as before. Without it the response is the
+    unchanged full document. -#}
+{% if not fragment %}<!DOCTYPE html>
 <html lang="{{ lang }}">
 <head>
   <meta charset="utf-8">
   <title>Run {{ detail.run.run_id }}</title>
   <link rel="stylesheet" href="/static/app.css">
-</head>
+</head>{% endif %}
 {% macro status_icon(status) %}{% if status == "failed" %}✗{% elif status in ["done", "passed", "completed"] %}✓{% elif status == "running" %}◐{% elif status == "waiting" %}◔{% else %}•{% endif %}{% endmacro %}
 {% macro tree_row(node) %}
     <span class="icon" aria-hidden="true">{{ status_icon(node.status) }}</span>
@@ -208,8 +213,13 @@
       {{ payload_view(node.payload) }}
     {% endif %}
 {% endmacro %}
-{% macro pane(node, tool_window) %}
-  <div class="pane pane-{{ node.type | replace('.', '-') }}" data-seq="{{ node.seq }}">
+{#- A2: a span node keeps its own pane SHELL, but its BODY is rendered only for the
+    ``?focus``-resolved node (``loaded``). Every other pane stays an empty shell marked
+    ``data-pane-unloaded`` — the client loads its body on selection via the fetch-header
+    partial. This keeps the ~62 unseen pane bodies off the wire (E6/AC 4/5). -#}
+{% macro pane(node, tool_window, loaded) %}
+  <div class="pane pane-{{ node.type | replace('.', '-') }}" data-seq="{{ node.seq }}"{% if not loaded %} data-pane-unloaded{% endif %}>
+  {% if loaded %}
     <h3>{{ node.label }} <small class="type">{{ node.type }}</small></h3>
     {% set bracketed = node.diff_from and node.diff_to %}
     {% if node.type == "agent.run" %}
@@ -275,6 +285,7 @@
     {% else %}
       {{ node_body(node) }}
     {% endif %}
+  {% endif %}
   </div>
 {% endmacro %}
 {# Run-level Raw tab (Aufgabe C): the event log as a filterable list — the
@@ -344,12 +355,13 @@
 {#- Client-injected chrome hints (A4): delivered with the page so app.js renders
     them in the language the server decided on. Fixed attributes on <body> — no
     per-entry markup, so the bounded entry-node budget is untouched. -#}
-<body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}"{% if focus_seq is not none %} data-focus="{{ focus_seq }}"{% endif %}
+{% if not fragment %}<body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}"{% if focus_seq is not none %} data-focus="{{ focus_seq }}"{% endif %}
       data-latest-context='{{ detail.latest_context | compact_context | tojson }}'
       data-hint-loading="{{ t.hint_loading }}"
       data-hint-payload-missing="{{ t.hint_payload_missing }}"
       data-hint-load-failed-expand="{{ t.hint_load_failed_expand }}"
-      data-hint-load-failed-open="{{ t.hint_load_failed_open }}">
+      data-hint-load-failed-open="{{ t.hint_load_failed_open }}"
+      data-hint-pane-load-failed="{{ t.hint_pane_load_failed }}">{% endif %}
   <header class="run-header"{% if detail.run.dry_run %} data-dry-run{% endif %}>
     {% if detail.run.dry_run %}<div class="dry-run-banner">{{ t.dry_run }}</div>{% endif %}
     <a class="lang-switch" href="?{{ switch_qs }}">{{ t.lang_switch }}</a>
@@ -399,7 +411,10 @@
     {% endif %}
   </header>
 
-  <main class="detail">
+  {#- A1: the no-selection context also rides on the region, so a fetch-header
+      fragment (which has no <body>) keeps it reachable — the client reads it from
+      here after a swap, otherwise the unselected context panel would freeze. -#}
+  <main class="detail" data-latest-context='{{ detail.latest_context | compact_context | tojson }}'>
     {#- Recovery card placement: an escalation card (kind `none`) is anchored at the
         governing escalation tree node inside the Trace tab (below). It is rendered
         here at RUN LEVEL only as a fallback — for `approve`/`resume` (no escalation
@@ -449,7 +464,7 @@
           </section>
 
           <section class="panes">
-            {% for node in pane_nodes %}{{ pane(node, tool_window) }}{% endfor %}
+            {% for node in pane_nodes %}{{ pane(node, tool_window, node.seq == focus_seq) }}{% endfor %}
             {# The shared pane for POINT nodes (tool calls/results, messages, …):
                one shell instead of one pane per node, so the unpaged tree column does
                not put thousands of hidden elements into the DOM. app.js points its
@@ -645,7 +660,7 @@
       </section>
     </div>
   </main>
-
+{% if not fragment %}
   <script src="/static/app.js"></script>
 </body>
-</html>
+</html>{% endif %}

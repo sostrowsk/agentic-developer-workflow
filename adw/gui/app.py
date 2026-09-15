@@ -3021,7 +3021,13 @@ def create_app(repos=None) -> FastAPI:
         # lists the whitelisted files of the run. Both are page-render concerns and
         # stay out of the JSON detail contract.
         events, _problems = _read_events(run_dir, runs_root)
+        # A1: the client announces a live-refresh / pane-load with ``X-Requested-With:
+        # fetch``; only then does the route emit the two live regions as a bare fragment
+        # (same render path, same markup, no document wrapper). Without the header the
+        # response is the unchanged full document (E3). The header alone decides.
+        fragment = request.headers.get("x-requested-with", "").lower() == "fetch"
         html = _TEMPLATES.get_template("run_detail.html").render({
+            "fragment": fragment,
             "detail": detail, "limit": limit, "focus_seq": focus_seq,
             "phase_timeline": _phase_timeline(detail["phases"], time.time()),
             "raw_q": raw_q or "", "raw_type": raw_type or "",

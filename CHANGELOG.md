@@ -12,6 +12,35 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [Unreleased]
+
+### Changed
+- **Run-detail live path: send only what is shown.** During a running run the
+  debounced live refresh no longer ships the whole document. `GET /runs/{repo}/{run_id}`
+  now honours the `X-Requested-With: fetch` header the client already sends and
+  returns **only the two live regions** (`header.run-header`, `main.detail`) as a
+  bare HTML fragment — same render path, no `<html>`/`<head>`/`<body>` wrapper.
+  Without the header the response is the unchanged full document.
+- **Detail panes on demand.** The delivered page carries the pane **body** only for
+  the `?focus`-resolved node (before: up to 62 server-rendered panes, ~45% of the
+  document, of which none is visible without `?focus`). Every other span pane is an
+  empty shell whose body the client loads on selection — re-requesting the same page
+  with that node's `?focus` and the fetch header — reusing the proven lazy-load
+  safeguards (shared in-flight request, superseded/swapped-away answers write
+  nothing, a loading state, a re-loadable failure hint). The page without `?focus`
+  is at least 35% smaller.
+
+### Unchanged
+- All `/api` routes (fields, types, values); no new route, no new query parameter.
+- The 200 ms debounce and the SSE trigger, `Last-Event-ID` reconnect, the
+  stream-close at run end, the `?focus` deep links and the `?tools_offset` window.
+
+### Docs
+- `docs/GUI-SPEC.md` §7.3 now describes the actual mechanism (debounced region swap,
+  the fetch-header partial, the on-demand panes) instead of the never-built
+  incremental tree patching; §7.2 A marks the run-list "live-updating" promise as
+  **not yet implemented** (deferred).
+
 ## [0.25.0] — 2026-09-15
 
 ### Added

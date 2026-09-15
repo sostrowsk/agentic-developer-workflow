@@ -76,7 +76,9 @@ def test_context_panel_is_a_read_only_six_field_list_on_the_page(home, tmp_path)
     fixed slot for each of the six fields, beside the existing detail pane. The
     existing detail-pane tabs remain present."""
     client, slug = _client(tmp_path)
-    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+    # A2: the detail-pane tabs live in the agent.run pane body (seq 3), delivered on
+    # focus; the panel/field chrome itself is in the always-present region.
+    html = client.get(f"/runs/{slug}/{RUN_ID}", params={"focus": 3}).text
 
     assert "run-context" in html
     for field in FIELDS:

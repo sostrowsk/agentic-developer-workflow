@@ -13,6 +13,38 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Geändert
+- **Live-Pfad der Run-Detailseite: nur senden, was gezeigt wird.** Während eines
+  laufenden Laufs überträgt der entprellte Live-Refresh nicht mehr das ganze
+  Dokument. `GET /runs/{repo}/{run_id}` wertet jetzt den `X-Requested-With: fetch`-
+  Header aus, den der Client ohnehin schickt, und liefert **nur die beiden
+  Live-Regionen** (`header.run-header`, `main.detail`) als HTML-Fragment — gleicher
+  Renderpfad, ohne `<html>`/`<head>`/`<body>`-Rahmen. Ohne den Header ist die
+  Antwort das unveränderte Volldokument.
+- **Detail-Panes bei Bedarf.** Die ausgelieferte Seite trägt den Pane-**Körper** nur
+  für den durch `?focus` aufgelösten Knoten (vorher: bis zu 62 servergerenderte
+  Panes, ~45 % des Dokuments, davon ohne `?focus` keiner sichtbar). Jeder andere
+  Span-Pane ist eine leere Hülle, deren Körper der Client bei Auswahl nachlädt —
+  indem er dieselbe Seite mit dem `?focus` dieses Knotens und dem Fetch-Header
+  anfordert — mit den erprobten Nachlade-Absicherungen (geteilte laufende Anfrage,
+  überholte/weggetauschte Antworten schreiben nichts, ein Ladezustand, ein erneut
+  ladbarer Fehlerhinweis). Die Seite ohne `?focus` ist mindestens 35 % kleiner.
+
+### Unverändert
+- Alle `/api`-Routen (Felder, Typen, Werte); keine neue Route, kein neuer
+  Query-Parameter.
+- Die 200-ms-Entprellung und der SSE-Auslöser, der `Last-Event-ID`-Reconnect, das
+  Schließen des Stroms beim Lauf-Ende, die `?focus`-Deep-Links und das
+  `?tools_offset`-Fenster.
+
+### Doku
+- `docs/GUI-SPEC.md` §7.3 beschreibt jetzt den tatsächlichen Mechanismus (entprellter
+  Regionentausch, die Fetch-Header-Teilantwort, die Panes bei Bedarf) statt des nie
+  gebauten inkrementellen Baum-Patchens; §7.2 A kennzeichnet die „Live-updating"-
+  Zusage der Run-Liste als **noch nicht umgesetzt** (zurückgestellt).
+
 ## [0.25.0] — 2026-09-15
 
 ### Hinzugefügt

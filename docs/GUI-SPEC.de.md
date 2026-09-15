@@ -359,7 +359,10 @@ der Rest — der handlungsbedürftige Lauf bleibt oben, statt unter neuere ferti
 Läufe zu rutschen. Die Gruppierung wird **vor** der gewählten Sortierung angewendet
 und behält Vorrang; sie ist nicht abschaltbar. Innerhalb jeder Gruppe bleibt die
 bestehende Reihenfolge „neueste zuerst". Alle Parameter überleben die
-Sprachumschaltung, weil sie in der URL stehen. Live aktualisiert.
+Sprachumschaltung, weil sie in der URL stehen. Die Live-Aktualisierung der
+**Liste** ist **noch nicht umgesetzt** (zurückgestellt): die Listenseite trägt
+keinen `EventSource` und es gibt keine SSE-Route auf Listenebene, sie aktualisiert
+sich also nur bei Navigation. (Die **Detailseite** ist live; siehe §7.3.)
 
 **Titelableitung** (reine Textverarbeitung, nie Markdown-/HTML-Rendering): (1) die
 erste `#`-Überschrift unter den ersten zwölf Zeilen, ihr Text ohne `#`; eine
@@ -795,10 +798,32 @@ Nichtüberlagerung der Timeline-Beschriftung (AC 7) sind in
 - `GET /api/runs/{repo}/{run_id}/stream` — SSE. Der Server tailt `events.jsonl`
   per Byte-Offset (Poll-Intervall 500 ms; keine Filesystem-Watch-Abhängigkeit)
   und schickt jede neue vollständige Zeile als Event.
-- Der Client patcht den Baum inkrementell; die GUI rendert nie die ganze Seite
-  neu. Reconnect über `Last-Event-ID` = letzte `seq`.
-- Ein fertiger Run schließt den Stream nach dem `run`-Ende. Eine später
-  geöffnete GUI merkt keinen Unterschied — gleicher Renderpfad.
+- Der SSE-Strom ist ein **Änderungssignal**, kein Patch-Feed. Bei jedem neuen
+  Datensatz entprellt der Client 200 ms und **holt dann dieselbe servergerenderte
+  Detailseite neu und tauscht ihre Live-Regionen an Ort und Stelle** aus
+  (`header.run-header`, `main.detail`) — ein Regionentausch, kein Seiten-Reload.
+  Der Client patcht den Baum **nicht** inkrementell und implementiert Baum/Panes
+  **nicht** in JS nach: seit der Verdichtung (0.17.0) kann ein einzelnes Ereignis
+  Mitgliedschaft und Zähler ganzer Sammelknoten ändern, ein Client-Patcher müsste
+  die Verdichtung nachbauen. Der Regionentausch bleibt der Mechanismus.
+- **Teilantwort (Fetch-Header).** Der Refresh (und das Pane-Nachladen unten)
+  schicken `X-Requested-With: fetch`; auf diesen Header liefert
+  `GET /runs/{repo}/{run_id}` **nur die beiden Live-Regionen** als HTML-Fragment —
+  gleicher Renderpfad, gleiches Markup, ohne `<html>`/`<head>`/`<body>`-Rahmen.
+  Ohne den Header ist die Antwort das unveränderte Volldokument. Der Kontext ohne
+  Auswahl (`data-latest-context`) reist auf `main.detail` mit, damit das Fragment
+  ihn erreichbar hält.
+- **Detail-Panes bei Bedarf.** Die ausgelieferte Seite trägt den Pane-**Körper**
+  nur für den durch `?focus` aufgelösten Knoten; jeder andere Span-Pane ist eine
+  leere Hülle, die der Client bei Auswahl nachlädt — er fordert dieselbe Seite mit
+  dem `?focus` dieses Knotens und dem Fetch-Header an und setzt den zurückgegebenen
+  Pane-Körper ein. Das Nachladen übernimmt die erprobten `loadToolBody`-Absicherungen:
+  eine laufende Anfrage wird geteilt, eine überholte oder weggetauschte Antwort
+  schreibt nichts, währenddessen zeigt ein Ladezustand, und ein Fehlschlag erhält
+  die letzte gute Ansicht und bleibt erneut ladbar.
+- Reconnect über `Last-Event-ID` = letzte `seq` (unverändert). Ein fertiger Run
+  schließt den Stream nach dem `run`-Ende (unverändert). Eine später geöffnete GUI
+  merkt keinen Unterschied — gleicher Renderpfad.
 
 ### 7.4 API
 

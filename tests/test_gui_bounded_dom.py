@@ -150,7 +150,9 @@ def test_tool_entry_markers_bounded_across_sizes(home, tmp_path):  # noqa: F811
     global budget passes."""
     for total in (200, 2000, 20000):
         client, slug = _client(tmp_path, many_tool_nodes_lines(total, nodes=8))
-        html = _detail_html(client, slug)
+        # A2: tool entries render inside the focused pane's Tools tab; the global
+        # tool-entry budget still bounds the rendered slice (focus the first agent.run).
+        html = _detail_html(client, slug, focus=2)
         count = html.count(TOOL_ENTRY_MARKER)
         assert 1 <= count <= CAP, f"total={total}: {count} tool-entry markers (cap {CAP})"
         assert count < total
@@ -163,7 +165,8 @@ def test_exactly_one_marker_per_rendered_entry(home, tmp_path):  # noqa: F811
     appears exactly once per trace-tree node."""
     lines = many_tool_entries_lines(3)
     client, slug = _client(tmp_path, lines)
-    html = _detail_html(client, slug)
+    # A2: the single agent.run pane's Tools entries render when the node is focused.
+    html = _detail_html(client, slug, focus=2)
 
     assert html.count(TOOL_ENTRY_MARKER) == 6            # 3 calls + 3 results
     assert html.count(TREE_ENTRY_MARKER) == _tree_node_count(lines)
@@ -181,17 +184,19 @@ def test_tools_moving_window_reaches_every_entry(home, tmp_path):  # noqa: F811
 
     head, mid, tail = tool_entry_command(0), tool_entry_command(300), tool_entry_command(pairs - 1)
 
-    initial = _tools_sections(_detail_html(client, slug))
+    # A2: the Tools entries render inside the focused agent.run pane (seq 2); the moving
+    # ?tools_offset window still slides over the global tool budget.
+    initial = _tools_sections(_detail_html(client, slug, focus=2))
     assert head in initial
     assert tail not in initial
 
     # The Tools window is navigated by its OWN offset (independent of the tree).
-    at_tail = _detail_html(client, slug, **{TOOLS_OFFSET: 100000})
+    at_tail = _detail_html(client, slug, focus=2, **{TOOLS_OFFSET: 100000})
     assert tail in _tools_sections(at_tail)
     assert head not in _tools_sections(at_tail)
     assert 1 <= at_tail.count(TOOL_ENTRY_MARKER) <= CAP
 
-    at_mid = _detail_html(client, slug, **{TOOLS_OFFSET: 550})
+    at_mid = _detail_html(client, slug, focus=2, **{TOOLS_OFFSET: 550})
     assert mid in _tools_sections(at_mid)
     assert 1 <= at_mid.count(TOOL_ENTRY_MARKER) <= CAP
 
@@ -207,7 +212,7 @@ def test_tools_window_navigation_keeps_owning_agent_selected(home, tmp_path):  #
     client, slug = _client(tmp_path, many_tool_entries_lines(pairs))
     agent_seq = 2  # run == seq 1, the single agent.run == seq 2
 
-    tools = _tools_sections(_detail_html(client, slug))
+    tools = _tools_sections(_detail_html(client, slug, focus=agent_seq))
     assert "tools_offset=" in tools               # an independent tool offset ...
     assert f"focus={agent_seq}" in tools          # ... carrying the owning agent
 

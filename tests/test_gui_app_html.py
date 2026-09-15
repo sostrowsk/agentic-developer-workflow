@@ -24,13 +24,16 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
 )
 
 
-def _detail_html(tmp_path, run_id, lines, phase="done"):
+def _detail_html(tmp_path, run_id, lines, phase="done", focus=None):
+    # GUI-Redesign 5 (A2): a span pane's BODY is delivered only for the ``?focus``
+    # node; without it the pane is an unloaded shell the client fetches on selection.
+    # Tests that assert a specific pane's body content pass ``focus=<seq>``.
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
     write_run(repo, run_id, lines, phase=phase)
     client = TestClient(create_app(repos=[str(repo)]))
     slug = client.get("/api/runs").json()[0]["repo"]
-    resp = client.get(f"/runs/{slug}/{run_id}")
+    resp = client.get(f"/runs/{slug}/{run_id}", params={"focus": focus} if focus else None)
     assert resp.status_code == 200
     return resp.text
 
@@ -39,7 +42,7 @@ def test_detail_html_renders_phase_bar_and_agent_tabs(home, tmp_path):  # noqa: 
     """AC 12/14/E9: the header shows the seven phases; the agent.run pane shows the
     Prompt/Answer/Tools tabs with their content — and NO Diff tab for this
     snapshot-less run (a Diff tab only appears for bracketed nodes)."""
-    html = _detail_html(tmp_path, "aaaa1111", comprehensive_lines())
+    html = _detail_html(tmp_path, "aaaa1111", comprehensive_lines(), focus=5)  # agent.run pane
 
     for phase in PHASE_ORDER:
         assert phase in html

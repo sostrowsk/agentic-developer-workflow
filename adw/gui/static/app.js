@@ -108,6 +108,12 @@
   // never writes the wrong node into the pane and never produces a measure.
   var selectionGen = 0;
 
+  // A2: the collapse state captured at the last region swap, KEPT across the panes'
+  // asynchronous re-load — a `<details>` a user had open before the swap does not yet
+  // exist in the un-loaded shell, so its state is re-applied when the pane body arrives
+  // (Brief 5 review-finding). Empty until the first swap.
+  var lastOpenState = {};
+
   // --- read-only run-context panel (GUI-SPEC §7.2): the six-field run state at the
   // selected node's seq. The data travels in the render — each node carries its own
   // `data-context`, the no-selection fallback is the body's `data-latest-context` —
@@ -241,6 +247,12 @@
     // Return the load promise so a caller (the adw:select measure) can complete
     // only once the fetched pane content is inserted, not when the box is empty.
     if (pane) {
+      // A2: a span pane delivered as an unloaded SHELL fetches its body on selection
+      // through the fetch-header partial (the guarded/deduped loadToolBody pattern).
+      // A pane already loaded (its body present) just shows — no fetch.
+      if (pane.hasAttribute && pane.hasAttribute("data-pane-unloaded")) {
+        return loadPaneBody(pane, selectedSeq);
+      }
       var pre = pane.querySelector(".tool-detail pre[data-load-seq]");
       if (pre) return loadToolBody(pre, true);  // selection-triggered -> guarded
     }
@@ -1026,6 +1038,65 @@
     return promise;
   }
 
+  // --- A2 (Brief 5): span-pane body on demand. A span node's pane is delivered as an
+  // empty SHELL marked `data-pane-unloaded` (the 62 unseen bodies stay off the wire).
+  // Selecting the node fetches the SAME detail page with `focus=<seq>` and the fetch
+  // header (A1) — preserving the current query window (e.g. `tools_offset`) — parses the
+  // partial and replaces the shell with the fetched pane BODY. The proven loadToolBody
+  // safeguards carry over: an in-flight request is shared (no double fetch), a superseded
+  // selection or a swap that replaced the shell writes nothing (no half state), and a
+  // failure keeps the last good view and stays re-loadable (E9/AC 6–9).
+  function paneLoadUrl(seq) {
+    var qs = (window.location.search || "").replace(/^\?/, "");
+    var params = new URLSearchParams(qs);
+    params.set("focus", seq);
+    return detailUrl + "?" + params.toString();
+  }
+
+  // The load is still relevant only while its node stays selected AND its shell is still
+  // the live pane for that seq — a newer selection or a region swap makes it a no-op.
+  function paneStillOurs(pane, seq) {
+    return String(seq) === String(selectedSeq) && ownPaneFor(seq) === pane;
+  }
+
+  function loadPaneBody(pane, seq) {
+    if (!pane || !seq) return Promise.resolve();
+    if (!pane.hasAttribute || !pane.hasAttribute("data-pane-unloaded")) return Promise.resolve();
+    if (pane._paneLoad) return pane._paneLoad;  // reuse the in-flight request (dedup)
+    pane.textContent = hint("loading", "Loading…");  // a loading state, never an empty box
+    var promise = fetch(paneLoadUrl(seq), { headers: { "X-Requested-With": "fetch" } })
+      .then(function (response) {
+        if (!response.ok) throw new Error("pane " + response.status);
+        return response.text();
+      })
+      .then(function (html) {
+        pane._paneLoad = null;
+        // Superseded selection or the shell was swapped away: write neither body nor
+        // error, and leave no half "Loading…" state behind (AC 7).
+        if (!paneStillOurs(pane, seq)) { pane.textContent = ""; return; }
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var fresh = doc.querySelector('.pane[data-seq="' + seq + '"]');
+        if (!fresh) {
+          pane.textContent = hint("pane-load-failed", "(failed to load — select this node again to retry)");
+          return;  // shell keeps data-pane-unloaded -> re-loadable
+        }
+        // Re-open any section the user had expanded before a swap (its state was captured
+        // at swap time and kept across this async load) — then swap the body in.
+        reapplyOpenState(fresh, lastOpenState);
+        pane.replaceWith(fresh);
+        applySelection();  // mark the fresh (now-loaded) pane selected — it will not re-fetch
+        initTabs();        // (re-)initialise the inserted body's tab pattern (A4/AC 12)
+      })
+      .catch(function () {
+        pane._paneLoad = null;
+        if (!paneStillOurs(pane, seq)) { pane.textContent = ""; return; }
+        // Keep the last good view; the shell stays re-loadable and says what happened.
+        pane.textContent = hint("pane-load-failed", "(failed to load — select this node again to retry)");
+      });
+    pane._paneLoad = promise;
+    return promise;
+  }
+
   // --- Aufgabe B: the Artifacts tab loads a whitelisted artifact's content on
   // demand from the read-only artifacts route. The full content is NOT inlined in
   // the initial page (bounded initial render, E8): only a bounded portion is
@@ -1184,17 +1255,24 @@
 
   function swapRegions(html) {
     var openState = captureOpenState();
+    // A2: the panes' bodies re-load asynchronously after the swap, so keep the captured
+    // open state to re-apply once each body arrives (its <details> do not exist yet).
+    lastOpenState = openState;
     var doc = new DOMParser().parseFromString(html, "text/html");
     reapplyOpenState(doc, openState); // preserve collapse choices before swapping
-    // The context panel's no-selection fallback (`data-latest-context`) lives on
-    // <body>, which is NOT one of the swapped regions — so refresh it from the
-    // fetched document, otherwise an unselected live panel would freeze at the
-    // value the page was first opened with.
-    var freshBody = doc.querySelector && doc.querySelector("body");
-    if (freshBody && freshBody.getAttribute) {
-      var latest = freshBody.getAttribute("data-latest-context");
-      if (latest !== null) body.setAttribute("data-latest-context", latest);
+    // The context panel's no-selection fallback (`data-latest-context`) is NOT on one of
+    // the swapped regions — so refresh it from the fetched document, otherwise an
+    // unselected live panel would freeze at the value the page was first opened with. A1:
+    // a fetch-header fragment has no <body>, so it now rides on the `main.detail` region;
+    // read it there first, and fall back to <body> for a full-document response.
+    var latest = null;
+    var freshMain = doc.querySelector && doc.querySelector("main.detail");
+    if (freshMain && freshMain.getAttribute) latest = freshMain.getAttribute("data-latest-context");
+    if (latest === null) {
+      var freshBody = doc.querySelector && doc.querySelector("body");
+      if (freshBody && freshBody.getAttribute) latest = freshBody.getAttribute("data-latest-context");
     }
+    if (latest !== null) body.setAttribute("data-latest-context", latest);
     REGIONS.forEach(function (selector) {
       var next = doc.querySelector(selector);
       var current = document.querySelector(selector);

@@ -99,7 +99,8 @@ def test_diff_tab_present_for_bracketed_and_absent_for_unbracketed(home, tmp_pat
     """AC-B5/B6: a run with bracketed nodes offers a Diff tab and the client wires
     the diff endpoint; a run without any bracketing snapshot offers no Diff tab."""
     client, slug = _detail(tmp_path, bracketed_lane_lines(RUN_ID))
-    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+    # A2: the Diff tab lives in the bracketed node's pane body (agent_one, seq 6).
+    html = client.get(f"/runs/{slug}/{RUN_ID}", params={"focus": 6}).text
     assert "Diff" in html
 
     js = client.get("/static/app.js").text
@@ -136,7 +137,8 @@ def test_bracketed_gate_node_offers_its_own_diff(home, tmp_path):  # noqa: F811
     assert gate["diff_from"] == f"refs/adw/{RUN_ID}/1"
     assert gate["diff_to"] == f"refs/adw/{RUN_ID}/2"
 
-    html = client.get(f"/runs/{slug}/{RUN_ID}").text
+    # A2: the gate's pane body (seq 5) is delivered on focus.
+    html = client.get(f"/runs/{slug}/{RUN_ID}", params={"focus": 5}).text
     # The gate's pane offers a Diff tab wired to its own derived pair.
     assert "Diff" in html
     assert f'data-diff-from="refs/adw/{RUN_ID}/1"' in html

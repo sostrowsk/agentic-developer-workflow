@@ -277,8 +277,10 @@ def test_client_injected_hints_are_served_translated(tmp_path):
     app2 = create_app(repos=[str(repo)])
     client2 = TestClient(app2)
     slug2 = client2.get("/api/runs").json()[0]["repo"]
-    de2 = client2.get(f"/runs/{slug2}/bbbb2222?lang=de").text
-    en2 = client2.get(f"/runs/{slug2}/bbbb2222?lang=en").text
+    # A2: the Diff tab (and its diff hints) live in the bracketed node's pane body
+    # (agent_one, seq 6), delivered on focus.
+    de2 = client2.get(f"/runs/{slug2}/bbbb2222?lang=de&focus=6").text
+    en2 = client2.get(f"/runs/{slug2}/bbbb2222?lang=en&focus=6").text
     assert "tab-diff" in de2
     for key in diff_keys:
         assert CATALOG["de"][key] in de2, f"German diff panel misses {key!r}"
