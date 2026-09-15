@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [Unreleased]
+## [0.25.0] — 2026-09-15
 
 ### Added
 - **Run-detail page: operable without a mouse.** The main interaction —
@@ -29,6 +29,19 @@ Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
   Left/Right switching and a roving tab stop, adopting the server preselection —
   and the selected node is exposed machine-readably (`aria-selected`). Purely
   operational: what the page shows and the JSON API are unchanged.
+
+### Fixed
+- **The keyboard cursor only walks real tree rows, and Right only reaches real
+  children.** `isNavigableRow` accepted every `li[data-seq]`, so the recovery card's
+  informational `li.recovery-abort` entries — which own no pane — became
+  `role="treeitem"` rows: they swallowed an Arrow-Down on the way past, and
+  activating one fell back to the first node. Rows are now `.node[data-seq]` and the
+  `.trace-wrap` collector hulls. Separately, Arrow-Right implemented "to the first
+  child row" as one step through the stop order, which interleaves each row with its
+  own inline action links — on a phase carrying a `raw-jump` link the cursor landed
+  on that link. It now resolves the child row explicitly, by DOM containment for
+  collector hulls and by greater `--depth` for phases, so an open but childless
+  phase no longer hands the cursor to its next sibling.
 
 ## [0.24.0] — 2026-09-14
 
@@ -858,6 +871,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.25.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.4...v0.22.0

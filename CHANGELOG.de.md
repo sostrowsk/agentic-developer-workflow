@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [Unreleased]
+## [0.25.0] — 2026-09-15
 
 ### Hinzugefügt
 - **Run-Detailseite: ohne Maus bedienbar.** Die Hauptinteraktion — einen
@@ -32,6 +32,20 @@ English edition: [CHANGELOG.md](CHANGELOG.md)
   und Roving-Tab-Halt, unter Übernahme der serverseitigen Vorauswahl — und der
   ausgewählte Knoten ist maschinenlesbar ausgezeichnet (`aria-selected`). Rein
   bedienend: was die Seite zeigt und die JSON-API bleiben unverändert.
+
+### Behoben
+- **Der Tastatur-Cursor kennt nur echte Baumzeilen, und Pfeil-rechts nur echte
+  Kinder.** `isNavigableRow` akzeptierte jedes `li[data-seq]`, wodurch die
+  Informationszeilen `li.recovery-abort` der Recovery-Karte — die keinen eigenen
+  Pane haben — zu `role="treeitem"`-Zeilen wurden: sie schluckten auf dem Weg ein
+  Pfeil-ab, und beim Auslösen sprang die Auswahl auf den ersten Knoten. Zeilen sind
+  jetzt `.node[data-seq]` und die Sammelknoten-Hüllen `.trace-wrap`. Unabhängig
+  davon setzte Pfeil-rechts „zur ersten Kindzeile" als einen Schritt in der
+  Stop-Reihenfolge um, die jede Zeile mit ihren eigenen Aktionslinks mischt — auf
+  einer Phase mit `raw-jump`-Link landete der Cursor auf diesem Link. Die Kindzeile
+  wird jetzt explizit bestimmt, über DOM-Enthaltensein bei Sammelknoten und über
+  größere `--depth` bei Phasen; eine offene, aber kinderlose Phase gibt den Cursor
+  damit nicht mehr an ihren nächsten Geschwisterknoten weiter.
 
 ## [0.24.0] — 2026-09-14
 
@@ -928,6 +942,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.25.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.21.4...v0.22.0
