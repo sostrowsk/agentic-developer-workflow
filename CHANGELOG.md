@@ -27,8 +27,13 @@ Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
   empty shell whose body the client loads on selection — re-requesting the same page
   with that node's `?focus` and the fetch header — reusing the proven lazy-load
   safeguards (shared in-flight request, superseded/swapped-away answers write
-  nothing, a loading state, a re-loadable failure hint). The page without `?focus`
-  is at least 35% smaller.
+  nothing, a loading state, a re-loadable failure hint). Without `?focus` the page no
+  longer ships those bodies, so it is substantially smaller (the excluded span-pane
+  bodies were ~45% of the reference document). **AC 5 caveat:** the structural
+  reduction is proven by supplementary synthetic tests; the contractual reference
+  measurement — run `16f39431` ≤ 551064 uncompressed bytes, ≥35% below the 847791-byte
+  2026-09-15 reference — is a manual measurement that is **not reproduced in the test
+  suite** (the run falls under retention) and is recorded there as **unverified**.
 
 ### Unchanged
 - All `/api` routes (fields, types, values); no new route, no new query parameter.

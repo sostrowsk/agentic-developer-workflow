@@ -20,8 +20,11 @@ RED until app.py evaluates the ``X-Requested-With: fetch`` header (A1) and rende
 only the focused span-pane's body (A2).
 """
 
+import os
 import re
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
@@ -177,6 +180,60 @@ def test_focus_on_a_foldable_result_is_redirected_to_its_call(home, tmp_path):  
 
 # --- AC 5: the delivered page is at least 35% smaller --------------------------------
 
+# The contractual reference measurement (.adw/contract.yaml x-adw-response-size),
+# pinned so the acceptance check is exact. The reference run 16f39431 is a REAL run
+# measured on 2026-09-15; it is NOT checked in (runs fall under retention, plan B1/B2),
+# so it is supplied out of band through $ADW_GUI_REFERENCE_REPO — a repo whose
+# ``.adw/runs/16f39431`` reproduces that run. Absent it, AC 5's reference measurement is
+# recorded as UNVERIFIED (below), never faked and never replaced by a synthetic fixture.
+REFERENCE_RUN = "16f39431"
+REFERENCE_DATE = "2026-09-15"
+REFERENCE_BYTES = 847791          # x-adw-response-size.reference_bytes
+MAXIMUM_BYTES = 551064            # x-adw-response-size.maximum_bytes (>= 35% reduction)
+REFERENCE_REPO_ENV = "ADW_GUI_REFERENCE_REPO"
+
+
+def _reference_repo():
+    """The repo root containing the reference run, or None when it is not available."""
+    root = os.environ.get(REFERENCE_REPO_ENV)
+    if not root:
+        return None
+    run_dir = Path(root) / ".adw" / "runs" / REFERENCE_RUN
+    reproducible = (run_dir / "events.jsonl").is_file() or (run_dir / "events.jsonl.gz").is_file()
+    return Path(root) if reproducible else None
+
+
+def test_reference_run_16f39431_meets_the_contractual_byte_maximum(home, tmp_path):  # noqa: F811
+    """AC 5 (contractual reference): the page delivered for run ``16f39431`` WITHOUT
+    ``?focus`` and WITHOUT the fetch header is at most ``551064`` uncompressed bytes —
+    at least 35% below the ``847791``-byte reference of 2026-09-15. The reference run is
+    supplied out of band via ``$ADW_GUI_REFERENCE_REPO``; when it is not reproducible
+    this acceptance is EXPLICITLY RECORDED AS UNVERIFIED (a skip carrying the run,
+    request parameters and the fixed maximum) rather than faked, invented or replaced by
+    a synthetic fixture — the contract's ``baseline_rule`` forbids all three. The
+    synthetic reduction test below is only supplementary structural coverage."""
+    repo = _reference_repo()
+    if repo is None:
+        pytest.skip(
+            f"AC 5 UNVERIFIED — reference run {REFERENCE_RUN} ({REFERENCE_DATE}) is not "
+            f"reproducible in-suite (runs fall under retention, plan B1/B2). Set "
+            f"${REFERENCE_REPO_ENV} to a repo whose .adw/runs/{REFERENCE_RUN} reproduces "
+            f"it. Unmeasured here: GET /runs/<repo>/{REFERENCE_RUN} (no focus, no fetch "
+            f"header) <= {MAXIMUM_BYTES} uncompressed bytes (reference {REFERENCE_BYTES}). "
+            f"The synthetic reduction test is supplementary coverage only."
+        )
+    client = TestClient(create_app(repos=[str(repo)]))
+    slug = next(e["repo"] for e in client.get("/api/runs").json()
+                if e.get("run_id") == REFERENCE_RUN)
+    resp = client.get(f"/runs/{slug}/{REFERENCE_RUN}")  # no ?focus, no fetch header
+    assert resp.status_code == 200
+    size = len(resp.content)
+    assert size <= MAXIMUM_BYTES, (
+        f"run {REFERENCE_RUN}, GET /runs/{slug}/{REFERENCE_RUN} (no focus, no fetch "
+        f"header): {size} uncompressed bytes exceeds the contractual maximum "
+        f"{MAXIMUM_BYTES} (reference {REFERENCE_BYTES} on {REFERENCE_DATE})"
+    )
+
 
 def _many_span_panes_lines(count, body_chars, *, issue="Many span panes"):
     """A run of ``count`` ``agent.run`` spans, each with a large unique prompt so its
@@ -202,12 +259,15 @@ def _many_span_panes_lines(count, body_chars, *, issue="Many span panes"):
 
 
 def test_delivered_page_without_focus_is_at_least_35_percent_smaller(home, tmp_path):  # noqa: F811
-    """AC 5: for a run whose span-pane bodies dominate the document, the page delivered
-    WITHOUT ``?focus`` (unencoded bytes) is at least 35% smaller than a page that
-    inlined those bodies. The reference size is derived from the ACTUAL server-rendered
-    body of each span (the per-focus byte delta), never fabricated; the request
-    parameters (no focus, no fetch header) and the measured byte counts ride in the
-    assertion message."""
+    """AC 5 (SUPPLEMENTARY structural coverage — NOT the contractual reference
+    measurement; that is
+    ``test_reference_run_16f39431_meets_the_contractual_byte_maximum``): for a run whose
+    span-pane bodies dominate the document, the page delivered WITHOUT ``?focus``
+    (unencoded bytes) is at least 35% smaller than a page that inlined those bodies. The
+    reference size is derived from the ACTUAL server-rendered body of each span (the
+    per-focus byte delta), never fabricated; the request parameters (no focus, no fetch
+    header) and the measured byte counts ride in the assertion message. This proves the
+    mechanism generally; it does not stand in for the 16f39431 / 551064-byte acceptance."""
     lines, span_seqs = _many_span_panes_lines(30, 6000)
     client, slug = _app(tmp_path, "cccc3333", lines)
     url = f"/runs/{slug}/cccc3333"

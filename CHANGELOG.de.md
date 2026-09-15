@@ -30,7 +30,13 @@ English edition: [CHANGELOG.md](CHANGELOG.md)
   indem er dieselbe Seite mit dem `?focus` dieses Knotens und dem Fetch-Header
   anfordert — mit den erprobten Nachlade-Absicherungen (geteilte laufende Anfrage,
   überholte/weggetauschte Antworten schreiben nichts, ein Ladezustand, ein erneut
-  ladbarer Fehlerhinweis). Die Seite ohne `?focus` ist mindestens 35 % kleiner.
+  ladbarer Fehlerhinweis). Ohne `?focus` überträgt die Seite diese Körper nicht mehr
+  und ist dadurch deutlich kleiner (die weggelassenen Span-Pane-Körper waren ~45 % des
+  Referenzdokuments). **AC-5-Vorbehalt:** Die strukturelle Verkleinerung ist durch
+  ergänzende synthetische Tests belegt; die vertragliche Referenzmessung — Lauf
+  `16f39431` ≤ 551064 unkomprimierte Byte, ≥ 35 % unter dem 847791-Byte-Referenzwert
+  vom 2026-09-15 — ist eine manuelle Messung, die im Testlauf **nicht reproduziert**
+  wird (der Lauf unterliegt der Retention) und dort als **unverifiziert** vermerkt ist.
 
 ### Unverändert
 - Alle `/api`-Routen (Felder, Typen, Werte); keine neue Route, kein neuer
