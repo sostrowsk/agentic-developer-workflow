@@ -2063,6 +2063,48 @@ async function runPaneOpenSurvivesSwap() {
   return { ok: true, section_open_after: frag.details ? frag.details.open : null };
 }
 
+async function runPaneOpenSurvivesDoubleSwap() {
+  // Regression (P2): a SECOND live swap arrives before the selected pane finishes its
+  // asynchronous re-load. At that moment the pane is still an un-loaded shell, so its
+  // <details> do not exist in the DOM and are not re-captured — the state kept across
+  // the async load must NOT be wiped by that second swap, or the eventual re-load closes
+  // a section the user had opened (AC 12).
+  var cur = openSurviveMain(true);
+  var body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111" },
+    children: [el("header", { classes: ["run-header"] }), cur.main] });
+  installGlobals(el("html", { children: [body] }), body);
+  loadAppJs(APP);
+
+  dispatch("click", { target: cur.nodeA }); await settle();  // select A (loaded, no fetch)
+  cur.details.open = true;                                    // the user opens the section
+
+  // Refresh #1: swap in a fresh un-loaded shell -> re-select A -> pane load A#1 in flight.
+  var fresh1 = openSurviveMain(false);
+  nextParsedDoc = el("html", { children: [el("body", {
+    children: [el("header", { classes: ["run-header"] }), fresh1.main] })] });
+  eventSource.onmessage({ data: JSON.stringify({ type: "phase", kind: "point" }) });
+  await drain(); flushTimers(); await drain();
+  resolveRefreshDetail("<html></html>"); await drain();
+
+  // Refresh #2 BEFORE A#1 resolves: another swap while the pane is still an un-loaded
+  // shell -> A#1 becomes stale, pane load A#2 in flight.
+  var fresh2 = openSurviveMain(false);
+  nextParsedDoc = el("html", { children: [el("body", {
+    children: [el("header", { classes: ["run-header"] }), fresh2.main] })] });
+  eventSource.onmessage({ data: JSON.stringify({ type: "phase", kind: "point" }) });
+  await drain(); flushTimers(); await drain();
+  resolveRefreshDetail("<html></html>"); await drain();
+
+  // Resolve the stale A#1 (harmless), then A#2 with the section closed by default. The
+  // open state captured at refresh #1 must have survived refresh #2 and re-open it.
+  resolveFetch("focus=10", textResponse("x")); await settle();  // A#1 stale
+  var frag = spanPaneFragmentDoc(10, "A_BODY", { withSection: true });
+  nextParsedDoc = frag.doc;
+  resolveFetch("focus=10", textResponse("x")); await settle();  // A#2 -> re-open section
+
+  return { ok: true, section_open_after: frag.details ? frag.details.open : null };
+}
+
 async function runContextFragmentSwap() {
   // AC 3 under A1: a live swap whose fetched partial response is a bare FRAGMENT (no
   // <body> wrapper) must still refresh the UNSELECTED context panel — the no-selection
@@ -2134,6 +2176,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "pane-lazy-error") result = await runPaneLazyError();
   else if (SCENARIO === "pane-lazy-keyboard") result = await runPaneLazyKeyboard();
   else if (SCENARIO === "pane-open-survives-swap") result = await runPaneOpenSurvivesSwap();
+  else if (SCENARIO === "pane-open-survives-double-swap") result = await runPaneOpenSurvivesDoubleSwap();
   else if (SCENARIO === "cost-format") result = await runCostFormat(ARG);
   else if (SCENARIO === "pretty-payload") result = await runPrettyPayload(ARG);
   else if (SCENARIO === "lazy-pane") result = await runLazyPane();

@@ -1257,7 +1257,12 @@
     var openState = captureOpenState();
     // A2: the panes' bodies re-load asynchronously after the swap, so keep the captured
     // open state to re-apply once each body arrives (its <details> do not exist yet).
-    lastOpenState = openState;
+    // MERGE, not replace: a still-un-loaded pane's <details> are absent from the DOM at
+    // this swap, so `captureOpenState` cannot see them — overwriting would drop the state
+    // captured for them at an earlier swap and the eventual re-load would close a section
+    // the user had opened (AC 12). States for sections present now win (a user close is
+    // honoured); states for absent sections are preserved.
+    lastOpenState = Object.assign({}, lastOpenState, openState);
     var doc = new DOMParser().parseFromString(html, "text/html");
     reapplyOpenState(doc, openState); // preserve collapse choices before swapping
     // The context panel's no-selection fallback (`data-latest-context`) is NOT on one of

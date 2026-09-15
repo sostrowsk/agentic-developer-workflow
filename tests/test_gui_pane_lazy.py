@@ -120,3 +120,14 @@ def test_open_section_survives_the_async_reload_across_a_swap(tmp_path):
     r = run_scenario(tmp_path, "pane-open-survives-swap")
 
     assert r["section_open_after"] is True
+
+
+def test_open_section_survives_a_second_swap_before_the_pane_reloads(tmp_path):
+    """AC 12 (regression): a SECOND region swap arriving before the selected pane
+    finishes its asynchronous re-load must not wipe the open state captured earlier —
+    the pane's <details> are absent from the un-loaded shell at that moment, so a
+    wholesale re-capture would drop them. The eventual re-load still re-opens the
+    section the user had expanded."""
+    r = run_scenario(tmp_path, "pane-open-survives-double-swap")
+
+    assert r["section_open_after"] is True
