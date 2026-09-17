@@ -12,6 +12,19 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.26.1] — 2026-09-17
+
+### Added
+- **The five ADW briefs of the GUI redesign series** under
+  [`docs/briefs/`](docs/briefs/README.md) — the issue texts that produced 0.22.0
+  through 0.26.0, each one run autonomously with `--gates none` and none of them
+  escalated. Kept as a template rather than as history: the README records which
+  parts of the brief structure made the difference (a measured starting point
+  instead of a described one, numbered pre-decisions that close a question for the
+  review loop as well, a "what this issue does NOT touch" section, a deferred list
+  that binds the fix cycle, and acceptance criteria computed against real data
+  before the run starts).
+
 ## [0.26.0] — 2026-09-15
 
 ### Changed
@@ -905,6 +918,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.26.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.23.0...v0.24.0

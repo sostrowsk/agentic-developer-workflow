@@ -13,6 +13,19 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.26.1] — 2026-09-17
+
+### Hinzugefügt
+- **Die fünf ADW-Briefe der GUI-Redesign-Reihe** unter
+  [`docs/briefs/`](docs/briefs/README.md) — die Issue-Texte, aus denen 0.22.0 bis
+  0.26.0 entstanden sind, je ein autonomer Lauf mit `--gates none`, keiner davon
+  eskaliert. Aufgehoben als Vorlage, nicht als Historie: die README hält fest,
+  welche Bestandteile der Brief-Struktur den Unterschied gemacht haben (gemessene
+  statt beschriebener Ausgangslage, nummerierte Vorentscheidungen, die eine Frage
+  auch für den Review-Loop schließen, ein Abschnitt „Bestand, der NICHT Gegenstand
+  ist", eine den Fix-Zyklus bindende Deferred-Liste und vor dem Start gegen echte
+  Daten nachgerechnete Akzeptanzkriterien).
+
 ## [0.26.0] — 2026-09-15
 
 ### Geändert
@@ -980,6 +993,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.26.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.23.0...v0.24.0
