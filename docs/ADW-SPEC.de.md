@@ -607,6 +607,18 @@ Subprozess mit:
   Compare-and-Swap unter `flock` zurücksynchronisiert.
 - dem konfigurierten Timeout (`codex.timeout`, Default 900 s) und Prozessgruppen-Kill.
 - begrenzten Puffern für stdout (5-MiB-Tail) und stderr (256-KiB-Tail).
+- einem **privaten Arbeitsverzeichnis pro Aufruf** als Prozess-cwd und geschlossenem
+  stdin: `--ephemeral` (keine Session-Dateien), `--json` (Events; der Token-Verbrauch
+  aus `turn.completed` geht ins `usage` des Spans und in die Run-Summen),
+  `-o last-message.txt` (die finale Antwort kommt aus dieser Datei, nicht aus dem
+  stdout-Transkript) und bei Reviews `--output-schema review-schema.json`
+  (`findings.REVIEW_OUTPUT_SCHEMA`: die Antwort ist auf den Findings-Vertrag
+  festgelegt; `extract_review_result` validiert trotzdem). Die Dateinamen sind relativ
+  zum Arbeitsverzeichnis — die argv im Span-Start-Event ist byte-gleich zur
+  ausgeführten, und ins Ziel-Repo wird nichts geschrieben.
+- die frische `models_cache.json`, die codex ins isolierte Home holt, wird als
+  `~/.adw/codex-models-cache.json` aufbewahrt; der Modell-Check liest den jeweils
+  neueren Katalog.
 
 **`review(kind, content_refs, cwd, context)`** — `kind` ist `spec`, `plan` oder
 `code`; der Prompt bettet `SCHEMA_INSTRUCTION` ein; die Antwort wird mit

@@ -2013,6 +2013,21 @@ Compare-and-Swap unter <code>flock</code> zurücksynchronisiert.</li>
 s) und Prozessgruppen-Kill.</li>
 <li>begrenzten Puffern für stdout (5-MiB-Tail) und stderr
 (256-KiB-Tail).</li>
+<li>einem <strong>privaten Arbeitsverzeichnis pro Aufruf</strong> als
+Prozess-cwd und geschlossenem stdin: <code>--ephemeral</code> (keine
+Session-Dateien), <code>--json</code> (Events; der Token-Verbrauch aus
+<code>turn.completed</code> geht ins <code>usage</code> des Spans und in
+die Run-Summen), <code>-o last-message.txt</code> (die finale Antwort
+kommt aus dieser Datei, nicht aus dem stdout-Transkript) und bei Reviews
+<code>--output-schema review-schema.json</code>
+(<code>findings.REVIEW_OUTPUT_SCHEMA</code>: die Antwort ist auf den
+Findings-Vertrag festgelegt; <code>extract_review_result</code>
+validiert trotzdem). Die Dateinamen sind relativ zum Arbeitsverzeichnis
+— die argv im Span-Start-Event ist byte-gleich zur ausgeführten, und ins
+Ziel-Repo wird nichts geschrieben.</li>
+<li>die frische <code>models_cache.json</code>, die codex ins isolierte
+Home holt, wird als <code>~/.adw/codex-models-cache.json</code>
+aufbewahrt; der Modell-Check liest den jeweils neueren Katalog.</li>
 </ul>
 <p><strong><code>review(kind, content_refs, cwd, context)</code></strong>
 — <code>kind</code> ist <code>spec</code>, <code>plan</code> oder

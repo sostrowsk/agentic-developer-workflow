@@ -371,3 +371,17 @@ def test_malformed_cache_entry_is_a_miss_not_a_crash(tmp_path, entry):
     latest, _ = models.latest_models(cache, NOW, probe, lambda: None)
     assert "opus" in probed
     assert latest["opus"] == agents.OPUS
+
+
+
+def test_freshest_catalog_wins_and_unreadable_ones_are_skipped(tmp_path):
+    old = tmp_path / "old.json"
+    old.write_text(json.dumps({"models": [], "fetched_at": "2026-10-01T00:00:00Z"}))
+    new = tmp_path / "new.json"
+    new.write_text(json.dumps({"models": [], "fetched_at": "2026-10-11T00:00:00Z"}))
+    broken = tmp_path / "broken.json"
+    broken.write_text("{")
+    missing = tmp_path / "missing.json"
+    chosen = models.freshest_catalog([old, broken, missing, new])
+    assert chosen["fetched_at"] == "2026-10-11T00:00:00Z"
+    assert models.freshest_catalog([missing]) is None

@@ -12,6 +12,20 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.30.0] — 2026-10-11
+
+### Changed
+- **Codex runs with more `codex exec` flags.** ADW keeps calling the codex CLI as a subprocess, with the same isolation as before. An evaluation of the official Codex Python SDK (`openai-codex`) found it offers little that the CLI flags don't already cover, while it lacks a timeout and process-group kill, adds 358 MB and changes the GUI argv contract. Each call now runs in a private working directory:
+  - `--output-schema` (reviews): the answer is constrained to the findings contract (`findings.REVIEW_OUTPUT_SCHEMA`). The strict parser still validates it.
+  - `-o`: the final answer is read from a file, not fished out of the stdout transcript.
+  - `--json`: the token usage from `turn.completed` shows up as `usage` in the span (GUI) and now counts toward the run totals.
+  - `--ephemeral`: no session files.
+  - The file names are relative to the working directory, so the argv recorded in the event log is still byte-identical to the one executed, and nothing is written into the target repo.
+- **Fresh codex catalog for the model check.** Every codex run fetches the current model catalog into its isolated `CODEX_HOME`. ADW now keeps that copy as `~/.adw/codex-models-cache.json`, and the model check reads whichever catalog is newest. A stale `~/.codex` catalog no longer prevents the check.
+
+### Fixed
+- **Codex could hang until the timeout when stdin was open.** `codex exec` reads additional input from stdin ("Reading additional input from stdin…"). When ADW ran in an environment with an open stdin pipe, codex waited for it. stdin is now closed.
+
 ## [0.29.2] — 2026-10-11
 
 ### Fixed
@@ -982,6 +996,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.30.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.1...v0.29.0

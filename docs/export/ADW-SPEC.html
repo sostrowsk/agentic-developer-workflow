@@ -1980,6 +1980,21 @@ during the call is synced back via compare-and-swap under
 <li>the configured timeout (<code>codex.timeout</code>, default 900 s)
 and a process-group kill.</li>
 <li>bounded stdout (5 MiB tail) / stderr (256 KiB tail) buffers.</li>
+<li>a <strong>private per-call workdir</strong> as process cwd and a
+closed stdin: <code>--ephemeral</code> (no session files),
+<code>--json</code> (events; the <code>turn.completed</code> token usage
+goes into the span's <code>usage</code> and the run totals),
+<code>-o last-message.txt</code> (the final answer is read from that
+file, not from the stdout transcript) and, for reviews,
+<code>--output-schema review-schema.json</code>
+(<code>findings.REVIEW_OUTPUT_SCHEMA</code>: the answer is constrained
+to the findings contract; <code>extract_review_result</code> still
+validates it). The file names are relative to the workdir, so the argv
+in the span start event is byte-identical to the executed one and
+nothing is written into the target repo.</li>
+<li>the fresh <code>models_cache.json</code> codex fetches into the
+isolated home is kept as <code>~/.adw/codex-models-cache.json</code>;
+the model check reads whichever catalog is newer.</li>
 </ul>
 <p><strong><code>review(kind, content_refs, cwd, context)</code></strong>
 — <code>kind</code> is <code>spec</code>, <code>plan</code> or

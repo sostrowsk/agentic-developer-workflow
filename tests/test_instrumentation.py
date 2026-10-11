@@ -374,9 +374,11 @@ def test_gate_span_end_uses_exception_defaults_and_propagates(target_repo, monke
 
 
 def test_codex_review_emits_span_with_findings_payload(target_repo, monkeypatch):
-    monkeypatch.setattr(
-        CodexRunner, "_execute", staticmethod(lambda argv, env: '{"verdict": "ok", "findings": []}')
-    )
+    def fake_execute(argv, env, workdir):
+        (workdir / argv[argv.index("-o") + 1]).write_text('{"verdict": "ok", "findings": []}')
+        return ""
+
+    monkeypatch.setattr(CodexRunner, "_execute", staticmethod(fake_execute))
     # The codex.review span is owned by the call site (GUI-SPEC §6, E4): open it
     # here and hand the runner the handle, exactly as phases.py does.
     emitter = EventEmitter(target_repo, RUN_ID)
@@ -391,7 +393,7 @@ def test_codex_review_emits_span_with_findings_payload(target_repo, monkeypatch)
     (end,) = of_type(records, "codex.review", "end")
     assert set(start["payload"]) == {"kind", "argv", "cwd", "custom_prompt"}
     assert start["payload"]["kind"] == "code"
-    assert set(end["payload"]) == {"findings", "raw_stdout", "parse_ok"}
+    assert set(end["payload"]) == {"findings", "raw_stdout", "parse_ok", "usage"}
     assert end["payload"]["parse_ok"] is True
     assert end["payload"]["findings"] == []
     assert '"verdict": "ok"' in end["payload"]["raw_stdout"]

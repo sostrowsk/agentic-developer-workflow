@@ -198,9 +198,10 @@ def test_codex_review_start_argv_matches_the_executed_argv(target_repo, monkeypa
 
     executed: dict = {}
 
-    def fake_execute(argv, env):
+    def fake_execute(argv, env, workdir):
         executed["argv"] = list(argv)
-        return '{"verdict": "ok", "findings": []}'
+        (workdir / argv[argv.index("-o") + 1]).write_text('{"verdict": "ok", "findings": []}')
+        return ""
 
     monkeypatch.setattr(CodexRunner, "_execute", staticmethod(fake_execute))
     ctx.codex = CodexRunner(emitter=emitter)

@@ -22,10 +22,25 @@ def captured_run(monkeypatch):
 
             captured["argv"] = argv
             captured["kwargs"] = kwargs
-            stdout = captured.get("stdout", '{"verdict": "ok", "findings": []}')
-            # Callable-Stdout: Authoring-Marker tragen eine Nonce aus dem
+            answer = captured.get("stdout", '{"verdict": "ok", "findings": []}')
+            # Callable-Antwort: Authoring-Marker tragen eine Nonce aus dem
             # Prompt — die Antwort kann erst beim Aufruf gebaut werden.
-            self.stdout = io.BytesIO((stdout(argv) if callable(stdout) else stdout).encode())
+            answer = answer(argv) if callable(answer) else answer
+            workdir = kwargs.get("cwd")
+            # codex -o: die finale Antwort landet in einer Datei im Prozess-cwd.
+            if workdir and "-o" in argv and not captured.get("no_last_message"):
+                (Path(workdir) / argv[argv.index("-o") + 1]).write_text(answer)
+            if workdir:
+                captured["workdir_files"] = sorted(os.listdir(workdir))
+                schema = Path(workdir) / "review-schema.json"
+                if schema.exists():
+                    captured["schema"] = schema.read_text()
+            events = captured.get(
+                "events",
+                '{"type": "turn.completed", "usage": {"input_tokens": 100, '
+                '"cached_input_tokens": 40, "output_tokens": 7}}\n',
+            )
+            self.stdout = io.BytesIO(events.encode())
             self.stderr = io.BytesIO(captured.get("stderr", "").encode())
             self._timed_out_once = False
 
@@ -576,3 +591,102 @@ def test_mock_codex_author_without_script_raises(tmp_path):
     mock.script_artifacts("plan", {"plan.md": "## Plan"})
     with pytest.raises(AssertionError, match="spec"):
         mock.author("spec", "Issue #7", cwd=tmp_path)
+
+
+
+# --- codex exec flags: --json / -o / --output-schema / --ephemeral / stdin -------------
+
+
+def test_review_argv_requests_schema_last_message_json_and_ephemeral(captured_run, tmp_path):
+    CodexRunner().review("code", ["diff"], cwd=tmp_path)
+    argv = captured_run["argv"]
+    for flag in ("--ephemeral", "--json"):
+        assert flag in argv
+    assert argv[argv.index("-o") + 1] == "last-message.txt"
+    assert argv[argv.index("--output-schema") + 1] == "review-schema.json"
+    assert argv == CodexRunner().effective_argv("code", ["diff"], tmp_path)
+
+
+def test_author_argv_has_no_review_schema(captured_run, tmp_path):
+    argv = CodexRunner().effective_author_argv("spec", "task", tmp_path, "abc123")
+    assert "--output-schema" not in argv
+    assert argv[argv.index("-o") + 1] == "last-message.txt"
+
+
+def test_codex_runs_in_private_workdir_with_closed_stdin(captured_run, tmp_path):
+    CodexRunner().review("code", ["diff"], cwd=tmp_path)
+    kwargs = captured_run["kwargs"]
+    assert kwargs["stdin"] is subprocess.DEVNULL  # an open stdin made codex wait for input
+    workdir = Path(kwargs["cwd"])
+    assert workdir != tmp_path  # -o/--output-schema never land in the target repo
+    assert not workdir.exists()  # cleaned up after the call
+    assert "review-schema.json" in captured_run["workdir_files"]
+
+
+def test_review_schema_file_matches_the_findings_contract(captured_run, tmp_path):
+    import json
+
+    from adw.findings import REVIEW_OUTPUT_SCHEMA
+
+    CodexRunner().review("code", ["diff"], cwd=tmp_path)
+    schema = json.loads(captured_run["schema"])
+    assert schema == REVIEW_OUTPUT_SCHEMA
+    finding = schema["properties"]["findings"]["items"]
+    # Strict structured output: every property required, nothing extra.
+    assert set(finding["required"]) == set(finding["properties"])
+    assert finding["additionalProperties"] is False
+
+
+def test_review_reads_the_answer_from_the_last_message_file(captured_run, tmp_path):
+    captured_run["stdout"] = (
+        '{"verdict": "needs_fixes", "findings": [{"severity": "P2", "lane": "backend", '
+        '"file": "a.py", "issue": "x", "remediation_plan": ["y"]}]}'
+    )
+    result = CodexRunner().review("code", ["diff"], cwd=tmp_path)
+    assert result.verdict == "needs_fixes"
+
+
+def test_missing_last_message_is_a_codex_error(captured_run, tmp_path):
+    from adw.codex import CodexError
+
+    captured_run["no_last_message"] = True
+    with pytest.raises(CodexError, match="last-message"):
+        CodexRunner().review("code", ["diff"], cwd=tmp_path)
+
+
+def test_token_usage_reaches_span_and_run_totals(captured_run, tmp_path):
+    from adw.agents import RunTotals
+    from adw.events import SpanHandle
+
+    totals = RunTotals()
+    handle = SpanHandle("h")
+    CodexRunner(totals=totals).review("code", ["diff"], cwd=tmp_path, span=handle)
+    assert handle.end_payload["usage"] == {"input_tokens": 100, "cached_input_tokens": 40,
+                                           "output_tokens": 7}
+    assert totals.tokens == 107
+
+
+def test_fresh_codex_catalog_is_kept_for_the_model_check(captured_run, tmp_path, monkeypatch):
+    target = tmp_path / "kept" / "codex-models-cache.json"
+    monkeypatch.setenv("ADW_CODEX_CATALOG_PATH", str(target))
+
+    def write_catalog(home):
+        Path(home, "models_cache.json").write_text('{"models": [], "fetched_at": "x"}')
+
+    captured_run["mutate_home"] = write_catalog
+    CodexRunner().review("code", ["diff"], cwd=tmp_path)
+    assert target.read_text() == '{"models": [], "fetched_at": "x"}'
+
+
+def test_failure_reports_the_json_error_event(captured_run, tmp_path):
+    """With --json, codex reports failures as stdout events, not on stderr."""
+    from adw.codex import CodexError
+
+    captured_run["returncode"] = 1
+    captured_run["stderr"] = "WARNING: proceeding, even though we could not create PATH aliases"
+    captured_run["events"] = (
+        '{"type": "error", "message": "stream disconnected before completion"}\n'
+        '{"type": "turn.failed", "error": {"message": "stream disconnected before completion"}}\n'
+    )
+    with pytest.raises(CodexError, match="stream disconnected"):
+        CodexRunner().review("code", ["diff"], cwd=tmp_path)

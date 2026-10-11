@@ -60,12 +60,26 @@ def resolve_claude_alias(alias: str) -> str:
     return agents.resolve_model_alias(alias)
 
 
+def freshest_catalog(paths: list[Path]) -> dict | None:
+    """The readable catalog with the newest fetched_at (undated ones rank last)."""
+    best, best_key = None, None
+    for path in paths:
+        try:
+            catalog = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        fetched = catalog.get("fetched_at") if isinstance(catalog, dict) else None
+        key = fetched if isinstance(fetched, str) else ""
+        if best_key is None or key > best_key:
+            best, best_key = catalog, key
+    return best
+
+
 def load_codex_catalog() -> dict | None:
+    """The user's own codex catalog or the copy ADW keeps from its isolated runs —
+    whichever was fetched last."""
     home = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
-    try:
-        return json.loads((home / "models_cache.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    return freshest_catalog([home / "models_cache.json", codex.kept_catalog_path()])
 
 
 def _version(slug: str) -> tuple[tuple[int, ...], str] | None:

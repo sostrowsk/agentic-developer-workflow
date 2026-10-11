@@ -591,6 +591,16 @@ subprocess with:
   rotated during the call is synced back via compare-and-swap under `flock`.
 - the configured timeout (`codex.timeout`, default 900 s) and a process-group kill.
 - bounded stdout (5 MiB tail) / stderr (256 KiB tail) buffers.
+- a **private per-call workdir** as process cwd and a closed stdin: `--ephemeral`
+  (no session files), `--json` (events; the `turn.completed` token usage goes into
+  the span's `usage` and the run totals), `-o last-message.txt` (the final answer is
+  read from that file, not from the stdout transcript) and, for reviews,
+  `--output-schema review-schema.json` (`findings.REVIEW_OUTPUT_SCHEMA`: the answer is
+  constrained to the findings contract; `extract_review_result` still validates it).
+  The file names are relative to the workdir, so the argv in the span start event is
+  byte-identical to the executed one and nothing is written into the target repo.
+- the fresh `models_cache.json` codex fetches into the isolated home is kept as
+  `~/.adw/codex-models-cache.json`; the model check reads whichever catalog is newer.
 
 **`review(kind, content_refs, cwd, context)`** — `kind` is `spec`, `plan` or `code`;
 the prompt embeds `SCHEMA_INSTRUCTION`; the answer is parsed with

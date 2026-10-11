@@ -1110,7 +1110,7 @@ def _build_context(
         config=config,
         state=state,
         agents=SdkAgentRunner(emitter=emitter, totals=run_totals),
-        codex=CodexRunner(emitter=emitter, timeout=config.codex.timeout),
+        codex=CodexRunner(emitter=emitter, timeout=config.codex.timeout, totals=run_totals),
         emitter=emitter,
         skip_approval=skip_approval,
         spec_approval=spec_approval,

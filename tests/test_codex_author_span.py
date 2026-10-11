@@ -102,9 +102,10 @@ def test_codex_author_start_argv_identical_to_executed_argv(target_repo, monkeyp
     byte identical to what the real runner executes (shared per-call marker_id)."""
     captured: dict = {}
 
-    def fake_execute(argv, env):
+    def fake_execute(argv, env, workdir):
         captured["argv"] = list(argv)
-        return _author_output_for_prompt(argv[-1])
+        (workdir / argv[argv.index("-o") + 1]).write_text(_author_output_for_prompt(argv[-1]))
+        return ""
 
     monkeypatch.setattr(CodexRunner, "_execute", staticmethod(fake_execute))
 

@@ -17,6 +17,7 @@ Known Limitations:
 import collections
 import contextlib
 import fcntl
+import json
 import os
 import secrets
 import shutil
@@ -31,9 +32,20 @@ from typing import Literal, Protocol
 from adw.agents import _PLAN_CONTENT_RULES, _SPEC_CONTENT_RULES
 from adw.env import safe_env
 from adw.events import SpanHandle
-from adw.findings import SCHEMA_INSTRUCTION, ReviewResult, extract_review_result
+from adw.findings import (
+    REVIEW_OUTPUT_SCHEMA,
+    SCHEMA_INSTRUCTION,
+    ReviewResult,
+    extract_review_result,
+)
 
 CODEX_TIMEOUT = 900
+# Relative to codex's PROCESS cwd (a private per-call workdir), not to -C: the
+# argv stays byte-identical between the span start event and the execution, and
+# nothing is ever written into the target repo.
+_LAST_MESSAGE = "last-message.txt"
+_SCHEMA_FILE = "review-schema.json"
+_CATALOG_PATH_ENV = "ADW_CODEX_CATALOG_PATH"
 
 ReviewKind = Literal["spec", "plan", "code"]
 
@@ -109,6 +121,66 @@ _AUTHOR_INSTRUCTIONS: dict[AuthorKind, str] = {
 
 # The top GPT model offered by the codex CLI (frontier tier, not the workhorse).
 CODEX_MODEL = "gpt-6-astra"
+
+
+def kept_catalog_path() -> Path:
+    """Where ADW keeps the model catalog each codex run fetches into its isolated
+    CODEX_HOME — the model check reads it (the real ~/.codex one may be stale)."""
+    override = os.environ.get(_CATALOG_PATH_ENV)
+    return Path(override) if override else Path.home() / ".adw" / "codex-models-cache.json"
+
+
+def _keep_catalog(isolated_home: Path) -> None:
+    """Best effort: a failed copy only means the model check sees an older catalog."""
+    source = isolated_home / "models_cache.json"
+    if not source.is_file():
+        return
+    target = kept_catalog_path()
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.")
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(source.read_bytes())
+        os.replace(tmp, target)
+    except OSError:
+        pass
+
+
+def _json_errors(events: str) -> str:
+    """Failure messages from `codex exec --json` — with --json, codex reports
+    errors as stdout events (`error`, `turn.failed`), not on stderr."""
+    messages: list[str] = []
+    for line in events.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "error":
+            message = event.get("message")
+        elif event.get("type") == "turn.failed":
+            message = (event.get("error") or {}).get("message")
+        else:
+            continue
+        if isinstance(message, str) and message and message not in messages:
+            messages.append(message)
+    return "; ".join(messages)
+
+
+def _usage(events: str) -> dict[str, int]:
+    """Token usage of the turn from `codex exec --json` (turn.completed events)."""
+    usage: dict[str, int] = {}
+    for line in events.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "turn.completed":
+            for key, value in (event.get("usage") or {}).items():
+                if isinstance(value, int):
+                    usage[key] = usage.get(key, 0) + value
+    return usage
 
 
 class CodexError(Exception):
@@ -274,7 +346,7 @@ def _extract_blocks(stdout: str, names: tuple[str, ...], marker_id: str) -> dict
 class CodexRunner:
     """Invokes the Codex CLI as a read-only subprocess and parses strictly."""
 
-    def __init__(self, emitter=None, timeout: int = CODEX_TIMEOUT):
+    def __init__(self, emitter=None, timeout: int = CODEX_TIMEOUT, totals=None):
         # Accepted for construction symmetry with SdkAgentRunner. The codex.review
         # span is owned by the phases.py call site (GUI-SPEC §6, E4), so the runner
         # no longer emits anything itself — it only fills the handle it is handed.
@@ -282,6 +354,8 @@ class CodexRunner:
         # default 900s); author and review share the value.
         self._emitter = emitter
         self._timeout = timeout
+        # A RunTotals: Codex tokens join the run-end totals (cost stays with Claude).
+        self._totals = totals
 
     def effective_argv(
         self, kind: ReviewKind, content_refs: list[str], cwd: Path, context: str | None = None
@@ -289,7 +363,7 @@ class CodexRunner:
         """The exact argv this runner will execute for such a review — a static,
         side-effect-free builder so the call site can write the full argv into the
         codex.review span start event before the subprocess runs (GUI-SPEC §6)."""
-        return self._argv(cwd, self._build_prompt(kind, content_refs, context))
+        return self._argv(cwd, self._build_prompt(kind, content_refs, context), schema=True)
 
     def review(
         self,
@@ -312,7 +386,7 @@ class CodexRunner:
         # Deterministic defaults BEFORE the subprocess: a parse failure or an
         # unexpected exception still writes a complete end record.
         handle.end_payload = {"findings": [], "raw_stdout": "", "parse_ok": False}
-        stdout = self._run(prompt, cwd)
+        stdout = self._run(prompt, cwd, handle, schema=REVIEW_OUTPUT_SCHEMA)
         handle.end_payload["raw_stdout"] = stdout
         result = extract_review_result(stdout)
         handle.end_payload["findings"] = [f.model_dump() for f in result.findings]
@@ -358,7 +432,7 @@ class CodexRunner:
         # Deterministic defaults BEFORE the subprocess: a parse failure or an
         # unexpected exception still writes a complete end record.
         handle.end_payload = {"artifacts": [], "raw_stdout": "", "parse_ok": False}
-        stdout = self._run(self._build_author_prompt(kind, task, marker_id), cwd)
+        stdout = self._run(self._build_author_prompt(kind, task, marker_id), cwd, handle)
         handle.end_payload["raw_stdout"] = stdout
         files = _extract_blocks(stdout, _AUTHOR_BLOCKS[kind], marker_id)
         handle.end_payload["artifacts"] = list(files)
@@ -366,7 +440,7 @@ class CodexRunner:
         return files
 
     @staticmethod
-    def _argv(cwd: Path, prompt: str) -> list[str]:
+    def _argv(cwd: Path, prompt: str, schema: bool = False) -> list[str]:
         return [
             "codex",
             "exec",
@@ -380,13 +454,40 @@ class CodexRunner:
             # beschränkt nur Shell-Kommandos, nicht MCP-Prozesse.
             "-c",
             "mcp_servers={}",
+            # Keine Session-Dateien; Events als JSONL (Token-Verbrauch); die finale
+            # Antwort als Datei statt aus dem stdout-Transkript gefischt.
+            "--ephemeral",
+            "--json",
+            "-o",
+            _LAST_MESSAGE,
+            *(["--output-schema", _SCHEMA_FILE] if schema else []),
             "-C",
             str(cwd),
             prompt,
         ]
 
-    def _run(self, prompt: str, cwd: Path) -> str:
-        argv = self._argv(cwd, prompt)
+    def _run(self, prompt: str, cwd: Path, handle, schema: dict | None = None) -> str:
+        """Run codex in a private workdir; returns its final answer (the -o file)."""
+        workdir = Path(tempfile.mkdtemp(prefix="adw-codex-run-"))
+        try:
+            if schema is not None:
+                (workdir / _SCHEMA_FILE).write_text(json.dumps(schema), encoding="utf-8")
+            events = self._run_in(self._argv(cwd, prompt, schema is not None), workdir)
+            usage = _usage(events)
+            handle.end_payload["usage"] = usage
+            if self._totals is not None:
+                tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                self._totals.add(None, tokens)
+            try:
+                return (workdir / _LAST_MESSAGE).read_text(encoding="utf-8")
+            except OSError as exc:
+                raise CodexError(
+                    f"codex exec: keine finale Antwort ({_LAST_MESSAGE} fehlt) — {exc}"
+                ) from exc
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+
+    def _run_in(self, argv: list[str], workdir: Path) -> str:
         env = safe_env()
         # Isoliertes CODEX_HOME: nur auth.json, KEINE config.toml — sonst
         # starten user-konfigurierte MCP-Server außerhalb der read-only-
@@ -394,8 +495,9 @@ class CodexRunner:
         isolated_home, source_home, original_auth = _isolated_codex_home()
         env["CODEX_HOME"] = str(isolated_home)
         try:
-            return self._execute(argv, env)
+            return self._execute(argv, env, workdir)
         finally:
+            _keep_catalog(isolated_home)
             # Rotierte Tokens zurücksyncen (codex refresht auth.json ggf.),
             # dann die Token-Kopie aufräumen. Schlägt der Sync fehl, bleibt
             # das Temp-Home als letzte gültige Token-Kopie erhalten.
@@ -409,16 +511,20 @@ class CodexRunner:
                     file=sys.stderr,
                 )
 
-    def _execute(self, argv: list[str], env: dict[str, str]) -> str:
+    def _execute(self, argv: list[str], env: dict[str, str], workdir: Path) -> str:
         timeout = self._timeout
         try:
             # Eigene Session: Bei Timeout/Interrupt stirbt die GANZE
             # Prozessgruppe (Codex spawnt Shell-Kommandos/MCP-Server).
             proc = subprocess.Popen(
                 argv,
+                # Geschlossenes stdin: sonst wartet codex exec auf weitere Eingabe
+                # ("Reading additional input from stdin…") bis zum Timeout.
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=env,
+                cwd=workdir,
                 start_new_session=True,
             )
         except OSError as exc:
@@ -447,7 +553,8 @@ class CodexRunner:
         stdout = b"".join(out_tail).decode("utf-8", errors="replace")
         stderr = b"".join(err_tail).decode("utf-8", errors="replace")
         if returncode != 0:
-            raise CodexError(f"codex exec: Exit {returncode} — {stderr.strip()[:2000]}")
+            reason = _json_errors(stdout) or stderr.strip()
+            raise CodexError(f"codex exec: Exit {returncode} — {reason[:2000]}")
         return stdout
 
     @staticmethod

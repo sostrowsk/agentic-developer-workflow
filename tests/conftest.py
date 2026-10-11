@@ -76,4 +76,6 @@ def _no_live_model_probe(tmp_path_factory, monkeypatch):
     monkeypatch.setattr(models, "load_codex_catalog", lambda: None)
     cache = tmp_path_factory.mktemp("adw-model-check") / "model-check.json"
     monkeypatch.setenv("ADW_MODEL_CHECK_PATH", str(cache))
+    kept = tmp_path_factory.mktemp("adw-codex-catalog") / "codex-models-cache.json"
+    monkeypatch.setenv("ADW_CODEX_CATALOG_PATH", str(kept))
     assert codex.CODEX_MODEL

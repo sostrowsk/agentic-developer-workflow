@@ -13,6 +13,20 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.30.0] — 2026-10-11
+
+### Geändert
+- **Codex läuft mit zusätzlichen `codex exec`-Flags.** ADW ruft die codex-CLI weiter als Subprozess auf, mit derselben Isolation wie bisher. Eine Prüfung des offiziellen Codex-Python-SDK (`openai-codex`) ergab, dass es kaum etwas bietet, was die CLI-Flags nicht schon abdecken; dafür fehlen Zeitlimit und Abbruch der Prozessgruppe, es kostet 358 MB und ändert den argv-Vertrag der GUI. Jeder Aufruf läuft jetzt in einem privaten Arbeitsverzeichnis:
+  - `--output-schema` (Reviews): Die Antwort ist auf den Findings-Vertrag festgelegt (`findings.REVIEW_OUTPUT_SCHEMA`). Der strikte Parser validiert sie weiterhin.
+  - `-o`: Die finale Antwort wird aus einer Datei gelesen statt aus dem stdout-Transkript gefischt.
+  - `--json`: Der Token-Verbrauch aus `turn.completed` erscheint als `usage` im Span (GUI) und zählt jetzt zu den Run-Summen.
+  - `--ephemeral`: keine Session-Dateien.
+  - Die Dateinamen sind relativ zum Arbeitsverzeichnis. Die argv im Event-Log bleibt so byte-gleich zur ausgeführten, und ins Ziel-Repo wird nichts geschrieben.
+- **Frischer Codex-Katalog für den Modell-Check.** Jeder Codex-Lauf holt den aktuellen Modellkatalog in sein isoliertes `CODEX_HOME`. ADW bewahrt diese Kopie jetzt als `~/.adw/codex-models-cache.json` auf, und der Modell-Check liest den jeweils neuesten Katalog. Ein veralteter Katalog in `~/.codex` verhindert die Prüfung nicht mehr.
+
+### Behoben
+- **Codex konnte bei offenem stdin bis zum Timeout hängen.** `codex exec` liest zusätzliche Eingabe von stdin („Reading additional input from stdin…“). Lief ADW in einer Umgebung mit offener stdin-Pipe, wartete codex darauf. stdin ist jetzt geschlossen.
+
 ## [0.29.2] — 2026-10-11
 
 ### Behoben
@@ -1057,6 +1071,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.30.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.1...v0.29.0

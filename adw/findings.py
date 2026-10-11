@@ -37,6 +37,34 @@ Rules: verdict "ok" only with an empty findings array; "needs_fixes" requires
 at least one Finding; all fields are mandatory."""
 
 
+# The same contract as JSON Schema for `codex exec --output-schema`: the model's
+# final answer is constrained to it (strict structured output — every property
+# required, nothing extra). extract_review_result still validates the result.
+REVIEW_OUTPUT_SCHEMA: dict = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": ["ok", "needs_fixes"]},
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "severity": {"type": "string", "enum": ["P1", "P2", "P3"]},
+                    "lane": {"type": "string", "enum": ["frontend", "backend", "unknown"]},
+                    "file": {"type": "string"},
+                    "issue": {"type": "string"},
+                    "remediation_plan": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["severity", "lane", "file", "issue", "remediation_plan"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["verdict", "findings"],
+    "additionalProperties": False,
+}
+
+
 class FindingsParseError(Exception):
     """Agent/Codex output did not conform to the strict review JSON contract."""
 
