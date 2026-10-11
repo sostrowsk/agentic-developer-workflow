@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from adw.ci import CiResult, CiTimeoutError, fetch_failed_job_logs, poll_pipeline
+from adw.ci import CiResult, CiTimeoutError, poll_pipeline
 from adw.config import CiConfig
 
 
@@ -146,18 +146,6 @@ def test_broken_glab_json_raises_clear_error(tmp_path):
     glab = FakeGlab(["das ist kein json"])
     with pytest.raises(CiError, match="JSON"):
         poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=FakeSleep())
-
-
-def test_fetch_failed_job_logs_collects_all_failed_jobs(tmp_path):
-    glab = FakeGlab(
-        [
-            jobs_json(("lint", "failed"), ("test", "failed"), ("build", "success")),
-            "lint kaputt",
-            "test kaputt",
-        ]
-    )
-    logs = fetch_failed_job_logs(tmp_path, pipeline_id=77, run_glab=glab)
-    assert "lint kaputt" in logs and "test kaputt" in logs
 
 
 def test_ci_result_is_dataclass_with_pipeline_id(tmp_path):

@@ -1697,9 +1697,10 @@ window.</td>
 <p><strong>Persistence mechanics.</strong> Snapshot to a temp file +
 <code>os.replace</code> (no half-written state ever exists); exclusive
 <code>flock</code> on <code>.adw/runs/.seq</code> around every write;
-<code>RunState.update()</code> gives lane threads a load → mutate →
-write transaction; a corrupt <code>.seq</code> is reconstructed from the
-persisted states.</p>
+parallel lane threads mutate the shared in-memory state under
+<code>RunContext.state_lock</code> and persist with
+<code>ctx.save()</code>; a corrupt <code>.seq</code> is reconstructed
+from the persisted states.</p>
 <h3 id="43-findings--the-one-reviewer-contract">4.3 Findings — the one
 reviewer contract</h3>
 <p>Every reviewer (Codex, final reviewer, E2E triage, log analyst)

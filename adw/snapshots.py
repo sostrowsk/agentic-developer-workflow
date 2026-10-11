@@ -70,7 +70,7 @@ def _capture(ctx, worktree, label: str) -> None:
     ctx.emitter.emit(
         "snapshot",
         {"lane": lane, "tree": tree, "ref": ref, "label": label},
-        span=_current_span_id(ctx.emitter),
+        span=ctx.emitter.current_span_id(),
     )
 
 
@@ -117,17 +117,3 @@ def _run_git(cwd: Path, env: dict[str, str], *args: str) -> str:
     if result.returncode != 0:
         raise RuntimeError(f"git {args[0]} failed: {result.stderr.strip()}")
     return result.stdout
-
-
-def _current_span_id(emitter):
-    """Innermost open span on the current thread, or None — so the snapshot point
-    attributes to its enclosing lane/round span (GUI-SPEC §4.2). Read lazily to
-    avoid an import cycle with ``phases``; mirrors ``phases._current_span_id``."""
-    stack = getattr(emitter, "_stack", None)
-    if stack is None:  # NoOpEmitter has no stack
-        return None
-    try:
-        current = stack()
-        return current[-1] if current else None
-    except Exception:
-        return None

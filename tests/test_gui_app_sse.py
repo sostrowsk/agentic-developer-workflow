@@ -132,3 +132,24 @@ def test_stream_incomplete_final_line_is_emitted_once_when_completed(home, tmp_p
     ids = [f["id"] for f in parse_sse(body) if f["event"] is None]
     assert ids.count("3") == 1  # the once-partial event appears exactly once
     assert ids == ["1", "2", "3", "4"]  # in order, no gap, closed on the run end
+
+
+def test_stream_over_a_gzipped_archive_is_one_pass(tmp_path, monkeypatch):
+    """Regression: a pruned run kept as events.jsonl.gz has no live tail — the
+    stream re-decompressed the whole archive every poll and never ended when the
+    archive lacked a run-end record. One pass, then close."""
+    import gzip
+
+    import adw.gui.app as app_mod
+
+    path = tmp_path / "events.jsonl.gz"
+    with gzip.open(path, "wt") as fh:
+        fh.write(json.dumps(rec(1, "run", "start", "R", payload=run_start_payload())) + "\n")
+        fh.write(json.dumps(rec(2, "phase", "start", "P", payload={"name": "spec"})) + "\n")
+
+    def no_poll(seconds):
+        raise AssertionError("a finished .gz archive must not be polled")
+
+    monkeypatch.setattr(app_mod.time, "sleep", no_poll)
+    frames = list(app_mod._stream(path, None))
+    assert len(frames) == 2

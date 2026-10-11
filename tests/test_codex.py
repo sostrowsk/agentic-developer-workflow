@@ -63,7 +63,7 @@ def captured_run(monkeypatch):
             return captured.get("returncode", 0)
 
     monkeypatch.setattr("adw.codex.subprocess.Popen", FakePopen)
-    # _kill_group läuft jetzt in JEDEM Pfad — nie echte PIDs killen.
+    # kill_group läuft jetzt in JEDEM Pfad — nie echte PIDs killen.
     monkeypatch.setattr(
         "adw.codex.os.killpg", lambda pid, sig: captured.setdefault("killed_pid", pid)
     )

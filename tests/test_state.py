@@ -172,29 +172,6 @@ def test_seq_with_unicode_digit_does_not_crash(target_repo):
     assert RunState.load(target_repo, "ab12cd34").seq >= 1
 
 
-def test_concurrent_updates_do_not_lose_increments(target_repo):
-    """Parallel Lane updates of the same run: no lost update thanks to RunState.update()."""
-    from concurrent.futures import ThreadPoolExecutor
-
-    state = make_state()
-    state.lanes["frontend"] = LaneState(worktree="wt-fe", branch="br-fe")
-    state.save(target_repo)
-
-    def bump(lane: str) -> None:
-        RunState.update(
-            target_repo,
-            "ab12cd34",
-            lambda s: setattr(s.lanes[lane], "gate_iterations", s.lanes[lane].gate_iterations + 1),
-        )
-
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        list(pool.map(bump, ["backend", "frontend"] * 25))
-
-    final = RunState.load(target_repo, "ab12cd34")
-    assert final.lanes["backend"].gate_iterations == 25 + 2  # 2 aus make_state
-    assert final.lanes["frontend"].gate_iterations == 25
-
-
 def test_corrupt_state_file_raises(target_repo):
     state = make_state()
     state.save(target_repo)

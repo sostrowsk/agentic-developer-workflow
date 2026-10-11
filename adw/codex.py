@@ -21,7 +21,6 @@ import json
 import os
 import secrets
 import shutil
-import signal
 import subprocess
 import sys
 import tempfile
@@ -38,6 +37,7 @@ from adw.findings import (
     ReviewResult,
     extract_review_result,
 )
+from adw.gates import kill_group
 
 CODEX_TIMEOUT = 900
 # Relative to codex's PROCESS cwd (a private per-call workdir), not to -C: the
@@ -89,7 +89,6 @@ _KIND_INSTRUCTIONS: dict[ReviewKind, str] = {
     ),
 }
 
-_SCHEMA_INSTRUCTION = SCHEMA_INSTRUCTION
 
 AuthorKind = Literal["spec", "plan"]
 
@@ -219,12 +218,6 @@ class CodexClient(Protocol):
     def effective_author_argv(
         self, kind: AuthorKind, task: str, cwd: Path, marker_id: str
     ) -> list[str]: ...
-
-
-def _kill_group(proc: subprocess.Popen) -> None:
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(proc.pid, signal.SIGKILL)
-    proc.wait()
 
 
 _CHUNK_BYTES = 8192
@@ -547,7 +540,7 @@ class CodexRunner:
         finally:
             # IMMER die Prozessgruppe aufräumen — auch nach normalem Exit:
             # detachte Kinder mit umgeleiteten Streams könnten weiterlaufen.
-            _kill_group(proc)
+            kill_group(proc)
             for pump in pumps:
                 pump.join(timeout=5)
         stdout = b"".join(out_tail).decode("utf-8", errors="replace")
@@ -584,5 +577,5 @@ class CodexRunner:
         return (
             f"You are an independent reviewer in an Agentic Developer Workflow "
             f"(review kind: {kind}).\n{_KIND_INSTRUCTIONS[kind]}\n\n"
-            f"To review:\n{refs}\n\n{block}{_SCHEMA_INSTRUCTION}"
+            f"To review:\n{refs}\n\n{block}{SCHEMA_INSTRUCTION}"
         )

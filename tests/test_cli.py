@@ -526,10 +526,10 @@ def test_agent_run_error_stops_cleanly_and_stays_resumable(target_repo, monkeypa
 
         original_run = agents.run
 
-        def run(agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
+        def run(agent, task, cwd, resume=None, deny_read_paths=None, **kwargs):
             if agent.name == "build_agent":
                 raise AgentRunError("Claude-CLI: usage limit reached — resets 14:00")
-            return original_run(agent, task, cwd, resume, deny_read_paths, emitter, span)
+            return original_run(agent, task, cwd, resume, deny_read_paths, **kwargs)
 
         agents.run = run
         return agents, codex

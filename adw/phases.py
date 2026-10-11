@@ -14,7 +14,6 @@ manual git invocation by the user.
 import contextlib
 import functools
 import hashlib
-import inspect
 import logging
 import os
 import secrets
@@ -88,29 +87,18 @@ AUTHORING_MAX_ROUNDS = 5
 logger = logging.getLogger(__name__)
 
 
-def _current_span_id(emitter) -> str | None:
-    """Innermost open span on the current thread, or None.
-
-    Point events must carry the id of their enclosing span (GUI-SPEC §4.2), but
-    emit() does not read the thread-local stack itself. This reads the top of
-    that stack so point-emitters (state.saved, escalation, …) attribute to the
-    innermost run/phase/lane/round span active where they fire.
-
-    KNOWN LIMITATION / FOLLOW-UP (reported, deliberately not fixed here): the
-    frozen ``adw/events.py`` (AC 11) exposes no public accessor for the active
-    span, so this reads the private ``emitter._stack()``. If a later run changes
-    those internals, point attribution degrades to null. The proper fix is a
-    separate run that adds a public ``current_span_id()`` to the emitter API and
-    switches this over; until then ``test_dry_run_points_all_carry_a_non_null_span``
-    is the regression guard."""
-    stack = getattr(emitter, "_stack", None)
-    if stack is None:  # NoOpEmitter has no stack
-        return None
+def _require_progress(ctx, previous, failures, scope: str, message: str) -> None:
+    """Circuit breaker: identical failures twice in a row emit a
+    ``circuit_breaker`` point and escalate — the same at every loop."""
     try:
-        current = stack()
-        return current[-1] if current else None
-    except Exception:
-        return None
+        check_progress(previous, failures)
+    except NoProgressError as exc:
+        ctx.emitter.emit(
+            "circuit_breaker",
+            {"keys": failures, "scope": scope},
+            span=ctx.emitter.current_span_id(),
+        )
+        raise escalate(ctx, message) from exc
 
 
 def _agent_run(ctx, agent, task, cwd, resume=None, deny_read_paths=None, on_session_id=None):
@@ -124,22 +112,10 @@ def _agent_run(ctx, agent, task, cwd, resume=None, deny_read_paths=None, on_sess
     first appears in the stream, so a mid-run abort still leaves it checkpointed
     for a later resume."""
     with ctx.emitter.span("agent.run", agent_run_start_payload(agent, task, cwd, resume)) as handle:
-        kwargs = {"cwd": cwd, "resume": resume, "deny_read_paths": deny_read_paths, "span": handle}
-        # Only hand the early-checkpoint callback to a runner that accepts it —
-        # a runner without ``on_session_id`` (a plain test double) still works,
-        # it just does not checkpoint early. Never retry the call (side effects).
-        if _runner_accepts_session_callback(ctx.agents):
-            kwargs["on_session_id"] = on_session_id
-        return ctx.agents.run(agent, task, **kwargs)
-
-
-def _runner_accepts_session_callback(runner) -> bool:
-    # Inspect the ACTUAL callable (tests may override ``run`` as an instance
-    # attribute), so a runner without the parameter is never handed the kwarg.
-    try:
-        return "on_session_id" in inspect.signature(runner.run).parameters
-    except (TypeError, ValueError):
-        return False
+        return ctx.agents.run(
+            agent, task, cwd=cwd, resume=resume, deny_read_paths=deny_read_paths,
+            span=handle, on_session_id=on_session_id,
+        )
 
 
 def _codex_review(ctx, kind, content_refs, cwd, context=None):
@@ -163,7 +139,7 @@ def _emit_artifact(ctx, path: Path) -> None:
             "bytes": len(data),
             "sha256": hashlib.sha256(data).hexdigest(),
         },
-        span=_current_span_id(ctx.emitter),
+        span=ctx.emitter.current_span_id(),
     )
 
 
@@ -175,7 +151,7 @@ def _log_warning(ctx, message: str, span_id: str | None = None) -> None:
     worker, whose thread-local span stack is empty) pass the enclosing span
     explicitly so the point is never attributed to null."""
     logger.warning("%s", message)
-    span = span_id if span_id is not None else _current_span_id(ctx.emitter)
+    span = span_id if span_id is not None else ctx.emitter.current_span_id()
     ctx.emitter.emit("log", {"level": "warning", "message": message}, span=span)
 
 
@@ -232,7 +208,7 @@ class RunContext:
         # an off-main-thread caller (draft-pool worker) pass the enclosing span
         # explicitly so state.saved never carries null.
         self.state.save(self.repo)
-        span = span_id if span_id is not None else _current_span_id(self.emitter)
+        span = span_id if span_id is not None else self.emitter.current_span_id()
         self.emitter.emit(
             "state.saved",
             {"seq": self.state.seq, "phase": self.state.phase},
@@ -260,7 +236,7 @@ def escalate(ctx: RunContext, reason: str, span_id: str | None = None) -> Escala
         # Resolve the enclosing span ONCE so both state.saved (inside ctx.save)
         # and the escalation point carry the same non-null span — critical for a
         # draft-pool worker whose thread-local stack is empty.
-        span = span_id if span_id is not None else _current_span_id(ctx.emitter)
+        span = span_id if span_id is not None else ctx.emitter.current_span_id()
         ctx.state.phase = "escalated"
         ctx.save(span_id=span)
         # AFTER the escalation actually happened (AC 9); the point carries the
@@ -674,7 +650,7 @@ def _draft_stage(
     # in pool workers whose span stack is empty, so any point they emit (log on
     # Codex degradation, escalation on a missing Claude draft) must be given
     # this enclosing span explicitly to stay non-null (GUI-SPEC §4.2).
-    span_id = _current_span_id(ctx.emitter)
+    span_id = ctx.emitter.current_span_id()
     with ThreadPoolExecutor(max_workers=2) as pool:
         codex_future = (
             pool.submit(_codex_draft, ctx, kind, task, artifacts, codex_paths, marker, span_id)
@@ -1078,14 +1054,11 @@ def _reviewed_authoring_loop(
                 _write_followups(ctx, dropped)
             review = ReviewResult(verdict="needs_fixes", findings=actionable)
             failures = _finding_keys(review)
-            try:
-                check_progress(previous_failures, failures)
-            except NoProgressError as exc:
-                raise escalate(
-                    ctx,
-                    f"Codex-{review_kind}-Review meldet unverändert dieselben Findings — "
-                    f"Circuit-Breaker.\n\n{_findings_text(review)}",
-                ) from exc
+            _require_progress(
+                ctx, previous_failures, failures, f"authoring:{review_kind}",
+                f"Codex-{review_kind}-Review meldet unverändert dieselben Findings — "
+                f"Circuit-Breaker.\n\n{_findings_text(review)}",
+            )
             previous_failures = failures
             prior_context = _extend_context(
                 prior_context,
@@ -1427,7 +1400,7 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
                         "value": lane_state.gate_iterations,
                         "cap": MAX_GATE_ITERATIONS,
                     },
-                    span=_current_span_id(ctx.emitter),
+                    span=ctx.emitter.current_span_id(),
                 )
                 raise escalate(ctx, f"Lane {lane}: {exc}") from exc
             lane_state.gate_iterations += 1
@@ -1470,19 +1443,11 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
                 _require_red_tests(ctx, lane, worktree, lane_state)
                 break
             failures = [f"{f.gate}|{f.exit_code}|{f.output}" for f in report.failures]
-            try:
-                check_progress(previous_failures, failures)
-            except NoProgressError as exc:
-                ctx.emitter.emit(
-                    "circuit_breaker",
-                    {"keys": failures, "scope": f"lane:{lane}"},
-                    span=_current_span_id(ctx.emitter),
-                )
-                raise escalate(
-                    ctx,
-                    f"Lane {lane}: Gate-Fix-Iteration hat nichts verändert — "
-                    f"Circuit-Breaker.\n\n{_gate_failure_text(report)}",
-                ) from exc
+            _require_progress(
+                ctx, previous_failures, failures, f"lane:{lane}",
+                f"Lane {lane}: Gate-Fix-Iteration hat nichts verändert — "
+                f"Circuit-Breaker.\n\n{_gate_failure_text(report)}",
+            )
             previous_failures = failures
             task = (
                 f"The Gates have failed. Analyze the output and fix the root cause "
@@ -1594,7 +1559,7 @@ def _confirm_red(
             "test_paths": red_tests,
             "gates": [gate.name for gate in tdd_gates],
         },
-        span=_current_span_id(ctx.emitter),
+        span=ctx.emitter.current_span_id(),
     )
     if report.passed:
         raise escalate(
@@ -1853,7 +1818,7 @@ def _commit_lane(ctx: RunContext, worktree: Path, lane: str, base_ref: str) -> N
     ctx.emitter.emit(
         "commit",
         {"lane": lane, "sha": sha, "subject": subject},
-        span=_current_span_id(ctx.emitter),
+        span=ctx.emitter.current_span_id(),
     )
 
 
@@ -2027,19 +1992,11 @@ def _integration_loop(ctx: RunContext, lanes: list[str]) -> Path:
                     f"(Limit {MAX_E2E_ROUNDS}) — Eskalation.\n\n{_gate_failure_text(report)}",
                 )
             failures = [f"{f.gate}|{f.exit_code}|{f.output}" for f in report.failures]
-            try:
-                check_progress(previous, failures)
-            except NoProgressError as exc:
-                ctx.emitter.emit(
-                    "circuit_breaker",
-                    {"keys": failures, "scope": "integration"},
-                    span=_current_span_id(ctx.emitter),
-                )
-                raise escalate(
-                    ctx,
-                    f"E2E-Fix-Runde hat nichts verändert — Circuit-Breaker.\n\n"
-                    f"{_gate_failure_text(report)}",
-                ) from exc
+            _require_progress(
+                ctx, previous, failures, "integration",
+                f"E2E-Fix-Runde hat nichts verändert — Circuit-Breaker.\n\n"
+                f"{_gate_failure_text(report)}",
+            )
             review = _triage_e2e(ctx, worktree, report)
             _dispatch_lane_fixes(ctx, review.findings, lanes, source="E2E")
             with ctx.state_lock:
@@ -2100,7 +2057,7 @@ def _fresh_integration_worktree(ctx: RunContext, lanes: list[str]) -> Path:
         ctx.emitter.emit(
             "merge",
             {"lane": lane, "target": INTEGRATION_LANE, "conflicts": []},
-            span=_current_span_id(ctx.emitter),
+            span=ctx.emitter.current_span_id(),
         )
     return worktree
 
@@ -2163,7 +2120,7 @@ def _dispatch_lane_fixes(
         else ReviewResult(verdict="ok", findings=[]),
         active_lanes=lanes,
         emitter=ctx.emitter,
-        span_id=_current_span_id(ctx.emitter),
+        span_id=ctx.emitter.current_span_id(),
     )
     with ctx.state_lock:
         # Erst ALLE Lanes validieren, dann mutieren — escalate() persistiert
@@ -2320,19 +2277,11 @@ def run_codex_review_phase(ctx: RunContext) -> None:
                     f"(Limit {MAX_REVIEW_ROUNDS}) — Eskalation.\n\n{_findings_text(review)}",
                 )
             failures = _finding_keys(review)
-            try:
-                check_progress(previous, failures)
-            except NoProgressError as exc:
-                ctx.emitter.emit(
-                    "circuit_breaker",
-                    {"keys": failures, "scope": "codex_review"},
-                    span=_current_span_id(ctx.emitter),
-                )
-                raise escalate(
-                    ctx,
-                    f"Codex-Code-Review meldet unverändert dieselben Findings — "
-                    f"Circuit-Breaker.\n\n{_findings_text(review)}",
-                ) from exc
+            _require_progress(
+                ctx, previous, failures, "codex_review",
+                f"Codex-Code-Review meldet unverändert dieselben Findings — "
+                f"Circuit-Breaker.\n\n{_findings_text(review)}",
+            )
             _dispatch_lane_fixes(
                 ctx,
                 review.findings,
@@ -2408,7 +2357,7 @@ def run_final_review_phase(ctx: RunContext) -> None:
                 review,
                 active_lanes=lanes,
                 emitter=ctx.emitter,
-                span_id=_current_span_id(ctx.emitter),
+                span_id=ctx.emitter.current_span_id(),
             )
             if decision.followups:
                 _write_followups(ctx, decision.followups)
@@ -2416,19 +2365,11 @@ def run_final_review_phase(ctx: RunContext) -> None:
                 break  # nur scope_gaps: Report statt Auto-Restart (SPEC §4 Phase 6)
             fixable = [f for f in review.findings if f.category != "scope_gap"]
             failures = _finding_keys(ReviewResult(verdict="needs_fixes", findings=fixable))
-            try:
-                check_progress(previous, failures)
-            except NoProgressError as exc:
-                ctx.emitter.emit(
-                    "circuit_breaker",
-                    {"keys": failures, "scope": "final_review"},
-                    span=_current_span_id(ctx.emitter),
-                )
-                raise escalate(
-                    ctx,
-                    f"Finaler Review meldet unverändert dieselben Findings — "
-                    f"Circuit-Breaker.\n\n{_findings_text(review)}",
-                ) from exc
+            _require_progress(
+                ctx, previous, failures, "final_review",
+                f"Finaler Review meldet unverändert dieselben Findings — "
+                f"Circuit-Breaker.\n\n{_findings_text(review)}",
+            )
 
             def _bump_fix_cycles(fix_lanes: list[str]) -> None:
                 # Läuft im Dispatch unter dem State-Lock und wird mit dem Staging
@@ -2444,7 +2385,7 @@ def run_final_review_phase(ctx: RunContext) -> None:
                                 "value": ctx.state.lanes[lane].fix_cycles,
                                 "cap": MAX_FIX_CYCLES,
                             },
-                            span=_current_span_id(ctx.emitter),
+                            span=ctx.emitter.current_span_id(),
                         )
                         raise escalate(ctx, f"Lane {lane}: {exc}") from exc
                 for lane in fix_lanes:
@@ -2547,10 +2488,20 @@ def run_ci_phase(ctx: RunContext) -> None:
             )
         review = _analyze_ci_logs(ctx, worktree, result.log_excerpt)
 
-        def _bump_ci_reentries(fix_lanes: list[str]) -> None:
+        no_routable = (
+            f"Pipeline rot, aber der Log-Analyst lieferte keine zuordenbaren "
+            f"Findings (Pipeline {result.pipeline_id}) — Mensch übernimmt.\n\n"
+            f"{result.log_excerpt}"
+        )
+
+        def _bump_ci_reentries(fix_lanes: list[str], no_routable: str = no_routable) -> None:
             # Läuft im Dispatch unter dem State-Lock und wird mit dem Staging
             # in EINEM Save persistiert — ein Crash kann das Re-Entry-Budget
             # nicht verbrennen, ohne dass der Fix beim Resume nachgeholt wird.
+            if not fix_lanes:
+                # Nichts zuzuordnen: ein Re-Push desselben Stands wäre sinnlos und
+                # die spätere Eskalation ("rot nach Re-Entry") irreführend.
+                raise escalate(ctx, no_routable)
             ctx.state.ci_reentries += 1
 
         _dispatch_lane_fixes(
@@ -2560,7 +2511,7 @@ def run_ci_phase(ctx: RunContext) -> None:
         ctx.emitter.emit(
             "ci.reentry",
             {"n": ctx.state.ci_reentries, "reason": "pipeline red"},
-            span=_current_span_id(ctx.emitter),
+            span=ctx.emitter.current_span_id(),
         )
     with ctx.state_lock:
         ctx.state.phase = "done"
@@ -2641,16 +2592,22 @@ def _write_followups(ctx: RunContext, followups: list[Finding]) -> None:
     """Collect deferred Findings as a follow-up report (no auto-restart):
     scope gaps and P3s that a fix run could not act on.
 
-    Dedupe via file+issue: a deliberately unfixed scope_gap shows up again in
-    every further review round and must not flood the report."""
+    Dedupe via the exact file+issue (`_finding_key`): a deliberately unfixed
+    scope_gap shows up again in every further review round and must not flood
+    the report — but an issue that merely prefixes a recorded one is new."""
     ctx.run_dir.mkdir(parents=True, exist_ok=True)
     path = ctx.run_dir / "followups.md"
     existing = path.read_text(encoding="utf-8") if path.is_file() else ""
     entries = []
     written: list[Finding] = []
+    seen: set[str] = set()
     for item in followups:
-        if f"{item.file}: {item.issue}" in existing:
+        # Each entry is "- [sev] file: issue" directly followed by its plan line —
+        # matching up to that line break makes the comparison exact.
+        recorded = f"] {item.file}: {item.issue}\n  - Plan:" in existing
+        if recorded or _finding_key(item) in seen:
             continue
+        seen.add(_finding_key(item))
         plan = "; ".join(item.remediation_plan)
         entries.append(f"- [{item.severity}] {item.file}: {item.issue}\n  - Plan: {plan}")
         written.append(item)
@@ -2660,11 +2617,11 @@ def _write_followups(ctx: RunContext, followups: list[Finding]) -> None:
     with path.open("a", encoding="utf-8") as fh:
         fh.write(header + "\n".join(entries) + "\n")
     # AFTER the follow-up was actually recorded (AC 9), one point per new entry.
-    span_id = _current_span_id(ctx.emitter)
+    span_id = ctx.emitter.current_span_id()
     for item in written:
         ctx.emitter.emit(
             "followup",
-            {"finding_key": f"{item.file}|{item.issue}", "text": item.issue},
+            {"finding_key": _finding_key(item), "text": item.issue},
             span=span_id,
         )
 

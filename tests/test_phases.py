@@ -1142,8 +1142,8 @@ def test_deleted_files_in_the_test_run_are_no_red_proof(ctx, target_repo):
     from pathlib import Path
 
     class DeletingAgentRunner(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
-            result = super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, **kwargs):
+            result = super().run(agent, task, cwd, resume, deny_read_paths, **kwargs)
             if agent.name == "build_agent":
                 (Path(cwd) / "README.md").unlink()  # getrackte Datei aus dem Base-Branch
             return result
@@ -1166,8 +1166,8 @@ def test_implementation_deleting_the_red_tests_escalates(ctx, target_repo):
     from pathlib import Path
 
     class DeletingImplRunner(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
-            result = super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, **kwargs):
+            result = super().run(agent, task, cwd, resume, deny_read_paths, **kwargs)
             if agent.name == "build_agent" and "RED confirmed" in task:
                 (Path(cwd) / "test_feature.py").unlink()
             return result
@@ -1595,8 +1595,8 @@ def test_agent_side_commits_during_build_escalate(ctx):
     from tests.conftest import git
 
     class CommittingAgentRunner(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
-            result = super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, **kwargs):
+            result = super().run(agent, task, cwd, resume, deny_read_paths, **kwargs)
             if agent.name == "build_agent":
                 git(cwd, "add", "-A")
                 git(cwd, "commit", "-m", "heimlicher Agent-Commit")
@@ -1853,8 +1853,8 @@ def test_agent_branch_switch_is_detected(ctx):
     from tests.conftest import git
 
     class BranchSwitchingAgent(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
-            result = super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, **kwargs):
+            result = super().run(agent, task, cwd, resume, deny_read_paths, **kwargs)
             if agent.name == "build_agent":
                 git(cwd, "switch", "--detach", "HEAD")
             return result
@@ -1911,8 +1911,8 @@ def test_config_symlink_to_directory_is_removed_safely(tmp_path):
     agents.script("plan_synthesis", "Plan")
 
     class SymlinkingAgent(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
-            result = super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, **kwargs):
+            result = super().run(agent, task, cwd, resume, deny_read_paths, **kwargs)
             if agent.name == "build_agent":
                 victim = repo / "opfer-verzeichnis"
                 victim.mkdir(exist_ok=True)
@@ -3967,10 +3967,10 @@ def test_resume_keeps_the_checkpointed_synthesis_artifact(ctx):
     seen = {}
 
     class SpyAgents(MockAgentRunner):
-        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, emitter=None, span=None):
+        def run(self, agent, task, cwd, resume=None, deny_read_paths=None, **kwargs):
             if agent.name == "spec_synthesis":
                 seen["spec"] = (cwd / ".adw" / "spec.md").read_text()
-            return super().run(agent, task, cwd, resume, deny_read_paths, emitter, span)
+            return super().run(agent, task, cwd, resume, deny_read_paths, **kwargs)
 
     spy = SpyAgents()
     script_authoring_agents(spy)
@@ -4241,3 +4241,54 @@ def test_lane_session_persisted_when_reported_then_abort(ctx):
     saved = RunState.load(ctx.repo, ctx.state.run_id)
     assert saved.lanes["backend"].session_id == "sess-lane-frueh"
     assert saved.phase != "escalated"
+
+
+def test_authoring_circuit_breaker_emits_the_event(ctx):
+    """Regression: the spec/plan authoring loop was the only circuit-breaker site
+    that escalated without a ``circuit_breaker`` point — GUI/trace missed it."""
+    from adw.events import NoOpEmitter
+
+    emitted = []
+
+    class Recording(NoOpEmitter):
+        def emit(self, type, payload=None, **kwargs):
+            emitted.append((type, payload))
+
+    ctx.emitter = Recording()
+    ctx.agents.script("spec_synthesis", "v1", "v2", "v3")
+    ctx.codex.script(needs_fixes("immer dasselbe"), needs_fixes("immer dasselbe"))
+    with pytest.raises(EscalationError):
+        run_spec_and_plan(ctx)
+    breakers = [payload for type, payload in emitted if type == "circuit_breaker"]
+    assert breakers and breakers[0]["scope"] == "authoring:spec"
+
+
+def test_log_analyst_without_routable_findings_escalates_without_reentry(ctx, target_repo):
+    """Regression: an analyst answer with no fixable finding must not burn the
+    CI re-entry and re-push the same commit — escalate with the real reason."""
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    builds_before = sum(c.agent == "build_agent" for c in ctx.agents.calls)
+    ctx.agents.script("log_analyst", json.dumps({"verdict": "ok", "findings": []}))
+    ctx.run_glab = FakeGlab("failed", "success")
+    ctx.sleep = lambda s: None
+    with pytest.raises(EscalationError, match="Log-Analyst"):
+        run_ci_phase(ctx)
+    assert ctx.state.ci_reentries == 0
+    assert sum(c.agent == "build_agent" for c in ctx.agents.calls) == builds_before
+
+
+def test_followup_whose_issue_prefixes_another_is_still_recorded(ctx):
+    """Regression: the substring dedupe dropped a finding whose issue text is the
+    beginning of an already recorded one (same file)."""
+    from adw.phases import _write_followups
+
+    long = Finding(severity="P3", lane="backend", file="a.py", issue="Name unklar und zu lang",
+                   remediation_plan=["umbenennen"])
+    short = Finding(severity="P3", lane="backend", file="a.py", issue="Name unklar",
+                    remediation_plan=["umbenennen"])
+    _write_followups(ctx, [long])
+    _write_followups(ctx, [short, short, long])
+    text = (ctx.run_dir / "followups.md").read_text()
+    assert text.count("a.py: Name unklar und zu lang\n") == 1
+    assert text.count("a.py: Name unklar\n") == 1

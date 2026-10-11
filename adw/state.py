@@ -181,24 +181,6 @@ class RunState(BaseModel):
         if emitter is not None:
             emitter.emit("state.saved", {"seq": self.seq, "phase": self.phase}, span=span_id)
 
-    @classmethod
-    def update(
-        cls, repo: Path, run_id: str, mutate, emitter=None, span_id: str | None = None
-    ) -> "RunState":
-        """Load → mutate → write as ONE transaction under the repo lock.
-
-        The only loss-free way to modify a run from multiple threads/processes
-        (e.g. Lane counters in parallel build Lanes).
-        """
-        with _repo_lock(repo) as seq_fh:
-            state = cls.load(repo, run_id)
-            mutate(state)
-            state.seq = _next_seq_locked(seq_fh, repo / RUNS_RELPATH)
-            state._write_snapshot(repo)
-        if emitter is not None:
-            emitter.emit("state.saved", {"seq": state.seq, "phase": state.phase}, span=span_id)
-        return state
-
     def _write_snapshot(self, repo: Path) -> None:
         run_dir = self.run_dir(repo)
         run_dir.mkdir(parents=True, exist_ok=True)

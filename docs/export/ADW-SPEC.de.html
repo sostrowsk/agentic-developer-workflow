@@ -1720,9 +1720,10 @@ Crash-Fenster hinweg.</td>
 <p><strong>Persistenz-Mechanik.</strong> Snapshot in eine Temp-Datei +
 <code>os.replace</code> (ein halb geschriebener State existiert nie);
 exklusiver <code>flock</code> auf <code>.adw/runs/.seq</code> um jeden
-Schreibvorgang; <code>RunState.update()</code> gibt Lane-Threads eine
-Transaktion Laden → Ändern → Schreiben; eine korrupte <code>.seq</code>
-wird aus den persistierten States rekonstruiert.</p>
+Schreibvorgang; parallele Lane-Threads ändern den gemeinsamen
+In-Memory-State unter <code>RunContext.state_lock</code> und
+persistieren mit <code>ctx.save()</code>; eine korrupte
+<code>.seq</code> wird aus den persistierten States rekonstruiert.</p>
 <h3 id="43-findings--der-eine-reviewer-vertrag">4.3 Findings — der eine
 Reviewer-Vertrag</h3>
 <p>Jeder Reviewer (Codex, Final-Reviewer, E2E-Triage, Log-Analyst)

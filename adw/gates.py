@@ -139,7 +139,7 @@ def _execute_gate(gate: Gate, cwd: Path, env: dict[str, str]) -> GateFailure | N
         # IMMER die ganze Prozessgruppe aufräumen — egal ob Pass, Fail,
         # Timeout oder Ctrl-C: kein Gate darf Hintergrund-Kinder
         # hinterlassen, die Ports/Worktree für den nächsten Loop blockieren.
-        _kill_group(proc)
+        kill_group(proc)
         pump.join(timeout=5)
     if timed_out:
         return GateFailure(
@@ -153,7 +153,8 @@ def _execute_gate(gate: Gate, cwd: Path, env: dict[str, str]) -> GateFailure | N
     return None
 
 
-def _kill_group(proc: subprocess.Popen) -> None:
+def kill_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the whole process group (the child runs in its own session), then reap."""
     with contextlib.suppress(ProcessLookupError):
         os.killpg(proc.pid, signal.SIGKILL)
     proc.wait()

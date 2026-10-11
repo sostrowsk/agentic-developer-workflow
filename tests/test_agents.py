@@ -65,7 +65,7 @@ def test_sdk_runner_passes_spec_options_through(captured_query, tmp_path):
     assert options.model == spec.model
     assert options.cwd == str(tmp_path)
     assert options.resume == "alte-session"
-    assert options.allowed_tools == spec.allowed_tools
+    assert options.allowed_tools == list(spec.allowed_tools)
     assert options.system_prompt["preset"] == "claude_code"
     assert spec.system_append in options.system_prompt["append"]
     assert captured_query["prompt"] == "Prüfe die Implementierung"
@@ -615,3 +615,11 @@ def test_resolve_model_alias_times_out_instead_of_hanging(monkeypatch):
     monkeypatch.setattr("adw.agents._require_stored_login", lambda: None)
     with pytest.raises(AgentRunError, match="Zeitlimit"):
         resolve_model_alias("opus", timeout=0.2)
+
+
+def test_agent_specs_are_truly_immutable():
+    """Regression: frozen AgentSpecs shared the same mutable rule lists — an
+    in-place change to one spec's rules silently changed the others'."""
+    for spec in REGISTRY.values():
+        assert isinstance(spec.tools, tuple), spec.name
+        assert isinstance(spec.allowed_tools, tuple), spec.name

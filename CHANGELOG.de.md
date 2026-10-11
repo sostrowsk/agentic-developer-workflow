@@ -13,13 +13,32 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.30.1] — 2026-10-11
+
+### Behoben
+- **Circuit-Breaker in der Spec-/Plan-Erstellung ist jetzt sichtbar.** Meldete der Codex-Review von Spec oder Plan zweimal dieselben Findings, eskalierte der Lauf ohne `circuit_breaker`-Ereignis; GUI und Trace zeigten den Grund nicht. Jetzt wird das Ereignis wie in allen anderen Schleifen geschrieben (Scope `authoring:spec` / `authoring:plan`).
+- **Der CI-Re-Entry wird nicht mehr verschenkt.** Fand der Log-Analyst nichts, was er einer Lane zuordnen konnte, verbrauchte ADW trotzdem den einen CI-Re-Entry, pushte denselben Stand erneut und eskalierte später mit dem irreführenden Grund „rot nach Re-Entry“. Jetzt eskaliert ADW sofort und nennt, dass der Analyst nichts Zuordenbares gefunden hat.
+- **Die Live-Ansicht eines archivierten Laufs endet.** Bei einem aufgeräumten Lauf, der als `events.jsonl.gz` aufbewahrt wird, entpackte der Live-Stream der GUI alle halbe Sekunde das ganze Archiv und hörte nie auf, wenn das Archiv kein Run-Ende enthielt. Ein gepacktes Log wird jetzt einmal gestreamt, dann schließt der Stream.
+- **Agent-Specs sind wirklich unveränderlich.** Mehrere eingefrorene Agent-Specs teilten sich dieselben veränderbaren Regel-Listen; eine Änderung an einer Spec hätte die anderen mitgeändert. Tools und Regeln sind jetzt Tupel.
+- **Follow-ups gehen nicht mehr verloren.** Der Follow-up-Report übersprang ein Finding, dessen Text der Anfang eines bereits erfassten in derselben Datei war. Dubletten werden jetzt exakt über Datei + Issue erkannt.
+
+### Geändert
+- Eine gemeinsame Hilfsfunktion für den Circuit-Breaker ersetzt fünf Kopien in `phases.py`.
+- Der Event-Emitter hat ein öffentliches `current_span_id()`; `phases.py`, `snapshots.py` und `cli.py` greifen nicht mehr auf seinen privaten Stack zu.
+- Agent-Runner bekommen den `on_session_id`-Callback immer; die Signaturprüfung zur Laufzeit entfällt.
+- Ein `kill_group` (in `gates.py`) wird vom Codex-Runner mitbenutzt.
+- Die Dev-Abhängigkeiten holen den GUI-Stack über `adw[gui]` statt über eine kopierte Liste; das ungenutzte `pytest-asyncio` ist entfernt.
+
+### Entfernt
+- Toter Code ohne produktive Aufrufer: `ci.fetch_failed_job_logs`, `RunState.update`, die GUI-Hilfsfunktion `_events_cost`, das nie gelesene `RunRecord.log_format`, drei ungenutzte GUI-Übersetzungsschlüssel und ein interner Alias in `codex.py`.
+
 ## [0.30.0] — 2026-10-11
 
 ### Geändert
 - **Codex läuft mit zusätzlichen `codex exec`-Flags.** ADW ruft die codex-CLI weiter als Subprozess auf, mit derselben Isolation wie bisher. Eine Prüfung des offiziellen Codex-Python-SDK (`openai-codex`) ergab, dass es kaum etwas bietet, was die CLI-Flags nicht schon abdecken; dafür fehlen Zeitlimit und Abbruch der Prozessgruppe, es kostet 358 MB und ändert den argv-Vertrag der GUI. Jeder Aufruf läuft jetzt in einem privaten Arbeitsverzeichnis:
   - `--output-schema` (Reviews): Die Antwort ist auf den Findings-Vertrag festgelegt (`findings.REVIEW_OUTPUT_SCHEMA`). Der strikte Parser validiert sie weiterhin.
   - `-o`: Die finale Antwort wird aus einer Datei gelesen statt aus dem stdout-Transkript gefischt.
-  - `--json`: Der Token-Verbrauch aus `turn.completed` erscheint als `usage` im Span (GUI) und zählt jetzt zu den Run-Summen.
+  - `--json`: Der Token-Verbrauch aus `turn.completed` erscheint als `usage` im Span (GUI) und zählt jetzt zu den Run-Summen. Ein fehlgeschlagener Aufruf wird mit dem Fehler gemeldet, den codex als JSON-Ereignis ausgibt (`error`, `turn.failed`), statt mit dem Startrauschen von stderr.
   - `--ephemeral`: keine Session-Dateien.
   - Die Dateinamen sind relativ zum Arbeitsverzeichnis. Die argv im Event-Log bleibt so byte-gleich zur ausgeführten, und ins Ziel-Repo wird nichts geschrieben.
 - **Frischer Codex-Katalog für den Modell-Check.** Jeder Codex-Lauf holt den aktuellen Modellkatalog in sein isoliertes `CODEX_HOME`. ADW bewahrt diese Kopie jetzt als `~/.adw/codex-models-cache.json` auf, und der Modell-Check liest den jeweils neuesten Katalog. Ein veralteter Katalog in `~/.codex` verhindert die Prüfung nicht mehr.
@@ -1071,6 +1090,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.30.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.0...v0.29.1

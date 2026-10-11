@@ -40,7 +40,6 @@ class RunRecord:
     date: datetime  # canonical UTC date (B4)
     event_count: int | None  # None = not determinable (legacy run, no log)
     log_size: int | None  # bytes of events.jsonl / events.jsonl.gz, or None
-    log_format: str | None  # "jsonl" | "gz" | None
 
 
 @dataclass
@@ -222,7 +221,6 @@ def scan_runs(repo: Path) -> list[RunRecord]:
         # could reach a directory OUTSIDE the repository (P1).
         if child.is_symlink() or _contained(child, runs_root) is None or not child.is_dir():
             continue
-        path, fmt = _log_file(child)
         records.append(
             RunRecord(
                 run_id=child.name,
@@ -231,7 +229,6 @@ def scan_runs(repo: Path) -> list[RunRecord]:
                 date=canonical_date(child),
                 event_count=_event_count(child),
                 log_size=_log_size(child),
-                log_format=fmt,
             )
         )
     records.sort(key=lambda r: (r.date, r.run_id))

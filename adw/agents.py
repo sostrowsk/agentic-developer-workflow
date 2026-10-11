@@ -25,25 +25,25 @@ SONNET = "claude-sonnet-5-5"
 
 _IS_MACOS = sys.platform == "darwin"
 
-READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
-WRITER_TOOLS = ["Read", "Grep", "Glob", "Write", "Edit"]
-BUILDER_TOOLS = ["Read", "Grep", "Glob", "Write", "Edit", "Bash"]
+READ_ONLY_TOOLS = ("Read", "Grep", "Glob")
+WRITER_TOOLS = ("Read", "Grep", "Glob", "Write", "Edit")
+BUILDER_TOOLS = ("Read", "Grep", "Glob", "Write", "Edit", "Bash")
 
 # Approval-Regeln immer workspace-relativ — cwd allein ist keine
 # Dateisystem-Grenze; ohne passende Regel wird headless verweigert.
-SCOPED_READ_RULES = ["Read(./**)", "Grep(./**)", "Glob(./**)"]
+SCOPED_READ_RULES = ("Read(./**)", "Grep(./**)", "Glob(./**)")
 # Artefakt-EXAKTE Schreibrechte: .adw/** würde auch .adw/runs/ (State!)
 # und .adw/config.yaml erlauben.
-SPEC_WRITE_RULES = ["Write(.adw/spec.md)", "Edit(.adw/spec.md)"]
-PLAN_WRITE_RULES = [
+SPEC_WRITE_RULES = ("Write(.adw/spec.md)", "Edit(.adw/spec.md)")
+PLAN_WRITE_RULES = (
     "Write(.adw/plan.md)",
     "Edit(.adw/plan.md)",
     "Write(.adw/contract.yaml)",
     "Edit(.adw/contract.yaml)",
-]
-SPEC_SUMMARY_WRITE_RULES = ["Write(.adw/spec-summary.md)", "Edit(.adw/spec-summary.md)"]
-PLAN_SUMMARY_WRITE_RULES = ["Write(.adw/plan-summary.md)", "Edit(.adw/plan-summary.md)"]
-SCOPED_WORKTREE_WRITE_RULES = ["Write(./**)", "Edit(./**)"]
+)
+SPEC_SUMMARY_WRITE_RULES = ("Write(.adw/spec-summary.md)", "Edit(.adw/spec-summary.md)")
+PLAN_SUMMARY_WRITE_RULES = ("Write(.adw/plan-summary.md)", "Edit(.adw/plan-summary.md)")
+SCOPED_WORKTREE_WRITE_RULES = ("Write(./**)", "Edit(./**)")
 
 # Deny schlägt Allow — Secret-Stores sind für ALLE Agents tabu, auch für
 # sandboxte Bash-Reads. Beide Regel-Formen: Glob (File-Tools) UND plain
@@ -148,8 +148,10 @@ class AgentSpec:
     model: str
     # tools RESTRINGIERT, was der Agent überhaupt angeboten bekommt;
     # allowed_tools approved nur (ggf. pfad-beschränkt). Beides nötig.
-    tools: list[str]
-    allowed_tools: list[str]
+    # Tuples: the spec is frozen, and specs share rule constants — a list would
+    # let an in-place change to one spec leak into the others.
+    tools: tuple[str, ...]
+    allowed_tools: tuple[str, ...]
     system_append: str
     permission_mode: str = "default"
     sandbox_bash: bool = False
@@ -215,7 +217,7 @@ REGISTRY: dict[str, AgentSpec] = {
         name="spec_agent",
         model=OPUS,
         tools=WRITER_TOOLS,
-        allowed_tools=[*SCOPED_READ_RULES, *SPEC_WRITE_RULES],
+        allowed_tools=(*SCOPED_READ_RULES, *SPEC_WRITE_RULES),
         system_append=(
             "You are the Spec agent of an Agentic Developer Workflow. You write "
             "EXCLUSIVELY the specification following a fixed template (goal, scope, "
@@ -227,7 +229,7 @@ REGISTRY: dict[str, AgentSpec] = {
         name="plan_agent",
         model=OPUS,
         tools=WRITER_TOOLS,
-        allowed_tools=[*SCOPED_READ_RULES, *PLAN_WRITE_RULES],
+        allowed_tools=(*SCOPED_READ_RULES, *PLAN_WRITE_RULES),
         system_append=(
             "You are the Plan agent of an Agentic Developer Workflow. From "
             ".adw/spec.md you produce the implementation plan .adw/plan.md with the "
@@ -240,7 +242,7 @@ REGISTRY: dict[str, AgentSpec] = {
         name="spec_synthesis",
         model=FABLE,
         tools=WRITER_TOOLS,
-        allowed_tools=[*SCOPED_READ_RULES, *SPEC_WRITE_RULES, *SPEC_SUMMARY_WRITE_RULES],
+        allowed_tools=(*SCOPED_READ_RULES, *SPEC_WRITE_RULES, *SPEC_SUMMARY_WRITE_RULES),
         system_append=(
             "You are the Spec synthesis agent of an Agentic Developer Workflow. "
             f"{_BEST_OF_MERGE_RULES} "
@@ -256,7 +258,7 @@ REGISTRY: dict[str, AgentSpec] = {
         name="plan_synthesis",
         model=FABLE,
         tools=WRITER_TOOLS,
-        allowed_tools=[*SCOPED_READ_RULES, *PLAN_WRITE_RULES, *PLAN_SUMMARY_WRITE_RULES],
+        allowed_tools=(*SCOPED_READ_RULES, *PLAN_WRITE_RULES, *PLAN_SUMMARY_WRITE_RULES),
         system_append=(
             "You are the Plan synthesis agent of an Agentic Developer Workflow. "
             f"{_BEST_OF_MERGE_RULES} "
@@ -275,7 +277,7 @@ REGISTRY: dict[str, AgentSpec] = {
         tools=BUILDER_TOOLS,
         # Schreiben nur worktree-relativ (./**) statt pauschal; Bash läuft
         # sandboxed (sandbox_bash) — kein Ausbruch in Haupt-Checkout/Lanes.
-        allowed_tools=[*SCOPED_READ_RULES, *SCOPED_WORKTREE_WRITE_RULES, "Bash"],
+        allowed_tools=(*SCOPED_READ_RULES, *SCOPED_WORKTREE_WRITE_RULES, "Bash"),
         sandbox_bash=True,
         system_append=(
             "You are a Build agent in an isolated Lane (its own git worktree). "
@@ -514,8 +516,8 @@ class SdkAgentRunner:
             model=agent.model,
             cwd=str(cwd),
             resume=resume,
-            tools=agent.tools,
-            allowed_tools=agent.allowed_tools,
+            tools=list(agent.tools),
+            allowed_tools=list(agent.allowed_tools),
             permission_mode=agent.permission_mode,
             env=_env_overrides(),
             # Isolation: keine repo-kontrollierten Settings/Hooks/MCP-Server —

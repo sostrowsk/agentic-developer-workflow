@@ -4,9 +4,10 @@ Every web import (FastAPI, Jinja2) lives in this module so the core ``adw run``
 path stays free of the web stack — ``adw gui`` imports it lazily, and the tests
 build the app via :func:`create_app`. The GUI is strictly read-only: it reads
 only below the resolved ``.adw/runs/<run_id>/`` directory (plus the registry file
-and its own packaged templates/static assets), runs no external program and
-exposes no write route. The read data layer (``reader``, ``model``, ``registry``)
-is only consumed here, never modified.
+and its own packaged templates/static assets), runs no external program except
+read-only ``git diff`` for the change-scope view, and exposes no write route.
+The read data layer (``reader``, ``model``, ``registry``) is only consumed here,
+never modified.
 """
 
 import bisect
@@ -1803,19 +1804,6 @@ def _tokens_per_model(events) -> list[dict]:
     return [{"model": m, "tokens": t} for m, t in per.items()]
 
 
-def _events_cost(events):
-    """Total ``cost_usd`` over the run's ``agent.run`` spans, or None when none
-    carries a cost (a dry run → empty, never a false 0)."""
-    total = None
-    for e in events:
-        if e.get("type") == "agent.run" and e.get("kind") == "end":
-            payload = e.get("payload")
-            cost = payload.get("cost_usd") if isinstance(payload, dict) else None
-            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
-                total = (total or 0.0) + float(cost)
-    return total
-
-
 # --- node-time run context (GUI-SPEC §7.2) -------------------------------------
 # A purely DERIVED, read-only projection of the SAME event stream the detail view
 # already loaded (no new reader/route/event/persistence): the run state AT the seq
@@ -1823,7 +1811,7 @@ def _events_cost(events):
 # the subtree maximum); only events with seq <= cutoff participate, so an earlier
 # node never sees a later event (time travel). Every absent datum is null, never a
 # fabricated 0 (E4): counts start at None and become a number only on the first
-# occurrence, and the cost reuses the single _events_cost rule over the cut list.
+# occurrence, and the cost sums agent.run cost_usd over the cut list.
 # The API value is exact — rounding is a presentation concern only (see
 # `_compact_context` / app.js).
 
@@ -1944,7 +1932,7 @@ def _context_deriver(events, round_ranges):
             "round": rnd,
             "limit_hits": pre_limit[i] or None,
             "circuit_breakers": pre_cb[i] or None,
-            # The exact cumulative cost (the shared _events_cost semantics); the API
+            # The exact cumulative cost (sum of agent.run cost_usd); the API
             # value is not rounded — presentation rounds it (compact_context/app.js).
             "cost_usd": pre_cost[i],
             "followups": pre_fu[i] or None,
@@ -2790,6 +2778,10 @@ def _stream(events_path, last_id):
             yield _sse_event(record)
             if is_end:
                 return
+        if os.fspath(events_path).endswith(".gz"):
+            # A gzipped log is a pruned, finished run: nothing more will arrive,
+            # and every read would decompress the whole archive again.
+            return
         time.sleep(_POLL_SECONDS)
 
 

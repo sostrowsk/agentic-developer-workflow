@@ -12,13 +12,32 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.30.1] — 2026-10-11
+
+### Fixed
+- **Circuit breaker in spec/plan authoring is now visible.** When the Codex review of the spec or plan reported the same findings twice, the run escalated without a `circuit_breaker` event, so the GUI and the trace did not show why. It now emits the event like every other loop (scope `authoring:spec` / `authoring:plan`).
+- **CI re-entry is no longer wasted.** If the log analyst found nothing it could assign to a lane, ADW still used up the one CI re-entry, pushed the same commit again and later escalated with the misleading reason "red after re-entry". It now escalates right away and says the analyst found nothing assignable.
+- **Live view of an archived run ends.** For a pruned run kept as `events.jsonl.gz`, the GUI's live stream decompressed the whole archive every half second and, if the archive had no run-end record, never stopped. A gzipped log is now streamed once and the stream closes.
+- **Agent specs are truly immutable.** Several frozen agent specs shared the same mutable rule lists, so changing one spec's rules in place would have changed the others'. Tools and rules are now tuples.
+- **Follow-ups are no longer lost.** The follow-up report skipped a finding whose text was the beginning of an already recorded one in the same file. Duplicates are now detected by exact file + issue.
+
+### Changed
+- One shared helper for the circuit breaker replaces five copies in `phases.py`.
+- The event emitter has a public `current_span_id()`; `phases.py`, `snapshots.py` and `cli.py` no longer reach into its private stack.
+- Agent runners always receive the `on_session_id` callback; the runtime signature check is gone.
+- One `kill_group` helper (in `gates.py`) is shared with the codex runner.
+- The dev dependency group pulls in the GUI stack via `adw[gui]` instead of a copied list; the unused `pytest-asyncio` is gone.
+
+### Removed
+- Dead code without production callers: `ci.fetch_failed_job_logs`, `RunState.update`, the GUI helper `_events_cost`, the never-read `RunRecord.log_format`, three unused GUI translation keys and an internal alias in `codex.py`.
+
 ## [0.30.0] — 2026-10-11
 
 ### Changed
 - **Codex runs with more `codex exec` flags.** ADW keeps calling the codex CLI as a subprocess, with the same isolation as before. An evaluation of the official Codex Python SDK (`openai-codex`) found it offers little that the CLI flags don't already cover, while it lacks a timeout and process-group kill, adds 358 MB and changes the GUI argv contract. Each call now runs in a private working directory:
   - `--output-schema` (reviews): the answer is constrained to the findings contract (`findings.REVIEW_OUTPUT_SCHEMA`). The strict parser still validates it.
   - `-o`: the final answer is read from a file, not fished out of the stdout transcript.
-  - `--json`: the token usage from `turn.completed` shows up as `usage` in the span (GUI) and now counts toward the run totals.
+  - `--json`: the token usage from `turn.completed` shows up as `usage` in the span (GUI) and now counts toward the run totals. A failed call is reported with the error codex emits as a JSON event (`error`, `turn.failed`) instead of the stderr startup noise.
   - `--ephemeral`: no session files.
   - The file names are relative to the working directory, so the argv recorded in the event log is still byte-identical to the one executed, and nothing is written into the target repo.
 - **Fresh codex catalog for the model check.** Every codex run fetches the current model catalog into its isolated `CODEX_HOME`. ADW now keeps that copy as `~/.adw/codex-models-cache.json`, and the model check reads whichever catalog is newest. A stale `~/.codex` catalog no longer prevents the check.
@@ -996,6 +1015,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.30.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.0...v0.29.1

@@ -276,6 +276,16 @@ class EventEmitter:
         )
         return None
 
+    def current_span_id(self) -> str | None:
+        """Innermost open span on the current thread, or None — point events use
+        it to attribute to their enclosing run/phase/lane/round span (GUI-SPEC
+        §4.2). Never raises."""
+        try:
+            stack = self._stack()
+            return stack[-1] if stack else None
+        except Exception:
+            return None
+
     def _stack(self) -> list:
         stack = getattr(self._local, "stack", None)
         if stack is None:
@@ -352,6 +362,9 @@ class NoOpEmitter:
         span: str | None = None,
         parent: str | None = None,
     ) -> None:
+        return None
+
+    def current_span_id(self) -> str | None:
         return None
 
     @contextlib.contextmanager

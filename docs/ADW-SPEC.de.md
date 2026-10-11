@@ -420,8 +420,8 @@ Persistiert als `.adw/runs/<run_id>/state.json`. `run_id` sind 8 Hex-Zeichen.
 
 **Persistenz-Mechanik.** Snapshot in eine Temp-Datei + `os.replace` (ein halb
 geschriebener State existiert nie); exklusiver `flock` auf `.adw/runs/.seq` um jeden
-Schreibvorgang; `RunState.update()` gibt Lane-Threads eine Transaktion Laden →
-Ändern → Schreiben; eine korrupte `.seq` wird aus den persistierten States
+Schreibvorgang; parallele Lane-Threads ändern den gemeinsamen In-Memory-State unter
+`RunContext.state_lock` und persistieren mit `ctx.save()`; eine korrupte `.seq` wird aus den persistierten States
 rekonstruiert.
 
 ### 4.3 Findings — der eine Reviewer-Vertrag

@@ -400,8 +400,8 @@ def _precise_cost_lines(cost):
 
 
 def test_api_cost_usd_is_exact_not_rounded(home, tmp_path):  # noqa: F811
-    """AC 7 / E4: the JSON API returns the EXACT cumulative cost (the shared
-    ``_events_cost`` semantics); rounding is presentation-only and must not alter the
+    """AC 7 / E4: the JSON API returns the EXACT cumulative cost (sum of agent.run
+    ``cost_usd``); rounding is presentation-only and must not alter the
     API value."""
     cost = 5.795072500000001  # more than six decimals: display rounding would change it
     detail = _detail(tmp_path, "cafe0001", _precise_cost_lines(cost)).json()

@@ -161,13 +161,6 @@ def _evaluate(repo: Path, pipeline: dict, cfg: CiConfig, run_glab: RunGlab) -> C
     return CiResult(passed=True, pipeline_id=pipeline_id)
 
 
-def fetch_failed_job_logs(repo: Path, pipeline_id: int, run_glab: RunGlab = run_glab) -> str:
-    """Logs of all failed jobs of a pipeline — food for the log analyst."""
-    jobs = _jobs(repo, pipeline_id, run_glab)
-    failed = [job for job in jobs if job.get("status") == "failed"]
-    return _logs_for(repo, failed, run_glab)
-
-
 _JOBS_PER_PAGE = 100
 
 

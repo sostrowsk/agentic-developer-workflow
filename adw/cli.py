@@ -32,7 +32,6 @@ from adw.phases import (
     EscalationError,
     RunContext,
     WorktreeRefusedError,
-    _current_span_id,
     run_build_phase,
     run_ci_phase,
     run_codex_review_phase,
@@ -876,7 +875,7 @@ def _catch_up_granted_breakpoints(ctx: RunContext) -> None:
             ctx.emitter.emit(
                 "approval",
                 {"gate": gate, "event": "granted"},
-                span=_current_span_id(ctx.emitter),
+                span=ctx.emitter.current_span_id(),
             )
 
 
@@ -904,7 +903,7 @@ def _execute(ctx: RunContext) -> None:
                 ctx.emitter.emit(
                     "approval",
                     {"gate": gate, "event": "awaited"},
-                    span=_current_span_id(ctx.emitter),
+                    span=ctx.emitter.current_span_id(),
                 )
             typer.echo(
                 f"Breakpoint '{gate}' erreicht — Run {ctx.state.run_id} pausiert. "
@@ -914,7 +913,7 @@ def _execute(ctx: RunContext) -> None:
         # awaited: ein tatsächlich eingetretenes Warten am Gate (AC 9).
         gate = "spec" if ctx.state.phase == "awaiting_spec_approval" else "plan"
         ctx.emitter.emit(
-            "approval", {"gate": gate, "event": "awaited"}, span=_current_span_id(ctx.emitter)
+            "approval", {"gate": gate, "event": "awaited"}, span=ctx.emitter.current_span_id()
         )
         # Die Zusammenfassung der Synthese ist die Entscheidungsgrundlage am
         # Gate — sie liegt im ignorierten Run-Ordner und wäre sonst unsichtbar.

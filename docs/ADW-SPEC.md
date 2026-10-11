@@ -414,7 +414,8 @@ Persisted as `.adw/runs/<run_id>/state.json`. `run_id` is 8 hex characters.
 
 **Persistence mechanics.** Snapshot to a temp file + `os.replace` (no half-written
 state ever exists); exclusive `flock` on `.adw/runs/.seq` around every write;
-`RunState.update()` gives lane threads a load → mutate → write transaction; a
+parallel lane threads mutate the shared in-memory state under `RunContext.state_lock`
+and persist with `ctx.save()`; a
 corrupt `.seq` is reconstructed from the persisted states.
 
 ### 4.3 Findings — the one reviewer contract
