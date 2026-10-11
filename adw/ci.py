@@ -12,7 +12,7 @@ from adw.config import CiConfig
 from adw.env import safe_env
 from adw.events import NoOpEmitter
 
-_GLAB_TIMEOUT = 120
+_CLI_TIMEOUT = 120
 _TERMINAL_STATUSES = {"success", "failed", "canceled", "skipped"}
 _LOG_EXCERPT_LINES = 200
 
@@ -34,24 +34,85 @@ class CiResult:
     log_excerpt: str = ""
 
 
-def run_glab(argv: list[str], cwd: Path) -> str:
-    """Real glab invocation — replaced by FakeGlab in tests."""
+def run_forge_cli(tool: str, argv: list[str], cwd: Path) -> str:
+    """Hardened glab/gh invocation shared by both forges: timeout, env whitelist,
+    clear error texts naming the tool."""
     try:
         result = subprocess.run(
-            ["glab", *argv],
+            [tool, *argv],
             cwd=cwd,
             capture_output=True,
             text=True,
-            timeout=_GLAB_TIMEOUT,
+            timeout=_CLI_TIMEOUT,
             env=safe_env(),
         )
     except subprocess.TimeoutExpired as exc:
-        raise CiError(f"glab {' '.join(argv)}: Timeout") from exc
+        raise CiError(f"{tool} {' '.join(argv)}: Timeout") from exc
     except OSError as exc:
-        raise CiError(f"glab {' '.join(argv)}: {exc}") from exc
+        raise CiError(f"{tool} {' '.join(argv)}: {exc}") from exc
     if result.returncode != 0:
-        raise CiError(f"glab {' '.join(argv)}: Exit {result.returncode} — {result.stderr.strip()}")
+        raise CiError(
+            f"{tool} {' '.join(argv)}: Exit {result.returncode} — {result.stderr.strip()}"
+        )
     return result.stdout
+
+
+def parse_json(tool: str, raw: str, context: str):
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise CiError(f"{tool} {context}: kein valides JSON — {raw[:200]}") from exc
+
+
+def poll_until(
+    *,
+    provider: str,
+    branch: str,
+    cfg: CiConfig,
+    sleep: Callable[[float], None],
+    emitter,
+    fetch: Callable[[], object],
+    describe: Callable[[object], str],
+    is_terminal: Callable[[object], bool],
+    evaluate: Callable[[object], tuple[CiResult, str]],
+    timeout_message: Callable[[object], str],
+) -> CiResult:
+    """The forge-neutral wait loop: a ``ci.wait`` span, one ``ci.poll`` point per
+    poll, the budget kept as remaining time with each sleep capped to it (a 61 s
+    budget at a 60 s interval must not sleep until 120 s). The forge supplies what
+    to fetch, how to describe it, when it is final and how to judge it."""
+    emitter = emitter or NoOpEmitter()
+    with emitter.span("ci.wait", {"provider": provider, "pipeline_ref": branch}) as handle:
+        handle.end_payload = {"status": "aborted", "polls": 0, "duration": 0}
+        remaining = float(cfg.timeout)
+        polls = 0
+        elapsed = 0.0
+        while True:
+            observed = fetch()
+            polls += 1
+            emitter.emit(
+                "ci.poll",
+                {"provider": provider, "status": describe(observed), "job": None},
+                span=handle.id,
+            )
+            handle.end_payload["polls"] = polls
+            handle.end_payload["duration"] = elapsed
+            if is_terminal(observed):
+                result, status = evaluate(observed)
+                handle.end_payload["status"] = status
+                return result
+            if remaining <= 0:
+                handle.end_payload["status"] = "timeout"
+                raise CiTimeoutError(timeout_message(observed))
+            nap = min(float(cfg.poll_interval), remaining)
+            sleep(nap)
+            remaining -= nap
+            elapsed += nap
+
+
+def run_glab(argv: list[str], cwd: Path) -> str:
+    """Real glab invocation — replaced by FakeGlab in tests."""
+    return run_forge_cli("glab", argv, cwd)
 
 
 def poll_pipeline(
@@ -74,47 +135,35 @@ def poll_pipeline(
     PREVIOUS push — which must not judge the fresh result.
 
     ``emitter`` is additive and optional (default: no-op): the wait is a
-    ``ci.wait`` span, each executed poll a ``ci.poll`` point. The end payload is
-    seeded with deterministic defaults and advanced per iteration.
+    ``ci.wait`` span, each executed poll a ``ci.poll`` point.
     """
-    emitter = emitter or NoOpEmitter()
-    with emitter.span("ci.wait", {"provider": "gitlab", "pipeline_ref": branch}) as handle:
-        handle.end_payload = {"status": "aborted", "polls": 0, "duration": 0}
-        # Budget als Restzeit führen und den Sleep darauf kappen — sonst schläft
-        # ein 61s-Budget bei 60s-Intervall bis 120s.
-        remaining = float(cfg.timeout)
-        polls = 0
-        elapsed = 0.0
-        while True:
-            pipeline = _latest_pipeline(repo, branch, run_glab, sha=sha)
-            if pipeline is not None and sha is not None and pipeline.get("sha") != sha:
-                pipeline = None  # Defense in depth — der Server filtert bereits
-            polls += 1
-            emitter.emit(
-                "ci.poll",
-                {
-                    "provider": "gitlab",
-                    "status": pipeline["status"] if pipeline else "keine Pipeline",
-                    "job": None,
-                },
-                span=handle.id,
-            )
-            handle.end_payload["polls"] = polls
-            handle.end_payload["duration"] = elapsed
-            if pipeline is not None and pipeline["status"] in _TERMINAL_STATUSES:
-                result = _evaluate(repo, pipeline, cfg, run_glab)
-                handle.end_payload["status"] = pipeline["status"]
-                return result
-            if remaining <= 0:
-                handle.end_payload["status"] = "timeout"
-                raise CiTimeoutError(
-                    f"Pipeline für {branch} nach {cfg.timeout}s nicht abgeschlossen "
-                    f"(Status: {pipeline['status'] if pipeline else 'keine Pipeline gefunden'})"
-                )
-            nap = min(float(cfg.poll_interval), remaining)
-            sleep(nap)
-            remaining -= nap
-            elapsed += nap
+
+    def fetch():
+        pipeline = _latest_pipeline(repo, branch, run_glab, sha=sha)
+        if pipeline is not None and sha is not None and pipeline.get("sha") != sha:
+            return None  # Defense in depth — der Server filtert bereits
+        return pipeline
+
+    def evaluate(pipeline):
+        return _evaluate(repo, pipeline, cfg, run_glab), pipeline["status"]
+
+    return poll_until(
+        provider="gitlab",
+        branch=branch,
+        cfg=cfg,
+        sleep=sleep,
+        emitter=emitter,
+        fetch=fetch,
+        describe=lambda pipeline: pipeline["status"] if pipeline else "keine Pipeline",
+        is_terminal=lambda pipeline: (
+            pipeline is not None and pipeline["status"] in _TERMINAL_STATUSES
+        ),
+        evaluate=evaluate,
+        timeout_message=lambda pipeline: (
+            f"Pipeline für {branch} nach {cfg.timeout}s nicht abgeschlossen "
+            f"(Status: {pipeline['status'] if pipeline else 'keine Pipeline gefunden'})"
+        ),
+    )
 
 
 def _latest_pipeline(
@@ -194,7 +243,4 @@ def _logs_for(repo: Path, jobs: list[dict], run_glab: RunGlab) -> str:
 
 
 def _parse_json(raw: str, context: str):
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise CiError(f"glab {context}: kein valides JSON — {raw[:200]}") from exc
+    return parse_json("glab", raw, context)

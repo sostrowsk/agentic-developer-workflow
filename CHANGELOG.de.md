@@ -13,6 +13,22 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.30.2] — 2026-10-11
+
+### Geändert
+Internes Aufräumen ohne Verhaltensänderung, aus dem parallelen Verbesserungs-Review durch Opus 5.5, Fable 5.1 und Codex (`gpt-6-astra`):
+- **Ein Weg, Git aufzurufen.** Das neue `adw/git.py` (`run_git`) ersetzt 15 handgeschriebene Git-Subprozess-Aufrufe in Orchestrator, CLI, Retention, Worktrees, Forge-Erkennung, Snapshots und GUI. Abgeschaltete Repo-Hooks und Env-Whitelist stehen jetzt an einer Stelle; jeder Aufrufer behält sein Zeitlimit und seine Fehlerbehandlung.
+- **GitLab und GitHub teilen einen Subprozess-Wrapper und eine Warteschleife** (`run_forge_cli`, `poll_until` in `adw/ci.py`). Jede Forge liefert weiter ihr eigenes Abrufen und Bewerten.
+- **Eine Begrenzung auf den Runs-Baum** (`state.runs_root` / `state.contained`), gemeinsam für GUI und Retention statt zweier Kopien.
+- **Die GUI arbeitet pro Seite weniger.** Die Run-Detailseite liest und parst das Event-Log einmal statt zweimal und berechnet die Phasenleiste einmal. Die Änderungsumfang-Ansicht führt pro Lane nur `git diff --numstat` aus, statt zusätzlich den kompletten Patch zu erzeugen und wegzuwerfen. Ergebnisse von Tool-Aufrufen folgen einer Regel statt drei Kopien (das Ergebnis eines eingeklappten Aufrufs wird nicht mehr aus seinem gerenderten Label gelesen).
+- **Tests aufgeräumt.**
+  - Die `home`-Fixture liegt in `conftest.py`; das entfernt 377 `# noqa: F811` und 63 Imports.
+  - Helfer, die in bis zu 37 Testdateien definiert waren (`_slug_for`, `RUN_ID`, `_git`, `_client`, `_detail`, `_trace_section`, `_detail_html`), kommen jetzt gemeinsam aus `tests/gui_app_helpers.py`.
+  - Helfer für ganze Läufe liegen in `tests/run_helpers.py`, kein Testmodul importiert mehr aus einem anderen.
+  - Kleine GUI-Testdateien sind zusammengelegt (Baum-Tastatur, Timeline, Status).
+  - Modul-Docstrings, die Brief- oder Aufgabennummern nacherzählten, sagen jetzt in einer Zeile, was sie testen.
+  - Die Zahl der Tests ist bis auf zwei neue für `run_git` unverändert.
+
 ## [0.30.1] — 2026-10-11
 
 ### Behoben
@@ -1090,6 +1106,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.30.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.1...v0.29.2

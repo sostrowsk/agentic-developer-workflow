@@ -1,36 +1,4 @@
-"""RED unit tests for the trace-tree compaction layer (Trace-Baum verdichten).
-
-The feature folds tool RESULTS into their call (A1), collapses repeated (A2) and
-groups adjacent (A3) Read/Grep/Glob operations into collapsible synthetic nodes,
-and shows a per-page line balance (A6); the default-open phase is a server-side
-decision (A5). Per .adw/contract.yaml the CONCRETE markup is NOT pinned and
-"interne Helper-Signaturen ... [sind] NICHT Contract"; the compaction is, per
-.adw/plan.md §B1/§B3, a PURE server function over the already-windowed pre-order
-row list (``tree_window["rows"]``, a list of ``{"node": <serialized>, "depth":
-int}``), plus a server helper that names the default-open phase (§B5).
-
-These tests define that seam (the RED contract of this lane):
-
-* ``_compact_rows(rows)`` → ``{"entries": [...], "rows": int, "folded": int}``
-  where each *entry* is a dict discriminated by ``kind``:
-    - ``{"kind": "node", "node": <serialized node>, "depth": int,
-       "result": <serialized result|None>, "outcome": "ok"|"error"|None,
-       "duration": <float|None>}`` — an original node, optionally carrying its
-       A1-folded result (outcome + determinable duration);
-    - ``{"kind": "repeat", "depth": int, "count": int, "duration": <float|None>,
-       "children": [node-entries]}`` — an A2 repetition (``count`` == calls);
-    - ``{"kind": "group", "depth": int, "count": int, "ops": [str, ...],
-       "children": [entries]}`` — an A3 group (``count`` == contained calls,
-       incl. those inside a nested repeat; ``ops`` == the operation kinds present).
-* ``_default_open_phase(tree)`` → the ``seq`` of the phase opened by default
-  (the phase with the tree-order-first determinable error, else the last-started
-  phase), or ``None``.
-
-The serialized node shape mirrors ``_serialize`` (point events carry ``type``,
-``seq``, ``ts``, ``label``, ``payload``, ``children``); rows are built directly
-here so adjacency, depth and the loaded-page boundary are under test control
-(E3/E4). RED until the seam exists.
-"""
+"""Unit tests for the trace-tree compaction layer (Trace-Baum verdichten)."""
 
 from adw.gui import i18n
 from adw.gui.app import (

@@ -1,47 +1,20 @@
-"""RED tests for A2 — three named time sizes with one vocabulary (AC 5, 6, 15).
+"""Tests for three named time sizes with one vocabulary."""
 
-A run has three distinct time sizes that today's UI conflates:
-
-* **Work** = sum of ``totals.duration`` over the closed ``run`` spans (real work,
-  from A1).
-* **Phase time** = sum of the phase spans (the coloured area of the Brief-1 rail);
-  NOT work — the two diverge 7–25× when a phase span outlives an interruption.
-* **Total** = first phase start to last phase end; **Waiting** = Total − Phase time.
-
-The additive summary fields (``work_seconds``, ``phase_seconds``, ``wait_seconds``,
-``total_seconds``) are pinned by the contract and exercised through the API. The
-run-detail head must NAME them with the binding vocabulary and must never label
-phase time as "Work"/"Arbeit" (E5).
-
-*Marker policy (declared here; the concrete markup is the implementation's choice,
-mirroring tests/test_gui_run_timeline.py): the run header shows each time size as a
-label directly followed by its formatted value, so tag-stripped text reads
-``<Label> <value>``.* Derived from .adw/spec.md (AC 5, 6, 15), .adw/contract.yaml
-(x-adw-reference.vocabulary, RunSummary) and .adw/plan.md (B2, B3, B7).
-"""
-
-import os
 import re
 from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
     rec,
     run_end_payload,
     run_start_payload,
     ts_at,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
-
-
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _by_id(entries, run_id):
@@ -97,7 +70,7 @@ def _phase(seq, sid, name, start_sec, end_sec):
 # --- AC 6: Phase time + Waiting = Total ----------------------------------------
 
 
-def test_phase_decomposition_sums_to_total(home, tmp_path):  # noqa: F811
+def test_phase_decomposition_sums_to_total(home, tmp_path):
     """AC 6: phases at 0–100 s and 300–500 s give phase_seconds 300, wait_seconds
     200 and total_seconds 500, and the decomposition adds up (the gaps do not
     overlap)."""
@@ -120,7 +93,7 @@ def test_phase_decomposition_sums_to_total(home, tmp_path):  # noqa: F811
 # --- AC 5: work and phase time are separate sizes -------------------------------
 
 
-def test_work_and_phase_time_diverge_when_a_phase_outlives_a_gap(home, tmp_path):  # noqa: F811
+def test_work_and_phase_time_diverge_when_a_phase_outlives_a_gap(home, tmp_path):
     """AC 5: when a phase span straddles an interruption, phase_seconds is far
     larger than the real work (the summed ``totals.duration``). Both are reported
     and they differ — phase time is not the work number."""
@@ -139,7 +112,7 @@ def test_work_and_phase_time_diverge_when_a_phase_outlives_a_gap(home, tmp_path)
     assert entry["work_seconds"] != entry["phase_seconds"]
 
 
-def test_detail_head_labels_work_and_phase_time_distinctly(home, tmp_path):  # noqa: F811
+def test_detail_head_labels_work_and_phase_time_distinctly(home, tmp_path):
     """AC 5 / E5: the run header names Work, Phase time, Waiting and Total; the real
     work value sits under "Work" and the (larger) phase-time value under "Phase
     time" — phase time is NEVER labeled "Work". Two phases with a gap so all four
@@ -170,7 +143,7 @@ def test_detail_head_labels_work_and_phase_time_distinctly(home, tmp_path):  # n
     assert not re.search(r"\bWork\W{0,4}1h 23m 20s", head), "phase time labeled as Work"
 
 
-def test_detail_head_named_metrics_come_from_the_summary_for_active_phase(home, tmp_path):  # noqa: F811
+def test_detail_head_named_metrics_come_from_the_summary_for_active_phase(home, tmp_path):
     """P2: the header's named numbers are the SUMMARY metrics, not the presentation
     timeline. With a closed phase (0–100) and an active phase from 200, the summary
     reports phase_seconds=100 (the active phase is excluded); the header must show
@@ -219,7 +192,7 @@ def test_time_vocabulary_present_in_both_languages():
     assert len({"Arbeit", "Phasenzeit", "Wartezeit", "Gesamt"}) == 4
 
 
-def test_work_metric_uses_the_work_vocabulary_not_duration(home, tmp_path):  # noqa: F811
+def test_work_metric_uses_the_work_vocabulary_not_duration(home, tmp_path):
     """P3/AC 15: the run's work metric is labeled with the binding Work/Arbeit
     vocabulary in the run list, not the old "Duration"/"Dauer" — the same size uses
     the same word everywhere."""
@@ -241,7 +214,7 @@ def test_work_metric_uses_the_work_vocabulary_not_duration(home, tmp_path):  # n
 # --- P2: summary time sizes follow the NORMATIVE definitions, not the timeline ---
 
 
-def test_open_active_phase_is_excluded_from_phase_seconds(home, tmp_path):  # noqa: F811
+def test_open_active_phase_is_excluded_from_phase_seconds(home, tmp_path):
     """P2: an open ACTIVE phase never contributes to phase_seconds (only phases with
     a parsable start AND end do), but it does extend total_seconds; the phase's API
     ``end`` stays null."""
@@ -266,7 +239,7 @@ def test_open_active_phase_is_excluded_from_phase_seconds(home, tmp_path):  # no
     assert build["end"] is None  # the page-build instant is never written back as an end
 
 
-def test_closed_zero_duration_phase_is_zero_not_null(home, tmp_path):  # noqa: F811
+def test_closed_zero_duration_phase_is_zero_not_null(home, tmp_path):
     """P2: a closed zero-length phase (start == end) yields genuine zeros, not null —
     the presentation timeline rejected a zero-length span, the summary must not."""
     repo = tmp_path / "repo"
@@ -287,7 +260,7 @@ def test_closed_zero_duration_phase_is_zero_not_null(home, tmp_path):  # noqa: F
     assert entry["wait_seconds"] == 0
 
 
-def test_fractional_phase_timestamps_are_not_rounded(home, tmp_path):  # noqa: F811
+def test_fractional_phase_timestamps_are_not_rounded(home, tmp_path):
     """P2: fractional span seconds are preserved in the summary (the timeline rounds
     for drawing; the metrics must not)."""
     repo = tmp_path / "repo"

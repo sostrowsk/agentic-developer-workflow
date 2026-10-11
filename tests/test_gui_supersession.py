@@ -1,23 +1,4 @@
-"""RED tests for Aufgabe B — latest-interaction-wins (supersession).
-
-This is a CORRECTNESS requirement, not a performance one: a debug tool must never
-show the data of the wrong node. Click node A, then node B; A's slower lazy-load
-fetch returns last. Today A's late fetch writes A's content into A's pane while B is
-selected, and A's interaction still completes an ``adw:select`` measure — the
-worst-possible failure for a tool whose only job is to reflect state correctly.
-
-After the fix, a superseded interaction writes nothing into the DOM and produces no
-measure; only the winning (latest) selection is applied and measured. This holds
-whether B interrupts before OR after the earlier selection's fetch returns, so the
-two resolution orders are exercised.
-
-Verified BEHAVIOURALLY through the minimal dependency-free JS harness
-(``tests/gui_js_harness.js``) — the served ``app.js`` run in ``node`` with stubbed
-DOM / fetch / performance / rAF whose deferred responses are resolved in a chosen
-order. No browser automation. A missing ``node`` runtime is a verification failure,
-never a skip. Derived from .adw/spec.md (B1/B2), .adw/contract.yaml
-(x-adw-supersession) and .adw/plan.md §3.
-"""
+"""Tests for latest-interaction-wins (supersession)."""
 
 import pytest
 

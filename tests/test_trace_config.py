@@ -1,14 +1,4 @@
-"""RED tests for Aufgabe B — the ``trace:`` config block and automatic retention
-(Spec-Schritt 13, §4.5; AC D1–D3).
-
-The observable surface: the config keys ``trace.enabled`` / ``trace.keep_runs``
-with their defaults and strict validation (D1), the absence of an event log when
-logging is disabled (D2), and automatic deleting-prune after a successful run
-bounded by ``keep_runs`` with its safety/fail-open guarantees (D3).
-
-RED until ``AdwConfig`` gains ``trace`` (today the block is an unknown key that
-``extra="forbid"`` rejects).
-"""
+"""Tests for the ``trace:`` config block and automatic retention (GUI-SPEC §4.5)."""
 
 import pytest
 from typer.testing import CliRunner

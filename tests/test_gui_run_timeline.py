@@ -1,34 +1,5 @@
-"""RED tests for A5 — the phase band becomes a to-scale timeline of the run.
+"""The phase band as a to-scale timeline of the run."""
 
-At its current place in the run header, the chip row (width follows the label) is
-replaced by a continuous rail: each phase sits at its real temporal position with
-its real duration as width; the gaps between phases — the time at the approval
-gates — show as their own "waiting" segments; three labelled numbers (work,
-waiting, total) sit beneath the rail. A phase that never ran keeps no rail area but
-stays visible, dampened, in the legend. When no phase has a parsable timestamp (or
-``T`` is not determinable / ≤ 0), the today's chip row is rendered as the fallback —
-never an empty or broken rail, and never a second band beside it.
-
-The reference runs ``16f39431`` and ``81795e53`` are rebuilt from REPRODUCIBLE test
-data (not from local run directories): only the pinned time relations and sums
-matter (contract ``reference_cases``; spec DoD).
-
-*Marker policy (declared here, as .adw/plan.md leaves the markup to the
-implementation — mirroring the ``data-tree-entry`` policy of the bounded-DOM run):*
-the rail carries one ``data-phase-seg="<name>"`` element per phase WITH a parsable
-start, each with an inline ``style`` giving its ``width``; a gap is a
-``data-wait-seg`` element; an open (active, no end) phase segment additionally
-carries ``data-open``; the three numbers are ``data-total="work|waiting|total"``
-elements, each with a machine-readable ``data-seconds`` and a human label+value.
-The concrete markup is the implementation's choice; these are the observables the
-automated tests read.
-
-Derived from .adw/spec.md (AC 7–10, 12), .adw/contract.yaml
-(x-adw-template-behavior.timeline) and .adw/plan.md (B5). RED until ``_phase_bar``
-emits start/end and the header renders the rail.
-"""
-
-import os
 import re
 from datetime import datetime, timedelta
 
@@ -36,9 +7,9 @@ from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.model import build_tree
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
     phases_lines,
     rec,
     run_end_payload,
@@ -46,7 +17,6 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     write_run,
 )
 
-RUN_ID = "aaaa1111"
 _BASE = datetime(2026, 8, 5, 14, 0, 0)
 
 
@@ -102,8 +72,6 @@ RUN_81795E53 = [
 ]
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _detail(tmp_path, lines, *, phase="done", run_id=RUN_ID):
@@ -144,7 +112,7 @@ def _total_seconds(header: str, kind: str):
 # --- AC 7: the rail is to scale ------------------------------------------------
 
 
-def test_build_segment_is_to_scale_and_a_dead_phase_keeps_no_area(home, tmp_path):  # noqa: F811
+def test_build_segment_is_to_scale_and_a_dead_phase_keeps_no_area(home, tmp_path):
     """AC 7 / A5: for 16f39431 the ``build`` segment (2607 s) is at least 20x as wide
     as the ``ci`` segment (124 s) — width follows duration, not the label — while
     ``integration`` (never ran, no parsable start) takes no rail area yet stays
@@ -164,7 +132,7 @@ def test_build_segment_is_to_scale_and_a_dead_phase_keeps_no_area(home, tmp_path
 # --- AC 8/9: waiting segments and the three numbers ----------------------------
 
 
-def test_waiting_segment_and_the_three_numbers(home, tmp_path):  # noqa: F811
+def test_waiting_segment_and_the_three_numbers(home, tmp_path):
     """AC 8: for 16f39431 the rail shows a waiting segment, and the three numbers are
     work 6084 s, waiting 3289 s, total 9372 s (±2); work + waiting = total up to
     rounding — so the 2 px minimum width (a geometric-only floor) never leaks into
@@ -183,7 +151,7 @@ def test_waiting_segment_and_the_three_numbers(home, tmp_path):  # noqa: F811
     assert abs((work + wait) - total) <= 2, (work, wait, total)
 
 
-def test_a_gapless_run_shows_no_waiting(home, tmp_path):  # noqa: F811
+def test_a_gapless_run_shows_no_waiting(home, tmp_path):
     """AC 9: for 81795e53 (contiguous phases) the rail shows NO waiting segment and
     waiting = 0, while work equals total (3656 s)."""
     _c, _s, html = _detail(tmp_path, _phase_events(RUN_81795E53), run_id="bbbb2222")
@@ -200,7 +168,7 @@ def test_a_gapless_run_shows_no_waiting(home, tmp_path):  # noqa: F811
 # --- A5: open active phase ------------------------------------------------------
 
 
-def test_open_active_phase_is_marked_open(home, tmp_path):  # noqa: F811
+def test_open_active_phase_is_marked_open(home, tmp_path):
     """A5: a still-active phase without an ``end`` reaches the right edge and is
     marked open (the ``.tl-bar.bar-running`` convention). ``build`` is active here."""
     _c, _s, html = _detail(tmp_path, phases_lines(), phase="build")
@@ -214,7 +182,7 @@ def test_open_active_phase_is_marked_open(home, tmp_path):  # noqa: F811
 # --- AC 10: the fallback stays the chip row ------------------------------------
 
 
-def test_run_without_parsable_timestamps_falls_back_to_the_chip_row(home, tmp_path):  # noqa: F811
+def test_run_without_parsable_timestamps_falls_back_to_the_chip_row(home, tmp_path):
     """AC 10: a run with no parsable phase timestamps renders the today's chip row —
     not an empty or broken rail, and no second band. The chips (``.phase-…``) are
     present while the rail markers are absent."""
@@ -230,7 +198,7 @@ def test_run_without_parsable_timestamps_falls_back_to_the_chip_row(home, tmp_pa
 # --- AC 12: the per-entry DOM budget is untouched ------------------------------
 
 
-def test_tree_entry_marker_count_is_unchanged(home, tmp_path):  # noqa: F811
+def test_tree_entry_marker_count_is_unchanged(home, tmp_path):
     """AC 12/E4: the timeline lives only in the header with a fixed, phase-count
     number of elements — it adds NO element per tree entry. The ``data-tree-entry``
     marker count still equals the number of trace-tree nodes."""
@@ -260,7 +228,7 @@ def _totals_labels(header: str) -> str:
     return re.sub(r"\s+", " ", seg).strip()
 
 
-def test_timeline_total_labels_are_translated_in_both_languages(home, tmp_path):  # noqa: F811
+def test_timeline_total_labels_are_translated_in_both_languages(home, tmp_path):
     """AC 15: the three numbers (work, waiting, total) are LABELLED, and the labels
     are delivered in both languages — the German header's totals labels differ from
     the English one's, while the numbers (``data-seconds``) stay language-neutral."""

@@ -1,40 +1,20 @@
-"""RED tests for Aufgabe A — the Tools tab and trace tree respond by NODE COUNT.
+"""The Tools tab and trace tree respond by node count."""
 
-The polish run made selecting an ``agent.run`` node fast by loading contents
-lazily, but switching to the Tools tab still blocks: the bottleneck is the number
-of DOM nodes, not the payload size. The corrected criterion is an ``agent.run``
-with at least 1500 tool entries (calls and results combined, small contents) that
-stays responsive; the same holds for the trace tree that lists the same entries.
-
-Only the OBSERVABLE EFFECT of the (unpinned) mechanism is asserted: the initial
-server-rendered page does not materialise every entry (a late entry's unique
-marker is absent), yet every entry — call and result, with full content — stays
-reachable through the read-only events route (AC-A1/A2/A3, E8). The 2-second
-bound itself is evidenced by the documented manual browser check, not automated.
-
-Derived from .adw/spec.md (AC-A1..A3), .adw/contract.yaml
-(x-adw-template-behavior.tools / .trace_tree) and .adw/plan.md §5.
-"""
-
-import os
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
     many_tool_entries_lines,
     tool_entry_command,
     write_run,
 )
 
-RUN_ID = "aaaa1111"
 PAIRS = 800  # -> 1600 tool entries (>= 1500)
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _tools_client(tmp_path):
@@ -45,7 +25,7 @@ def _tools_client(tmp_path):
     return client, _slug_for(repo)
 
 
-def test_fixture_has_at_least_1500_tool_entries(home, tmp_path):  # noqa: F811
+def test_fixture_has_at_least_1500_tool_entries(home, tmp_path):
     """The fixture is a faithful node-count reference: at least 1500 tool entries
     (calls and results combined), each with a small content."""
     client, slug = _tools_client(tmp_path)
@@ -73,7 +53,7 @@ def _tools_panels(html: str) -> str:
         start = (end + len(close)) if end != -1 else (i + len(key))
 
 
-def test_initial_page_does_not_materialise_every_tool_entry(home, tmp_path):  # noqa: F811
+def test_initial_page_does_not_materialise_every_tool_entry(home, tmp_path):
     """AC-A1/A3 (E8): the initial server-rendered Tools panes materialise a BOUNDED
     slice — the first call's marker may appear, but a late call's marker does not,
     and the panes stay far below "one summary line per entry" (the ~35 s /
@@ -86,7 +66,7 @@ def test_initial_page_does_not_materialise_every_tool_entry(home, tmp_path):  # 
     assert panels.count("toolstep-") < PAIRS
 
 
-def test_every_tool_entry_stays_reachable_with_full_content(home, tmp_path):  # noqa: F811
+def test_every_tool_entry_stays_reachable_with_full_content(home, tmp_path):
     """AC-A2 (E8): no entry is dropped — every call and result of the big node is
     reachable through the events route, calls and results remain distinguishable,
     and each entry's full content is intact."""

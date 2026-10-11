@@ -1,28 +1,15 @@
-"""RED tests for Aufgabe B — selecting an agent.run node keeps the UI usable.
-
-The reference case is the big fixture (>= 40 tool-call/-result pairs, >= 5 MB of
-payload, one result >= 1 MB). Only the *observable effect* of the fix is asserted
-here; the concrete mechanism (collapse/section-load/render-only-the-visible-slice)
-is an implementation decision (spec B2, contract x-adw-detail-responsiveness). The
-2-second bound itself is verified by the documented manual browser check (B4), not
-automated — an automated browser/performance harness is deferred.
-
-Derived from .adw/spec.md (B1–B4), .adw/contract.yaml and .adw/plan.md. Tested
-against the deterministic big fixture with FastAPI's TestClient.
-"""
+"""Selecting an agent.run node keeps the UI usable."""
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
     BIG_RESULT_HEAD,
     BIG_RESULT_TAIL,
+    RUN_ID,
     big_agent_run_lines,
-    home,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
 
 
 def _big_client(tmp_path):
@@ -43,7 +30,7 @@ def _total_result_bytes(client, slug):
     )
 
 
-def test_fixture_meets_the_reference_case_thresholds(home, tmp_path):  # noqa: F811
+def test_fixture_meets_the_reference_case_thresholds(home, tmp_path):
     """B1: the fixture is a faithful reference case — >= 40 tool pairs, >= 5 MB of
     result payload in total, and one single result >= 1 MB."""
     client, slug = _big_client(tmp_path)
@@ -57,7 +44,7 @@ def test_fixture_meets_the_reference_case_thresholds(home, tmp_path):  # noqa: F
     assert max(len(r["payload"].get("content", "")) for r in results) >= 1024 * 1024
 
 
-def test_initial_detail_html_does_not_inline_all_payloads_at_once(home, tmp_path):  # noqa: F811
+def test_initial_detail_html_does_not_inline_all_payloads_at_once(home, tmp_path):
     """B1/B2: the initial detail delivery does not materialise every full payload
     at once — the served HTML is far smaller than the summed result payloads (the
     old code rendered all of it inline, causing the ~35 s freeze)."""
@@ -69,7 +56,7 @@ def test_initial_detail_html_does_not_inline_all_payloads_at_once(home, tmp_path
     assert len(resp.text) < total // 2
 
 
-def test_full_tool_result_stays_reachable(home, tmp_path):  # noqa: F811
+def test_full_tool_result_stays_reachable(home, tmp_path):
     """B2: the user can still reach every full content — the >= 1 MB tool result is
     delivered in full (head + body + tail) through the read-only events route the
     load mechanism draws on."""
@@ -86,7 +73,7 @@ def test_full_tool_result_stays_reachable(home, tmp_path):  # noqa: F811
     assert len(content) >= 1024 * 1024
 
 
-def test_tool_node_pane_carries_load_anchor_and_loads_on_selection(home, tmp_path):  # noqa: F811
+def test_tool_node_pane_carries_load_anchor_and_loads_on_selection(home, tmp_path):
     """B2 (regression): selecting a tool node directly must not show a permanently
     empty box. A tool node is a POINT node and has no pane of its own any more — it
     is shown through the SHARED pane shell, which carries a standalone load anchor
@@ -103,7 +90,7 @@ def test_tool_node_pane_carries_load_anchor_and_loads_on_selection(home, tmp_pat
     assert "data-generic-pane" in js
 
 
-def test_single_record_events_query_returns_only_that_record(home, tmp_path):  # noqa: F811
+def test_single_record_events_query_returns_only_that_record(home, tmp_path):
     """B (regression): the events route accepts an upper bound so the client can
     fetch a single record (from_seq == to_seq) instead of the whole tail — a hint
     query returns exactly the requested record, not megabytes of following log."""
@@ -115,7 +102,7 @@ def test_single_record_events_query_returns_only_that_record(home, tmp_path):  #
     assert [r["seq"] for r in recs] == [3]
 
 
-def test_detail_endpoints_respond_without_server_error(home, tmp_path):  # noqa: F811
+def test_detail_endpoints_respond_without_server_error(home, tmp_path):
     """B3: opening the big run never yields a 5xx (HTML and JSON detail both 200),
     and the pinned error cases stay controlled client errors — whatever load
     mechanism (and any route it adds) must keep the read-only guarantees."""

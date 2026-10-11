@@ -1,16 +1,4 @@
-"""RED tests for task C — snapshots as the step-diff basis (GUI-SPEC §5, ACs 5–11).
-
-``adw/snapshots.py`` does not exist yet, so the unit tests import ``capture``
-locally (an ImportError makes exactly those tests RED without breaking module
-collection). The run-wide tests drive the CLI / build phase and assert on the
-``snapshot`` events that ``phases.py`` will emit at the four §5 boundaries — RED
-today because no snapshot points are wired.
-
-Every assertion is over the externally observable surface pinned by the contract:
-the ``refs/adw/<run_id>/<seq>`` refs and their commits, and the ``snapshot``
-events with payload ``lane``/``tree``/``ref``/``label``. The mechanic (index
-handling, git command order, how <seq> is derived) is deliberately never asserted.
-"""
+"""Tests for snapshots as the step-diff basis (GUI-SPEC §5)."""
 
 import logging
 import re
@@ -23,7 +11,7 @@ from adw.phases import RunContext, run_build_phase, run_spec_and_plan
 from adw.state import LaneState, RunState
 from adw.worktrees import create_lane_worktree, lane_branch
 from tests.conftest import git, write_config
-from tests.test_instrumentation import TDD_CONFIG, cli_run, of_type, read_events, read_run_events
+from tests.run_helpers import TDD_CONFIG, cli_run, of_type, read_events, read_run_events
 
 # --- helpers ----------------------------------------------------------------
 
@@ -286,7 +274,7 @@ class _RaisingAgentRunner:
 def _build_ready_ctx(target_repo) -> RunContext:
     """Drive spec+plan with mocks to reach the build phase, ready for _run_lane."""
     from adw.mock import MockAgentRunner, MockCodexRunner
-    from tests.test_e2e_dry_run import OK, script_authoring, script_draft_artifacts
+    from tests.run_helpers import OK, script_authoring, script_draft_artifacts
 
     agents = MockAgentRunner()
     script_authoring(agents)

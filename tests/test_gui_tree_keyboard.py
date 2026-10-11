@@ -1,23 +1,8 @@
-"""RED tests for A1 — the trace tree becomes keyboard operable (AC 1–4).
-
-The main interaction of the run inspector — selecting a trace node and reading it —
-is today mouse-only: ``app.js`` registers no ``keydown`` handler and no ``li.node``
-is focusable. This brief adds a keyboard path to the tree column with the binding
-key table (spec "Bindende Tastenbelegung"): Up/Down move between VISIBLE rows
-(collapsed content skipped), Right/Left drive the existing folds, Enter/Space select
-the node exactly like a click, Home/End jump to the first/last visible row. The tree
-column is exactly ONE tab stop, not 577 (E2).
-
-Behaviour is exercised through the Node harness against the SERVED ``app.js`` (never a
-source-text proxy); the harness only dispatches keydown and reads the resulting DOM
-state (the ``.selected`` class, ``tabindex``, ``phase-open``/``fold-hidden``). Key
-names and ARIA attributes are NOT contract (contract "Nicht Teil des Contracts") — the
-observable RESULT is: which node the page selects, and how many tab stops the column
-holds. Derived from .adw/spec.md (A1, AC 1–4), .adw/plan.md (B3/B4) and
-.adw/contract.yaml (x-adw-template-behavior.tree).
-"""
+"""Trace-tree keyboard navigation and actions."""
 
 from tests.gui_js_harness import run_scenario
+
+# --- from test_gui_tree_keyboard.py ---------------------------------------------
 
 
 def test_keyboard_selects_a_node_without_a_mouse(tmp_path):
@@ -126,3 +111,66 @@ def test_row_actions_stay_keyboard_operable_within_one_tab_stop(tmp_path):
     assert r["recovery"]["artifacts_active"] is True, "recovery did not open the Artifacts tab"
     assert r["recovery"]["escalation_open"] is True, "recovery did not reveal the escalation report"
     assert r["recovery"]["trace_active"] is False, "the Trace tab stayed active after recovery"
+
+
+# --- from test_gui_tree_keyboard_actions.py -------------------------------------
+
+
+def test_arrow_right_on_an_open_row_reaches_the_child_not_the_action_link(tmp_path):
+    """The key table's "to the first child row" must mean the child ROW. A phase that
+    owns an inline ``raw-jump`` link must not capture Arrow-Right with that link."""
+    r = run_scenario(tmp_path, "tree-keyboard-actions")
+
+    cursor = r["cursorAfterRight"]
+    assert cursor is not None, "Arrow-Right left the tree without a cursor"
+    assert not cursor.startswith("a."), (
+        f"Arrow-Right landed on a row's action link ({cursor}) instead of its first "
+        "child row"
+    )
+    assert cursor.startswith("li.node"), f"Arrow-Right landed on {cursor}, not on a node row"
+    assert cursor.endswith("[3]"), f"Arrow-Right reached {cursor}, expected the child row seq 3"
+
+
+def test_a_recovery_abort_entry_is_not_a_tree_row(tmp_path):
+    """``li.recovery-abort[data-seq]`` is an informational entry of the recovery card,
+    not a selectable node: it has no pane, and selecting it would fall back to the
+    first node. It must neither be decorated as a ``treeitem`` nor consume a cursor
+    step."""
+    r = run_scenario(tmp_path, "tree-keyboard-actions")
+
+    assert not r["abortIsTreeitem"], (
+        "a recovery-abort entry is decorated as role=treeitem and becomes selectable"
+    )
+
+
+def test_the_tree_keeps_exactly_one_tab_stop_across_a_keyboard_fold(tmp_path):
+    """E2/AC 4: the tree column is ONE tab stop — before and after a fold reveals
+    rows that carry their own action links. Guards the behaviour the review suspected
+    to be broken; it holds because the action links are neutralised while still
+    hidden."""
+    r = run_scenario(tmp_path, "tree-keyboard-actions")
+
+    assert r["cursorBeforeOpen"] is not None and r["cursorBeforeOpen"].endswith("[8]"), (
+        f"the walk did not reach the collapsed phase (cursor {r['cursorBeforeOpen']})"
+    )
+    assert len(r["stopsInitial"]) == 1, f"initial tab stops: {r['stopsInitial']}"
+    assert len(r["stopsAfterOpen"]) == 1, (
+        f"opening a fold left {len(r['stopsAfterOpen'])} tab stops: {r['stopsAfterOpen']}"
+    )
+
+
+def test_arrow_right_on_a_childless_open_row_does_not_step_sideways(tmp_path):
+    """Follow-up to the fix above (Codex, round 1): "to the first child row" means a
+    CHILD — a phase that is open but has no children must not hand the cursor to the
+    next sibling row. Phase-only event logs produce exactly that shape."""
+    r = run_scenario(tmp_path, "tree-keyboard-actions")
+
+    assert r["cursorOnChildless"] is not None and r["cursorOnChildless"].endswith("[30]"), (
+        f"the walk did not reach the childless phase (cursor {r['cursorOnChildless']})"
+    )
+    # Compare the ROW the cursor sits on, not the class list — opening the fold adds
+    # a `phase-open` class to the very same row.
+    assert r["cursorAfterRightChildless"].endswith("[30]"), (
+        f"Arrow-Right moved from the childless phase to {r['cursorAfterRightChildless']} "
+        "— a sibling, not a child"
+    )

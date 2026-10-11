@@ -1,35 +1,13 @@
-"""RED tests for A4 — the Timeline bar's label leaves the proportional bar.
+"""The Timeline bar's label sits outside the proportional bar."""
 
-The timeline learns the same rule the phase rail already knows: geometry into the
-track, words to a place whose readability does NOT depend on the bar's duration. A
-bar becomes pure geometry; its name (``_timeline_bar_label``, the unchanged source)
-appears somewhere that is not the width-scaled ``.tl-bar`` element, so a short bar
-no longer clips its own name. What stays untouched is the geometry: ``left``/``width``
-in percent from the same derivation, the active / waiting / still-running
-distinction (``bar-<state>`` / ``bar-running``) and the ``title`` attribute.
-
-The markup is not contractual — these tests read only the observables the plan
-pins for the automatable half (``.adw/plan.md`` B2.8/B2.9): each bar's name is
-present at a duration-independent place (its geometry element carries no readable
-label of its own), the ``title`` stays, and the geometry/state of every bar is
-unchanged against the current ``_timeline`` derivation (the golden). The visual
-readability / non-overlap proof is the documented browser measurement (B9); the
-``title`` attribute alone does not satisfy A4.
-
-Derived from .adw/spec.md (AC 7-8), .adw/contract.yaml
-(x-adw-template-behavior.timeline) and .adw/plan.md (B6). RED until the label moves
-out of the proportional ``.tl-bar`` element.
-"""
-
-import os
 import re
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import _timeline, create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
     rec,
     run_end_payload,
     run_start_payload,
@@ -37,12 +15,6 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     timeline_lines,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
-
-
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _panel(tmp_path, lines, *, run_id=RUN_ID, name="repo"):
@@ -118,7 +90,7 @@ def _many_short_bars_lines(n=8):
     return lines
 
 
-def test_bar_label_leaves_the_proportional_bar_but_stays_readable(home, tmp_path):  # noqa: F811
+def test_bar_label_leaves_the_proportional_bar_but_stays_readable(home, tmp_path):
     """A4: for a track of many short bars every bar's name is present in the panel,
     but NOT inside the width-scaled ``.tl-bar`` element — that element carries no
     readable label of its own, so a short bar cannot clip its name. The ``title``
@@ -147,7 +119,7 @@ def test_bar_label_leaves_the_proportional_bar_but_stays_readable(home, tmp_path
 # --- A4: title alone is not the readability answer ------------------------------
 
 
-def test_a_bar_name_is_rendered_beyond_the_title_attribute(home, tmp_path):  # noqa: F811
+def test_a_bar_name_is_rendered_beyond_the_title_attribute(home, tmp_path):
     """A4: the ``title`` attribute alone does not meet the readability requirement —
     a bar's name is rendered as visible text OUTSIDE any ``.tl-bar`` element, not only
     as a tooltip. The panel with all ``.tl-bar`` elements removed still carries the
@@ -181,7 +153,7 @@ def _seq_spans(panel: str):
     return out
 
 
-def test_each_bar_shares_a_row_with_its_own_label(home, tmp_path):  # noqa: F811
+def test_each_bar_shares_a_row_with_its_own_label(home, tmp_path):
     """A4 (association, Codex P2): with many short bars in one track the name↔bar
     correspondence must stay unambiguous. Each bar and its label sit in the SAME row
     and carry the SAME ``data-seq`` — so the ``data-seq``-bearing spans come in
@@ -209,7 +181,7 @@ def test_each_bar_shares_a_row_with_its_own_label(home, tmp_path):  # noqa: F811
 # --- A4: the label itself is never truncated (Codex P2) -------------------------
 
 
-def test_bar_label_css_never_truncates_the_name(home, tmp_path):  # noqa: F811
+def test_bar_label_css_never_truncates_the_name(home, tmp_path):
     """A4 (readability, Codex P2): moving the name out of the width-scaled bar only
     fixes *duration*-dependent clipping — the label element itself must also show the
     COMPLETE name, never an ellipsis or a hidden overflow that hides a long agent /
@@ -236,7 +208,7 @@ def test_bar_label_css_never_truncates_the_name(home, tmp_path):  # noqa: F811
 # --- AC 8: the geometry and state of every bar are unchanged --------------------
 
 
-def test_bar_geometry_and_state_are_unchanged(home, tmp_path):  # noqa: F811
+def test_bar_geometry_and_state_are_unchanged(home, tmp_path):
     """AC 8: for identical inputs every bar's ``left``/``width`` percent and its
     ``bar-<state>`` / ``bar-running`` / ``data-seq`` / ``title`` are unchanged against
     the current ``_timeline`` derivation. A finished run pins active vs waiting; a
@@ -295,7 +267,7 @@ def _flex_parts(joined: str):
     return grow, shrink, basis
 
 
-def test_every_timeline_track_starts_at_the_same_x(home, tmp_path):  # noqa: F811
+def test_every_timeline_track_starts_at_the_same_x(home, tmp_path):
     """Regression (run f56b5ee8, Codex P2): a timeline is only readable if equal
     timestamps sit above each other and equal durations are equally long. Both hold
     only when every track has the SAME origin and the SAME width — that is, when the

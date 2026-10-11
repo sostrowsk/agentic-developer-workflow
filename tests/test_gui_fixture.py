@@ -1,14 +1,5 @@
-"""RED integration test for DoD 4 — a realistic event-log fixture read by the
-reader and turned into the span tree by the model.
-
-The fixture bundles nested spans, a worker-thread orphan, point events, unknown
-types, a broken line, a seq gap, an initially incomplete last line, a resume
-seam (second run start) and the three dangling-reference cases (AC 19). It must
-be readable without abort, yield the pinned tree with correctly re-homed
-orphans, and keep every otherwise-valid record observable — and give the same
-observable tree whether read at once or incrementally (AC 20).
-
-Both modules are new, so this test is RED until they are built.
+"""Integration test for a realistic event-log fixture read by the reader and turned into the
+span tree by the model.
 """
 
 import json

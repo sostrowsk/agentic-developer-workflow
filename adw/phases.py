@@ -44,6 +44,7 @@ from adw.findings import (
 )
 from adw.forge import Forge, ForgeError, detect_forge
 from adw.gates import GateReport, run_gates
+from adw.git import run_git
 from adw.state import LaneState, RunState
 from adw.triage import (
     MAX_FIX_CYCLES,
@@ -1710,12 +1711,8 @@ def _handle_idle_agent_run(ctx: RunContext, lane: str, findings: list[Finding]) 
 def _require_lane_branch(ctx: RunContext, worktree: Path, lane_state: LaneState) -> None:
     """A SHA-identical branch switch (git switch --detach) would pass the
     HEAD check — the symbolic ref must remain the Lane branch."""
-    result = subprocess.run(
-        ["git", "-C", str(worktree), "symbolic-ref", "--short", "-q", "HEAD"],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=safe_env(ctx.git_env),
+    result = run_git(
+        worktree, "symbolic-ref", "--short", "-q", "HEAD", timeout=120, env=safe_env(ctx.git_env)
     )
     current_ref = result.stdout.strip()
     if result.returncode != 0 or current_ref != lane_state.branch:
@@ -1755,13 +1752,7 @@ def _worktree_tree_hash(ctx: RunContext, worktree: Path) -> str:
         # Index aus HEAD seeden: sonst fehlen getrackte Dateien, die zugleich
         # einem Ignore-Pattern entsprechen, im Hash (add -A überspränge sie).
         for args in (["read-tree", "HEAD"], ["add", "-A"], ["write-tree"]):
-            result = subprocess.run(
-                ["git", "-C", str(worktree), "-c", "core.hooksPath=/dev/null", *args],
-                capture_output=True,
-                text=True,
-                timeout=120,
-                env=env,
-            )
+            result = run_git(worktree, *args, timeout=120, env=env)
             if result.returncode != 0:
                 raise escalate(
                     ctx, f"Tree-Hash fehlgeschlagen (git {args[0]}): {result.stderr.strip()}"
@@ -1862,48 +1853,23 @@ def _restore_approved_artifacts(ctx: RunContext, worktree: Path, base_ref: str) 
     # zurücksetzen. Schlägt das fehl (Config im Ziel-Repo untracked, also
     # nicht im Base-Branch), wird eine evtl. vom Agenten eingeschleuste
     # Config gelöscht statt still committet.
-    restored = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(worktree),
-            "-c",
-            "core.hooksPath=/dev/null",
-            "checkout",
-            base_ref,
-            "--",
-            ".adw/config.yaml",
-        ],
-        capture_output=True,
-        timeout=120,
-        env=safe_env(ctx.git_env),
+    restored = run_git(
+        worktree, "checkout", base_ref, "--", ".adw/config.yaml",
+        timeout=120, env=safe_env(ctx.git_env),
     )
     if restored.returncode != 0:
         # Nur der POSITIV verifizierte Nicht-im-Base-Branch-Fall rechtfertigt
         # das Löschen: ls-tree rc==0 mit LEEREM Output. rc!=0 (kaputter Ref,
         # Repo-Fehler) oder nicht-leerer Output → eskalieren, nichts löschen.
-        on_base = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(worktree),
-                "-c",
-                "core.hooksPath=/dev/null",
-                "ls-tree",
-                base_ref,
-                "--",
-                ".adw/config.yaml",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env=safe_env(ctx.git_env),
+        on_base = run_git(
+            worktree, "ls-tree", base_ref, "--", ".adw/config.yaml",
+            timeout=120, env=safe_env(ctx.git_env),
         )
         if on_base.returncode != 0 or on_base.stdout.strip():
             raise escalate(
                 ctx,
                 f"Config-Restore im Worktree fehlgeschlagen: "
-                f"{restored.stderr.decode(errors='replace').strip()} / "
+                f"{restored.stderr.strip()} / "
                 f"{on_base.stderr.strip()}",
             )
         injected = worktree / ".adw" / "config.yaml"
@@ -1921,13 +1887,7 @@ def _worktree_dirty(ctx: RunContext, worktree: Path) -> bool:
 
 def _git(ctx: RunContext, cwd: Path, *args: str) -> str:
     """Git through the orchestrator — env whitelist, repo hooks disabled."""
-    result = subprocess.run(
-        ["git", "-C", str(cwd), "-c", "core.hooksPath=/dev/null", *args],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=safe_env(ctx.git_env),
-    )
+    result = run_git(cwd, *args, timeout=120, env=safe_env(ctx.git_env))
     if result.returncode != 0:
         raise escalate(
             ctx, f"git {' '.join(args)} in {cwd} fehlgeschlagen: {result.stderr.strip()}"
@@ -2022,21 +1982,8 @@ def _fresh_integration_worktree(ctx: RunContext, lanes: list[str]) -> Path:
     for lane in lanes:
         branch = lane_branch(ctx.state.run_id, lane)
         try:
-            result = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(worktree),
-                    "-c",
-                    "core.hooksPath=/dev/null",
-                    "merge",
-                    "--no-edit",
-                    branch,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                env=safe_env(ctx.git_env),
+            result = run_git(
+                worktree, "merge", "--no-edit", branch, timeout=300, env=safe_env(ctx.git_env)
             )
         except subprocess.TimeoutExpired as exc:
             _abort_merge(ctx, worktree)
@@ -2065,12 +2012,7 @@ def _fresh_integration_worktree(ctx: RunContext, lanes: list[str]) -> Path:
 def _abort_merge(ctx: RunContext, worktree: Path) -> None:
     """Best effort: do not leave a half-merged state behind."""
     try:
-        subprocess.run(
-            ["git", "-C", str(worktree), "-c", "core.hooksPath=/dev/null", "merge", "--abort"],
-            capture_output=True,
-            timeout=120,
-            env=safe_env(ctx.git_env),
-        )
+        run_git(worktree, "merge", "--abort", timeout=120, env=safe_env(ctx.git_env))
     except (subprocess.TimeoutExpired, OSError):
         pass  # der Worktree wird ohnehin je Runde neu aufgebaut
 
@@ -2545,23 +2487,9 @@ def _push_branch(ctx: RunContext, worktree: Path, branch: str) -> None:
     if "SSH_AUTH_SOCK" in os.environ:
         extra.setdefault("SSH_AUTH_SOCK", os.environ["SSH_AUTH_SOCK"])
     try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(worktree),
-                "-c",
-                "core.hooksPath=/dev/null",
-                "push",
-                "--force-with-lease",
-                "-u",
-                "origin",
-                branch,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=600,
-            env=safe_env(extra),
+        result = run_git(
+            worktree, "push", "--force-with-lease", "-u", "origin", branch,
+            timeout=600, env=safe_env(extra),
         )
     except subprocess.TimeoutExpired as exc:
         raise escalate(ctx, f"Push von {branch} hat das Timeout überschritten") from exc

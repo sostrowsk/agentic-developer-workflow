@@ -10,12 +10,15 @@ the reader/model/registry, never change them.
 """
 
 import json
+import os
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import pytest
+from fastapi.testclient import TestClient
 
+from adw.gui.app import create_app
+from adw.gui.registry import _slug
 from adw.state import RunState
 
 _TS_BASE = datetime(2026, 8, 5, 14, 0, 0)
@@ -387,18 +390,6 @@ def problems_lines():
         rec(4, "phase", "end", "P", "R", sec=4, payload={"name": "build", "to_phase": "done"}),
         rec(5, "run", "end", "R", None, sec=5, payload=run_end_payload("done")),
     ]
-
-
-@pytest.fixture
-def home(tmp_path, monkeypatch):
-    """Hermetic HOME so ``load_registry()`` starts empty and no test touches the
-    real ~/.adw/repos.json (Aufgabe A guarantees this globally; app tests pin it
-    locally too so they are self-contained)."""
-    h = tmp_path / "home"
-    h.mkdir()
-    monkeypatch.setenv("HOME", str(h))
-    monkeypatch.setenv("USERPROFILE", str(h))
-    return h
 
 
 def parse_sse(text: str):
@@ -1084,3 +1075,65 @@ def huge_artifact_body(min_bytes=2 * 1024 * 1024):
         i += 1
     parts.append(LARGE_ARTIFACT_TAIL + "\n")
     return "".join(parts)
+
+
+def escalation_history_lines():
+    """One run log carrying TWO escalations (as several ``run`` spans appended to
+    one file produce). The GOVERNING escalation is the one with the greatest
+    ``seq`` (seq 7). Its aborts are the ``limit.hit``/``circuit_breaker`` events
+    between the PRIOR escalation (seq 4) and it (seqs 5, 6) — the earlier
+    circuit_breaker (seq 3) belongs to the prior escalation and must NOT appear."""
+    return [
+        rec(1, "run", "start", "R", None, sec=0,
+            payload=run_start_payload("Escalation history")),
+        rec(2, "phase", "start", "B", "R", sec=1,
+            payload={"name": "build", "from_phase": "build"}),
+        rec(3, "circuit_breaker", "point", "B", sec=2,
+            payload={"keys": ["old|1|x"], "scope": "lane:backend"}),   # PRIOR's abort
+        rec(4, "escalation", "point", "B", sec=3,
+            payload={"reason": "old reason", "phase": "spec"}),         # PRIOR escalation
+        rec(5, "limit.hit", "point", "B", sec=4,
+            payload={"limit": "gate_iterations", "value": 10, "cap": 10}),
+        rec(6, "circuit_breaker", "point", "B", sec=5,
+            payload={"keys": ["new|2|y"], "scope": "lane:backend"}),
+        rec(7, "escalation", "point", "B", sec=6,
+            payload={"reason": "new reason", "phase": "build"}),        # GOVERNING
+        rec(8, "phase", "end", "B", "R", sec=7,
+            payload={"name": "build", "to_phase": None}),
+        rec(9, "run", "end", "R", None, sec=8, payload=run_end_payload("escalated")),
+    ]
+
+
+def _slug_for(repo):
+    """The stable slug the app assigns to an ad-hoc ``--repo`` path — computed the
+    same way as the resolver, so the detail routes can be addressed even when the
+    repo has no listable runs (and thus is absent from ``/api/runs``)."""
+    return _slug(os.path.normpath(str(repo.resolve())))
+
+
+RUN_ID = "aaaa1111"
+
+
+def _trace_section(html: str) -> str:
+    """The trace-tree region only (``section.trace`` up to ``section.panes``), so a
+    token check is not satisfied by the same token echoed inside a detail pane."""
+    i = html.find('class="trace"')
+    j = html.find('class="panes"')
+    assert i != -1 and j != -1 and i < j, "trace/panes layout anchors not found"
+    return html[i:j]
+
+
+def _detail_html(client, slug, **params):
+    resp = client.get(f"/runs/{slug}/{RUN_ID}", params=params or None)
+    assert resp.status_code == 200
+    return resp.text
+
+
+def _client(repo):
+    return TestClient(create_app(repos=[str(repo)]))
+
+
+def _detail(client, slug, run_id=RUN_ID):
+    r = client.get(f"/api/runs/{slug}/{run_id}")
+    assert r.status_code == 200, r.status_code
+    return r.json()

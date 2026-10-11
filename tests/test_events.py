@@ -1,9 +1,4 @@
-"""RED tests for adw/events.py — the ADW run event-log emitter.
-
-Derived from .adw/spec.md, .adw/contract.yaml and docs/GUI-SPEC.md §4.1–§4.4.
-Every assertion is over the public API (EventEmitter / NoOpEmitter / span
-handle) and the on-disk content of .adw/runs/<run_id>/events.jsonl only.
-"""
+"""Tests for adw/events.py — the ADW run event-log emitter."""
 
 import json
 import logging

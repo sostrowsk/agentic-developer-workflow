@@ -998,23 +998,16 @@ def _real_paused_run(target_repo) -> RunState:
     return state
 
 
-def test_resume_refuses_undetectable_forge_and_stays_resumable(target_repo, monkeypatch):
+@pytest.mark.parametrize("command", ["resume", "approve"])
+def test_continuation_refuses_undetectable_forge_and_stays_at_the_gate(
+    target_repo, monkeypatch, command
+):
     state = _real_paused_run(target_repo)
     _no_execution(monkeypatch)
-    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
-    assert res.exit_code == 1, res.output
-    assert "ci.provider" in res.output
-    saved = RunState.load(target_repo, state.run_id)
-    assert saved.phase == "awaiting_approval"
-    assert not (saved.run_dir(target_repo) / "escalation.md").exists()
-
-
-def test_approve_refuses_undetectable_forge_without_granting(target_repo, monkeypatch):
-    state = _real_paused_run(target_repo)
-    _no_execution(monkeypatch)
-    res = runner.invoke(app, ["approve", state.run_id, "--repo", str(target_repo)])
+    res = runner.invoke(app, [command, state.run_id, "--repo", str(target_repo)])
     assert res.exit_code == 1, res.output
     assert "ci.provider" in res.output
     saved = RunState.load(target_repo, state.run_id)
     assert saved.phase == "awaiting_approval"
     assert saved.approval_granted is False
+    assert not (saved.run_dir(target_repo) / "escalation.md").exists()

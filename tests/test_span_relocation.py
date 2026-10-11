@@ -1,18 +1,4 @@
-"""RED tests for tasks A and B (GUI-SPEC §4.4/§6, spec ACs 1–4).
-
-Task A — the missing coverage of the ``run`` span's exception path: the end
-event with ``status: escalated`` is written BEFORE the unexpected exception
-propagates unchanged. The implementation is correct and stays unchanged (E1);
-this test only pins the behaviour ``_run_span`` already has.
-
-Task B — the ``agent.run`` and ``codex.review`` **spans** move from the runners
-to the call sites in ``adw/phases.py``. Only then does a dry run (the 0-token
-acceptance path, mock runners) produce these spans at all. The runner-side
-CONTENT (SDK stream mirroring, usage/cost) stays in the runners and is rightly
-absent in a dry run. Every assertion here is over the on-disk event log — the
-externally observable surface — never over the (unpinned) mechanism by which a
-span handle reaches the runner.
-"""
+"""Tests for the codex/agent spans owned by the phase call sites (GUI-SPEC §4.4/§6)."""
 
 import pytest
 
@@ -23,7 +9,7 @@ from adw.events import EventEmitter
 from adw.mock import MockAgentRunner, MockCodexRunner
 from adw.phases import RunContext, run_build_phase, run_codex_review_phase, run_spec_and_plan
 from adw.state import RunState
-from tests.test_instrumentation import RUN_ID, cli_run, of_type, read_events, read_run_events
+from tests.run_helpers import RUN_ID, cli_run, of_type, read_events, read_run_events
 
 # --- Task A: run-span exception path (AC 1, E1) -----------------------------
 
@@ -172,7 +158,7 @@ def test_codex_review_start_argv_matches_the_executed_argv(target_repo, monkeypa
     argv the runner actually executes — the argv is complete when the span opens
     (built by the shared builder), not backfilled. Driven through the real
     call site in ``run_codex_review_phase`` with a real CodexRunner."""
-    from tests.test_e2e_dry_run import OK, script_authoring, script_draft_artifacts
+    from tests.run_helpers import OK, script_authoring, script_draft_artifacts
 
     agents = MockAgentRunner()
     script_authoring(agents)

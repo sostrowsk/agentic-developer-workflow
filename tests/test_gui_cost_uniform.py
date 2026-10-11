@@ -1,17 +1,4 @@
-"""RED tests for A7 / AC 11 — one cost format everywhere.
-
-Cost appears in the run list, the Timeline header and the run-context panel in a
-single format (the ``_fmt_cost`` convention, e.g. ``$56.88``). Today the run-context
-entry runs ``cost_usd`` through ``ctx_num`` (``round(6)`` → ``56.87666``) both
-server-side and — after selection / live refresh — in ``app.js``
-(``Math.round(value*1e6)/1e6``). The other context number fields keep ``ctx_num``;
-the raw payload the panel PROJECTS FROM (a data attribute) is not a formatted
-display and is untouched (E10).
-
-Derived from .adw/spec.md (AC 11), .adw/contract.yaml
-(x-adw-template-behavior.costs) and .adw/plan.md (B2/B3). RED until the server
-template and the client projection adopt the shared cost format.
-"""
+"""Tests for one cost format everywhere."""
 
 import os
 import re
@@ -21,8 +8,8 @@ from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
     rec,
     run_end_payload,
     run_start_payload,
@@ -30,7 +17,6 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
 )
 from tests.gui_js_harness import run_scenario
 
-RUN_ID = "aaaa1111"
 # A cost whose six-decimal rounding (56.87666) and two-decimal format ($56.88)
 # differ visibly — the exact value the issue cites from the run-context panel.
 COST = 56.87666
@@ -65,7 +51,7 @@ def _ctx_cost_cell(html: str):
     return m.group(1).strip() if m else None
 
 
-def test_cost_uses_the_shared_format_in_list_timeline_and_context(home, tmp_path):  # noqa: F811
+def test_cost_uses_the_shared_format_in_list_timeline_and_context(home, tmp_path):
     """AC 11: the run list, the Timeline header and the run-context panel all show
     ``$56.88`` — one format. The panel's rendered field no longer shows the raw
     six-decimal ``56.87666``."""
@@ -84,7 +70,7 @@ def test_cost_uses_the_shared_format_in_list_timeline_and_context(home, tmp_path
     assert "56.87666" != cell  # the six-decimal form is gone from the formatted display
 
 
-def test_a_missing_cost_stays_empty_in_the_context_panel(home, tmp_path):  # noqa: F811
+def test_a_missing_cost_stays_empty_in_the_context_panel(home, tmp_path):
     """AC 11 / the "never as 0" rule: a run with no cost renders the context cost
     field EMPTY — never ``$0.00`` and never ``0``."""
     repo = tmp_path / "repo"

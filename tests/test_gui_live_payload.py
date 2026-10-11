@@ -1,24 +1,4 @@
-"""RED tests for GUI-Redesign 5 — the live payload (A1 partial response, A2 panes
-on demand).
-
-Derived from .adw/spec.md (AC 1–5, 10, 13), .adw/contract.yaml
-(x-adw-template-behavior, x-adw-api-invariance, x-adw-response-size) and
-.adw/plan.md (B2 rows 1–5, B3, B4). Markup wording and CSS/data-* attribute
-NAMES are not contractual (contract-boundary); these tests therefore assert
-observable structure through two agreed markers the implementation must emit:
-
-  * the two live regions ``header.run-header`` and ``main.detail`` (already in the
-    template, the same nodes ``swapRegions`` swaps), and
-  * ``data-pane-unloaded`` on an un-rendered span-pane SHELL — the machine-readable
-    "not yet loaded" marker of B4. A ``.pane`` carrying ``data-seq`` but NOT this
-    marker is a rendered span-pane BODY; the shared generic point-node pane has no
-    ``data-seq`` and never counts. This marker name is this suite's contract with
-    the B4 implementation (the concrete name is a free choice of .adw/contract.yaml,
-    pinned here so the pane-count acceptance is testable).
-
-RED until app.py evaluates the ``X-Requested-With: fetch`` header (A1) and renders
-only the focused span-pane's body (A2).
-"""
+"""Tests for the live payload (partial response, panes on demand)."""
 
 import os
 import re
@@ -28,10 +8,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
     build_diff_run,
     comprehensive_lines,
-    home,
     rec,
     run_end_payload,
     run_start_payload,
@@ -80,7 +59,7 @@ def _span_pane_bodies(html):
 # --- AC 1 / AC 3 (structural): the fetch-header partial response --------------------
 
 
-def test_fetch_header_returns_only_the_two_regions_as_a_fragment(home, tmp_path):  # noqa: F811
+def test_fetch_header_returns_only_the_two_regions_as_a_fragment(home, tmp_path):
     """AC 1: with ``X-Requested-With: fetch`` the route returns a bare HTML fragment —
     no ``<!DOCTYPE>``, ``<html>`` or ``<head>`` document wrapper — carrying exactly the
     two live regions ``header.run-header`` and ``main.detail`` in document order. At
@@ -117,7 +96,7 @@ def test_fetch_header_returns_only_the_two_regions_as_a_fragment(home, tmp_path)
     assert "data-latest-context" in frag
 
 
-def test_without_the_header_the_response_is_a_full_document(home, tmp_path):  # noqa: F811
+def test_without_the_header_the_response_is_a_full_document(home, tmp_path):
     """AC 2: the same request WITHOUT the header stays the full document mode —
     ``<!DOCTYPE>``, ``<html>``, ``<head>`` and ``<body>`` — unchanged product
     behaviour. Only the header selects the fragment (E3)."""
@@ -134,7 +113,7 @@ def test_without_the_header_the_response_is_a_full_document(home, tmp_path):  # 
 # --- AC 4 / AC 10: panes on demand, focus resolution --------------------------------
 
 
-def test_span_pane_bodies_reduced_to_at_most_one(home, tmp_path):  # noqa: F811
+def test_span_pane_bodies_reduced_to_at_most_one(home, tmp_path):
     """AC 4: without ``?focus`` the delivered page (full OR fragment) carries ZERO
     span-pane bodies; with a span focus exactly ONE — the targeted node's — while
     every other span keeps an (empty, marked) shell. The shared point-node pane never
@@ -161,7 +140,7 @@ def test_span_pane_bodies_reduced_to_at_most_one(home, tmp_path):  # noqa: F811
     assert _span_pane_bodies(client.get(url, params={"focus": 5}, headers=_FETCH).text) == 1
 
 
-def test_focus_on_a_foldable_result_is_redirected_to_its_call(home, tmp_path):  # noqa: F811
+def test_focus_on_a_foldable_result_is_redirected_to_its_call(home, tmp_path):
     """AC 10: the existing focus resolution is untouched — a ``?focus`` landing on an
     A1-foldable tool RESULT (Read result seq 8, tool_use_id ``t1``) is redirected to
     its call (seq 7), whose seq then carries the selection. The redirect holds with and
@@ -203,7 +182,7 @@ def _reference_repo():
     return Path(root) if reproducible else None
 
 
-def test_reference_run_16f39431_meets_the_contractual_byte_maximum(home, tmp_path):  # noqa: F811
+def test_reference_run_16f39431_meets_the_contractual_byte_maximum(home, tmp_path):
     """AC 5 (contractual reference): the page delivered for run ``16f39431`` WITHOUT
     ``?focus`` and WITHOUT the fetch header is at most ``551064`` uncompressed bytes —
     at least 35% below the ``847791``-byte reference of 2026-09-15. The reference run is
@@ -258,7 +237,7 @@ def _many_span_panes_lines(count, body_chars, *, issue="Many span panes"):
     return lines, starts
 
 
-def test_delivered_page_without_focus_is_at_least_35_percent_smaller(home, tmp_path):  # noqa: F811
+def test_delivered_page_without_focus_is_at_least_35_percent_smaller(home, tmp_path):
     """AC 5 (SUPPLEMENTARY structural coverage — NOT the contractual reference
     measurement; that is
     ``test_reference_run_16f39431_meets_the_contractual_byte_maximum``): for a run whose
@@ -290,7 +269,7 @@ def test_delivered_page_without_focus_is_at_least_35_percent_smaller(home, tmp_p
 # --- AC 13: the /api routes stay unchanged across the new HTML behaviour --------------
 
 
-def test_api_routes_unchanged_across_full_and_fragment_html_fetches(home, tmp_path):  # noqa: F811
+def test_api_routes_unchanged_across_full_and_fragment_html_fetches(home, tmp_path):
     """AC 13: every ``/api`` route answers identically before and after an intervening
     full-document AND fragment HTML fetch — the deliberate HTML change touches no API
     field, type or value, and adds no route or query parameter. Uses the existing

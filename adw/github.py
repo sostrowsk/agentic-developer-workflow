@@ -8,17 +8,13 @@ Deviation from the GitLab model: a push can start MULTIPLE workflow runs
 completed and none of them is red.
 """
 
-import json
-import subprocess
 import time
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote
 
-from adw.ci import CiError, CiResult, CiTimeoutError
+from adw.ci import CiError, CiResult, parse_json, poll_until, run_forge_cli
 from adw.config import CiConfig
-from adw.env import safe_env
-from adw.events import NoOpEmitter
 
 _LOG_EXCERPT_LINES = 200
 _RUNS_PER_PAGE = 100
@@ -29,28 +25,9 @@ _GREEN_CONCLUSIONS = {"success", "skipped", "neutral"}
 RunGh = Callable[[list[str], Path], str]
 
 
-_GH_TIMEOUT = 120
-
-
 def run_gh(argv: list[str], cwd: Path) -> str:
-    """Real gh invocation — replaced by FakeGh in tests. Same hardened
-    subprocess mechanics as run_glab (timeout, safe_env, clear error texts)."""
-    try:
-        result = subprocess.run(
-            ["gh", *argv],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=_GH_TIMEOUT,
-            env=safe_env(),
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise CiError(f"gh {' '.join(argv)}: Timeout") from exc
-    except OSError as exc:
-        raise CiError(f"gh {' '.join(argv)}: {exc}") from exc
-    if result.returncode != 0:
-        raise CiError(f"gh {' '.join(argv)}: Exit {result.returncode} — {result.stderr.strip()}")
-    return result.stdout
+    """Real gh invocation — replaced by FakeGh in tests."""
+    return run_forge_cli("gh", argv, cwd)
 
 
 def poll_ci(
@@ -71,41 +48,32 @@ def poll_ci(
     ``emitter`` is additive and optional (default: no-op): the wait is a
     ``ci.wait`` span, each executed poll a ``ci.poll`` point.
     """
-    emitter = emitter or NoOpEmitter()
-    with emitter.span("ci.wait", {"provider": "github", "pipeline_ref": branch}) as handle:
-        handle.end_payload = {"status": "aborted", "polls": 0, "duration": 0}
-        remaining = float(cfg.timeout)
-        polls = 0
-        elapsed = 0.0
-        while True:
-            runs = _workflow_runs(repo, branch, run_gh, sha)
-            polls += 1
-            emitter.emit(
-                "ci.poll",
-                {
-                    "provider": "github",
-                    "status": ", ".join(str(run.get("status")) for run in runs) or "keine Runs",
-                    "job": None,
-                },
-                span=handle.id,
-            )
-            handle.end_payload["polls"] = polls
-            handle.end_payload["duration"] = elapsed
-            if runs and all(run.get("status") == "completed" for run in runs):
-                result = _evaluate(repo, runs, cfg, run_gh)
-                handle.end_payload["status"] = "success" if result.passed else "failed"
-                return result
-            if remaining <= 0:
-                pending = [run.get("status") for run in runs] or ["keine Workflow-Runs gefunden"]
-                handle.end_payload["status"] = "timeout"
-                raise CiTimeoutError(
-                    f"GitHub-Actions für {branch} nach {cfg.timeout}s nicht abgeschlossen "
-                    f"(Status: {', '.join(str(s) for s in pending)})"
-                )
-            nap = min(float(cfg.poll_interval), remaining)
-            sleep(nap)
-            remaining -= nap
-            elapsed += nap
+
+    def evaluate(runs):
+        result = _evaluate(repo, runs, cfg, run_gh)
+        return result, "success" if result.passed else "failed"
+
+    def timeout_message(runs):
+        pending = [run.get("status") for run in runs] or ["keine Workflow-Runs gefunden"]
+        return (
+            f"GitHub-Actions für {branch} nach {cfg.timeout}s nicht abgeschlossen "
+            f"(Status: {', '.join(str(s) for s in pending)})"
+        )
+
+    return poll_until(
+        provider="github",
+        branch=branch,
+        cfg=cfg,
+        sleep=sleep,
+        emitter=emitter,
+        fetch=lambda: _workflow_runs(repo, branch, run_gh, sha),
+        describe=lambda runs: ", ".join(str(run.get("status")) for run in runs) or "keine Runs",
+        is_terminal=lambda runs: (
+            bool(runs) and all(run.get("status") == "completed" for run in runs)
+        ),
+        evaluate=evaluate,
+        timeout_message=timeout_message,
+    )
 
 
 def _workflow_runs(repo: Path, branch: str, run_gh: RunGh, sha: str | None) -> list[dict]:
@@ -166,7 +134,4 @@ def _failed_logs(repo: Path, runs: list[dict], run_gh: RunGh) -> str:
 
 
 def _parse_json(raw: str, context: str):
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise CiError(f"gh {context}: kein valides JSON — {raw[:200]}") from exc
+    return parse_json("gh", raw, context)

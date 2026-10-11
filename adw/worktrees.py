@@ -7,8 +7,8 @@ import threading
 from pathlib import Path
 
 from adw.config import Gate
-from adw.env import safe_env
 from adw.gates import run_gates
+from adw.git import run_git
 from adw.state import RUNS_RELPATH
 
 _GIT_TIMEOUT = 60
@@ -28,16 +28,7 @@ class WorktreeError(Exception):
 def _git(repo: Path, *args: str) -> str:
     """Git query with parseable stdout — only for commands WITHOUT hook execution."""
     try:
-        result = subprocess.run(
-            # Repo-Hooks deaktiviert: worktree add/remove führt sonst
-            # repo-kontrollierte Hooks als Orchestrator (außerhalb jeder
-            # Sandbox) aus. Whitelist-Env: keine Secrets in git-Subprozesse.
-            ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", *args],
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT,
-            env=safe_env(),
-        )
+        result = run_git(repo, *args, timeout=_GIT_TIMEOUT)
     except subprocess.TimeoutExpired as exc:
         raise WorktreeError(f"git {' '.join(args)}: Timeout") from exc
     if result.returncode != 0:
@@ -160,22 +151,8 @@ def remove_registered_worktree(repo: Path, path: Path) -> None:
 
 def _branch_exists(repo: Path, branch: str) -> bool:
     try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo),
-                "-c",
-                "core.hooksPath=/dev/null",
-                "show-ref",
-                "--verify",
-                "--quiet",
-                f"refs/heads/{branch}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT,
-            env=safe_env(),
+        result = run_git(
+            repo, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}", timeout=_GIT_TIMEOUT
         )
     except subprocess.TimeoutExpired as exc:
         raise WorktreeError(f"show-ref {branch}: Timeout") from exc

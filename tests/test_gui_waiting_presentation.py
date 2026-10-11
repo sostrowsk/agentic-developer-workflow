@@ -1,37 +1,16 @@
-"""RED tests for A4 / Contract R4 — presentation and labels of the new states.
+"""Tests for presentation and labels of the new states."""
 
-``waiting`` (tree node), ``awaiting_approval`` (run status) and ``awaiting``
-(phase) are rendered visually distinguishable from ``running`` with ADDITIVE
-styling — every existing status presentation remains. Labels for the newly
-visible states exist in English and German, semantically equivalent. The
-language-neutral JSON status values are never translated. Both the run list's
-status column and the run-detail header surface the derived run status, so a run
-awaiting approval shows ``awaiting_approval`` on both.
-
-Derived from .adw/spec.md (AC4), .adw/contract.yaml (x-behavior.R4_presentation)
-and .adw/plan.md (B4). Markup/CSS wording is NOT contractual; the checks stay at
-the loose level the repo uses for the Timeline (a state token surfaces in the
-stylesheet and the rendered page). RED until the styling and labels are added.
-"""
-
-import os
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
     rec,
     run_start_payload,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
-
-
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _client(tmp_path, lines, *, phase, run_id=RUN_ID):
@@ -50,7 +29,7 @@ def awaiting_run_lines(issue="Awaiting presentation"):
     ]
 
 
-def test_new_state_styling_is_additive_and_distinct(home, tmp_path):  # noqa: F811
+def test_new_state_styling_is_additive_and_distinct(home, tmp_path):
     """R4/E3: the stylesheet gains rules for the new states (a ``waiting`` tree
     node, an ``awaiting`` phase / run status) WHILE every existing status class
     remains — the change adds, never replaces."""
@@ -65,7 +44,7 @@ def test_new_state_styling_is_additive_and_distinct(home, tmp_path):  # noqa: F8
     assert "awaiting" in css          # phase-awaiting / awaiting_approval (new)
 
 
-def test_awaiting_approval_surfaces_on_both_list_and_detail(home, tmp_path):  # noqa: F811
+def test_awaiting_approval_surfaces_on_both_list_and_detail(home, tmp_path):
     """R4: while a run awaits approval, both the run list's status column and the
     run-detail header render the derived ``awaiting_approval`` status (not
     ``running``)."""

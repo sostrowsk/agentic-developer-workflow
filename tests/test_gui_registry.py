@@ -1,10 +1,4 @@
-"""RED tests for Aufgabe B3 — the repo registry (``adw.gui.registry``).
-
-Derived from .adw/spec.md (AC 21–26), .adw/contract.yaml (``registry_api`` /
-``registry_file_format``) and docs/GUI-SPEC.md §7.4 (URL slug). The module does
-not exist yet, so these tests are RED until it is built. Only the public surface
-and the on-disk ``~/.adw/repos.json`` format are asserted.
-"""
+"""Tests for the repo registry (``adw.gui.registry``)."""
 
 import json
 import shutil

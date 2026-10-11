@@ -1,42 +1,27 @@
-"""RED tests for the change-scope projection — the additive, purely DERIVED
-``change_scope`` object on ``GET /api/runs/{repo}/{run_id}`` and its read-only
-rendering on the HTML run-detail page.
-
-``change_scope`` places two facts side by side WITHOUT any judgement (S5): the
-files each observed lane actually changed (diff between its lowest- and
-highest-seq snapshot, +/- counts, via the EXISTING snapshot/diff/numstat logic —
-no new git path, E5) and the contract's declared scope as readable YAML text (all
-top-level ``x-adw-*`` blocks, or ``null``). It never marks a file "in scope" or
-"out of scope" (E1) and never causes a 5xx on an otherwise successful detail
-request (S3).
-
-Derived from .adw/spec.md (AC-1…AC-9), .adw/contract.yaml
-(ChangeScope/ChangeScopeLane/ChangeScopeFile, S1…S7) and .adw/plan.md (B1…B6).
-Git-touching cases run against temp repos like tests/test_gui_diff_endpoint.py /
-tests/test_gui_diff_pairing.py. RED until ``_run_detail`` hangs ``change_scope`` on
-its result and the template renders the block.
+"""Tests for the change-scope projection — the additive, purely DERIVED ``change_scope`` object
+on ``GET /api/runs/{repo}/{run_id}`` and its read-only rendering on the HTML run-detail
+page.
 """
 
-import os
 import subprocess
 
 import pytest
 import yaml
-from fastapi.testclient import TestClient
 
-from adw.gui.app import _observed_lanes, _snapshots_by_lane, create_app
+from adw.gui.app import _observed_lanes, _snapshots_by_lane
 from adw.gui.i18n import CATALOG
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _client,
+    _detail,
+    _git,
+    _slug_for,
     build_diff_run,
-    home,
     rec,
     run_end_payload,
     run_start_payload,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
 
 # The chrome-label keys this feature adds to BOTH language blocks (B6). Scope text
 # and file paths are CONTENT and are never translated (S6).
@@ -56,15 +41,8 @@ CHANGE_SCOPE_LABEL_KEYS = [
 # --- helpers -------------------------------------------------------------------
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
-def _git(repo, *args):
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        check=True, capture_output=True, text=True, timeout=60,
-    ).stdout.strip()
 
 
 def _init_repo(repo):
@@ -128,14 +106,8 @@ def _wrap(inner):
     ]
 
 
-def _client(repo):
-    return TestClient(create_app(repos=[str(repo)]))
 
 
-def _detail(client, slug, run_id=RUN_ID):
-    r = client.get(f"/api/runs/{slug}/{run_id}")
-    assert r.status_code == 200, r.status_code
-    return r.json()
 
 
 def _lanes(client, slug, run_id=RUN_ID):
@@ -159,7 +131,7 @@ def _page(client, slug, run_id=RUN_ID, lang="en"):
 # --- AC-9 / AC-5: additive, exactly the pinned keys, no judgement ---------------
 
 
-def test_change_scope_is_present_additive_and_carries_only_pinned_keys(home, tmp_path):  # noqa: F811
+def test_change_scope_is_present_additive_and_carries_only_pinned_keys(home, tmp_path):
     """AC-9/AC-5/S7: ``change_scope`` is ALWAYS present with exactly
     ``{lanes, declared_scope}``; every lane object has exactly
     ``{lane, diff_available, files}`` and every file exactly
@@ -185,7 +157,7 @@ def test_change_scope_is_present_additive_and_carries_only_pinned_keys(home, tmp
 # --- AC-1 / AC-2: the per-lane file list from the existing diff logic ------------
 
 
-def test_lane_diff_lists_files_with_counts_binary_null_in_git_order(home, tmp_path):  # noqa: F811
+def test_lane_diff_lists_files_with_counts_binary_null_in_git_order(home, tmp_path):
     """AC-1/AC-2: a lane with two snapshots carries the diff of its first vs last
     snapshot — per file ``path``/``additions``/``deletions`` from the existing
     numstat logic, a binary file as null/null, in git's report order."""
@@ -207,7 +179,7 @@ def test_lane_diff_lists_files_with_counts_binary_null_in_git_order(home, tmp_pa
     assert by_path["assets/logo.bin"]["deletions"] is None
 
 
-def test_diff_pairs_the_lowest_and_highest_seq_snapshot_only(home, tmp_path):  # noqa: F811
+def test_diff_pairs_the_lowest_and_highest_seq_snapshot_only(home, tmp_path):
     """AC-1/S2: with THREE snapshots the diff is strictly first (lowest seq) vs last
     (highest seq); the middle snapshot is never an endpoint — a file that exists
     only in the middle tree never appears in the reported diff."""
@@ -234,7 +206,7 @@ def test_diff_pairs_the_lowest_and_highest_seq_snapshot_only(home, tmp_path):  #
     assert keep["additions"] == 3 and keep["deletions"] == 1
 
 
-def test_snapshots_of_other_lanes_are_never_mixed_into_a_lane(home, tmp_path):  # noqa: F811
+def test_snapshots_of_other_lanes_are_never_mixed_into_a_lane(home, tmp_path):
     """AC-1/S2: each lane diffs only its OWN snapshots — a two-lane run keeps the
     backend and frontend file lists strictly separate."""
     repo = tmp_path / "repo"
@@ -258,7 +230,7 @@ def test_snapshots_of_other_lanes_are_never_mixed_into_a_lane(home, tmp_path):  
     assert [f["path"] for f in by["frontend"]["files"]] == ["frontend/x.js"]
 
 
-def test_lanes_ordered_by_first_observation_one_entry_per_name(home, tmp_path):  # noqa: F811
+def test_lanes_ordered_by_first_observation_one_entry_per_name(home, tmp_path):
     """AC-1/S1: the lane list is ordered by first observation (smallest seq across
     lane spans and snapshot events); a lane observed several times (span twice plus
     snapshots) yields exactly one entry. Here frontend (seq 3) precedes backend
@@ -278,7 +250,7 @@ def test_lanes_ordered_by_first_observation_one_entry_per_name(home, tmp_path): 
     assert [ln["lane"] for ln in lanes] == ["frontend", "backend"]
 
 
-def test_snapshot_only_lane_appears_and_invalid_snapshot_events_are_ignored(home, tmp_path):  # noqa: F811,E501
+def test_snapshot_only_lane_appears_and_invalid_snapshot_events_are_ignored(home, tmp_path):  # noqa: E501
     """AC-1/S1: a lane observed ONLY via valid snapshots (no lane span) appears with
     its diff; snapshot events whose ref fails the structural validation
     (option-like, foreign run, range-like) contribute neither a lane nor a pair — so
@@ -319,7 +291,7 @@ def _bad_snap(seq, lane, ref):
                payload={"lane": lane, "tree": "t", "ref": ref, "label": "s"})
 
 
-def test_non_string_lane_names_are_ignored_without_a_5xx(home, tmp_path):  # noqa: F811
+def test_non_string_lane_names_are_ignored_without_a_5xx(home, tmp_path):
     """AC-1/S1 (contract `lane: string`): a numeric/`None`/empty `payload.name` on a
     lane span and a numeric `payload.lane` on a snapshot never become a lane — the
     only observed lane is the valid string one, and every reported `lane` is a
@@ -368,7 +340,7 @@ def test_non_mapping_payload_helpers_ignore_the_event_without_raising():
     ) == {}
 
 
-def test_non_mapping_lane_start_payload_is_ignored_without_a_5xx(home, tmp_path):  # noqa: F811
+def test_non_mapping_lane_start_payload_is_ignored_without_a_5xx(home, tmp_path):
     """AC-1: a `lane`/`start` event whose entire `payload` is a non-empty list, a
     non-empty string and a non-zero number never becomes a lane. Beside a valid
     string lane the detail stays 200 and the only reported lane is the valid one —
@@ -388,7 +360,7 @@ def test_non_mapping_lane_start_payload_is_ignored_without_a_5xx(home, tmp_path)
     assert [ln["lane"] for ln in cs["lanes"]] == ["backend"]
 
 
-def test_non_mapping_snapshot_payload_is_ignored_and_keeps_the_valid_pair(home, tmp_path):  # noqa: F811,E501
+def test_non_mapping_snapshot_payload_is_ignored_and_keeps_the_valid_pair(home, tmp_path):  # noqa: E501
     """AC-2: `snapshot` events whose entire `payload` is a list, a string and a
     number — placed before, between and after a valid snapshot pair — are ignored:
     the detail stays 200, the broken events bracket no node and appear in no lane,
@@ -416,7 +388,7 @@ def test_non_mapping_snapshot_payload_is_ignored_and_keeps_the_valid_pair(home, 
     assert [f["path"] for f in backend["files"]] == ["backend/a.py"]
 
 
-def test_run_with_only_non_mapping_payload_events_is_200_with_no_lanes(home, tmp_path):  # noqa: F811,E501
+def test_run_with_only_non_mapping_payload_events_is_200_with_no_lanes(home, tmp_path):  # noqa: E501
     """AC-3: a run built ONLY from `lane`/`start` and `snapshot` events whose payload
     is a non-mapping value (list / string / number) — no valid mapping-payload event
     at all, so the events go straight to `write_run` without the `_wrap` scaffold —
@@ -435,7 +407,7 @@ def test_run_with_only_non_mapping_payload_events_is_200_with_no_lanes(home, tmp
     assert r.json()["change_scope"]["lanes"] == []
 
 
-def test_unhashable_lane_values_do_not_crash_the_detail(home, tmp_path):  # noqa: F811
+def test_unhashable_lane_values_do_not_crash_the_detail(home, tmp_path):
     """AC-1/S1 robustness: an unhashable `payload.lane`/`payload.name` (a list or
     mapping) — which would raise `TypeError` if used as a dict key — is ignored, not
     a 5xx. The valid string lane is the only entry, and every `lane` is a string."""
@@ -457,7 +429,7 @@ def test_unhashable_lane_values_do_not_crash_the_detail(home, tmp_path):  # noqa
 # --- AC-6 / AC-7: canonical shapes for unusable and empty diffs -----------------
 
 
-def test_zero_and_one_snapshot_lanes_have_no_diff_and_no_run_diff(home, tmp_path):  # noqa: F811
+def test_zero_and_one_snapshot_lanes_have_no_diff_and_no_run_diff(home, tmp_path):
     """AC-6/AC-7: an observed lane with no snapshot (span only) and one with a
     single snapshot both carry the canonical unavailable shape
     ``diff_available: false`` / ``files: null`` (never ``[]``, never an omitted
@@ -477,7 +449,7 @@ def test_zero_and_one_snapshot_lanes_have_no_diff_and_no_run_diff(home, tmp_path
     assert all(ln["diff_available"] is False for ln in by.values())
 
 
-def test_available_diff_without_changes_is_empty_list_not_null(home, tmp_path):  # noqa: F811
+def test_available_diff_without_changes_is_empty_list_not_null(home, tmp_path):
     """AC-7/S3: a produced diff with no changed files is ``diff_available: true``
     with ``files: []`` — distinguishable from the unavailable ``files: null`` — so
     the view can say clearly "no changed files were found"."""
@@ -500,7 +472,7 @@ def test_available_diff_without_changes_is_empty_list_not_null(home, tmp_path): 
 # --- AC-8: robustness against git failure ---------------------------------------
 
 
-def test_diff_failure_despite_a_pair_stays_200_and_isolates_the_lane(home, tmp_path):  # noqa: F811
+def test_diff_failure_despite_a_pair_stays_200_and_isolates_the_lane(home, tmp_path):
     """AC-8/S3: when a lane's diff fails despite a snapshot pair (a removed ref
     object), that lane falls back to ``diff_available: false`` / ``files: null`` —
     never a false empty diff — while the response stays 200 and other lanes keep
@@ -535,7 +507,7 @@ def test_diff_failure_despite_a_pair_stays_200_and_isolates_the_lane(home, tmp_p
     OSError("exec failed"),                                       # ENOENT/EACCES-style
     subprocess.TimeoutExpired(cmd=["git", "diff"], timeout=1),    # SubprocessError family
 ], ids=["oserror", "timeout"])
-def test_subprocess_error_during_diff_is_unavailable_not_5xx(home, tmp_path, monkeypatch, exc):  # noqa: F811,E501
+def test_subprocess_error_during_diff_is_unavailable_not_5xx(home, tmp_path, monkeypatch, exc):  # noqa: E501
     """AC-8/S3: an OS-level execution error or a timeout while diffing is caught per
     lane — the lane becomes ``diff_available: false`` / ``files: null`` and the
     detail response stays 200 (never a 5xx, never an invented diff)."""
@@ -556,7 +528,7 @@ def test_subprocess_error_during_diff_is_unavailable_not_5xx(home, tmp_path, mon
 # --- AC-3 / AC-4: the declared contract scope as YAML text ----------------------
 
 
-def test_declared_scope_serializes_only_x_adw_blocks_in_document_order(home, tmp_path):  # noqa: F811
+def test_declared_scope_serializes_only_x_adw_blocks_in_document_order(home, tmp_path):
     """AC-3: ``declared_scope`` is a semantically equivalent YAML serialization of
     all top-level ``x-adw-*`` entries in document order — keys, values and nesting
     unchanged, no rename/merge/normalization. Other top-level entries are dropped,
@@ -599,7 +571,7 @@ def test_declared_scope_serializes_only_x_adw_blocks_in_document_order(home, tmp
     "openapi: 3.1.0\ninfo:\n  title: X\n",                   # mapping without any x-adw-* key
     "1: one\ntrue: yes\nnull: none\n",                       # only non-string keys
 ], ids=["missing", "not_mapping", "no_x_adw_key", "non_string_keys"])
-def test_declared_scope_is_null_when_no_readable_x_adw_scope(home, tmp_path, contract):  # noqa: F811
+def test_declared_scope_is_null_when_no_readable_x_adw_scope(home, tmp_path, contract):
     """AC-4: a missing contract, a non-mapping document, a mapping without any
     ``x-adw-*`` key, and a mapping whose only keys are non-strings each yield
     ``declared_scope: null`` — no error, no 5xx, a neutral absence."""
@@ -612,7 +584,7 @@ def test_declared_scope_is_null_when_no_readable_x_adw_scope(home, tmp_path, con
     assert detail["change_scope"]["declared_scope"] is None
 
 
-def test_declared_scope_from_a_boundary_escaping_symlink_is_null(home, tmp_path):  # noqa: F811
+def test_declared_scope_from_a_boundary_escaping_symlink_is_null(home, tmp_path):
     """AC-4/E5: a ``contract.yaml`` that is a symlink escaping the run directory is
     absent per the existing containment discipline — its target is never read and
     ``declared_scope`` is null."""
@@ -631,7 +603,7 @@ def test_declared_scope_from_a_boundary_escaping_symlink_is_null(home, tmp_path)
 # --- S6: read-only rendering in the run detail ----------------------------------
 
 
-def test_run_detail_renders_files_and_declared_scope(home, tmp_path):  # noqa: F811
+def test_run_detail_renders_files_and_declared_scope(home, tmp_path):
     """S6/AC-3/AC-9: the run-detail page renders the change-scope block read-only —
     the changed file paths, the binary label for a null count, and the declared
     scope as its verbatim content — with no "no diff"/"no declared scope"
@@ -648,7 +620,7 @@ def test_run_detail_renders_files_and_declared_scope(home, tmp_path):  # noqa: F
     assert CATALOG["en"]["change_scope_no_run_diff"] not in html
 
 
-def test_run_detail_states_no_run_diff_and_no_declared_scope(home, tmp_path):  # noqa: F811
+def test_run_detail_states_no_run_diff_and_no_declared_scope(home, tmp_path):
     """S6/AC-4/AC-7: when no lane has a usable diff and no declared scope exists, the
     block still renders and says so clearly — "no run diff available" and "no
     declared scope" — never an unexplained empty table."""
@@ -661,7 +633,7 @@ def test_run_detail_states_no_run_diff_and_no_declared_scope(home, tmp_path):  #
     assert CATALOG["en"]["change_scope_no_declared"] in html
 
 
-def test_run_detail_keeps_every_unavailable_lane_visible(home, tmp_path):  # noqa: F811
+def test_run_detail_keeps_every_unavailable_lane_visible(home, tmp_path):
     """S6/AC-6/AC-7: even when EVERY observed lane is unavailable, each lane stays
     visible with its name and its own "no diff available" state (never hidden) — the
     global "no run diff available" statement is shown IN ADDITION, and only the file
@@ -682,7 +654,7 @@ def test_run_detail_keeps_every_unavailable_lane_visible(home, tmp_path):  # noq
     assert CATALOG["en"]["change_scope_no_run_diff"] in html
 
 
-def test_change_scope_chrome_labels_are_bilingual(home, tmp_path):  # noqa: F811
+def test_change_scope_chrome_labels_are_bilingual(home, tmp_path):
     """B6: every change-scope chrome label exists in BOTH language blocks, non-empty,
     with identical key sets; German values are not mere copies of the English."""
     for key in CHANGE_SCOPE_LABEL_KEYS:

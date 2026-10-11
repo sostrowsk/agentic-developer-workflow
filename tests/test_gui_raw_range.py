@@ -1,44 +1,19 @@
-"""RED tests for A1/A2 — the Raw tab's inclusive seq-range filter and the
-span-node jump into it.
-
-The externally observable surface is the server-rendered run-detail page
-``GET /runs/{repo}/{run_id}`` with the two NEW query parameters ``raw_from_seq``
-and ``raw_to_seq`` (names pinned in .adw/contract.yaml). The range is composed
-SERVER-SIDE (logical AND) with the existing ``q``/``type`` filters and the
-``limit`` window; ``total`` stays the size of the match set BEFORE windowing and
-``types`` stays the full type set of the log (contract R1..R4). Every span node
-offers a jump that sets the range to its already-exposed ``[seq, end_seq]`` while
-preserving ``q``/``type``/``limit`` (R5/R6); an active range is visible and
-clearable in isolation, and landing on it activates the existing Raw tab without a
-second Raw widget (R5/R6).
-
-Markup/CSS are not pinned by the contract; following the established GUI test
-style (see ``test_gui_context_panel``) this module fixes a small, intuitive
-data-attribute / query observable so the implementation has a concrete target:
-the Raw filter form round-trips ``raw_from_seq``/``raw_to_seq`` and a
-``raw-range-clear`` control drops ONLY the range. No production code is written
-here.
-
-Derived from .adw/spec.md (AC 1-7), .adw/contract.yaml (R1..R6) and
-.adw/plan.md (B1-B3).
-"""
+"""Tests for the Raw tab's inclusive seq-range filter and the span-node jump into it."""
 
 import re
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
     comprehensive_lines,
-    home,
     iter_nodes,
     rec,
     run_end_payload,
     run_start_payload,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
 
 
 def _range_lines():
@@ -100,7 +75,7 @@ def _hrefs(chunk):
     return re.findall(r'href="([^"]*)"', chunk)
 
 
-def test_range_both_bounds_are_inclusive(home, tmp_path):  # noqa: F811
+def test_range_both_bounds_are_inclusive(home, tmp_path):
     """R1: with both bounds set, an event matches iff ``lower <= seq <= upper``;
     each bound is inclusive."""
     client, slug = _client(tmp_path, _range_lines())
@@ -111,7 +86,7 @@ def test_range_both_bounds_are_inclusive(home, tmp_path):  # noqa: F811
     assert _raw_total(html) == 3
 
 
-def test_range_one_sided_lower_and_upper(home, tmp_path):  # noqa: F811
+def test_range_one_sided_lower_and_upper(home, tmp_path):
     """R1: a single active bound filters one-sided (>= lower / <= upper)."""
     client, slug = _client(tmp_path, _range_lines())
 
@@ -122,7 +97,7 @@ def test_range_one_sided_lower_and_upper(home, tmp_path):  # noqa: F811
     assert set(_raw_seqs(upper)) == {"1", "2", "3"}
 
 
-def test_event_without_integer_seq_never_satisfies_active_range(home, tmp_path):  # noqa: F811
+def test_event_without_integer_seq_never_satisfies_active_range(home, tmp_path):
     """R1: an event whose ``seq`` is not an integer does not satisfy an active
     range, but is present when no range is active."""
     client, slug = _client(tmp_path, _range_lines())
@@ -137,7 +112,7 @@ def test_event_without_integer_seq_never_satisfies_active_range(home, tmp_path):
     assert _raw_total(plain) == 8             # unchanged: every event including the noseq one
 
 
-def test_range_composes_with_type_and_free_text(home, tmp_path):  # noqa: F811
+def test_range_composes_with_type_and_free_text(home, tmp_path):
     """R2: the range is AND-composed with ``type`` and with ``q`` (evaluated over
     the full serialized payload)."""
     client, slug = _client(tmp_path, _range_lines())
@@ -154,7 +129,7 @@ def test_range_composes_with_type_and_free_text(home, tmp_path):  # noqa: F811
     assert _raw_total(queried) == 3
 
 
-def test_range_limit_windows_after_filtering_and_total_is_pre_window(home, tmp_path):  # noqa: F811
+def test_range_limit_windows_after_filtering_and_total_is_pre_window(home, tmp_path):
     """R2: ``limit`` windows only the fully filtered match set; the reported
     ``total`` stays the match-set size BEFORE windowing."""
     client, slug = _client(tmp_path, _range_lines())
@@ -165,7 +140,7 @@ def test_range_limit_windows_after_filtering_and_total_is_pre_window(home, tmp_p
     assert _raw_total(html) == 5              # 5 events match the range before windowing
 
 
-def test_types_stay_the_full_log_type_set_with_active_range(home, tmp_path):  # noqa: F811
+def test_types_stay_the_full_log_type_set_with_active_range(home, tmp_path):
     """R3: the offered ``types`` list is the full type set of the log even while a
     narrow range is active."""
     client, slug = _client(tmp_path, _range_lines())
@@ -176,7 +151,7 @@ def test_types_stay_the_full_log_type_set_with_active_range(home, tmp_path):  # 
     assert {"run", "note.alpha", "note.beta", "note.noseq"} <= offered
 
 
-def test_non_numeric_bound_is_inactive_and_other_filters_stay_effective(home, tmp_path):  # noqa: F811
+def test_non_numeric_bound_is_inactive_and_other_filters_stay_effective(home, tmp_path):
     """R4: a non-numeric bound is treated as a missing bound (that bound inactive);
     a concurrently set ``q`` stays effective; two non-numeric bounds leave the Raw
     tab exactly as before."""
@@ -195,7 +170,7 @@ def test_non_numeric_bound_is_inactive_and_other_filters_stay_effective(home, tm
     assert _raw_total(both_bad) == 8                       # no range -> unchanged
 
 
-def test_upper_below_lower_is_a_defined_empty_set_no_5xx(home, tmp_path):  # noqa: F811
+def test_upper_below_lower_is_a_defined_empty_set_no_5xx(home, tmp_path):
     """R4: an upper bound below the lower yields a defined EMPTY match set with
     ``total`` 0 — never a traceback / 5xx — while ``q`` stays set."""
     client, slug = _client(tmp_path, _range_lines())
@@ -224,7 +199,7 @@ def _trace_section(html):
     return html[i:j]
 
 
-def test_span_node_offers_a_jump_to_its_subtree_seq_range(home, tmp_path):  # noqa: F811
+def test_span_node_offers_a_jump_to_its_subtree_seq_range(home, tmp_path):
     """R5: every span node offers a jump into the Raw tab pre-filtered to the
     node's already-exposed ``[seq, end_seq]``; the jump preserves the existing
     ``q``/``type``/``limit`` values, and no second Raw widget appears."""
@@ -244,7 +219,7 @@ def test_span_node_offers_a_jump_to_its_subtree_seq_range(home, tmp_path):  # no
     assert html.count('data-tab-panel="raw"') == 1              # E5: one Raw widget
 
 
-def test_active_range_is_visible_clearable_in_isolation_and_activates_raw(home, tmp_path):  # noqa: F811
+def test_active_range_is_visible_clearable_in_isolation_and_activates_raw(home, tmp_path):
     """R5/R6: an active range round-trips in the Raw filter form (so changing
     ``q``/``type``/``limit`` keeps it) and landing on it activates the existing Raw
     tab. A ``raw-range-clear`` control drops ONLY the range, keeping

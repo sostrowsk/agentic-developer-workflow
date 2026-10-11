@@ -1,31 +1,15 @@
-"""RED tests for A1 / Contract R1 — ``waiting`` in the trace tree.
+"""Tests for ``waiting`` in the trace tree."""
 
-An OPEN (still-running) span whose event type is in ``_WAITING_TYPES``
-(``ci.wait``, ``gate``) reports the new node status ``waiting`` instead of
-``running``. Any other open span (``agent.run`` and friends) still reports
-``running``; a CLOSED ``ci.wait``/``gate`` span keeps its prior result
-(``gate`` → ``passed``/``failed``, otherwise ``done``). ``_WAITING_TYPES`` stays
-the one shared source for the Timeline and the tree, so the same open span the
-Timeline draws as waiting reports ``waiting`` in the tree — the two never
-disagree.
-
-Derived from .adw/spec.md (AC1), .adw/contract.yaml (x-behavior.R1_tree_waiting)
-and .adw/plan.md (B1). The JSON status field of the tree is the pinned surface;
-addressed through FastAPI's TestClient. RED until ``_node_status`` learns the
-fifth value.
-"""
-
-import os
 import re
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
     find_node,
     find_node_by_label,
-    home,
     rec,
     run_end_payload,
     run_start_payload,
@@ -33,12 +17,6 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     timeline_lines,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
-
-
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _detail(tmp_path, lines, *, run_id=RUN_ID, phase="build"):
@@ -93,7 +71,7 @@ def closed_waiting_lines(issue="Closed waiting spans"):
 
 
 def test_open_ci_wait_and_gate_report_waiting_while_agent_run_stays_running(
-    home, tmp_path  # noqa: F811
+    home, tmp_path
 ):
     """R1: an OPEN ``ci.wait`` and an OPEN ``gate`` report ``waiting``; every
     other open span (here ``agent.run``) still reports ``running``."""
@@ -111,7 +89,7 @@ def test_open_ci_wait_and_gate_report_waiting_while_agent_run_stays_running(
     assert agent["running"] is True and agent["status"] == "running"
 
 
-def test_closed_waiting_spans_keep_their_prior_result(home, tmp_path):  # noqa: F811
+def test_closed_waiting_spans_keep_their_prior_result(home, tmp_path):
     """R1: a CLOSED ``gate`` keeps ``passed``/``failed`` and a CLOSED ``ci.wait``
     keeps ``done`` — ``waiting`` is only for the open case."""
     client, slug, run_id = _detail(tmp_path, closed_waiting_lines(), phase="done")
@@ -130,7 +108,7 @@ def test_closed_waiting_spans_keep_their_prior_result(home, tmp_path):  # noqa: 
 
 
 def test_tree_and_timeline_never_disagree_for_the_same_open_ci_wait(
-    home, tmp_path  # noqa: F811
+    home, tmp_path
 ):
     """R1: the same open ``ci.wait`` span the Timeline marks ``waiting`` reports
     ``waiting`` in the tree — the shared ``_WAITING_TYPES`` keeps both surfaces in

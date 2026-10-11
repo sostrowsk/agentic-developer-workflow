@@ -1421,7 +1421,7 @@ def test_failed_config_restore_of_tracked_config_escalates(ctx, monkeypatch):
             return real_subprocess.CompletedProcess(argv, 128, stdout=b"", stderr=b"fatal: kaputt")
         return original_run(argv, **kwargs)
 
-    monkeypatch.setattr("adw.phases.subprocess.run", failing_checkout)
+    monkeypatch.setattr("adw.git.subprocess.run", failing_checkout)
     with pytest.raises(EscalationError, match="[Cc]onfig"):
         run_build_phase(ctx)
     worktree = ctx.repo / ".adw" / "runs" / ctx.state.run_id / "trees" / "backend"
@@ -1470,7 +1470,7 @@ def test_git_error_during_config_absence_check_escalates(ctx, monkeypatch):
                 )
         return original_run(argv, **kwargs)
 
-    monkeypatch.setattr("adw.phases.subprocess.run", failing_git)
+    monkeypatch.setattr("adw.git.subprocess.run", failing_git)
     with pytest.raises(EscalationError):
         run_build_phase(ctx)
     worktree = ctx.repo / ".adw" / "runs" / ctx.state.run_id / "trees" / "backend"
@@ -2240,7 +2240,7 @@ def test_merge_timeout_escalates_instead_of_crashing(pctx, monkeypatch):
             raise sp.TimeoutExpired(cmd=argv, timeout=300)
         return real_run(argv, *args, **kwargs)
 
-    monkeypatch.setattr("adw.phases.subprocess.run", slow_merge)
+    monkeypatch.setattr("adw.git.subprocess.run", slow_merge)
     with pytest.raises(EscalationError, match="[Mm]erge"):
         run_integration_phase(pctx)
     assert (pctx.run_dir / "escalation.md").is_file()

@@ -1,22 +1,10 @@
-"""RED tests for the node-time run context added to the run-detail JSON.
-
-Derived from .adw/spec.md (AC 1–11), .adw/contract.yaml (RunContext, RoundContext,
-TraceNodeContextAddition, RunDetailContextAdditions, x-behavior C1–C6) and
-.adw/plan.md (B1–B5). The context is a PURELY DERIVED, read-only projection of the
-event stream already loaded for the detail response: every trace node carries a
-six-field ``context`` computed at its seq cutoff, and the response carries a
-top-level ``latest_context`` at the greatest seq.
-
-RED until ``_serialize``/``_run_detail`` in ``adw.gui.app`` attach ``context`` /
-``latest_context``. No production code is written here.
-"""
+"""Tests for the node-time run context added to the run-detail JSON."""
 
 import pytest
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
     iter_nodes,
     rec,
     run_end_payload,
@@ -99,7 +87,7 @@ def _context_lines():
     ]
 
 
-def test_every_node_and_latest_context_have_exactly_the_six_fields(home, tmp_path):  # noqa: F811
+def test_every_node_and_latest_context_have_exactly_the_six_fields(home, tmp_path):
     """AC 1 / contract RunContext: every trace node carries a ``context`` and the
     response a top-level ``latest_context``, each with EXACTLY the six agreed
     fields — never more, never fewer (E3)."""
@@ -113,7 +101,7 @@ def test_every_node_and_latest_context_have_exactly_the_six_fields(home, tmp_pat
         assert set(node["context"]) == SIX, node.get("type")
 
 
-def test_point_node_cutoff_uses_only_events_up_to_its_seq(home, tmp_path):  # noqa: F811
+def test_point_node_cutoff_uses_only_events_up_to_its_seq(home, tmp_path):
     """AC 2: a point-event node's cutoff is its own ``seq``; only events with
     ``seq`` <= that cutoff participate. The limit.hit at seq 6 sees the first cost
     and the first limit hit, but none of the later round / cost / breaker events."""
@@ -128,7 +116,7 @@ def test_point_node_cutoff_uses_only_events_up_to_its_seq(home, tmp_path):  # no
     assert ctx["cost_usd"] == pytest.approx(0.10)  # only A1 (@4); A2 (@12) is later
 
 
-def test_span_context_uses_end_seq_and_includes_inside_span_events(home, tmp_path):  # noqa: F811
+def test_span_context_uses_end_seq_and_includes_inside_span_events(home, tmp_path):
     """AC 2: a span node's cutoff is its exposed ``end_seq`` (subtree maximum), so
     selecting the finished round includes the cost, limit.hit and followup that
     occur INSIDE the span after its start — a running/finished span is not limited
@@ -144,7 +132,7 @@ def test_span_context_uses_end_seq_and_includes_inside_span_events(home, tmp_pat
     assert ctx["round"] == {"loop": "gates", "n": 2, "cap": 5}  # its own round
 
 
-def test_later_events_never_change_an_earlier_nodes_context(home, tmp_path):  # noqa: F811
+def test_later_events_never_change_an_earlier_nodes_context(home, tmp_path):
     """AC 2/3 (time travel): an earlier node reflects only its own cutoff, never a
     later event; selecting a different node exposes that node's historical state."""
     detail = _detail(tmp_path, "aaaa1111", _context_lines()).json()
@@ -162,7 +150,7 @@ def test_later_events_never_change_an_earlier_nodes_context(home, tmp_path):  # 
     assert latest["cost_usd"] == pytest.approx(0.30) and latest["circuit_breakers"] == 1
 
 
-def test_latest_context_reflects_the_greatest_seq(home, tmp_path):  # noqa: F811
+def test_latest_context_reflects_the_greatest_seq(home, tmp_path):
     """AC 3: ``latest_context`` is derived through the greatest observed seq — the
     live-run, no-selection view."""
     latest = _detail(tmp_path, "aaaa1111", _context_lines()).json()["latest_context"]
@@ -192,7 +180,7 @@ def _phase_precedence_lines():
     ]
 
 
-def test_phase_precedence_between_state_saved_and_phase_span_by_seq(home, tmp_path):  # noqa: F811
+def test_phase_precedence_between_state_saved_and_phase_span_by_seq(home, tmp_path):
     """AC 4 / C3: both a ``phase`` span's start ``name`` and a ``state.saved``
     ``phase`` are valid observations; the one with the greatest seq at/before the
     cutoff wins."""
@@ -214,7 +202,7 @@ def _phase_empty_lines():
     ]
 
 
-def test_phase_null_when_no_valid_observation(home, tmp_path):  # noqa: F811
+def test_phase_null_when_no_valid_observation(home, tmp_path):
     """AC 4 / C3: empty/absent phase values are not observations, so ``phase`` is
     null (not an empty-string artefact)."""
     detail = _detail(tmp_path, "cccc3333", _phase_empty_lines()).json()
@@ -226,7 +214,7 @@ def test_phase_null_when_no_valid_observation(home, tmp_path):  # noqa: F811
 # --- rounds (C4) ---------------------------------------------------------------
 
 
-def test_round_enclosing_own_and_null_outside(home, tmp_path):  # noqa: F811
+def test_round_enclosing_own_and_null_outside(home, tmp_path):
     """AC 5 / C4: a node inside a round (or the round node itself) carries the
     nearest enclosing round's ``{loop, n, cap}``; a node outside every round has
     ``round`` null."""
@@ -253,7 +241,7 @@ def _round_missing_lines():
     ]
 
 
-def test_round_missing_individual_values_stay_null(home, tmp_path):  # noqa: F811
+def test_round_missing_individual_values_stay_null(home, tmp_path):
     """AC 5 / C4 missing_values: an absent round field is null, not inferred."""
     tree = _detail(tmp_path, "dddd4444", _round_missing_lines()).json()["tree"]
 
@@ -271,7 +259,7 @@ def _running_round_lines():
     ]
 
 
-def test_latest_context_round_inside_a_running_round(home, tmp_path):  # noqa: F811
+def test_latest_context_round_inside_a_running_round(home, tmp_path):
     """AC 5 / C4 latest_context: with the greatest-seq event inside an open round,
     ``latest_context.round`` is that round; contrast the master fixture, where the
     round ended before the last event and ``latest_context.round`` is null."""
@@ -300,7 +288,7 @@ def _open_round_nested_span_lines():
     ]
 
 
-def test_open_round_containing_a_nested_active_span(home, tmp_path):  # noqa: F811
+def test_open_round_containing_a_nested_active_span(home, tmp_path):
     """AC 5 / C4 (regression): a round is recognised for a cutoff inside its SUBTREE,
     even when the round's own span carries only its start event and the newest
     events belong to a nested span. Both the nested node contexts and
@@ -316,7 +304,7 @@ def test_open_round_containing_a_nested_active_span(home, tmp_path):  # noqa: F8
 # --- counts & cost (C5): null, never a fabricated 0 ----------------------------
 
 
-def test_counts_and_cost_are_null_when_the_event_type_never_occurs(home, tmp_path):  # noqa: F811
+def test_counts_and_cost_are_null_when_the_event_type_never_occurs(home, tmp_path):
     """AC 6/7/8 / C5: a run without any limit.hit / circuit_breaker / followup /
     cost carries null for those fields — never a fabricated 0 (E4)."""
     latest = _detail(tmp_path, "ffff6666",
@@ -347,7 +335,7 @@ def _malformed_lines():
     ]
 
 
-def test_malformed_or_incomplete_payloads_yield_null_not_error(home, tmp_path):  # noqa: F811
+def test_malformed_or_incomplete_payloads_yield_null_not_error(home, tmp_path):
     """AC 10 / C6: invalid values are not invented as data and never raise a 5xx —
     only the affected fields stay null."""
     resp = _detail(tmp_path, "abcd1234", _malformed_lines())
@@ -377,7 +365,7 @@ def _non_dict_agentrun_payload_lines():
     ]
 
 
-def test_non_dict_agent_run_payload_does_not_5xx(home, tmp_path):  # noqa: F811
+def test_non_dict_agent_run_payload_does_not_5xx(home, tmp_path):
     """AC 10 / C6: a non-mapping ``agent.run`` end payload leaves ``cost_usd`` null
     and never raises a 5xx (defensive malformed-payload requirement)."""
     resp = _detail(tmp_path, "12ab34cd", _non_dict_agentrun_payload_lines())
@@ -399,7 +387,7 @@ def _precise_cost_lines(cost):
     ]
 
 
-def test_api_cost_usd_is_exact_not_rounded(home, tmp_path):  # noqa: F811
+def test_api_cost_usd_is_exact_not_rounded(home, tmp_path):
     """AC 7 / E4: the JSON API returns the EXACT cumulative cost (sum of agent.run
     ``cost_usd``); rounding is presentation-only and must not alter the
     API value."""
@@ -411,7 +399,7 @@ def test_api_cost_usd_is_exact_not_rounded(home, tmp_path):  # noqa: F811
     assert detail["latest_context"]["cost_usd"] != round(cost, 6)  # rounding would differ
 
 
-def test_run_without_a_trace_has_only_latest_context_all_null(home, tmp_path):  # noqa: F811
+def test_run_without_a_trace_has_only_latest_context_all_null(home, tmp_path):
     """AC 10 / C6: a run without a trace has no trace nodes, no synthetic node and
     NO top-level ``context`` field — only ``latest_context`` with all six fields
     null, and never a 5xx."""

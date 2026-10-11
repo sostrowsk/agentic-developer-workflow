@@ -14,20 +14,17 @@ Safety: raw HTML in a payload is escaped, never executed, and a link renders as
 literal text — payload text is agent-generated and must not become a click target.
 """
 
-import os
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import _payload_blocks, _render_markdown, create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
     rec,
     run_start_payload,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
 
 
 def _kinds(blocks):
@@ -87,11 +84,9 @@ def test_code_blocks_and_tables_survive():
     assert "<code" in html and "x = 1" in html
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
-def test_the_run_pane_renders_its_issue_as_markdown(home, tmp_path):  # noqa: F811
+def test_the_run_pane_renders_its_issue_as_markdown(home, tmp_path):
     """End to end: the run node's pane shows the issue as a document, not as source."""
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
@@ -138,7 +133,7 @@ def _panes(client, slug, focus=None):
     return html[i:j]
 
 
-def test_agent_run_prompt_answer_and_messages_render_as_markdown(home, tmp_path):  # noqa: F811
+def test_agent_run_prompt_answer_and_messages_render_as_markdown(home, tmp_path):
     """The prompt and answer tabs are the fields most worth rendering — a task string
     and an agent's reply are Markdown. They must not stay source text while the
     generic payload block renders."""
@@ -157,7 +152,7 @@ def test_agent_run_prompt_answer_and_messages_render_as_markdown(home, tmp_path)
     assert "# Aufgabe" not in panes and "## Ergebnis" not in panes
 
 
-def test_the_prompt_diff_stays_literal(home, tmp_path):  # noqa: F811
+def test_the_prompt_diff_stays_literal(home, tmp_path):
     """A unified diff is NOT Markdown: its leading `-`/`+` would become list items and
     `---`/`+++` a heading rule. It stays verbatim."""
     repo = tmp_path / "repo"
@@ -207,7 +202,7 @@ def _single_line_run_lines():
     ]
 
 
-def test_single_line_blocks_keep_their_semantic_classes(home, tmp_path):  # noqa: F811
+def test_single_line_blocks_keep_their_semantic_classes(home, tmp_path):
     """Regression: a class attribute built inside a Jinja expression is autoescaped,
     so `class="final"` arrives as `class=&#34;final&#34;` and the browser reads the
     quotes as part of the class name — every existing `.final` / `.assistant` rule
@@ -224,7 +219,7 @@ def test_single_line_blocks_keep_their_semantic_classes(home, tmp_path):  # noqa
     assert '<pre class="final">' in html
 
 
-def test_an_empty_system_append_renders_no_block(home, tmp_path):  # noqa: F811
+def test_an_empty_system_append_renders_no_block(home, tmp_path):
     """Regression: prompt and system append used to share one <pre>. Split into two
     blocks, an empty append leaves a styled, visibly blank panel — it is omitted."""
     repo = tmp_path / "repo"

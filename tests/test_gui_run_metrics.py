@@ -1,38 +1,16 @@
-"""RED tests for A1 — run metrics summed over the WHOLE run (AC 1–4, AC 14).
+"""Tests for run metrics summed over the WHOLE run."""
 
-Today ``_summary`` (adw/gui/app.py) reports ``duration``/``cost`` from the LAST
-``run`` span only; a gated run is several CLI commands (several ``run`` spans in
-one log), so the numbers are the last section's, not the run's. This brief sums
-``duration``, ``cost`` and ``tokens`` over ALL closed ``run`` spans while ``start``
-stays the first span. An open (unfinished) span contributes nothing; without any
-closed span the numbers stay ``null`` — never a fabricated ``0`` (E6) — but a real
-``0`` from the payload is kept.
 
-Addressed through the observable HTTP surface (``/api/runs``,
-``/api/runs/{repo}/{run_id}`` and the rendered list ``/``) with FastAPI's
-TestClient, exactly as the sibling run-list tests do; the contract pins the field
-NAMES/TYPES, not the internal helper. Derived from .adw/spec.md (AC 1–4, 14),
-.adw/contract.yaml (RunSummary, invariants) and .adw/plan.md (B1, B2).
-"""
 
-import os
-
-from fastapi.testclient import TestClient
-
-from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    _client,
+    _slug_for,
     rec,
     run_end_payload,
     run_start_payload,
     ts,
     write_run,
 )
-
-
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _by_id(entries, run_id):
@@ -61,14 +39,12 @@ def multi_span_lines(specs, *, issue="Gated run", last_status="done"):
     return lines
 
 
-def _client(repo):
-    return TestClient(create_app(repos=[str(repo)]))
 
 
 # --- AC 1: sum over all closed spans -------------------------------------------
 
 
-def test_metrics_summed_over_all_closed_run_spans(home, tmp_path):  # noqa: F811
+def test_metrics_summed_over_all_closed_run_spans(home, tmp_path):
     """AC 1: three closed spans with totals 100/200/300 s and 1/2/3 $ report
     ``duration`` 600 and ``cost`` 6 (not 300 / 3); tokens 10/20/30 sum to 60;
     ``duration`` equals ``work_seconds``; ``start`` stays the FIRST span."""
@@ -90,7 +66,7 @@ def test_metrics_summed_over_all_closed_run_spans(home, tmp_path):  # noqa: F811
 # --- AC 2: an open last span contributes nothing -------------------------------
 
 
-def test_open_last_span_contributes_nothing(home, tmp_path):  # noqa: F811
+def test_open_last_span_contributes_nothing(home, tmp_path):
     """AC 2: a run whose LAST span is still open counts only the closed spans; the
     open span adds nothing and raises no exception."""
     repo = tmp_path / "repo"
@@ -116,7 +92,7 @@ def test_open_last_span_contributes_nothing(home, tmp_path):  # noqa: F811
 # --- AC 3: no closed span → null, but a real 0 is kept -------------------------
 
 
-def test_no_closed_span_is_null_while_a_real_zero_is_kept(home, tmp_path):  # noqa: F811
+def test_no_closed_span_is_null_while_a_real_zero_is_kept(home, tmp_path):
     """AC 3 / E6: with no closed span the metrics are ``null`` (never a fabricated
     0); a span whose payload carries a genuine 0 keeps the 0."""
     repo = tmp_path / "repo"
@@ -151,7 +127,7 @@ def test_no_closed_span_is_null_while_a_real_zero_is_kept(home, tmp_path):  # no
 # --- AC 4: a gated run reports the corrected, higher value ----------------------
 
 
-def test_gated_run_costs_corrected_and_list_matches_detail(home, tmp_path):  # noqa: F811
+def test_gated_run_costs_corrected_and_list_matches_detail(home, tmp_path):
     """AC 4: for a 16f39431-shaped run the list reports $56.88 (the SUM), not the
     last span's $47.16; for an e4e70373-shaped run whose last span cost $0.00 the
     reported cost is greater than zero. The run detail head reads the SAME value as
@@ -190,7 +166,7 @@ def test_gated_run_costs_corrected_and_list_matches_detail(home, tmp_path):  # n
 # --- AC 14: the contract fields survive; the new ones are additive --------------
 
 
-def test_contract_fields_preserved_and_additive(home, tmp_path):  # noqa: F811
+def test_contract_fields_preserved_and_additive(home, tmp_path):
     """AC 14: every field of RunSummary keeps its name/type; ``issue`` stays the
     raw (truncated) issue value — NOT the derived display title; the four time-size
     fields and ``tokens`` are additionally present; ``tree`` stays a list."""

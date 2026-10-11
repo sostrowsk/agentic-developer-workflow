@@ -20,8 +20,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from adw.env import safe_env
+from adw.git import run_git
 from adw.state import RUN_ID_RE, RUNS_RELPATH, RunState, StateNotFoundError
+from adw.state import contained as _contained
+from adw.state import runs_root as _runs_root
 from adw.worktrees import WorktreeError, remove_registered_worktree
 
 _GIT_TIMEOUT = 60
@@ -68,41 +70,10 @@ class RetentionError(Exception):
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", *args],
-        capture_output=True,
-        text=True,
-        timeout=_GIT_TIMEOUT,
-        env=safe_env(),
-    )
+    return run_git(repo, *args, timeout=_GIT_TIMEOUT)
 
 
 # --- containment: never read/replace/delete anything outside the runs tree ------
-
-
-def _runs_root(repo: Path) -> Path | None:
-    """The resolved ``.adw/runs`` directory — but ONLY if it stays within the
-    resolved repository (mirrors adw/gui/app.py::_runs_root). A ``.adw/runs`` that is
-    itself a symlink to somewhere OUTSIDE the repo would otherwise become the
-    containment root and expose arbitrary external directories to deletion/gzip.
-    Returns None when it escapes or collapses onto the repo root."""
-    repo_root = repo.resolve()
-    runs_root = (repo_root / RUNS_RELPATH).resolve()
-    if runs_root == repo_root or not runs_root.is_relative_to(repo_root):
-        return None
-    return runs_root
-
-
-def _contained(path: Path, root: Path) -> Path | None:
-    """The real path if it stays within ``root`` after resolving EVERY symlink, else
-    None — the same discipline the GUI reader applies. Pruning must never follow a
-    symlinked run directory or event log out of the runs tree and delete/replace a
-    file elsewhere (scope + data-loss guard)."""
-    try:
-        resolved = path.resolve()
-    except OSError:
-        return None
-    return resolved if resolved.is_relative_to(root) else None
 
 
 def _is_valid_gzip(path: Path) -> bool:
@@ -276,13 +247,7 @@ def _worktree_dirty(path: Path) -> bool:
     dirty — cleanliness could not be established, so the run is never force-removed
     (C4)."""
     try:
-        result = subprocess.run(
-            ["git", "-C", str(path), "-c", "core.hooksPath=/dev/null", "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT,
-            env=safe_env(),
-        )
+        result = run_git(path, "status", "--porcelain", timeout=_GIT_TIMEOUT)
     except (OSError, subprocess.SubprocessError):
         return True
     if result.returncode != 0:

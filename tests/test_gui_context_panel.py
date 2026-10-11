@@ -1,30 +1,12 @@
-"""RED tests for the read-only run-context PANEL on the run-detail page.
-
-Two halves, in the established GUI test style and without any browser automation:
-
-* markup (``TestClient`` over ``GET /runs/{repo}/{run_id}``): the page renders the
-  read-only six-field panel beside the detail pane, each rendered node carries its
-  own six-field ``context`` in the markup (``data-context``), and the no-selection
-  fallback (``data-latest-context``) travels with the page — including a run with
-  no trace, whose panel fields are simply empty;
-* behaviour (the minimal JS harness driving the SERVED ``app.js`` in ``node``):
-  selecting a node projects THAT node's context onto the panel fields; changing the
-  selection updates every field (time travel); a null field renders empty, never 0.
-
-Derived from .adw/spec.md (AC 9, 3, 4), .adw/contract.yaml (P1_context_panel) and
-.adw/plan.md (B6). RED until the template renders the panel/context data and
-``app.js`` wires the selection-driven projection. No production code is written
-here; the panel's data-attribute contract is asserted so the implementation has a
-concrete observable to satisfy.
-"""
+"""Tests for the read-only run-context PANEL on the run-detail page."""
 
 import re
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
     rec,
     run_end_payload,
     run_start_payload,
@@ -33,7 +15,6 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
 )
 from tests.gui_js_harness import run_scenario
 
-RUN_ID = "aaaa1111"
 FIELDS = ("phase", "round", "limit_hits", "circuit_breakers", "cost_usd", "followups")
 
 
@@ -71,7 +52,7 @@ def _trace_section(html: str) -> str:
     return html[i:j] if (i != -1 and j != -1 and i < j) else ""
 
 
-def test_context_panel_is_a_read_only_six_field_list_on_the_page(home, tmp_path):  # noqa: F811
+def test_context_panel_is_a_read_only_six_field_list_on_the_page(home, tmp_path):
     """AC 9 / P1_context_panel: the page renders a read-only context panel with a
     fixed slot for each of the six fields, beside the existing detail pane. The
     existing detail-pane tabs remain present."""
@@ -93,7 +74,7 @@ def test_context_panel_is_a_read_only_six_field_list_on_the_page(home, tmp_path)
     assert 'data-tab="trace"' in html and 'data-tab-panel="tools"' in html
 
 
-def test_each_rendered_node_carries_its_own_context_in_the_markup(home, tmp_path):  # noqa: F811
+def test_each_rendered_node_carries_its_own_context_in_the_markup(home, tmp_path):
     """AC 3 / plan B6: the panel data travels PER NODE in the render (no client-side
     re-derivation) — each rendered trace node carries a ``data-context`` — and the
     no-selection fallback ``data-latest-context`` is available in the markup."""
@@ -106,7 +87,7 @@ def test_each_rendered_node_carries_its_own_context_in_the_markup(home, tmp_path
     assert re.search(r"\sdata-context=", _trace_section(html))
 
 
-def test_run_without_trace_still_renders_the_panel_with_empty_fields(home, tmp_path):  # noqa: F811
+def test_run_without_trace_still_renders_the_panel_with_empty_fields(home, tmp_path):
     """AC 10 / P1: a run without a trace renders the panel (fed by
     ``latest_context``) without error — the fields are simply empty, never 0."""
     client, slug = _client(tmp_path, run_id="beef0001", state_only=True)

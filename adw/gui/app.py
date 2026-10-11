@@ -31,12 +31,14 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markdown_it import MarkdownIt
 
-from adw.env import safe_env
+from adw.git import run_git
 from adw.gui import i18n
 from adw.gui.model import build_tree
 from adw.gui.reader import EventReader
 from adw.gui.registry import _slug, _unique_slug, load_registry
 from adw.state import RUN_ID_RE, RUNS_RELPATH, RunState, StateNotFoundError
+from adw.state import contained as _contained
+from adw.state import runs_root as _runs_root
 
 _HERE = Path(__file__).resolve().parent
 _TEMPLATES = Jinja2Templates(directory=str(_HERE / "templates"))
@@ -215,6 +217,9 @@ _FOLDABLE_TOOLS = ("Read", "Grep", "Glob")
 # read/search group, A3) yet repeating the same write is pure noise, so it collapses
 # into a repeat of its own.
 _WRITE_TOOLS = ("Write", "Edit")
+# Calls that have a repeat target: the tool's priority main argument
+# (_TOOL_ARG_PRIORITY) — file_path, or pattern for Grep/Glob.
+_TARGET_TOOLS = ("Read", *_WRITE_TOOLS, "Grep", "Glob")
 
 
 def _tool_use_id(node):
@@ -237,26 +242,42 @@ def _tool_target(node):
     if not isinstance(inp, dict):
         return None
     tool = p.get("tool")
-    key = ("file_path" if tool in ("Read",) + _WRITE_TOOLS
-           else ("pattern" if tool in ("Grep", "Glob") else None))
-    if key is None:
+    if tool not in _TARGET_TOOLS:
         return None
-    value = inp.get(key)
+    value = inp.get(_TOOL_ARG_PRIORITY[tool][0])
     return value if isinstance(value, str) and value else None
 
 
-def _result_outcome(result_node):
-    """The determinable outcome of a folded result, read from its existing label
-    (``_tool_result_label``): ``"ok"``/``"error"`` — or None when undetermined, which
-    is NEVER presented as success (spec A1)."""
-    label = result_node.get("label")
-    if not isinstance(label, str):
+def _is_number(value) -> bool:
+    """A real int/float — ``bool`` is an int subclass but never a measurement."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _result_failed(payload) -> bool | None:
+    """THE outcome rule of a tool result: ``is_error`` wins, else a nonzero
+    ``exit_code`` is a failure and zero a success; anything else (``content`` is a
+    body, not an outcome) is undetermined — None, never presented as success."""
+    if not isinstance(payload, dict):
         return None
-    if label.startswith("error"):
-        return "error"
-    if label == "ok" or label.startswith("ok "):
-        return "ok"
+    is_error, exit_code = payload.get("is_error"), payload.get("exit_code")
+    if isinstance(is_error, bool):
+        return is_error
+    if isinstance(exit_code, int) and not isinstance(exit_code, bool):
+        return exit_code != 0
     return None
+
+
+def _result_outcome(result_node):
+    """The determinable outcome of a folded result: ``"ok"``/``"error"`` — or None
+    when undetermined (spec A1). A result whose label stayed the bare type name has
+    no resolvable tool identity and stays undetermined, like its label."""
+    label = result_node.get("label")
+    if not isinstance(label, str) or label == "agent.tool.result":
+        return None
+    failed = _result_failed(_mapping_payload(result_node))
+    if failed is None:
+        return None
+    return "error" if failed else "ok"
 
 
 def _iso_dt(ts):
@@ -442,13 +463,7 @@ def _node_determinate_error(node) -> bool:
     (``is_error: true``, else ``exit_code != 0``, else a failed span); an
     undetermined result is not an error."""
     if node.get("type") == "agent.tool.result":
-        p = _mapping_payload(node)
-        ie, ec = p.get("is_error"), p.get("exit_code")
-        if isinstance(ie, bool):
-            return ie
-        if isinstance(ec, int) and not isinstance(ec, bool):
-            return ec != 0
-        return False
+        return _result_failed(_mapping_payload(node)) is True
     return node.get("status") == "failed"
 
 
@@ -561,7 +576,7 @@ def _annotate_paths(entries, repo_root) -> None:
 
 
 def _fmt_duration(seconds) -> str:
-    if not isinstance(seconds, (int, float)) or isinstance(seconds, bool):
+    if not _is_number(seconds):
         return ""
     total = int(round(seconds))
     hours, rem = divmod(total, 3600)
@@ -576,7 +591,7 @@ def _fmt_duration(seconds) -> str:
 
 
 def _fmt_cost(cost) -> str:
-    if not isinstance(cost, (int, float)) or isinstance(cost, bool):
+    if not _is_number(cost):
         return ""
     return f"${cost:.2f}"
 
@@ -610,7 +625,7 @@ def _compact_context(ctx):
             continue
         if k == "round" and isinstance(v, dict):
             out[k] = {rk: rv for rk, rv in v.items() if rv is not None}
-        elif k == "cost_usd" and isinstance(v, (int, float)) and not isinstance(v, bool):
+        elif k == "cost_usd" and _is_number(v):
             out[k] = round(v, 6)
         else:
             out[k] = v
@@ -878,32 +893,6 @@ def _ts_epoch(ts):
         return None
 
 
-def _runs_root(repo_path) -> Path | None:
-    """The resolved ``.adw/runs`` directory — but ONLY if it stays within the
-    resolved repository. A ``.adw/runs`` that is itself a symlink to somewhere
-    outside the registered repo would otherwise become the containment root and
-    expose arbitrary external runs (GUI-SPEC §8). Anchoring to the resolved repo
-    (not to the resolved runs dir) closes that escape; per-run/per-file symlinks
-    are still checked against this validated root by :func:`_contained`."""
-    repo_root = Path(repo_path).resolve()
-    runs_root = (repo_root / RUNS_RELPATH).resolve()
-    if runs_root == repo_root or not runs_root.is_relative_to(repo_root):
-        return None
-    return runs_root
-
-
-def _contained(path: Path, root: Path) -> Path | None:
-    """The real path if it stays within ``root`` after resolving EVERY symlink,
-    else None. The read-only scope (GUI-SPEC §8) must never follow a symlinked run
-    directory or events/state file out of the resolved runs tree — resolving both
-    sides consistently neutralises legitimate symlinks in the root itself."""
-    try:
-        resolved = path.resolve()
-    except OSError:
-        return None
-    return resolved if resolved.is_relative_to(root) else None
-
-
 def _events_source(run_dir: Path, runs_root: Path):
     """The contained event-log file to read: ``events.jsonl`` if present, else the
     gzipped ``events.jsonl.gz`` (a pruned but kept run). When both exist the plain
@@ -919,11 +908,17 @@ def _events_source(run_dir: Path, runs_root: Path):
 
 
 def _read_events(run_dir: Path, runs_root: Path):
+    events, problems, _has_trace = _load_events(run_dir, runs_root)
+    return events, problems
+
+
+def _load_events(run_dir: Path, runs_root: Path):
+    """(events, problems, has_trace) from ONE lookup and ONE parse of the log."""
     events_file = _events_source(run_dir, runs_root)
     if events_file is None:
-        return [], []
+        return [], [], False
     result = EventReader(events_file).read()
-    return result.events, result.problems
+    return result.events, result.problems, True
 
 
 def _load_state(run_dir: Path, runs_root: Path, repo_path, run_id):
@@ -1029,7 +1024,7 @@ def _run_totals(events) -> dict:
             totals = _as_mapping(_mapping_payload(e).get("totals"))
             for key in _RUN_TOTAL_KEYS:
                 v = totals.get(key)
-                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                if _is_number(v):
                     sums[key] = v if sums[key] is None else sums[key] + v
     return sums
 
@@ -1079,7 +1074,7 @@ def _phase_time_sizes(phases, now_epoch):
     return phase_seconds, wait_seconds, total_seconds
 
 
-def _summary(slug, run_id, events, state, has_trace=None, now_epoch=None) -> dict:
+def _summary(slug, run_id, events, state, has_trace=None, now_epoch=None, phases=None) -> dict:
     start_rec, end_rec = _run_span(events)
     start_payload = _mapping_payload(start_rec or {})
     end_payload = _mapping_payload(end_rec or {})
@@ -1088,7 +1083,8 @@ def _summary(slug, run_id, events, state, has_trace=None, now_epoch=None) -> dic
     # The named time sizes (A2): computed from the normative definitions, NOT copied
     # from the presentation-only phase timeline (which includes open phases, rounds
     # seconds and drops a zero-length timeline).
-    phases = _phase_bar(events, state.phase if state is not None else None)
+    if phases is None:
+        phases = _phase_bar(events, state.phase if state is not None else None)
     phase_seconds, wait_seconds, total_seconds = _phase_time_sizes(
         phases, time.time() if now_epoch is None else now_epoch)
     issue = start_payload.get("issue")
@@ -1331,14 +1327,11 @@ _TOOL_ARG_MAX = 80
 
 
 def _tool_main_arg(tool, inp) -> str | None:
-    if not isinstance(inp, dict):
+    """The main argument for a label, truncated to ``_TOOL_ARG_MAX``."""
+    value, _key = _raw_main_arg(tool, inp)
+    if value is None:
         return None
-    keys = _TOOL_ARG_PRIORITY.get(tool, ()) + _TOOL_ARG_FALLBACK
-    for key in keys:
-        value = inp.get(key)
-        if isinstance(value, str) and value:
-            return value if len(value) <= _TOOL_ARG_MAX else value[:_TOOL_ARG_MAX] + "…"
-    return None
+    return value if len(value) <= _TOOL_ARG_MAX else value[:_TOOL_ARG_MAX] + "…"
 
 
 def _tool_call_label(p) -> str:
@@ -1358,20 +1351,11 @@ def _tool_result_label(p, tool_names) -> str:
     tool = p.get("tool") or tool_names.get(p.get("tool_use_id"))
     if not tool:
         return "agent.tool.result"
-    # Only ``is_error`` / ``exit_code`` are actual outcome fields; ``content`` is
-    # the payload body, not an outcome, so a content-only result stays the type
-    # name rather than being invented as success.
-    is_error = p.get("is_error")
-    exit_code = p.get("exit_code")
-    if isinstance(is_error, bool):
-        failed = is_error
-    elif isinstance(exit_code, int) and not isinstance(exit_code, bool):
-        # No explicit is_error: a nonzero exit code is a failure, zero a success —
-        # never the opposite (a nonzero exit must not be presented as ``ok``).
-        failed = exit_code != 0
-    else:
+    failed = _result_failed(p)
+    if failed is None:
         return "agent.tool.result"  # no valid outcome signal → keep the type name
     outcome = "error" if failed else "ok"
+    exit_code = p.get("exit_code")
     if exit_code is not None:
         return f"{outcome} (exit {exit_code})"
     return outcome
@@ -1430,7 +1414,7 @@ def _subtree_cost(node):
         if node.type == "agent.run":
             ep = node.end_payload
             cost = ep.get("cost_usd") if isinstance(ep, dict) else None
-            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+            if _is_number(cost):
                 total = float(cost)
         for child in node.children:
             child_cost = _subtree_cost(child)
@@ -1798,7 +1782,7 @@ def _tokens_per_model(events) -> list[dict]:
             model = model_by_span.get(e.get("span")) or "?"
             tokens = sum(
                 v for v in usage.values()
-                if isinstance(v, (int, float)) and not isinstance(v, bool)
+                if _is_number(v)
             )
             per[model] = per.get(model, 0) + int(tokens)
     return [{"model": m, "tokens": t} for m, t in per.items()]
@@ -1902,7 +1886,7 @@ def _context_deriver(events, round_ranges):
         if t == "agent.run" and e.get("kind") == "end":
             payload = e.get("payload")
             c = payload.get("cost_usd") if isinstance(payload, dict) else None
-            if isinstance(c, (int, float)) and not isinstance(c, bool):
+            if _is_number(c):
                 cost = (cost or 0.0) + float(c)
         pre_cost[i] = cost
         obs = _phase_observation(e)
@@ -2332,8 +2316,11 @@ def _escalated_recovery(events) -> dict:
 def _run_detail(
     ref: RepoRef, run_id: str, run_dir: Path, runs_root: Path, *,
     limit=_DISPLAY_WINDOW, raw_q=None, raw_type=None, raw_from_seq=None, raw_to_seq=None,
+    loaded=None,
 ) -> dict:
-    events, problems = _read_events(run_dir, runs_root)
+    """The detail projection. ``loaded`` = a ``_load_events`` result the caller
+    already holds (the HTML page reuses it for the timeline: one parse per request)."""
+    events, problems, has_trace = loaded or _load_events(run_dir, runs_root)
     state = _load_state(run_dir, runs_root, ref.path, run_id)
     tool_names = _tool_names_by_use_id(events)
     own_ranges = _span_seq_ranges(events)
@@ -2348,13 +2335,11 @@ def _run_detail(
     round_ranges = _round_subtree_ranges(roots, own_ranges)
     context_at = _context_deriver(events, round_ranges)
     prompt_diffs = _prompt_diffs(roots)
-    run_summary = _summary(
-        ref.slug, run_id, events, state,
-        has_trace=_events_source(run_dir, runs_root) is not None,
-    )
+    phases = _phase_bar(events, state.phase if state is not None else None)
+    run_summary = _summary(ref.slug, run_id, events, state, has_trace=has_trace, phases=phases)
     detail = {
         "run": run_summary,
-        "phases": _phase_bar(events, state.phase if state is not None else None),
+        "phases": phases,
         "tree": [
             _serialize(n, tool_names, own_ranges=own_ranges, snaps=snaps,
                        context_at=context_at, prompt_diffs=prompt_diffs)
@@ -2432,31 +2417,30 @@ def _parse_numstat(text: str) -> list:
     return files
 
 
-def _git_diff(repo_path, frm: str, to: str) -> dict:
-    """Run ``git diff`` between two already-allowlisted refs like the orchestrator
-    (AC-B4): a list argv (no shell), ``core.hooksPath=/dev/null``, ``safe_env()``,
-    a timeout. Reads only — no worktree switch, no ref created/updated/deleted.
-
-    BOTH git invocations are checked: if either fails (a dangling/removed ref, a
-    concurrent gc, a one-sided failure), the result is NOT a valid diff and must
-    never be presented as an (empty) success — a controlled non-5xx error is
-    raised so no diff data is silently lost or misrepresented."""
-    base = ["git", "-C", str(repo_path), "-c", "core.hooksPath=/dev/null"]
-    env = safe_env()
-    numstat = subprocess.run(
-        [*base, "diff", "--numstat", frm, to],
-        capture_output=True, text=True, timeout=_GIT_DIFF_TIMEOUT, env=env,
-    )
-    patch = subprocess.run(
-        [*base, "diff", frm, to],
-        capture_output=True, text=True, timeout=_GIT_DIFF_TIMEOUT, env=env,
-    )
-    if numstat.returncode != 0 or patch.returncode != 0:
+def _git_diff_output(repo_path, *args: str) -> str:
+    """One read-only ``git diff`` between two already-allowlisted refs, run like the
+    orchestrator (AC-B4): list argv (no shell), hooks off, ``safe_env()``, a timeout
+    — no worktree switch, no ref created/updated/deleted. A failing git (a dangling
+    or removed ref, a concurrent gc) is NOT a valid diff and must never be presented
+    as an (empty) success: a controlled non-5xx error is raised instead."""
+    result = run_git(repo_path, "diff", *args, timeout=_GIT_DIFF_TIMEOUT)
+    if result.returncode != 0:
         # Allowlisted and well-formed, but git could not produce the diff (e.g. the
         # snapshot object is gone). Report it as unavailable, never a false empty
         # diff. Non-5xx, and never a partial/one-sided result.
         raise HTTPException(status_code=404, detail="Snapshot diff unavailable")
-    return {"files": _parse_numstat(numstat.stdout), "patch": patch.stdout}
+    return result.stdout
+
+
+def _git_numstat(repo_path, frm: str, to: str) -> list:
+    """Per-file change counts only — the change-scope view needs no patch text."""
+    return _parse_numstat(_git_diff_output(repo_path, "--numstat", frm, to))
+
+
+def _git_diff(repo_path, frm: str, to: str) -> dict:
+    """Files and full patch; both git invocations must succeed (see above)."""
+    files = _git_numstat(repo_path, frm, to)
+    return {"files": files, "patch": _git_diff_output(repo_path, frm, to)}
 
 
 # --- change scope projection (Änderungsumfang eines Laufs) ----------------------
@@ -2467,7 +2451,7 @@ def _git_diff(repo_path, frm: str, to: str) -> dict:
 # event or state (E5/E6).
 
 # The narrow set of expected operational diff errors a per-lane comparison may raise
-# via the existing `_git_diff`: its own HTTPException(404) on a missing snapshot
+# via `_git_numstat`: its own HTTPException(404) on a missing snapshot
 # object / one-sided failure, plus the SubprocessError (incl. TimeoutExpired) and
 # OSError that propagate from `subprocess.run`. A programming error is NOT swallowed.
 _CHANGE_SCOPE_DIFF_ERRORS = (HTTPException, subprocess.SubprocessError, OSError)
@@ -2502,7 +2486,7 @@ def _observed_lanes(events, snaps: dict) -> list:
 def _lane_change(repo_path, lane: str, snaps: dict) -> dict:
     """One lane's change entry (AC-1/AC-6/AC-7/AC-8/S2/S3). With >= 2 valid
     snapshots the diff between its lowest- and highest-seq snapshot is produced via
-    the existing `_git_diff` (a produced diff with no changes is `files: []`).
+    `_git_numstat` (a produced diff with no changes is `files: []`).
     Otherwise — 0/1 snapshot, or any expected diff error despite a pair — the
     canonical unavailable shape `diff_available: false` / `files: null` (never `[]`,
     never omitted, never a false empty diff)."""
@@ -2510,7 +2494,7 @@ def _lane_change(repo_path, lane: str, snaps: dict) -> dict:
     if len(pairs) >= 2:
         frm, to = pairs[0][1], pairs[-1][1]
         try:
-            files = _git_diff(repo_path, frm, to)["files"]
+            files = _git_numstat(repo_path, frm, to)
         except _CHANGE_SCOPE_DIFF_ERRORS:
             return {"lane": lane, "diff_available": False, "files": None}
         return {"lane": lane, "diff_available": True, "files": files}
@@ -2969,9 +2953,10 @@ def create_app(repos=None) -> FastAPI:
         raw_from_seq = _parse_seq_bound(request.query_params.get("raw_from_seq"))
         raw_to_seq = _parse_seq_bound(request.query_params.get("raw_to_seq"))
         raw_range_active = raw_from_seq is not None or raw_to_seq is not None
+        loaded = _load_events(run_dir, runs_root)
         detail = _run_detail(
             ref, run_id, run_dir, runs_root, limit=limit, raw_q=raw_q, raw_type=raw_type,
-            raw_from_seq=raw_from_seq, raw_to_seq=raw_to_seq,
+            raw_from_seq=raw_from_seq, raw_to_seq=raw_to_seq, loaded=loaded,
         )
         # Bound the materialised entry nodes by COUNT (Aufgabe A): one global budget
         # per collection, held across nesting levels and across navigation.
@@ -3012,7 +2997,7 @@ def create_app(repos=None) -> FastAPI:
         # The Timeline derives from the same events Trace uses; the Artifacts tab
         # lists the whitelisted files of the run. Both are page-render concerns and
         # stay out of the JSON detail contract.
-        events, _problems = _read_events(run_dir, runs_root)
+        events, _problems, has_trace = loaded
         # A1: the client announces a live-refresh / pane-load with ``X-Requested-With:
         # fetch``; only then does the route emit the two live regions as a bare fragment
         # (same render path, same markup, no document wrapper). Without the header the
@@ -3031,9 +3016,7 @@ def create_app(repos=None) -> FastAPI:
             # (never written into `detail` / the JSON API, AC 12); the planned-tasks
             # summary is rendered inline from the existing `detail.plan_skeleton`.
             "change_summary": _change_scope_summary(detail["change_scope"]),
-            "timeline": _timeline(
-                events, has_trace=_events_source(run_dir, runs_root) is not None
-            ),
+            "timeline": _timeline(events, has_trace=has_trace),
             "artifacts": _artifacts_listing(run_dir),
             "t": t, "lang": lang, "switch_qs": switch_qs,
         })

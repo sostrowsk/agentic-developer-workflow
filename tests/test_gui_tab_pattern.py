@@ -1,21 +1,4 @@
-"""RED tests for A4 — the announced tab pattern is fulfilled (AC 8, AC 9).
-
-``run_detail.html`` already sets ``role="tablist"`` on each tab-button container, but
-the buttons carry no ``role="tab"``, no ``aria-selected``, no ``aria-controls`` and
-there is no arrow-key navigation; the active state lives only in the CSS class
-``active``. This brief delivers real tabs: each button gets ``role="tab"``, a
-maintained ``aria-selected`` and ``aria-controls`` to its panel (``role="tabpanel"``);
-Left/Right switch within a group; only the active tab is a sequential tab stop; the
-existing ``active`` class and the server-side preselection stay as they are, the ARIA
-markup joins them (E4). The role is NOT removed.
-
-Exercised through the Node harness against the served ``app.js`` — the ARIA state is
-maintained on the client (arrow-switching is client-only), so the harness can assert
-the whole pattern regardless of whether individual attributes were rendered by the
-server. The concrete ARIA names ARE binding per spec (AC 8) even though the contract
-excludes attribute wording. Derived from .adw/spec.md (A4, AC 8/9), .adw/plan.md (B7)
-and .adw/contract.yaml (x-adw-template-behavior.tabs).
-"""
+"""The announced tab pattern is fulfilled."""
 
 from tests.gui_js_harness import run_scenario
 

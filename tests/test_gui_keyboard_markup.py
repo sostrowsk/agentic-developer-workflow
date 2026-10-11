@@ -1,42 +1,18 @@
-"""Server-side markup checks for Brief 4 — DOM weight (AC 11), preserved landmarks
-(AC 12) and the translated tree-region label (A6/AC 6).
+"""Server-side markup checks: DOM weight, landmarks, translated tree-region label."""
 
-Two of these are invariants that may be green immediately (E3 DOM weight, AC 12
-preservation); the tree-region accessible name is RED until the template gains it.
-
-* **AC 11 (E3):** the server-rendered tree column does not grow by an attribute per
-  row — exactly one ``data-tree-entry`` marker per tree node (no new per-row hull) and
-  at most ONE new keyboard entry point (``tabindex``) in the whole trace column, never
-  577.
-* **AC 12:** the pinned accessibility of the surrounding chrome stays literally intact
-  — the ``<label>`` around the type filter, the ``aria-label`` on the search field, the
-  ``aria-expanded`` on the fold toggle and the ``aria-hidden`` on the status glyphs.
-* **A6:** the tree region carries an accessible name drawn from ``adw/gui/i18n.py``,
-  present and translated in both languages with a shared key.
-
-Derived from .adw/spec.md (AC 6/11/12, A6), .adw/plan.md (B1/B9) and
-.adw/contract.yaml (x-adw-invariants, x-adw-template-behavior.tree/localization).
-"""
-
-import os
 import re
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.model import build_tree
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
+    _trace_section,
     comprehensive_lines,
-    home,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
-
-
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _client(tmp_path, lines=None):
@@ -52,11 +28,6 @@ def _detail(client, slug, **params):
     return resp.text
 
 
-def _trace_section(html: str) -> str:
-    i = html.find('class="trace"')
-    j = html.find('class="panes"')
-    assert i != -1 and j != -1 and i < j, "trace/panes layout anchors not found"
-    return html[i:j]
 
 
 def _tree_node_count(lines) -> int:
@@ -71,7 +42,7 @@ def _tree_node_count(lines) -> int:
 # --- AC 11: no DOM growth per tree row (E3) --------------------------------------
 
 
-def test_tree_column_keeps_one_marker_per_node_and_one_entry_point(home, tmp_path):  # noqa: F811
+def test_tree_column_keeps_one_marker_per_node_and_one_entry_point(home, tmp_path):
     """AC 11/E3: the server-rendered trace column carries exactly one
     ``data-tree-entry`` marker per tree node (no new per-row hull), and at most ONE
     new keyboard entry point (``tabindex``) — not one per row."""
@@ -90,7 +61,7 @@ def test_tree_column_keeps_one_marker_per_node_and_one_entry_point(home, tmp_pat
 # --- AC 12: preserved accessibility of the surrounding chrome --------------------
 
 
-def test_pinned_accessibility_landmarks_are_preserved(home, tmp_path):  # noqa: F811
+def test_pinned_accessibility_landmarks_are_preserved(home, tmp_path):
     """AC 12: the type filter stays wrapped in a ``<label>``, the search field keeps
     its ``aria-label``, the fold toggle its ``aria-expanded`` and the status glyphs
     their ``aria-hidden`` — all literally present."""
@@ -115,7 +86,7 @@ def test_pinned_accessibility_landmarks_are_preserved(home, tmp_path):  # noqa: 
 # --- A6: the tree region has a translated accessible name ------------------------
 
 
-def test_tree_region_has_a_translated_accessible_name(home, tmp_path):  # noqa: F811
+def test_tree_region_has_a_translated_accessible_name(home, tmp_path):
     """A6/AC 6: the tree region carries an accessible name from the i18n catalog —
     present and DIFFERENT in English and German, sharing one catalog key (identical
     key sets, A6)."""

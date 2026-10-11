@@ -18,6 +18,31 @@ RUN_ID_RE = re.compile(r"^[0-9a-f]{8}$")
 
 RUNS_RELPATH = Path(".adw") / "runs"
 
+
+def runs_root(repo: Path) -> Path | None:
+    """The resolved ``.adw/runs`` directory — but ONLY if it stays within the
+    resolved repository. A ``.adw/runs`` that is itself a symlink to somewhere
+    outside the repo would otherwise become the containment root and expose
+    arbitrary external directories (to the GUI's reads, to retention's deletes).
+    Returns None when it escapes or collapses onto the repo root; per-run/per-file
+    symlinks are still checked against this validated root by :func:`contained`."""
+    repo_root = Path(repo).resolve()
+    root = (repo_root / RUNS_RELPATH).resolve()
+    if root == repo_root or not root.is_relative_to(repo_root):
+        return None
+    return root
+
+
+def contained(path: Path, root: Path) -> Path | None:
+    """The real path if it stays within ``root`` after resolving EVERY symlink, else
+    None. Neither the read-only GUI nor pruning may follow a symlinked run directory
+    or log file out of the runs tree."""
+    try:
+        resolved = path.resolve()
+    except OSError:
+        return None
+    return resolved if resolved.is_relative_to(root) else None
+
 Phase = Literal[
     "spec",
     "awaiting_spec_approval",

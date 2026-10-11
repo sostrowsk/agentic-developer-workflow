@@ -12,14 +12,11 @@ non-mapping payload shape, in one run. They are endpoint-level on purpose — th
 guarantee is "no 5xx", not a particular helper's signature.
 """
 
-import os
 
-from fastapi.testclient import TestClient
 
-from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    _client,
+    _slug_for,
     rec,
     run_start_payload,
     simple_run_lines,
@@ -45,8 +42,6 @@ EVENT_TYPES = (
 SPAN_ONLY_TYPES = ("round", "codex")
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _corrupt_run_lines():
@@ -87,11 +82,9 @@ def _corrupt_run_lines():
     return lines
 
 
-def _client(repo):
-    return TestClient(create_app(repos=[str(repo)]))
 
 
-def test_run_list_survives_a_corrupt_run(home, tmp_path):  # noqa: F811
+def test_run_list_survives_a_corrupt_run(home, tmp_path):
     """The list is the worst case: one corrupt run must not hide the healthy ones.
     Before the fix `_summary` raised on `payload.totals` and the whole endpoint 5xx'd."""
     repo = tmp_path / "repo"
@@ -106,7 +99,7 @@ def test_run_list_survives_a_corrupt_run(home, tmp_path):  # noqa: F811
     assert RUN_ID in ids, "the corrupt run is degraded, not dropped"
 
 
-def test_run_detail_survives_a_corrupt_run(home, tmp_path):  # noqa: F811
+def test_run_detail_survives_a_corrupt_run(home, tmp_path):
     """The detail projections (phase bar, approval state, tool names, token totals,
     timeline) each read payloads; none may raise."""
     repo = tmp_path / "repo"
@@ -117,7 +110,7 @@ def test_run_detail_survives_a_corrupt_run(home, tmp_path):  # noqa: F811
     assert resp.json()["run"]["run_id"] == RUN_ID
 
 
-def test_detail_page_renders_for_a_corrupt_run(home, tmp_path):  # noqa: F811
+def test_detail_page_renders_for_a_corrupt_run(home, tmp_path):
     """The server-rendered page builds the trace tree and its panes from the same
     events — it must render, not 500."""
     repo = tmp_path / "repo"
@@ -127,7 +120,7 @@ def test_detail_page_renders_for_a_corrupt_run(home, tmp_path):  # noqa: F811
     assert resp.status_code == 200, resp.text
 
 
-def test_events_endpoint_survives_a_corrupt_run(home, tmp_path):  # noqa: F811
+def test_events_endpoint_survives_a_corrupt_run(home, tmp_path):
     """The raw events route already tolerated this; pinned so it stays that way."""
     repo = tmp_path / "repo"
     write_run(repo, RUN_ID, _corrupt_run_lines(), phase="done")
@@ -136,7 +129,7 @@ def test_events_endpoint_survives_a_corrupt_run(home, tmp_path):  # noqa: F811
     assert resp.status_code == 200, resp.text
 
 
-def test_non_mapping_totals_do_not_break_the_summary(home, tmp_path):  # noqa: F811
+def test_non_mapping_totals_do_not_break_the_summary(home, tmp_path):
     """The nested case: `payload` IS a mapping, but `payload.totals` is not. Both
     `_summary` and the timeline derive `duration`/`cost` from it with `.get`."""
     repo = tmp_path / "repo"
@@ -154,7 +147,7 @@ def test_non_mapping_totals_do_not_break_the_summary(home, tmp_path):  # noqa: F
 # --- Follow-up of run b6739174 [P3]: has_trace means "a log exists" -------------
 
 
-def test_has_trace_is_true_for_an_existing_but_unreadable_log(home, tmp_path):  # noqa: F811
+def test_has_trace_is_true_for_an_existing_but_unreadable_log(home, tmp_path):
     """`has_trace` answers "does this run have an event log", not "did the reader
     accept a record". An existing log whose every line is malformed is a trace WITH
     reader problems — reporting `has_trace: false` hides that distinction."""
@@ -166,7 +159,7 @@ def test_has_trace_is_true_for_an_existing_but_unreadable_log(home, tmp_path):  
     assert entry["has_trace"] is True
 
 
-def test_has_trace_is_true_for_an_empty_log_file(home, tmp_path):  # noqa: F811
+def test_has_trace_is_true_for_an_empty_log_file(home, tmp_path):
     """An empty `events.jsonl` exists — the run was instrumented, it just has no
     events yet."""
     repo = tmp_path / "repo"
@@ -176,7 +169,7 @@ def test_has_trace_is_true_for_an_empty_log_file(home, tmp_path):  # noqa: F811
     assert entry["has_trace"] is True
 
 
-def test_timeline_agrees_with_the_summary_on_trace_presence(home, tmp_path):  # noqa: F811
+def test_timeline_agrees_with_the_summary_on_trace_presence(home, tmp_path):
     """Consistency: `detail.run.has_trace` and the Timeline's own `has_trace` answer
     the SAME question. An existing but unreadable log must not say "trace" in the
     summary and "no event log" in the Timeline tab."""
@@ -193,7 +186,7 @@ def test_timeline_agrees_with_the_summary_on_trace_presence(home, tmp_path):  # 
     assert page.status_code == 200
 
 
-def test_a_run_with_only_an_empty_log_is_still_listed(home, tmp_path):  # noqa: F811
+def test_a_run_with_only_an_empty_log_is_still_listed(home, tmp_path):
     """A crash can leave a freshly created, still-empty `events.jsonl` and no
     loadable state. The run exists — `require_run` accepts it — so the listing must
     not drop it just because no event parsed."""

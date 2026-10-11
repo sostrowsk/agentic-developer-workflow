@@ -1,46 +1,26 @@
-"""RED/invariant tests for A5 — the trace-tree size is STATED and checked, not
-windowed.
+"""The trace-tree size is stated and checked, not windowed."""
 
-The trace column renders the COMPLETE serialized tree: exactly one
-``data-tree-entry`` per tree node, no doubling, at any fixture size — a result
-folded onto its call keeps its own marker, a compaction wrapper (repeat/group)
-adds none. This is the invariant A5 pins as a policy (spec/plan leave the markup
-to the implementation): the column is kept readable by the compaction, not by a
-cut. ``?offset`` is inert for the column and it renders no page navigation (E2),
-while the SEPARATE 200-marker cap keeps applying to the Tools entries
-(``data-tool-entry``) and never to the tree (E6).
-
-These fix invariants the code already holds today, so they may be green from the
-start (``.adw/plan.md`` B2: the counting definition / ``?offset`` inert /
-Tools-window tests are allowed to be green immediately).
-
-Derived from .adw/spec.md (AC 9-11), .adw/contract.yaml (x-adw-template-behavior
-.tree / .tools) and .adw/plan.md (B2.5-B2.7, B7).
-"""
-
-import os
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.model import build_tree
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _detail_html,
+    _slug_for,
+    _trace_section,
     many_tool_entries_lines,
     many_tool_nodes_lines,
     nested_tree_lines,
     write_run,
 )
 
-RUN_ID = "aaaa1111"
 TREE_ENTRY_MARKER = "data-tree-entry"
 TOOL_ENTRY_MARKER = "data-tool-entry"
 CAP = 200  # the 200-marker cap — for the Tools entries only (E6), never for the tree.
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _client(tmp_path, lines, *, name="repo"):
@@ -50,17 +30,8 @@ def _client(tmp_path, lines, *, name="repo"):
     return TestClient(create_app(repos=[str(repo)])), _slug_for(repo)
 
 
-def _detail_html(client, slug, **params):
-    resp = client.get(f"/runs/{slug}/{RUN_ID}", params=params or None)
-    assert resp.status_code == 200
-    return resp.text
 
 
-def _trace_section(html: str) -> str:
-    i = html.find('class="trace"')
-    j = html.find('class="panes"')
-    assert i != -1 and j != -1 and i < j, "trace/panes layout anchors not found"
-    return html[i:j]
 
 
 def _tree_node_count(lines) -> int:
@@ -75,7 +46,7 @@ def _tree_node_count(lines) -> int:
 # --- AC 9: one data-tree-entry per serialized node, at several sizes -------------
 
 
-def test_tree_entry_marker_equals_node_count_across_sizes(home, tmp_path):  # noqa: F811
+def test_tree_entry_marker_equals_node_count_across_sizes(home, tmp_path):
     """AC 9: for several fixture sizes — including a tree well past 200 nodes with
     appended tool results, and a deeply nested one — the number of
     ``data-tree-entry`` markers equals the number of serialized tree nodes: no node
@@ -101,7 +72,7 @@ def test_tree_entry_marker_equals_node_count_across_sizes(home, tmp_path):  # no
 # --- AC 10: the column has no window — ?offset is inert, no page navigation ------
 
 
-def test_offset_is_inert_for_the_tree_and_no_window_nav(home, tmp_path):  # noqa: F811
+def test_offset_is_inert_for_the_tree_and_no_window_nav(home, tmp_path):
     """AC 10 (E2): a bookmarked ``?offset`` from the paged era does not change the
     trace column — the same markers with and without it, the same rendered column —
     and the column carries no page navigation (``offset=`` / ``window-nav``)."""
@@ -119,7 +90,7 @@ def test_offset_is_inert_for_the_tree_and_no_window_nav(home, tmp_path):  # noqa
 # --- AC 11: the Tools window keeps its 200 cap; the tree is uncapped -------------
 
 
-def test_tools_window_is_capped_while_the_tree_is_uncapped(home, tmp_path):  # noqa: F811
+def test_tools_window_is_capped_while_the_tree_is_uncapped(home, tmp_path):
     """AC 11 (E6): the Tools entries stay bounded by the 200-marker cap (spread over
     several panes) with their own ``?tools_offset`` page navigation, while the SAME
     page renders the trace tree in full — its marker count equals the node count and

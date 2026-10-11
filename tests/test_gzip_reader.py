@@ -1,23 +1,12 @@
-"""RED tests for Aufgabe B — the transparent gzip reader (AC C6).
-
-Every event-log-reading route of the Run Inspector must read ``events.jsonl.gz``
-with the SAME business output as ``events.jsonl``: same events in the same order,
-same event count, same bad-line / seq-gap handling. When both files are present
-the plain ``events.jsonl`` is authoritative (consistent with --gzip, C5).
-
-Exercised through the HTTP surface (``adw.gui.app.create_app``) so no internal
-reader signature is pinned. RED until the read paths learn ``.gz`` (today
-``adw/gui/reader.py`` and ``app.py`` contain no gzip handling at all).
-"""
+"""Tests for the transparent gzip reader."""
 
 import gzip
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
     comprehensive_lines,
-    home,
     problems_lines,
     write_run,
 )
@@ -32,7 +21,7 @@ def _gzip_only(run_dir):
     src.unlink()
 
 
-def test_gz_only_run_is_listed_and_readable(home, tmp_path):  # noqa: F811
+def test_gz_only_run_is_listed_and_readable(home, tmp_path):
     """C6: a run whose ONLY log is events.jsonl.gz stays discoverable and fully
     readable — its event count and detail tree match a plain-log twin exactly."""
     repo = tmp_path / "repo"
@@ -57,7 +46,7 @@ def test_gz_only_run_is_listed_and_readable(home, tmp_path):  # noqa: F811
     assert gz_detail["tree"] == plain_detail["tree"]
 
 
-def test_both_present_prefers_plain_events_jsonl(home, tmp_path):  # noqa: F811
+def test_both_present_prefers_plain_events_jsonl(home, tmp_path):
     """C6/C5: when both events.jsonl and events.jsonl.gz exist the plain file is
     authoritative — a stale/divergent .gz is ignored."""
     repo = tmp_path / "repo"
@@ -77,7 +66,7 @@ def test_both_present_prefers_plain_events_jsonl(home, tmp_path):  # noqa: F811
     assert len(events) > 1
 
 
-def test_gz_run_reports_same_bad_line_and_seq_gap(home, tmp_path):  # noqa: F811
+def test_gz_run_reports_same_bad_line_and_seq_gap(home, tmp_path):
     """C6: reader problems (bad_line, seq_gap) are reported identically whether the
     log is plain or gzipped."""
     repo = tmp_path / "repo"

@@ -1,20 +1,5 @@
-"""RED tests for the plan-skeleton JSON surface — the additive, purely derived
-``plan_skeleton`` array on ``GET /api/runs/{repo}/{run_id}``.
-
-Derived from .adw/spec.md (AC1-AC7), .adw/contract.yaml
-(RunDetailPlanSkeletonAddition / PlanSkeletonEntry, x-behavior S1-S6) and
-.adw/plan.md (B1-B3). The array is a pure projection of the run's ``plan.md`` —
-read ONLY through the existing whitelist artifact path — and of the already-loaded
-event stream (for the coarse lane status). It is PRESENT exactly when ``plan.md``
-yields at least one ``## Workstream:`` section with at least one ``###`` task, and
-ABSENT otherwise — an empty list is never forced.
-
-The parser follows EXACTLY two rules (S2_parse): a section is ``## Workstream:
-<name>`` up to the next ``##`` heading (or EOF); a task is every ``### `` line in
-it, its text taken VERBATIM after the ``### `` prefix — no identifier pattern, no
-Markdown parser, no dependency.
-
-RED until ``_run_detail`` hangs the derived ``plan_skeleton`` array on its result.
+"""Tests for the plan-skeleton JSON surface — the additive, purely derived ``plan_skeleton``
+array on ``GET /api/runs/{repo}/{run_id}``.
 """
 
 import os
@@ -24,16 +9,15 @@ from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _detail,
     comprehensive_lines,
-    home,
     rec,
     run_end_payload,
     run_start_payload,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
 
 
 def _real_path(repo):
@@ -58,10 +42,6 @@ def _client(tmp_path, *, lines=None, phase="done", plan=None, run_id=RUN_ID,
     return client, _slug(_real_path(repo)), repo, run_id
 
 
-def _detail(client, slug, run_id=RUN_ID):
-    r = client.get(f"/api/runs/{slug}/{run_id}")
-    assert r.status_code == 200, r.status_code
-    return r.json()
 
 
 def _skeleton(client, slug, run_id=RUN_ID):
@@ -103,7 +83,7 @@ ONE_WS = "## Workstream: backend\n\n### B1 — Parser\n### B2 — Feld\n"
 # --- AC1 / E3 / S2_parse: the two parse rules ----------------------------------
 
 
-def test_heterogeneous_headings_each_yield_one_verbatim_task(home, tmp_path):  # noqa: F811
+def test_heterogeneous_headings_each_yield_one_verbatim_task(home, tmp_path):
     """AC1/E3 (mandatory): the heterogeneous heading forms observed across the runs
     (``### B1 — …``, ``### 1. …``, ``### A.1 — …``, ``### Aufgabe A — …``,
     ``### Aufgabe B1 — …``) are NOT filtered — each yields exactly one task whose
@@ -130,7 +110,7 @@ def test_heterogeneous_headings_each_yield_one_verbatim_task(home, tmp_path):  #
     ]
 
 
-def test_task_text_removes_exactly_one_separator_space(home, tmp_path):  # noqa: F811
+def test_task_text_removes_exactly_one_separator_space(home, tmp_path):
     """S2_parse: only the ``### `` marker plus ONE separator space is removed —
     further leading whitespace survives verbatim (no extra trimming)."""
     plan = "## Workstream: backend\n###   two extra leading spaces\n"
@@ -139,7 +119,7 @@ def test_task_text_removes_exactly_one_separator_space(home, tmp_path):  # noqa:
     assert _skeleton(client, slug)[0]["tasks"] == ["  two extra leading spaces"]
 
 
-def test_bare_hashhashhash_yields_no_task(home, tmp_path):  # noqa: F811
+def test_bare_hashhashhash_yields_no_task(home, tmp_path):
     """S2_parse: a line that is exactly ``###`` with no following text is neither a
     section end (it starts with ``###``) nor a task (no ``### `` prefix) — it is
     ignored, and only the real task remains."""
@@ -149,7 +129,7 @@ def test_bare_hashhashhash_yields_no_task(home, tmp_path):  # noqa: F811
     assert _skeleton(client, slug)[0]["tasks"] == ["Real task"]
 
 
-def test_section_ends_at_next_heading_and_ignores_trailing_tasks(home, tmp_path):  # noqa: F811
+def test_section_ends_at_next_heading_and_ignores_trailing_tasks(home, tmp_path):
     """AC1/S2_parse: the section ends at the next ``##`` heading; a ``###`` line
     AFTER that closing heading is not attributed to the workstream."""
     plan = (
@@ -166,7 +146,7 @@ def test_section_ends_at_next_heading_and_ignores_trailing_tasks(home, tmp_path)
     assert skel[0]["tasks"] == ["inside backend"]
 
 
-def test_headings_outside_any_section_do_not_count(home, tmp_path):  # noqa: F811
+def test_headings_outside_any_section_do_not_count(home, tmp_path):
     """AC1/S2_parse: ``###`` lines BEFORE the first ``## Workstream:`` section are
     ignored — only tasks inside a section contribute."""
     plan = (
@@ -181,7 +161,7 @@ def test_headings_outside_any_section_do_not_count(home, tmp_path):  # noqa: F81
     assert skel[0]["tasks"] == ["real task"]
 
 
-def test_multiple_workstreams_in_document_order(home, tmp_path):  # noqa: F811
+def test_multiple_workstreams_in_document_order(home, tmp_path):
     """AC2/S1: one entry per ``## Workstream:`` section with >= 1 task, in
     ``plan.md`` document order; ``<name>`` is the verbatim text after the prefix."""
     plan = (
@@ -198,7 +178,7 @@ def test_multiple_workstreams_in_document_order(home, tmp_path):  # noqa: F811
     assert skel[1]["tasks"] == ["F task"]
 
 
-def test_section_without_task_produces_no_entry(home, tmp_path):  # noqa: F811
+def test_section_without_task_produces_no_entry(home, tmp_path):
     """AC2/S1: a ``## Workstream:`` section with no ``###`` task contributes no
     entry at all (never an empty ``tasks`` list)."""
     plan = (
@@ -217,7 +197,7 @@ def test_section_without_task_produces_no_entry(home, tmp_path):  # noqa: F811
 # --- AC4 / S3_status: coarse lane-level status ---------------------------------
 
 
-def test_status_done_when_lane_completed(home, tmp_path):  # noqa: F811
+def test_status_done_when_lane_completed(home, tmp_path):
     """AC4/S3: ``done`` exactly when the ``lane`` span named like the workstream has
     a ``lane`` end carrying ``completed: true``."""
     client, slug, _repo, _rid = _client(
@@ -227,7 +207,7 @@ def test_status_done_when_lane_completed(home, tmp_path):  # noqa: F811
 
 
 @pytest.mark.parametrize("kind", ["failed", "no_completed", "running", "absent"])
-def test_status_pending_unless_completed(home, tmp_path, kind):  # noqa: F811
+def test_status_pending_unless_completed(home, tmp_path, kind):
     """AC4/S3: every non-completed lane state is ``pending`` — a lane end without
     ``completed: true`` (``false`` or missing), a still-running lane, and a
     not-yet-started lane (no lane node)."""
@@ -237,7 +217,7 @@ def test_status_pending_unless_completed(home, tmp_path, kind):  # noqa: F811
     assert _skeleton(client, slug)[0]["status"] == "pending"
 
 
-def test_not_started_lane_yields_pending_entry_without_a_lane_node(home, tmp_path):  # noqa: F811
+def test_not_started_lane_yields_pending_entry_without_a_lane_node(home, tmp_path):
     """AC3/S3: a valid ``backend`` workstream in ``plan.md`` but NO ``backend`` lane
     event still yields its ``pending`` entry — and the derived trace carries no lane
     node (the skeleton is not bound to a trace node, and none is invented)."""
@@ -260,7 +240,7 @@ def test_not_started_lane_yields_pending_entry_without_a_lane_node(home, tmp_pat
 # --- AC2 / AC6 / S1: purely additive -------------------------------------------
 
 
-def test_plan_skeleton_is_purely_additive(home, tmp_path):  # noqa: F811
+def test_plan_skeleton_is_purely_additive(home, tmp_path):
     """AC2/AC6/S1: the field is a pure addition — with ``plan.md`` removed the WHOLE
     rest of the response is byte-for-byte identical, and ``plan_skeleton`` is the
     only difference. The trace tree and all other fields keep their shape."""
@@ -280,7 +260,7 @@ def test_plan_skeleton_is_purely_additive(home, tmp_path):  # noqa: F811
 # --- AC5 / S4_fallback: robustness ---------------------------------------------
 
 
-def test_missing_plan_yields_no_skeleton(home, tmp_path):  # noqa: F811
+def test_missing_plan_yields_no_skeleton(home, tmp_path):
     """AC5/S4: no ``plan.md`` at all -> ``plan_skeleton`` absent, no error."""
     client, slug, _repo, _rid = _client(tmp_path, plan=None)
 
@@ -292,7 +272,7 @@ def test_missing_plan_yields_no_skeleton(home, tmp_path):  # noqa: F811
     "# Title\n## Not a workstream\n### task\n",        # no `## Workstream:` section
     "## Workstream: backend\nno task headings here\n",  # section, but no `###` task
 ], ids=["empty", "no_workstream", "no_task"])
-def test_unmatching_plan_yields_no_skeleton(home, tmp_path, plan):  # noqa: F811
+def test_unmatching_plan_yields_no_skeleton(home, tmp_path, plan):
     """AC5/S4: an empty ``plan.md``, or one with no ``## Workstream:`` section
     carrying a ``###`` task, yields NO skeleton — the key is absent (never a forced
     empty list), no 5xx, and the rest of the response is intact."""
@@ -303,7 +283,7 @@ def test_unmatching_plan_yields_no_skeleton(home, tmp_path, plan):  # noqa: F811
     assert "tree" in detail and "run" in detail          # rest of the response intact
 
 
-def test_unreadable_plan_is_treated_as_absent(home, tmp_path):  # noqa: F811
+def test_unreadable_plan_is_treated_as_absent(home, tmp_path):
     """AC5/S4: a ``plan.md`` that is not a readable file (here a directory in its
     place) counts as absent — no skeleton, no 5xx."""
     client, slug, repo, run_id = _client(tmp_path, plan=None)
@@ -312,7 +292,7 @@ def test_unreadable_plan_is_treated_as_absent(home, tmp_path):  # noqa: F811
     assert "plan_skeleton" not in _detail(client, slug)
 
 
-def test_boundary_escaping_symlink_plan_is_absent(home, tmp_path):  # noqa: F811
+def test_boundary_escaping_symlink_plan_is_absent(home, tmp_path):
     """AC5/AC7/S4/E4: a ``plan.md`` that is a symlink escaping the run-directory
     boundary is absent per the artifact path — its target is never read, and no
     skeleton appears."""

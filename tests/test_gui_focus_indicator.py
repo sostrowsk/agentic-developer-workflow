@@ -1,19 +1,4 @@
-"""RED tests for A3 — a visible focus indicator, everywhere, in both themes (AC 6/7).
-
-``app.css`` contains today not a single ``:focus`` or ``:focus-visible`` rule: even the
-natively focusable elements fall back to the browser default ring, on the Brief-1
-backgrounds and in a dark mode that did not exist before. This brief adds a uniform,
-clearly visible focus indicator with its OWN token (source may be ``--busy``, but NOT
-``--signal`` — reserved for "a human must act", E5), with a contour of its own (not
-colour alone), reaching at least 3:1 against ``--paper`` AND ``--surface`` in both
-themes, and it is nowhere removed with a bare ``outline: none``.
-
-The token VALUES, names and CSS wording are not contract surface (contract note) —
-these tests assert the DISCIPLINE: a visible focus rule exists, no bare ``outline:
-none``, the indicator token is not ``--signal`` and clears 3:1 in both themes, computed
-from the sheet's own token values. Derived from .adw/spec.md (A3, AC 6/7),
-.adw/plan.md (B6) and .adw/contract.yaml (x-adw-template-behavior.focus).
-"""
+"""Tests for a visible focus indicator, everywhere, in both themes."""
 
 import re
 

@@ -1,14 +1,4 @@
-"""RED tests for Aufgabe A — the ``codex.author`` span (GUI-SPEC §4.4).
-
-Derived from .adw/spec.md (AC 1–5), .adw/contract.yaml (``codex_author_span``)
-and docs/GUI-SPEC.md §4.4/§6. The span is owned by the call site in
-``phases.py:_codex_draft`` (E4): it therefore appears in a dry run (mock
-runner) and stays closed even when the Codex draft fails. These tests exercise
-the not-yet-existing instrumentation, so they are RED until it is wired.
-
-Everything asserted here is externally observable surface: the on-disk event
-log and its typed payloads.
-"""
+"""Tests for the ``codex.author`` span (GUI-SPEC §4.4)."""
 
 import json
 import re

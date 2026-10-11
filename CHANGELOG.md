@@ -12,6 +12,22 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.30.2] — 2026-10-11
+
+### Changed
+Internal clean-up with no change in behaviour, from the parallel improvement review by Opus 5.5, Fable 5.1 and Codex (`gpt-6-astra`):
+- **One way to run git.** The new `adw/git.py` (`run_git`) replaces 15 hand-written git subprocess calls in the orchestrator, CLI, retention, worktrees, forge detection, snapshots and the GUI. Repo hooks off and the environment whitelist now live in one place; every caller keeps its own timeout and error handling.
+- **GitLab and GitHub share one subprocess wrapper and one wait loop** (`run_forge_cli`, `poll_until` in `adw/ci.py`). Each forge still supplies its own fetching and evaluation.
+- **One runs-tree containment check** (`state.runs_root` / `state.contained`), shared by the GUI and retention instead of two copies.
+- **GUI does less work per page.** The run-detail page reads and parses the event log once instead of twice, and computes the phase bar once. The change-scope view runs only `git diff --numstat` per lane instead of also producing the full patch and discarding it. Tool-result outcomes come from one rule instead of three copies (the folded-result outcome no longer parses its rendered label).
+- **Tests tidied up.**
+  - The `home` fixture lives in `conftest.py`, which removes 377 `# noqa: F811` markers and 63 imports.
+  - Helpers defined in up to 37 test files (`_slug_for`, `RUN_ID`, `_git`, `_client`, `_detail`, `_trace_section`, `_detail_html`) are now shared from `tests/gui_app_helpers.py`.
+  - Run-level helpers moved to `tests/run_helpers.py`, so no test module imports from another any more.
+  - Small GUI test files were merged (tree keyboard, timeline, status).
+  - Module docstrings that narrated brief or task numbers now say in one line what they test.
+  - The number of tests is unchanged apart from two new tests for `run_git`.
+
 ## [0.30.1] — 2026-10-11
 
 ### Fixed
@@ -1015,6 +1031,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.30.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.1...v0.29.2

@@ -1,14 +1,4 @@
-"""RED tests for Aufgabe B — the ``adw gui`` CLI and the optional-extra packaging.
-
-Derived from .adw/spec.md (AC 4/5, 21/22), .adw/contract.yaml (x-adw-cli /
-x-adw-packaging) and GUI-SPEC §7.1/§8. Pinned surface only: the command exists
-with the documented options, binds to loopback unless ``--i-know`` is given,
-opens a browser only with ``--open``, ends cleanly (no traceback) with an install
-hint when the gui extra is missing, and the core import path never pulls in the
-web stack. The app-factory signature and the uvicorn wiring are not contractual;
-the tests use ``uvicorn.run`` as the (documented) "start the app via uvicorn"
-seam and never bind a real socket.
-"""
+"""Tests for the ``adw gui`` CLI and the optional-extra packaging."""
 
 import subprocess
 import sys
@@ -16,12 +6,11 @@ import sys
 from typer.testing import CliRunner
 
 from adw.cli import app
-from tests.gui_app_helpers import home  # noqa: F401 — used as a fixture
 
 cli = CliRunner()
 
 
-def test_gui_rejects_non_loopback_host_without_i_know(home, monkeypatch):  # noqa: F811
+def test_gui_rejects_non_loopback_host_without_i_know(home, monkeypatch):
     """AC 5: a non-loopback --host without --i-know is refused with a
     comprehensible error BEFORE any bind or server start."""
     started = []
@@ -33,7 +22,7 @@ def test_gui_rejects_non_loopback_host_without_i_know(home, monkeypatch):  # noq
     assert "i-know" in out or "loopback" in out
 
 
-def test_gui_allows_non_loopback_host_with_i_know(home, monkeypatch):  # noqa: F811
+def test_gui_allows_non_loopback_host_with_i_know(home, monkeypatch):
     """AC 5: with the explicit --i-know opt-in the non-loopback host is permitted
     and the server is started via uvicorn on that host/port."""
     started = []
@@ -45,7 +34,7 @@ def test_gui_allows_non_loopback_host_with_i_know(home, monkeypatch):  # noqa: F
     assert "0.0.0.0" in blob and "8765" in blob  # host passed through, default port
 
 
-def test_gui_opens_browser_only_with_open_flag(home, monkeypatch):  # noqa: F811
+def test_gui_opens_browser_only_with_open_flag(home, monkeypatch):
     """AC 4: --open opens the browser on the local loopback address; without
     --open no browser is opened."""
     monkeypatch.setattr("uvicorn.run", lambda *a, **k: None)
@@ -62,7 +51,7 @@ def test_gui_opens_browser_only_with_open_flag(home, monkeypatch):  # noqa: F811
     assert "127.0.0.1" in opened[0] and "8765" in opened[0]
 
 
-def test_gui_without_extra_exits_with_install_hint_not_traceback(home, monkeypatch):  # noqa: F811
+def test_gui_without_extra_exits_with_install_hint_not_traceback(home, monkeypatch):
     """AC 22: without the gui extra, ``adw gui`` ends cleanly with an instruction
     to install adw[gui] — no raw ImportError traceback."""
     # fastapi + jinja2 are the gui-only libs (uvicorn is always present via the

@@ -34,16 +34,17 @@ automated half proves the DOM bound. Derived from .adw/spec.md (A1–A3),
 .adw/contract.yaml (x-adw-bounded-rendering) and .adw/plan.md §2.
 """
 
-import os
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.model import build_tree
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _detail_html,
+    _slug_for,
+    _trace_section,
     heavy_tool_run_lines,
-    home,
     many_tool_entries_lines,
     many_tool_nodes_lines,
     nested_leaf_token,
@@ -51,8 +52,6 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     tool_entry_command,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
 
 # The hard cap pinned by the spec/contract (A1): at most this many TOOL entry markers
 # (``data-tool-entry``) at every fixture size. It applies ONLY to the Tools window;
@@ -71,8 +70,6 @@ OFFSET = "offset"
 TOOLS_OFFSET = "tools_offset"
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _client(tmp_path, lines):
@@ -82,19 +79,8 @@ def _client(tmp_path, lines):
     return TestClient(create_app(repos=[str(repo)])), _slug_for(repo)
 
 
-def _detail_html(client, slug, **params):
-    resp = client.get(f"/runs/{slug}/{RUN_ID}", params=params or None)
-    assert resp.status_code == 200
-    return resp.text
 
 
-def _trace_section(html: str) -> str:
-    """The trace-tree region only (``section.trace`` up to ``section.panes``), so a
-    token check is not satisfied by the same token echoed inside a detail pane."""
-    i = html.find('class="trace"')
-    j = html.find('class="panes"')
-    assert i != -1 and j != -1 and i < j, "trace/panes layout anchors not found"
-    return html[i:j]
 
 
 def _tools_sections(html: str) -> str:
@@ -128,7 +114,7 @@ def _tree_node_count(lines) -> int:
 # --- A1: bounded initial DOM, global budget per collection ----------------------
 
 
-def test_nested_tree_renders_completely_at_every_size(home, tmp_path):  # noqa: F811
+def test_nested_tree_renders_completely_at_every_size(home, tmp_path):
     """The trace column is NOT bounded any more: for DEEPLY NESTED trees of
     200 / 2 000 / 20 000 entries every node is rendered, head and tail together.
     The cap that used to apply here was removed on request — the column is kept
@@ -141,7 +127,7 @@ def test_nested_tree_renders_completely_at_every_size(home, tmp_path):  # noqa: 
         assert nested_leaf_token(total - 1) in tree      # ... and the tail
 
 
-def test_tool_entry_markers_bounded_across_sizes(home, tmp_path):  # noqa: F811
+def test_tool_entry_markers_bounded_across_sizes(home, tmp_path):
     """A1: for 200 / 2 000 / 20 000 Tools entries spread over MULTIPLE tool-bearing
     nodes, the count of the tool-entry marker anywhere in the initial detail-pane
     DOM (hidden, non-active panes included) is at least one and at most 200,
@@ -158,7 +144,7 @@ def test_tool_entry_markers_bounded_across_sizes(home, tmp_path):  # noqa: F811
         assert count < total
 
 
-def test_exactly_one_marker_per_rendered_entry(home, tmp_path):  # noqa: F811
+def test_exactly_one_marker_per_rendered_entry(home, tmp_path):
     """A1 counting definition: exactly one marker element per rendered entry, on
     BOTH collections. A small run (nothing windowed) has 3 tool pairs -> 6 Tools
     entries, so the tool-entry marker appears exactly 6 times; the trace-entry marker
@@ -175,7 +161,7 @@ def test_exactly_one_marker_per_rendered_entry(home, tmp_path):  # noqa: F811
 # --- A2: reachability through a MOVING window (not a growing prefix) -------------
 
 
-def test_tools_moving_window_reaches_every_entry(home, tmp_path):  # noqa: F811
+def test_tools_moving_window_reaches_every_entry(home, tmp_path):
     """A2: the same moving-window reachability for the Tools collection — a late tool
     entry is reached via ``?offset`` while the tool-entry marker count stays bounded
     and reaching the tail does not re-materialise the head."""
@@ -201,7 +187,7 @@ def test_tools_moving_window_reaches_every_entry(home, tmp_path):  # noqa: F811
     assert 1 <= at_mid.count(TOOL_ENTRY_MARKER) <= CAP
 
 
-def test_tools_window_navigation_keeps_owning_agent_selected(home, tmp_path):  # noqa: F811
+def test_tools_window_navigation_keeps_owning_agent_selected(home, tmp_path):
     """A2 (P1 finding): paging the Tools window must keep the OWNING agent selected
     and its trace entry visible while advancing a SEPARATE tool offset — otherwise
     the agent loses its tree entry on reload and its later tool entries become
@@ -238,7 +224,7 @@ def test_tools_window_navigation_keeps_owning_agent_selected(home, tmp_path):  #
 # --- A3: presentation fidelity (order, identity, full payload reachable) ---------
 
 
-def test_rendered_entries_keep_order_and_full_payload_stays_reachable(home, tmp_path):  # noqa: F811,E501
+def test_rendered_entries_keep_order_and_full_payload_stays_reachable(home, tmp_path):  # noqa: E501
     """A3 (E8): displayed entries appear in the UNDERLYING ORDER and are not
     reordered relative to the served data; tool entries keep their call/result
     identity; and a windowed-out entry's complete payload stays reachable through the
@@ -279,7 +265,7 @@ def _iter_tokens(text: str):
 # --- A4 fixture-shape guard (the twice-repeated wrong-size pitfall) --------------
 
 
-def test_heavy_run_reference_has_the_correct_shape(home, tmp_path):  # noqa: F811
+def test_heavy_run_reference_has_the_correct_shape(home, tmp_path):
     """A4 shape guard: the manual measurement's reference run has >= 2000 TOOL NODES
     (not bytes) with SMALL contents — a node-count reference. Twice a fixture
     mirrored the wrong size (bytes instead of nodes, then too few nodes) while the

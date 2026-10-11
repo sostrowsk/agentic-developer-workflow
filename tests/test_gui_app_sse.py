@@ -1,12 +1,4 @@
-"""RED tests for Aufgabe B — the SSE live-tail stream.
-
-Derived from .adw/spec.md (AC 18–20), .adw/contract.yaml (x-adw-sse) and
-GUI-SPEC §7.3. The stream tails events.jsonl by byte offset and closes after the
-run end event, so a FINISHED run yields a deterministic, terminating body that
-TestClient can read in full. One live test appends bytes mid-stream to pin the
-"incomplete final line is emitted exactly once when completed" behaviour. RED
-until ``adw.gui.app.create_app`` exists.
-"""
+"""Tests for the SSE live-tail stream."""
 
 import json
 import threading
@@ -15,9 +7,8 @@ import time
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
     comprehensive_lines,
-    home,
     parse_sse,
     problems_lines,
     rec,
@@ -36,7 +27,7 @@ def _client_for(tmp_path, run_id, lines):
     return client, slug
 
 
-def test_stream_replays_from_start_as_id_data_and_closes_after_run_end(home, tmp_path):  # noqa: F811
+def test_stream_replays_from_start_as_id_data_and_closes_after_run_end(home, tmp_path):
     """AC 18/19/20: an initial connection (no Last-Event-ID) replays from the
     beginning; each accepted event is one message with id: = seq and data: = the
     full record; the stream closes after the run end event."""
@@ -56,7 +47,7 @@ def test_stream_replays_from_start_as_id_data_and_closes_after_run_end(home, tmp
     assert last["type"] == "run" and last["kind"] == "end"  # closed on the run end
 
 
-def test_stream_reconnect_resumes_strictly_after_last_event_id(home, tmp_path):  # noqa: F811
+def test_stream_reconnect_resumes_strictly_after_last_event_id(home, tmp_path):
     """AC 19: a reconnect with Last-Event-ID resumes strictly after that seq — no
     duplication, no gap."""
     client, slug = _client_for(tmp_path, "aaaa1111", comprehensive_lines())
@@ -67,7 +58,7 @@ def test_stream_reconnect_resumes_strictly_after_last_event_id(home, tmp_path): 
     assert seqs == list(range(10, 19))  # strictly after seq 9
 
 
-def test_stream_reports_problems_without_id_and_keeps_going(home, tmp_path):  # noqa: F811
+def test_stream_reports_problems_without_id_and_keeps_going(home, tmp_path):
     """AC 18: a broken line emits an ``event: problem`` message WITHOUT an id (so
     Last-Event-ID is unaffected), does not terminate the stream, and later valid
     events still arrive — live corruption becomes visible without a reload."""
@@ -86,7 +77,7 @@ def test_stream_reports_problems_without_id_and_keeps_going(home, tmp_path):  # 
     assert json.loads(events[-1]["data"])["kind"] == "end"  # still closed on run end
 
 
-def test_stream_incomplete_final_line_is_emitted_once_when_completed(home, tmp_path):  # noqa: F811
+def test_stream_incomplete_final_line_is_emitted_once_when_completed(home, tmp_path):
     """AC 18: a partially written final line is never emitted while incomplete;
     once a writer completes it (and appends the run end), it appears exactly once,
     in order, and the stream then closes.

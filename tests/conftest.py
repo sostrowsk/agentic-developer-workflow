@@ -79,3 +79,15 @@ def _no_live_model_probe(tmp_path_factory, monkeypatch):
     kept = tmp_path_factory.mktemp("adw-codex-catalog") / "codex-models-cache.json"
     monkeypatch.setenv("ADW_CODEX_CATALOG_PATH", str(kept))
     assert codex.CODEX_MODEL
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    """Hermetic HOME so ``load_registry()`` starts empty and no test touches the
+    real ~/.adw/repos.json (Aufgabe A guarantees this globally; app tests pin it
+    locally too so they are self-contained)."""
+    h = tmp_path / "home"
+    h.mkdir()
+    monkeypatch.setenv("HOME", str(h))
+    monkeypatch.setenv("USERPROFILE", str(h))
+    return h

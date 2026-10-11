@@ -1,42 +1,18 @@
-"""RED tests for A3/A4 — the per-round prompt diff on ``agent.run`` nodes.
-
-Two additive, purely DERIVED fields appear on serialized ``agent.run`` trace nodes
-of ``GET /api/runs/{repo}/{run_id}`` (contract): ``prompt_diff`` and
-``previous_prompt_seq``. The predecessor is determined purely STRUCTURALLY within
-THIS run — same ``agent`` string, same lane, greatest ``seq`` less than the node's
-— BEFORE prompt usability matters (D1). The "no predecessor" case yields both
-fields ``null``; an identical prompt yields ``prompt_diff == ""`` (NOT null) with
-``previous_prompt_seq`` still set; a real difference yields the unified diff
-produced byte-exactly by the fixed recipe (splitlines, ``difflib.unified_diff``
-with ``n=3``/``lineterm=""``, join with ``"\n"``), where a trailing-newline-only
-difference counts as identical (D2/D3, E6). The two fields appear on NO other node
-type.
-
-The Prompt tab shows exactly one distinguishable state — "no predecessor",
-"identical prompt" or the visible diff (R7). Markup is not pinned by the contract;
-following the established GUI test style this module fixes the observable
-``data-prompt-diff-state`` (``none``/``identical``/``diff``) as the concrete
-target. No production code is written here.
-
-Derived from .adw/spec.md (AC 8-13), .adw/contract.yaml (D1..D3, R7) and
-.adw/plan.md (B4-B6).
-"""
+"""Tests for the per-round prompt diff on ``agent.run`` nodes."""
 
 import difflib
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
     iter_nodes,
     rec,
     run_end_payload,
     run_start_payload,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
 
 P1 = "line one\nline two\nline three\nline four"
 P2 = "line one\nline TWO changed\nline three\nline four"
@@ -127,7 +103,7 @@ def _by_seq(tree):
     return {n["seq"]: n for n in iter_nodes(tree) if n.get("type") == "agent.run"}
 
 
-def test_predecessor_by_agent_lane_and_greatest_smaller_seq(home, tmp_path):  # noqa: F811
+def test_predecessor_by_agent_lane_and_greatest_smaller_seq(home, tmp_path):
     """D1: the predecessor is the same-agent, same-lane run with the greatest seq
     below the node's. Other agents and other lanes are never used as predecessor."""
     client, slug = _client(tmp_path, _predecessor_lines())
@@ -144,7 +120,7 @@ def test_predecessor_by_agent_lane_and_greatest_smaller_seq(home, tmp_path):  # 
     assert runs[14]["prompt_diff"] is None and runs[14]["previous_prompt_seq"] is None
 
 
-def test_identical_prompt_yields_empty_diff_not_null(home, tmp_path):  # noqa: F811
+def test_identical_prompt_yields_empty_diff_not_null(home, tmp_path):
     """D3: A3's predecessor is A2 (greatest smaller seq); the prompts are identical,
     so ``prompt_diff`` is ``""`` (distinct from the null 'no predecessor' case) with
     ``previous_prompt_seq`` still pointing at A2."""
@@ -155,7 +131,7 @@ def test_identical_prompt_yields_empty_diff_not_null(home, tmp_path):  # noqa: F
     assert runs[8]["previous_prompt_seq"] == 6
 
 
-def test_unusable_immediate_predecessor_yields_null_not_an_older_run(home, tmp_path):  # noqa: F811
+def test_unusable_immediate_predecessor_yields_null_not_an_older_run(home, tmp_path):
     """D1/D2 (targeted): the predecessor is chosen structurally BEFORE prompt
     usability. B3's immediate predecessor B2 has a non-string prompt, so the result
     is the null 'no predecessor' case — the older valid B1 is NEVER substituted."""
@@ -182,7 +158,7 @@ def test_unusable_immediate_predecessor_yields_null_not_an_older_run(home, tmp_p
     assert runs[8]["prompt_diff"] != _unified(base, current)   # not diffed against B1
 
 
-def test_no_predecessor_when_own_agent_or_prompt_is_unusable(home, tmp_path):  # noqa: F811
+def test_no_predecessor_when_own_agent_or_prompt_is_unusable(home, tmp_path):
     """D2: a considered node with no usable string ``agent`` or ``prompt`` is the
     null case even when an earlier same-agent candidate exists."""
     lines = _wrap([
@@ -205,7 +181,7 @@ def test_no_predecessor_when_own_agent_or_prompt_is_unusable(home, tmp_path):  #
     assert runs[8]["prompt_diff"] is None and runs[8]["previous_prompt_seq"] is None
 
 
-def test_diff_is_byte_exact_and_trailing_newline_counts_as_identical(home, tmp_path):  # noqa: F811
+def test_diff_is_byte_exact_and_trailing_newline_counts_as_identical(home, tmp_path):
     """D3/E6: a real difference is the byte-exact unified diff; a difference only in
     the trailing newline splits to equal lines and yields the empty diff."""
     prev = "alpha\nbeta\ngamma\ndelta\nepsilon"
@@ -234,7 +210,7 @@ def test_diff_is_byte_exact_and_trailing_newline_counts_as_identical(home, tmp_p
     assert runs[10]["previous_prompt_seq"] == 8
 
 
-def test_fields_are_present_only_on_agent_run_nodes(home, tmp_path):  # noqa: F811
+def test_fields_are_present_only_on_agent_run_nodes(home, tmp_path):
     """AC 13: the derived fields ride only ``agent.run`` nodes; no other node type
     carries them."""
     client, slug = _client(tmp_path, _predecessor_lines())
@@ -261,7 +237,7 @@ def _pane(html, seq):
     raise AssertionError(f"no agent.run pane for seq {seq}")
 
 
-def test_prompt_tab_shows_three_distinguishable_states(home, tmp_path):  # noqa: F811
+def test_prompt_tab_shows_three_distinguishable_states(home, tmp_path):
     """R7: the Prompt tab additionally shows exactly one distinguishable state —
     'no predecessor' (A1), 'identical prompt' (A3) or the visible diff (A2, whose
     changed line is rendered). The full prompt itself stays present."""

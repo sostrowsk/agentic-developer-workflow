@@ -1,20 +1,4 @@
-"""RED tests for A1–A4 — the token layer, the scales and the signal-colour rules.
-
-The stylesheet is redesigned around a NAMED token/scale system: every colour comes
-from a custom property defined in exactly two blocks (``:root`` = light,
-``@media (prefers-color-scheme: dark)`` = dark); font sizes and spacings come from a
-six-step scale; the three roles "a human must act" / "working" / "technically
-waiting" are visually distinct; a ``prefers-reduced-motion`` block switches the
-transitions off. The concrete token VALUES, class names and CSS wording are NOT
-contract surface (contract note / AC 13) — these tests assert the DISCIPLINE
-(where literals may live, how many distinct scale values exist, that referenced
-variables are really defined, that the two clashing roles no longer share a hue),
-not the exact bytes.
-
-Derived from .adw/spec.md (AC 1–6), .adw/plan.md (B4). RED until app.css is rebuilt
-around the token layer. The existing GUI tests stay green unchanged (E2: every
-pinned class name survives).
-"""
+"""Tests for the token layer, the scales and the signal-colour rules."""
 
 import re
 

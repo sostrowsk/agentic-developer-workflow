@@ -1,32 +1,14 @@
-"""RED tests for Aufgabe A — the run-level Timeline tab.
+"""Timeline tab: rendering, focus navigation and keyboard."""
 
-The run detail view gains a run-level ``Timeline`` tab in the §7.2 tab set
-``Trace`` (default) · ``Timeline`` · ``Artifacts`` · ``Raw``. The timeline shows
-horizontal swimlanes (orchestrator, spec, plan, per lane, codex, CI) derived from
-the run's ALREADY-loaded event log — the same events Trace uses — with active vs.
-waiting (CI polling, gate runtime) sections distinguishable, a header of total
-duration / cost / tokens per model, bars carrying their target node's ``data-seq``
-for click-to-Trace navigation, a still-running span drawn to the current edge, and
-a clear "no trace" indication for a run with no event log. Drawn with own means
-only — no charting library, no third-party asset (A7, E5).
-
-Derived from .adw/spec.md (A1–A8), .adw/contract.yaml
-(x-adw-template-behavior.timeline / .run_level_tabs) and .adw/plan.md §4. Markup
-is not contractual: assertions scope to the timeline panel and check observable
-content (strand labels, the semantic "waiting" distinction, node ``data-seq``),
-attesting wiring at source level — the visual/navigation checks are documented
-manual. RED until the Timeline tab exists.
-"""
-
-import os
 import re
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
+    late_timeline_strand_lines,
     rec,
     run_end_payload,
     run_start_payload,
@@ -36,12 +18,9 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     write_run,
     write_state_only_run,
 )
+from tests.gui_js_harness import run_scenario
 
-RUN_ID = "aaaa1111"
-
-
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
+# --- from test_gui_timeline_tab.py ----------------------------------------------
 
 
 def _detail_html(tmp_path, lines, *, run_id=RUN_ID, phase="done"):
@@ -55,7 +34,7 @@ def _detail_html(tmp_path, lines, *, run_id=RUN_ID, phase="done"):
     return resp.text
 
 
-def test_run_level_tab_set_is_trace_timeline_artifacts_raw_default_trace(home, tmp_path):  # noqa: F811,E501
+def test_run_level_tab_set_is_trace_timeline_artifacts_raw_default_trace(home, tmp_path):  # noqa: E501
     """A1: the run-level tab set is Trace (default) · Timeline · Artifacts · Raw,
     in that order, with Trace the default active tab."""
     html = _detail_html(tmp_path, timeline_lines())
@@ -69,7 +48,7 @@ def test_run_level_tab_set_is_trace_timeline_artifacts_raw_default_trace(home, t
     assert re.search(r'class="tab-btn active"[^>]*data-tab="trace"', html)
 
 
-def test_timeline_lanes_match_present_strands(home, tmp_path):  # noqa: F811
+def test_timeline_lanes_match_present_strands(home, tmp_path):
     """A2: one swimlane per strand PRESENT in the run — orchestrator, spec, plan,
     the build lane (backend), codex, CI — and a strand ABSENT from a run contributes
     no lane and is never an error. A full run shows all strands; a minimal run (no
@@ -88,7 +67,7 @@ def test_timeline_lanes_match_present_strands(home, tmp_path):  # noqa: F811
     assert not re.search(r"\bci\b", minimal)  # no CI strand for a run that never polled
 
 
-def test_active_and_waiting_sections_are_distinguishable(home, tmp_path):  # noqa: F811
+def test_active_and_waiting_sections_are_distinguishable(home, tmp_path):
     """A3: active vs. waiting sections are visually distinguishable; waiting covers
     at least CI polling and gate runtime. Attested at source level: the timeline
     marks waiting intervals with the semantic "waiting" token and the stylesheet
@@ -106,7 +85,7 @@ def test_active_and_waiting_sections_are_distinguishable(home, tmp_path):  # noq
     assert "waiting" in css  # the distinction is carried into the stylesheet
 
 
-def test_header_shows_duration_cost_and_tokens_per_model(home, tmp_path):  # noqa: F811
+def test_header_shows_duration_cost_and_tokens_per_model(home, tmp_path):
     """A4: the timeline header shows total duration, total cost and tokens per
     model when the log carries them."""
     panel = tab_panel(_detail_html(tmp_path, timeline_lines()), "timeline")
@@ -117,7 +96,7 @@ def test_header_shows_duration_cost_and_tokens_per_model(home, tmp_path):  # noq
     assert "1500" in panel         # tokens for that model (1000 in + 500 out)
 
 
-def test_live_run_header_work_is_empty_without_a_completed_span(home, tmp_path):  # noqa: F811
+def test_live_run_header_work_is_empty_without_a_completed_span(home, tmp_path):
     """B3 (supersedes the earlier A4 elapsed-fallback): the timeline header's run
     metric is the corrected whole-run Work (summed over closed run spans), the SAME
     source as the run list and the run-detail head. A LIVE run has no completed run
@@ -132,7 +111,7 @@ def test_live_run_header_work_is_empty_without_a_completed_span(home, tmp_path):
     assert not re.search(r"\d", m.group(1)), m.group(1)
 
 
-def test_header_metrics_empty_when_completed_span_lacks_totals(home, tmp_path):  # noqa: F811
+def test_header_metrics_empty_when_completed_span_lacks_totals(home, tmp_path):
     """B3: a run whose completed ``run`` span carries no ``totals`` has null summed
     duration/cost — the header shows neither a duration value nor a cost, with no
     elapsed-time or event-cost fallback."""
@@ -154,7 +133,7 @@ def test_header_metrics_empty_when_completed_span_lacks_totals(home, tmp_path): 
     assert "$" not in panel                               # no cost (no event-cost fallback)
 
 
-def test_dry_run_header_renders_cost_and_tokens_empty_never_zero(home, tmp_path):  # noqa: F811
+def test_dry_run_header_renders_cost_and_tokens_empty_never_zero(home, tmp_path):
     """A4 / GUI-SPEC §12: under a dry run the mocks produce no ``usage``, so the
     header renders cost and tokens EMPTY — never a false 0 and never a ``$0``."""
     panel = tab_panel(_detail_html(tmp_path, timeline_lines(dry_run=True)), "timeline")
@@ -166,7 +145,7 @@ def test_dry_run_header_renders_cost_and_tokens_empty_never_zero(home, tmp_path)
     assert "tokens: 0" not in low and "0 tokens" not in low
 
 
-def test_lane_less_gate_is_drawn_as_waiting_on_orchestrator_lane(home, tmp_path):  # noqa: F811
+def test_lane_less_gate_is_drawn_as_waiting_on_orchestrator_lane(home, tmp_path):
     """A3 (root cause): a gate that runs OUTSIDE any lane (e.g. the integration E2E
     gate, whose span carries lane=None) still represents waiting time and must be
     drawn — not silently absorbed into the orchestrator's active run bar. Its bar
@@ -185,7 +164,7 @@ def test_lane_less_gate_is_drawn_as_waiting_on_orchestrator_lane(home, tmp_path)
     assert re.search(r'bar-waiting[^>]*data-seq="2"', panel), panel[:800]
 
 
-def test_bars_carry_target_node_data_seq_for_trace_navigation(home, tmp_path):  # noqa: F811
+def test_bars_carry_target_node_data_seq_for_trace_navigation(home, tmp_path):
     """A5: a bar carries its target node's ``data-seq`` so a click can select that
     node in Trace (reusing the existing data-seq selection path; the navigation
     itself is a documented-manual check). The agent.run node's seq (8) is a bar."""
@@ -195,7 +174,7 @@ def test_bars_carry_target_node_data_seq_for_trace_navigation(home, tmp_path):  
     assert 'data-seq="15"' in panel  # the ci.wait bar targets its trace node
 
 
-def test_running_span_renders_to_current_edge_same_path_as_finished(home, tmp_path):  # noqa: F811
+def test_running_span_renders_to_current_edge_same_path_as_finished(home, tmp_path):
     """A6: a still-running span's bar is drawn (not omitted); a live run and a
     finished run render through the same path without a 5xx. The live run marks
     its open span running; the finished run has no running span."""
@@ -207,7 +186,7 @@ def test_running_span_renders_to_current_edge_same_path_as_finished(home, tmp_pa
     assert "running" not in done.lower()  # a finished run has no open span
 
 
-def test_open_span_extends_to_current_timeline_endpoint(home, tmp_path):  # noqa: F811
+def test_open_span_extends_to_current_timeline_endpoint(home, tmp_path):
     """A6 (root cause): a running span extends to the CURRENT timeline endpoint
     (now), not the timestamp of the newest logged event. When the open span is
     itself the newest event, ending it at the last event would degenerate its bar
@@ -229,7 +208,7 @@ def test_open_span_extends_to_current_timeline_endpoint(home, tmp_path):  # noqa
     assert left + width >= 99.0  # ...reaching the right edge, not a 0.5% sliver
 
 
-def test_no_event_log_shows_empty_timeline_with_no_trace_indication(home, tmp_path):  # noqa: F811
+def test_no_event_log_shows_empty_timeline_with_no_trace_indication(home, tmp_path):
     """A8: a run with no event log shows the timeline empty with a clear "no trace"
     indication, never a 5xx (parallel to the existing no-trace handling)."""
     repo = tmp_path / "repo"
@@ -243,7 +222,7 @@ def test_no_event_log_shows_empty_timeline_with_no_trace_indication(home, tmp_pa
     assert "no trace" in tab_panel(resp.text, "timeline").lower()
 
 
-def test_timeline_uses_own_means_only_no_charting_library(home, tmp_path):  # noqa: F811
+def test_timeline_uses_own_means_only_no_charting_library(home, tmp_path):
     """A7/E5: the timeline is drawn with own means only — no charting library and
     no third-party frontend asset. The page pulls in only the packaged app.css /
     app.js; no external <script src>/<link href> to a CDN appears."""
@@ -257,3 +236,98 @@ def test_timeline_uses_own_means_only_no_charting_library(home, tmp_path):  # no
     assert "http://" not in html and "https://" not in html  # no external asset/CDN
     for lib in ("d3.", "chart.js", "chartjs", "plotly", "mermaid", "//cdn"):
         assert lib not in html.lower(), lib
+
+
+# --- from test_gui_timeline_focus.py --------------------------------------------
+
+
+def _client(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    write_run(repo, RUN_ID, late_timeline_strand_lines(300), phase="done")
+    return TestClient(create_app(repos=[str(repo)])), _slug_for(repo)
+
+
+def _trace_section(html: str) -> str:
+    i = html.find('class="trace"')
+    j = html.find('class="panes"')
+    return html[i:j] if (i != -1 and j != -1 and i < j) else ""
+
+
+def _panes_section(html: str) -> str:
+    i = html.find('class="panes"')
+    j = html.find('class="problems"')
+    return html[i:j] if (i != -1 and j != -1 and i < j) else html[i:]
+
+
+def _ci_wait_seq(client, slug) -> int:
+    events = client.get(f"/api/runs/{slug}/{RUN_ID}/events").json()
+    return next(e["seq"] for e in events
+               if e.get("type") == "ci.wait" and e.get("kind") == "start")
+
+
+def test_focus_keeps_a_late_timeline_node_selectable(home, tmp_path):
+    """P2 (server): a late ``ci.wait`` strand is a Timeline bar target. Since the
+    trace column is no longer paged it already has a tree entry and a pane, and
+    ``?focus`` must keep both — the deep link stays valid for every node of the run,
+    not just for the ones a window happened to cover."""
+    client, slug = _client(tmp_path)
+    ci_seq = _ci_wait_seq(client, slug)
+
+    base = client.get(f"/runs/{slug}/{RUN_ID}").text
+    seq_attr = f'data-seq="{ci_seq}"'
+    # It IS a timeline bar target, and it is reachable in the trace column already.
+    assert seq_attr in tab_panel(base, "timeline")
+    assert seq_attr in _trace_section(base)
+    assert re.search(rf'class="pane[^"]*"\s+data-seq="{ci_seq}"', _panes_section(base))
+
+    focused = client.get(f"/runs/{slug}/{RUN_ID}", params={"focus": ci_seq}).text
+    tsec = _trace_section(focused)
+    assert seq_attr in tsec                       # the tree entry is now visible ...
+    assert "data-tree-entry" in tsec
+    # ... and its detail pane
+    assert re.search(rf'class="pane[^"]*"\s+data-seq="{ci_seq}"', _panes_section(focused))
+
+
+def test_bar_click_navigates_to_focus_for_out_of_window_node(tmp_path):
+    """P2 (client): clicking a Timeline bar whose node has no pane navigates to
+    ``?focus=<seq>`` (so the node is materialised on load); an in-window bar whose
+    node has a pane still selects in place — no extra navigation, and the requested
+    sequence, not the first visible one, is shown."""
+    r = run_scenario(tmp_path, "timeline-focus")
+
+    assert r["nav_out"] == ["/runs/repo/aaaa1111?focus=99"]  # out-of-window bar -> navigate
+    assert r["nav_all"] == r["nav_out"]                      # in-window bar adds no navigation
+    assert r["pane10_selected"] is True                      # the requested in-window node is shown
+
+
+# --- from test_gui_timeline_keyboard.py -----------------------------------------
+
+
+def test_timeline_row_is_the_operable_unit(tmp_path):
+    """AC 5: the row (not the bar alone) is a keyboard tab stop and its label is a
+    click target; a click on the label selects the in-window node in place, keyboard
+    activation of an out-of-window row redirects via ``?focus``, Space activates
+    without scrolling, and a click on the bar inside the row selects exactly once."""
+    r = run_scenario(tmp_path, "timeline-activate")
+
+    # The whole row is keyboard-focusable (a tab stop), not just the 6px bar.
+    assert r["row_tabindex"] is not None and int(r["row_tabindex"]) >= 0, (
+        "the timeline row is not keyboard-focusable"
+    )
+
+    # A click on the LABEL selects the in-window node in place — no navigation.
+    assert r["afterLabel"]["pane10_selected"] is True, "a label click did not select the node"
+    assert r["afterLabel"]["navs"] == [], "an in-window label click navigated away"
+
+    # Enter on the OUT-of-window row redirects to ?focus for its node (no pane/row).
+    assert r["afterKeyOut"]["navs"] == ["/runs/repo/aaaa1111?focus=99"], (
+        "keyboard activation of an out-of-window row did not use the ?focus redirect"
+    )
+
+    # Space on the in-window row triggers the same in-place selection without scrolling.
+    assert r["afterKeySpace"]["pane10_selected"] is True, "Space did not activate the row"
+    assert r["afterKeySpace"]["space_default_prevented"] is True, "Space did not prevent scrolling"
+
+    # A click on the bar inside the row activates once, not twice.
+    assert r["bar_click_measures"] == 1, "a bar click double-activated through the row"

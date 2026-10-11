@@ -279,14 +279,15 @@ introduced this?" answerable.
 | `adw/codex.py` | 473 | `CodexRunner`: `review()` and `author()` via `codex exec -m gpt-6-astra --sandbox read-only`, isolated `CODEX_HOME`, marker-block protocol with per-call nonce, process-group kill, token back-sync. |
 | `adw/findings.py` | 223 | `Finding`, `ReviewResult`, `SCHEMA_INSTRUCTION` (one shared constant), strict parser `extract_review_result`. |
 | `adw/config.py` | 154 | `.adw/config.yaml` schema and loader (`AdwConfig`, `Gate`, `LaneConfig`, `E2eConfig`, `CiConfig`, `CodexConfig`, `TraceConfig`, `BreakpointName`). |
-| `adw/state.py` | 289 | `RunState`, `LaneState`, `Phase`; atomic persistence, transactions, monotonic sequence, `find_latest`. |
+| `adw/state.py` | 296 | `RunState`, `LaneState`, `Phase`; atomic persistence, transactions, monotonic sequence, `find_latest`; `runs_root`/`contained` — the runs-tree containment shared by the GUI and retention. |
 | `adw/gates.py` | 187 | Gate runner: subprocess per gate with real timeout, process-group kill, bounded output tail (200 lines × max. 4 KiB), `gate` spans. |
 | `adw/worktrees.py` | 219 | Lane worktrees (idempotent, ready marker, recovery from partial adds, serialized mutations), lane branches `adw/<run_id>/<lane>`, deterministic ports with bind check, self-ignoring `.adw/runs/.gitignore`. |
 | `adw/triage.py` | 95 | Pure functions: final-review triage (`scope_gap` → follow-up, rest → lane fixes), limit checks, circuit breaker. |
-| `adw/ci.py` | 207 | GitLab: SHA-bound pipeline polling via `glab api`, failed-job log retrieval. |
-| `adw/github.py` | 172 | GitHub Actions: SHA-bound workflow-run polling via `gh api`, `--log-failed` excerpts. Same `CiResult` and error classes as `ci.py`. |
+| `adw/ci.py` | 246 | GitLab: SHA-bound pipeline polling via `glab api`, failed-job log retrieval; the forge-neutral `run_forge_cli` (hardened glab/gh call) and `poll_until` (wait loop) both forges use. |
+| `adw/github.py` | 137 | GitHub Actions: SHA-bound workflow-run polling via `gh api`, `--log-failed` excerpts. Same `CiResult` and error classes as `ci.py`. |
 | `adw/forge.py` | 82 | GitLab vs. GitHub: `ci.provider` override, otherwise hostname of the `origin` URL; unknown host → `ForgeError`: the CLI forge preflight refuses the command; phase 7 escalates only if origin/config changed mid-run (dry run: falls back to GitLab). |
 | `adw/env.py` | 39 | `safe_env()`: environment whitelist for every subprocess. |
+| `adw/git.py` | 30 | `run_git()`: the one hardened git invocation (hooks off, env whitelist, caller's timeout) for orchestrator, CLI and GUI. |
 | `adw/events.py` | 371 | `EventEmitter`/`NoOpEmitter`: append-only JSON Lines event log with spans, per-run seq, `flock`, file mode 0600, **fail-open**. |
 | `adw/snapshots.py` | 133 | Per-step worktree snapshots as git refs `refs/adw/<run_id>/<seq>` (temporary index, `commit-tree`, `update-ref`), fail-open. |
 | `adw/retention.py` | 477 | Run enumeration, canonical dating, pruning (worktrees → refs → directory), `--gzip` compression of event logs. |

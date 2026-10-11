@@ -1,59 +1,25 @@
-"""RED tests for A1/A2 — the work field moves directly under the head and the two
-summaries drop below it, collapsed and self-describing.
+"""The work field sits under the head; the two summaries follow, collapsed."""
 
-The run-detail page is re-ordered so the instrument (the trace tree) begins right
-under the page head: ``Head → work field (Trace tree │ detail panes │ run context)
-→ "Planned tasks" (collapsed) → "Change scope" (collapsed)``. Both former blocks
-render as native ``<details>`` WITHOUT ``open`` — no JavaScript, no client state, no
-query parameter, exactly like the trace tree's collapse nodes. Each ``<summary>``
-line carries the statement one used to have to expand the block for: "Planned
-tasks" the per-lane name / task count / state, "Change scope" the number of changed
-files with the sums of added and removed lines. When the data is missing the line
-says so instead of unfolding into an empty block.
-
-Markup/CSS wording, class names and block order in the markup are NOT contractual
-(``.adw/contract.yaml`` x-adw-contract-boundary); these tests read only the
-observable behaviour — document order of the trace tree vs the two blocks, the
-``<details>``/``<summary>`` collapse, and the tokens each summary line carries —
-anchored on the existing ``data-plan-skeleton`` / ``data-change-scope`` markers the
-present tests already rely on.
-
-Derived from .adw/spec.md (AC 1-4), .adw/contract.yaml
-(x-adw-template-behavior.order / .summaries) and .adw/plan.md (B2.1-B2.4, B3, B4).
-RED until the template re-orders the blocks, wraps them in ``<details>`` and renders
-the two summary lines.
-"""
-
-import os
 import re
-import subprocess
 
-from fastapi.testclient import TestClient
-
-from adw.gui.app import create_app
 from adw.gui.i18n import CATALOG
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _client,
+    _git,
+    _slug_for,
     comprehensive_lines,
-    home,
     rec,
     run_end_payload,
     run_start_payload,
     write_run,
 )
 
-RUN_ID = "aaaa1111"
-
-
 # --- helpers -------------------------------------------------------------------
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
-def _client(repo):
-    return TestClient(create_app(repos=[str(repo)]))
 
 
 def _page(client, slug, run_id=RUN_ID, **params):
@@ -99,11 +65,6 @@ def _has_open(open_tag: str) -> bool:
 # --- git-backed change-scope fixtures ------------------------------------------
 
 
-def _git(repo, *args):
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        check=True, capture_output=True, text=True, timeout=60,
-    ).stdout.strip()
 
 
 def _init_repo(repo):
@@ -171,7 +132,7 @@ def _write_plan(repo, text, run_id=RUN_ID):
 # --- AC 1: the trace tree precedes the two summary blocks -----------------------
 
 
-def test_trace_list_precedes_the_two_summary_blocks(home, tmp_path):  # noqa: F811
+def test_trace_list_precedes_the_two_summary_blocks(home, tmp_path):
     """AC 1: in the rendered document ``.trace-list`` stands BEFORE both "Planned
     tasks" (``data-plan-skeleton``) and "Change scope" (``data-change-scope``), and
     neither block sits between the page head and the work field."""
@@ -200,7 +161,7 @@ def test_trace_list_precedes_the_two_summary_blocks(home, tmp_path):  # noqa: F8
 # --- AC 2: both blocks are collapsed <details> without open ---------------------
 
 
-def test_summary_blocks_are_collapsed_details_without_open(home, tmp_path):  # noqa: F811
+def test_summary_blocks_are_collapsed_details_without_open(home, tmp_path):
     """AC 2: "Planned tasks" and "Change scope" each render as a native ``<details>``
     with a ``<summary>`` and NO ``open`` attribute — their bodies start hidden but the
     former block content stays reachable below the summary. No query parameter or
@@ -230,7 +191,7 @@ def test_summary_blocks_are_collapsed_details_without_open(home, tmp_path):  # n
 # --- AC 3: the Planned-tasks summary line carries the statement ------------------
 
 
-def test_planned_tasks_summary_names_lane_task_count_and_state(home, tmp_path):  # noqa: F811
+def test_planned_tasks_summary_names_lane_task_count_and_state(home, tmp_path):
     """AC 3: the "Planned tasks" ``<summary>`` names, per lane, its name, the number
     of tasks and the EXISTING lane state — readable without expanding. Here backend
     (1 task, completed lane -> done) and frontend (3 tasks, never ran -> pending)
@@ -254,7 +215,7 @@ def test_planned_tasks_summary_names_lane_task_count_and_state(home, tmp_path): 
     assert CATALOG["en"]["plan_skeleton_pending"] in text
 
 
-def test_planned_tasks_block_is_absent_without_a_plan_skeleton(home, tmp_path):  # noqa: F811
+def test_planned_tasks_block_is_absent_without_a_plan_skeleton(home, tmp_path):
     """AC 3 / normative: without a plan skeleton (no plan.md) the whole block is not
     rendered — no empty collapsible ``<details>`` and no summary line at all."""
     repo = tmp_path / "repo"
@@ -270,7 +231,7 @@ def test_planned_tasks_block_is_absent_without_a_plan_skeleton(home, tmp_path): 
 # --- AC 4: the Change-scope summary line carries the file/line statement ---------
 
 
-def test_change_scope_summary_counts_files_and_line_sums_across_lanes(home, tmp_path):  # noqa: F811,E501
+def test_change_scope_summary_counts_files_and_line_sums_across_lanes(home, tmp_path):  # noqa: E501
     """AC 4: the "Change scope" ``<summary>`` names the number of changed files over
     ALL observed lanes and the sums of added and removed lines. A binary file counts
     towards the file number but contributes nothing to the line sums. Here backend
@@ -306,7 +267,7 @@ def test_change_scope_summary_counts_files_and_line_sums_across_lanes(home, tmp_
     assert "50" not in text, "the binary's byte size must not leak into the sums"
 
 
-def test_change_scope_summary_distinguishes_empty_from_unavailable(home, tmp_path):  # noqa: F811,E501
+def test_change_scope_summary_distinguishes_empty_from_unavailable(home, tmp_path):  # noqa: E501
     """AC 4 (normative empty vs unavailable): a run whose diff is available but has
     NO changed files shows file count 0 with zero sums; a run with NO usable diff
     shows an explanatory line INSTEAD of a zero. The two summary lines are

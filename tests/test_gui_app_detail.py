@@ -1,10 +1,5 @@
-"""RED tests for Aufgabe B — the run-detail JSON, path-traversal guard, the raw
-``/events`` endpoint and the read-only guarantee.
-
-Derived from .adw/spec.md (AC 6/7/8, 12/13/15/16), .adw/contract.yaml (RunDetail,
-PhaseStatus, TraceNode, EventRecord, x-adw-scope.invariants) and GUI-SPEC §7.4.
-Tested against fixture logs with FastAPI's TestClient. RED until
-``adw.gui.app.create_app`` exists.
+"""Tests for the run-detail JSON, path-traversal guard, the raw ``/events`` endpoint and the
+read-only guarantee.
 """
 
 import json
@@ -12,7 +7,7 @@ import json
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
     CODEX_STDOUT,
     FINAL_ANSWER,
     GATE_CMD,
@@ -22,7 +17,6 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     SYSTEM_APPEND,
     comprehensive_lines,
     find_node,
-    home,
     phases_lines,
     problems_lines,
     write_run,
@@ -38,7 +32,7 @@ def _client_with(tmp_path, run_id, lines, phase=None):
     return client, slug
 
 
-def test_detail_phase_bar_has_seven_phases_in_order_with_states(home, tmp_path):  # noqa: F811
+def test_detail_phase_bar_has_seven_phases_in_order_with_states(home, tmp_path):
     """AC 12: the header is exactly the seven phases in workflow order, each with
     a status (completed/active/pending/failed) and a duration where
     determinable."""
@@ -56,7 +50,7 @@ def test_detail_phase_bar_has_seven_phases_in_order_with_states(home, tmp_path):
         assert by_name[later]["duration"] is None
 
 
-def test_detail_tree_comes_from_model_and_keeps_unknown_types(home, tmp_path):  # noqa: F811
+def test_detail_tree_comes_from_model_and_keeps_unknown_types(home, tmp_path):
     """AC 13/16: the tree is the span tree from adw.gui.model (run root, nested
     phase/lane/round, agent.run with its tool points) and unknown event types are
     retained generically with their raw payload, never dropped."""
@@ -77,7 +71,7 @@ def test_detail_tree_comes_from_model_and_keeps_unknown_types(home, tmp_path):  
     assert rnd.get("n") == 2 and rnd.get("cap") == 10  # loop nodes carry n/cap
 
 
-def test_detail_pane_data_present_per_node_type(home, tmp_path):  # noqa: F811
+def test_detail_pane_data_present_per_node_type(home, tmp_path):
     """AC 14: agent.run carries the full prompt (incl. system append), the answer
     and the tool calls (full input + result); gate carries command/exit/output;
     codex.review carries the findings and the raw stdout."""
@@ -96,7 +90,7 @@ def test_detail_pane_data_present_per_node_type(home, tmp_path):  # noqa: F811
     assert "Missing null check" in review and "P2" in review and CODEX_STDOUT in review
 
 
-def test_detail_surfaces_reader_problems(home, tmp_path):  # noqa: F811
+def test_detail_surfaces_reader_problems(home, tmp_path):
     """AC 15: reader-reported problems (broken lines, seq gaps) are made visible
     in the detail JSON with their position/sequence information."""
     client, slug = _client_with(tmp_path, "aaaa1111", problems_lines(), phase="done")
@@ -108,7 +102,7 @@ def test_detail_surfaces_reader_problems(home, tmp_path):  # noqa: F811
     assert gap["expected"] == 2 and gap["found"] == 3
 
 
-def test_path_traversal_guard_slug_and_run_id(home, tmp_path):  # noqa: F811
+def test_path_traversal_guard_slug_and_run_id(home, tmp_path):
     """AC 7/8: unknown slug -> 404; a run_id that violates RUN_ID_RE -> 400; a
     valid-format but absent run_id -> 404. Never a 5xx."""
     client, slug = _client_with(tmp_path, "abcdef12", comprehensive_lines(), phase="done")
@@ -122,7 +116,7 @@ def test_path_traversal_guard_slug_and_run_id(home, tmp_path):  # noqa: F811
     assert client.get("/runs/no-such-slug/abcdef12").status_code == 404
 
 
-def test_events_endpoint_from_seq_and_unknown_types(home, tmp_path):  # noqa: F811
+def test_events_endpoint_from_seq_and_unknown_types(home, tmp_path):
     """AC / contract: /events returns reader-accepted records with all original
     fields in file order, from seq >= N (default: the beginning), unknown types
     NOT filtered; an invalid from_seq is a controlled client error (never 5xx)."""
@@ -143,7 +137,7 @@ def test_events_endpoint_from_seq_and_unknown_types(home, tmp_path):  # noqa: F8
     assert 400 <= bad.status_code < 500  # controlled client error, not a server error
 
 
-def test_gui_is_strictly_read_only(home, tmp_path):  # noqa: F811
+def test_gui_is_strictly_read_only(home, tmp_path):
     """AC 6: no route mutates a run's files and there is no write/control route —
     a full read pass leaves every file under the run directory byte-identical."""
     repo = tmp_path / "repo"

@@ -1,21 +1,4 @@
-"""RED tests for the orchestrator instrumentation (GUI-SPEC §11, steps 2–4).
-
-Derived from .adw/spec.md, .adw/contract.yaml and docs/GUI-SPEC.md §4.3/§4.4/§6.
-The emitter (adw/events.py) already exists and is only wired in and called — it
-is never modified here.
-
-Every assertion is over externally observable surface:
-  * the on-disk event log (.adw/runs/<run_id>/events.jsonl) and its typed
-    payloads (contract §2),
-  * the additive-compatible signatures of the existing public functions
-    (contract §4),
-  * the run-span boundary / status mapping (contract §3, E1),
-  * the dry-run as the acceptance path (contract §6).
-
-These tests exercise the NEW optional ``emitter=`` (and, for the point-only
-modules, ``span_id=``) parameters that do not exist yet — so they are RED until
-the instrumentation is wired.
-"""
+"""Tests for the orchestrator instrumentation (GUI-SPEC §11, steps 2–4)."""
 
 import json
 import logging
@@ -29,7 +12,6 @@ from claude_agent_sdk import (
     ToolUseBlock,
     UserMessage,
 )
-from typer.testing import CliRunner
 
 import adw.events as events_module
 from adw.agents import REGISTRY, AgentRunError, SdkAgentRunner, agent_run_start_payload
@@ -45,38 +27,25 @@ from adw.phases import EscalationError, run_ci_phase, run_final_review_phase
 from adw.state import RunState
 from adw.triage import triage_final_review
 from tests.conftest import git, write_config
-
-runner = CliRunner()
-
-RUN_ID = "run01a2"
-
+from tests.run_helpers import (
+    RUN_ID,
+    TDD_CONFIG,
+    cli_run,
+    of_type,
+    read_events,
+    read_run_events,
+    runner,
+)
 
 # --- shared helpers ---------------------------------------------------------
 
 
-def read_events(repo, run_id: str = RUN_ID) -> list[dict]:
-    """Every complete line of the run's events.jsonl (empty list if absent)."""
-    path = repo.resolve() / ".adw" / "runs" / run_id / "events.jsonl"
-    if not path.exists():
-        return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-def of_type(records: list[dict], type_: str, kind: str | None = None) -> list[dict]:
-    return [
-        r for r in records if r["type"] == type_ and (kind is None or r["kind"] == kind)
-    ]
 
 
-def cli_run(repo, *extra):
-    return runner.invoke(
-        app, ["run", "--repo", str(repo), "--issue", "Instrumentierung", "--dry-run", *extra]
-    )
 
 
-def read_run_events(repo) -> tuple[RunState, list[dict]]:
-    state = RunState.find_latest(repo)
-    return state, read_events(repo, state.run_id)
 
 
 PARALLEL_CONFIG = """\
@@ -821,16 +790,6 @@ def test_approval_points_emitted_on_pause_and_grant(target_repo):
         assert set(approval["payload"]) == {"gate", "event"}
 
 
-TDD_CONFIG = """\
-base_branch: staging
-lanes:
-  backend:
-    gates:
-      - {name: pytest, cmd: "test -f .adw-dry-run-fixed", timeout: 10, tdd: true}
-ci:
-  provider: gitlab
-  staging_job: deploy-staging
-"""
 
 
 def test_dry_run_tdd_gate_emits_red_check(target_repo):
@@ -968,7 +927,7 @@ def test_codex_draft_degradation_log_has_non_null_span(target_repo):
 def test_fix_cycle_limit_emits_limit_hit(target_repo):
     """limit.hit: three fix cycles exhaust the per-lane limit and emit a
     limit.hit point before escalating."""
-    from tests.test_e2e_dry_run import finding, prepare_final_review, review_json
+    from tests.run_helpers import finding, prepare_final_review, review_json
 
     ctx = prepare_final_review(target_repo)
     ctx.emitter = EventEmitter(ctx.repo, ctx.state.run_id)
@@ -994,7 +953,7 @@ def test_ci_reentry_emits_reentry_point(target_repo):
     ci.reentry point on the actual re-entry."""
     import json as _json
 
-    from tests.test_e2e_dry_run import prepare_final_review, review_json
+    from tests.run_helpers import prepare_final_review, review_json
 
     ctx = prepare_final_review(target_repo)
     ctx.agents.script("final_reviewer", review_json([]))  # ok → advance to "ci"
@@ -1079,7 +1038,7 @@ def test_plan_phase_to_phase_stays_null_when_archival_fails(target_repo, monkeyp
     to_phase null (the transition was never reached) and the error propagates."""
     from adw.config import AdwConfig
     from adw.phases import RunContext, run_spec_and_plan
-    from tests.test_e2e_dry_run import OK, script_authoring, script_draft_artifacts
+    from tests.run_helpers import OK, script_authoring, script_draft_artifacts
 
     agents = MockAgentRunner()
     script_authoring(agents)

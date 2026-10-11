@@ -1,14 +1,4 @@
-"""RED tests for Aufgabe B — ``adw runs prune`` behaviour on the real filesystem
-and git (Spec-Schritt 13, §4.5; AC C1–C8, B4, E9/E10).
-
-Everything is exercised through the CLI against real temp git repos: run
-directories, snapshot refs ``refs/adw/<run_id>/*``, registered git worktrees
-under ``.adw/runs/<run_id>/trees/<lane>`` and lane branches ``adw/<run_id>/*``.
-Only observable effects are asserted (which run dirs / refs / worktrees / branches
-remain, what the output names), never internal helper signatures.
-
-RED until the ``runs prune`` command and the retention core exist.
-"""
+"""Tests for ``adw runs prune`` on the real filesystem and git (GUI-SPEC §4.5)."""
 
 import gzip
 import os

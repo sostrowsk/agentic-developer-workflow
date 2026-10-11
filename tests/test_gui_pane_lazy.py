@@ -1,28 +1,4 @@
-"""RED behavioural tests for GUI-Redesign 5 (Brief 5) — the client side of A1/A2.
-
-The served ``app.js`` is exercised in the minimal dependency-free ``node`` harness
-(``tests/gui_js_harness.js`` / ``.py``; no browser automation). These prove the
-externally observable contract of the span-pane LAZY LOAD and the fragment swap:
-
-  * a selected span pane fetches the SAME detail page with ``focus=<seq>`` (existing
-    query params preserved) and the ``X-Requested-With: fetch`` header, shows a loading
-    state, then the fetched body — AC 6;
-  * a superseded / swapped-away answer writes nothing (no half state, no error) —
-    AC 7;
-  * a running request is reused (double-select and A→B→A), a loaded pane is not
-    re-fetched — AC 8;
-  * a failed load keeps the rest of the view, shows a "could not load" state and stays
-    re-loadable — AC 9;
-  * keyboard selection uses the SAME path as a click (no synthetic click); pure
-    navigation fetches nothing — AC 11;
-  * the fragment refresh keeps the unselected context panel live (AC 3) and the open
-    state of a section survives the asynchronous re-load across a region swap (AC 12).
-
-RED until B5 adds the span-pane lazy load and B3's fragment carries the context on a
-region. Derived from .adw/spec.md (AC 3, 6–9, 11–12), .adw/contract.yaml
-(x-adw-template-behavior.lazy_selection, latest_context) and .adw/plan.md (B2 rows
-6–13, B5).
-"""
+"""Behavioural tests for the client side of the live payload (lazy panes)."""
 
 import re
 

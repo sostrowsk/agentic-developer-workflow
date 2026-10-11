@@ -1,42 +1,17 @@
-"""RED tests for Aufgabe C — measurable response time.
-
-The served vanilla client instruments the TWO interactions the issue names — node
-selection and tab switch — with the ``performance`` API only (no new dependency,
-no browser automation). Each sets a start ``performance.mark()`` at the triggering
-input event and an end mark only once the interaction is observably complete: the
-content is in the DOM AND the browser has painted it. Because a
-``requestAnimationFrame`` callback runs BEFORE the paint, the end mark is recorded
-in a task scheduled from WITHIN a rAF callback (rAF → ``setTimeout(0)``), which
-runs after that paint. A named ``performance.measure()`` between the marks is
-readable via ``performance.getEntriesByName(...)``. Pinned names:
-
-  node selection: adw:select:start / adw:select:end, measure adw:select
-  tab switch:     adw:tab:start / adw:tab:end,       measure adw:tab
-
-adw:select and adw:tab are the two long-standing measures asserted here; run
-7fe9d702 additionally RE-INTRODUCES the third measure adw:artifact and the
-supersession guard that a prior review had descoped (their own pinned names and
-behaviour live in test_gui_artifact_measure.py and test_gui_supersession.py).
-
-Derived from .adw/spec.md (C1–C4, as descoped), .adw/contract.yaml
-(x-adw-performance, x-adw-guide) and .adw/plan.md §5/§6. The tests assert the
-served client-script TEXT — wiring and stable names only, not runtime behavior.
-RED until the instrumentation and the guide exist.
-"""
+"""Tests for measurable response time."""
 
 import pathlib
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import home  # noqa: F401 — used as a fixture
 
 
 def _client_script():
     return TestClient(create_app(repos=[])).get("/static/app.js").text
 
 
-def test_client_script_contains_the_pinned_mark_and_measure_names(home):  # noqa: F811
+def test_client_script_contains_the_pinned_mark_and_measure_names(home):
     """C2: the served client script carries the pinned mark and measure names for
     the node-selection and tab-switch interactions."""
     js = _client_script()
@@ -50,7 +25,7 @@ def test_client_script_contains_the_pinned_mark_and_measure_names(home):  # noqa
     # shared construction are asserted in test_gui_artifact_measure.py.
 
 
-def test_both_interactions_use_the_performance_api(home):  # noqa: F811
+def test_both_interactions_use_the_performance_api(home):
     """C1/C4: both interactions are instrumented with the vanilla ``performance``
     API — start marks and a named measure between them — and no browser-automation
     tool is pulled in."""
@@ -63,7 +38,7 @@ def test_both_interactions_use_the_performance_api(home):  # noqa: F811
         assert banned not in js.lower(), banned
 
 
-def test_end_mark_awaits_async_loaded_content(home):  # noqa: F811
+def test_end_mark_awaits_async_loaded_content(home):
     """C1 (root cause): for an interaction that triggers a fetch — node selection ->
     ``loadToolBody``, tab switch -> ``loadDiff`` — the end mark is recorded only
     AFTER the fetched content is inserted, not after the loading placeholder is
@@ -85,7 +60,7 @@ def test_end_mark_awaits_async_loaded_content(home):  # noqa: F811
     assert ".then(" in window and "perfEndAfterPaint" in window
 
 
-def test_end_mark_is_scheduled_from_a_raf_callback_after_paint(home):  # noqa: F811
+def test_end_mark_is_scheduled_from_a_raf_callback_after_paint(home):
     """C1: the end mark is recorded in a task scheduled from WITHIN a
     ``requestAnimationFrame`` callback (rAF → ``setTimeout``), which runs AFTER the
     paint — a rAF callback alone runs before the paint and is insufficient. Both

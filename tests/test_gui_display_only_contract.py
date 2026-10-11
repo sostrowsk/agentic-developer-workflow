@@ -29,14 +29,12 @@ Derived from .adw/spec.md (AC 12), .adw/contract.yaml (/api/runs,
 """
 
 import json
-import os
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import home  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import _slug_for
 
 _FIXTURES = Path(__file__).parent / "fixtures"
 _EVENTS = json.loads((_FIXTURES / "contract_baseline_events.json").read_text())
@@ -49,8 +47,6 @@ RUN_ID = _EVENTS["run_id"]
 EXPECTED_DETAIL_KEYS = set(_GOLDEN["detail"])
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _build(tmp_path):
@@ -71,7 +67,7 @@ def _norm(obj, slug):
     return json.loads(json.dumps(obj).replace(slug, "<REPO>"))
 
 
-def test_api_detail_matches_the_pre_feature_baseline_before_and_after_render(home, tmp_path):  # noqa: F811,E501
+def test_api_detail_matches_the_pre_feature_baseline_before_and_after_render(home, tmp_path):  # noqa: E501
     """AC 12: the run-detail JSON equals the cc201f1 baseline in every field, type,
     value and list order — including ``change_scope``, ``plan_skeleton``, ``tree``,
     ``phases``, ``raw``, ``latest_context``, ``problems`` and the Brief-2 metrics — and
@@ -95,7 +91,7 @@ def test_api_detail_matches_the_pre_feature_baseline_before_and_after_render(hom
     assert after == _GOLDEN["detail"], "run-detail JSON changed across an HTML render"
 
 
-def test_api_runs_list_matches_the_pre_feature_baseline_before_and_after_render(home, tmp_path):  # noqa: F811,E501
+def test_api_runs_list_matches_the_pre_feature_baseline_before_and_after_render(home, tmp_path):  # noqa: E501
     """AC 12: the run-list JSON equals the cc201f1 baseline (fields, types, values,
     entry order) and is identical before and after a detail HTML render — the feature
     adds no field, no entry and no reordering to ``GET /api/runs``."""

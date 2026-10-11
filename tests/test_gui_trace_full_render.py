@@ -11,27 +11,25 @@ Also pinned here: the pane's raw payload block is pretty-printed JSON, not a
 single unreadable line.
 """
 
-import os
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.model import build_tree
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _detail_html,
+    _slug_for,
+    _trace_section,
     many_tool_entries_lines,
     tool_entry_command,
     write_run,
 )
 from tests.gui_js_harness import run_scenario
 
-RUN_ID = "aaaa1111"
 TREE_ENTRY_MARKER = "data-tree-entry"
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _client(tmp_path, lines):
@@ -41,17 +39,8 @@ def _client(tmp_path, lines):
     return TestClient(create_app(repos=[str(repo)])), _slug_for(repo)
 
 
-def _detail_html(client, slug, **params):
-    resp = client.get(f"/runs/{slug}/{RUN_ID}", params=params or None)
-    assert resp.status_code == 200
-    return resp.text
 
 
-def _trace_section(html: str) -> str:
-    i = html.find('class="trace"')
-    j = html.find('class="panes"')
-    assert i != -1 and j != -1 and i < j, "trace/panes layout anchors not found"
-    return html[i:j]
 
 
 def _tree_node_count(lines) -> int:
@@ -63,7 +52,7 @@ def _tree_node_count(lines) -> int:
     return walk(build_tree(dicts))
 
 
-def test_trace_column_renders_every_node_of_a_large_run(home, tmp_path):  # noqa: F811
+def test_trace_column_renders_every_node_of_a_large_run(home, tmp_path):
     """A run far past the old 200-entry cap renders ONE entry marker per tree node —
     head and tail are in the same document, nothing is windowed out."""
     pairs = 600
@@ -78,7 +67,7 @@ def test_trace_column_renders_every_node_of_a_large_run(home, tmp_path):  # noqa
     assert tool_entry_command(pairs - 1) in tree         # ... and the tail, together
 
 
-def test_trace_column_has_no_paging_navigation(home, tmp_path):  # noqa: F811
+def test_trace_column_has_no_paging_navigation(home, tmp_path):
     """No ``?offset`` paging link survives in the trace column — there is nothing
     left to page through."""
     client, slug = _client(tmp_path, many_tool_entries_lines(600))
@@ -89,7 +78,7 @@ def test_trace_column_has_no_paging_navigation(home, tmp_path):  # noqa: F811
     assert "window-nav" not in tree
 
 
-def test_trace_column_ignores_a_stale_offset_parameter(home, tmp_path):  # noqa: F811
+def test_trace_column_ignores_a_stale_offset_parameter(home, tmp_path):
     """A bookmarked ``?offset`` from the paged era must not hide the head any more:
     the parameter is inert for the trace column, the full tree renders either way."""
     pairs = 600
@@ -102,7 +91,7 @@ def test_trace_column_ignores_a_stale_offset_parameter(home, tmp_path):  # noqa:
     assert tool_entry_command(pairs - 1) in tree
 
 
-def test_pane_raw_payload_is_pretty_printed(home, tmp_path):  # noqa: F811
+def test_pane_raw_payload_is_pretty_printed(home, tmp_path):
     """The pane's payload block is a readable field list over several lines — not one
     long line, and not a JSON dump (no quoted keys, no braces). See
     tests/test_gui_payload_pretty.py for the format itself."""
@@ -131,7 +120,7 @@ def _panes_section(html: str) -> str:
     return html[i:j] if (i != -1 and j != -1 and i < j) else html[i:]
 
 
-def test_point_nodes_get_no_server_rendered_pane(home, tmp_path):  # noqa: F811
+def test_point_nodes_get_no_server_rendered_pane(home, tmp_path):
     """With the column unpaged, a pane per node would put thousands of hidden
     elements in the DOM. Point nodes (tool calls/results, messages, …) therefore get
     NO pane of their own — the panes section holds only the few span panes."""
@@ -145,7 +134,7 @@ def test_point_nodes_get_no_server_rendered_pane(home, tmp_path):  # noqa: F811
     assert _detail_html(client, slug).count(TREE_ENTRY_MARKER) >= 2 * pairs
 
 
-def test_a_single_lazy_pane_shell_is_rendered_for_point_nodes(home, tmp_path):  # noqa: F811
+def test_a_single_lazy_pane_shell_is_rendered_for_point_nodes(home, tmp_path):
     """Exactly one shared, server-rendered shell exists that the client fills on
     selection — no DOM is constructed in JS (GUI-SPEC §7.3)."""
     client, slug = _client(tmp_path, many_tool_entries_lines(5))

@@ -1,39 +1,17 @@
-"""RED tests for A3 / Contract R3 — ``awaiting`` in the phase bar.
+"""Tests for ``awaiting`` in the phase bar."""
 
-For a run paused at an approval gate, the waiting business phase reports the new
-status ``awaiting`` instead of ``active``: the spec gate (``approval`` event
-``gate: spec``; fallback state phase ``awaiting_spec_approval``) marks phase
-``spec``; the plan gate (``gate: plan``; fallback ``awaiting_approval``) marks
-phase ``plan``. The awaiting phase is never simultaneously
-``active``/``pending``/``completed``, no other phase is ``active`` at the same
-time, and after the matching ``granted`` the bar follows the normal progression.
-``RunDetail.phases`` keeps its seven business-phase cells — no approval phase cell
-is added.
-
-Derived from .adw/spec.md (AC3), .adw/contract.yaml (x-behavior.R3_phase_awaiting)
-and .adw/plan.md (B3). The ``phases[*].status`` field is the pinned surface. RED
-until ``_phase_bar`` learns ``awaiting``.
-"""
-
-import os
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
     PHASE_ORDER,
-    home,
+    RUN_ID,
+    _slug_for,
     rec,
     run_start_payload,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
-
-
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _phases(tmp_path, lines, *, phase, run_id=RUN_ID):
@@ -117,7 +95,7 @@ def _assert_single_awaiting(status_by_name, awaiting_phase):
             assert status not in ("active", "pending", "completed", "failed")
 
 
-def test_spec_gate_marks_the_spec_phase_awaiting(home, tmp_path):  # noqa: F811
+def test_spec_gate_marks_the_spec_phase_awaiting(home, tmp_path):
     """R3: at the spec gate the ``spec`` phase is ``awaiting`` and nothing is
     ``active``; the later phases stay ``pending``."""
     status_by_name = _phases(tmp_path, spec_gate_lines(), phase="awaiting_spec_approval")
@@ -127,7 +105,7 @@ def test_spec_gate_marks_the_spec_phase_awaiting(home, tmp_path):  # noqa: F811
     assert status_by_name["build"] == "pending"
 
 
-def test_plan_gate_marks_the_plan_phase_awaiting(home, tmp_path):  # noqa: F811
+def test_plan_gate_marks_the_plan_phase_awaiting(home, tmp_path):
     """R3: at the plan gate the ``plan`` phase is ``awaiting`` while ``spec``
     (already done) stays ``completed`` and nothing is ``active``."""
     status_by_name = _phases(tmp_path, plan_gate_lines(), phase="awaiting_approval")
@@ -137,7 +115,7 @@ def test_plan_gate_marks_the_plan_phase_awaiting(home, tmp_path):  # noqa: F811
 
 
 def test_after_granted_the_phase_bar_follows_the_normal_progression(
-    home, tmp_path  # noqa: F811
+    home, tmp_path
 ):
     """R3: once the plan gate is ``granted``, no phase is ``awaiting`` any more and
     the bar resumes normally — ``build`` is ``active`` again."""
@@ -149,7 +127,7 @@ def test_after_granted_the_phase_bar_follows_the_normal_progression(
 
 
 def test_a_non_matching_grant_does_not_lift_the_awaiting_phase(
-    home, tmp_path  # noqa: F811
+    home, tmp_path
 ):
     """R3: only the grant that names the SAME gate lifts the pause. A ``spec``
     ``awaited`` followed by a ``granted`` for ``plan`` (a different gate) leaves
@@ -162,7 +140,7 @@ def test_a_non_matching_grant_does_not_lift_the_awaiting_phase(
 
 
 def test_a_matching_grant_after_a_non_matching_one_lifts_the_awaiting_phase(
-    home, tmp_path  # noqa: F811
+    home, tmp_path
 ):
     """R3: after the mismatched ``plan`` grant, a later ``granted`` for ``spec``
     (the matching gate) does lift the pause — ``spec`` is no longer ``awaiting``,

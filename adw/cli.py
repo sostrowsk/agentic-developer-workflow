@@ -21,10 +21,10 @@ from adw import ci, github, models, retention
 from adw.agents import AgentRunError, RunTotals, SdkAgentRunner
 from adw.codex import CodexRunner
 from adw.config import AdwConfig, BreakpointName, ConfigError
-from adw.env import safe_env
 from adw.events import EventEmitter
 from adw.findings import Finding, ReviewResult
 from adw.forge import ForgeError, detect_forge
+from adw.git import run_git
 from adw.gui.registry import register_repo
 from adw.mock import MockAgentRunner, MockCodexRunner
 from adw.phases import (
@@ -127,13 +127,7 @@ SELF_HEAL_ARTIFACTS = (
 def _git_plain(repo: Path, *args: str) -> subprocess.CompletedProcess:
     """Git in the main checkout WITHOUT the escalating orchestrator wrapper — the
     worktree preflight must NEVER escalate a run (B1), only refuse or self-heal."""
-    return subprocess.run(
-        ["git", "-C", str(repo), "-c", "core.hooksPath=/dev/null", *args],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=safe_env(),
-    )
+    return run_git(repo, *args, timeout=120)
 
 
 def _worktree_dirty_paths(repo: Path) -> list[str]:

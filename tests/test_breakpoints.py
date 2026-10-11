@@ -1,19 +1,4 @@
-"""RED tests for Breakpoints — configurable holds as a generalized approval.
-
-Derived from .adw/spec.md (AC1–AC14), .adw/contract.yaml (C1_config…C7_no_approval)
-and .adw/plan.md (B1–B10). Every assertion is over an externally observable
-surface only — the `breakpoints` config key, the persisted `pending_breakpoint`
-state field, the process exit code, the `approval` event log and the read-only
-GUI model. No internal helper signature, module layout or step order is pinned
-(contract preamble).
-
-The orchestrator pause/continue behaviour is exercised through the real CLI in
-dry-run mode against the mock runners (pattern: tests/test_e2e_dry_run.py):
-0 tokens, no network, real git in tmp_path.
-
-RED until the `breakpoints` config field, the `pending_breakpoint` state field
-and the breakpoint gates in the orchestrator/CLI exist.
-"""
+"""Tests for Breakpoints — configurable holds as a generalized approval."""
 
 import contextlib
 import json

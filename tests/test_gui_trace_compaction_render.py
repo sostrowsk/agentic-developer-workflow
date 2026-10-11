@@ -1,23 +1,4 @@
-"""RED page-level tests for the compacted trace-tree column (Trace-Baum verdichten).
-
-These exercise the externally observable HTML/JSON surface, which .adw/contract.yaml
-pins normatively (the markup WORDING is not pinned; the behaviour of A1/A4/A5 and
-the structural invariance of the JSON ``tree`` are):
-
-* A4 — file paths render repo-relative in the visible tree text while the full path
-  survives in a ``title`` attribute; a path OUTSIDE the repo is left untouched; no
-  tree node shows the absolute repo path as visible text.
-* A5 — ``?focus`` on an A1-folded ``agent.tool.result`` is redirected to its call
-  node (same ``tool_use_id``): the CALL's ``data-seq`` tree entry and its pane are
-  brought into the loaded page, and the result no longer exists as its own
-  selectable tree entry.
-* Contract — ``GET /api/runs/{repo}/{run_id}`` still serves under ``tree`` the
-  UNVERDICHTETE structure: every ``agent.tool.call``/``agent.tool.result`` a
-  separate node, no synthetic nodes, no new fields.
-
-RED until the compaction layer is built (today paths are absolute, results are
-separate tree entries, and ``?focus`` targets the result's own seq).
-"""
+"""Page-level tests for the compacted trace-tree column (Trace-Baum verdichten)."""
 
 import os
 import re
@@ -25,17 +6,15 @@ import re
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
     comprehensive_lines,
-    home,
     late_timeline_strand_lines,
     rec,
     run_start_payload,
     write_run,
 )
 from tests.gui_js_harness import run_scenario
-
-RUN_ID = "aaaa1111"
 
 
 def _client(tmp_path, lines, run_id=RUN_ID):
@@ -90,7 +69,7 @@ def _repo_path_lines(repo_abs: str):
     ]
 
 
-def test_a4_paths_are_repo_relative_in_text_and_full_in_title(home, tmp_path):  # noqa: F811
+def test_a4_paths_are_repo_relative_in_text_and_full_in_title(home, tmp_path):
     repo_abs = os.path.normpath(str((tmp_path / "repo").resolve()))
     client, slug, _repo = _client(tmp_path, _repo_path_lines(repo_abs))
     inside_abs = f"{repo_abs}/adw/gui/app.py"
@@ -111,7 +90,7 @@ def test_a4_paths_are_repo_relative_in_text_and_full_in_title(home, tmp_path):  
     assert 'title="/etc/hosts"' in trace or "title='/etc/hosts'" in trace
 
 
-def test_css_hides_folded_wrapper_rows_not_only_node_rows(home, tmp_path):  # noqa: F811
+def test_css_hides_folded_wrapper_rows_not_only_node_rows(home, tmp_path):
     """A5 (regression): a collapsed phase sets ``fold-hidden`` on ALL its direct
     rows, including the synthetic ``<li class="trace-wrap …">`` group/repeat wrappers
     (which carry no ``node`` class). The stylesheet must hide those too — a rule
@@ -132,7 +111,7 @@ def test_css_hides_folded_wrapper_rows_not_only_node_rows(home, tmp_path):  # no
     assert covered, "app.css hides fold-hidden only on .node rows, not on wrapper rows"
 
 
-def test_a4_repeat_summary_shows_relative_path_with_full_title(home, tmp_path):  # noqa: F811
+def test_a4_repeat_summary_shows_relative_path_with_full_title(home, tmp_path):
     """A4: a repeat node's summary shows the first call's repo-relative path yet keeps
     its full raw path in a ``title`` on the shortened label."""
     repo_abs = os.path.normpath(str((tmp_path / "repo").resolve()))
@@ -167,7 +146,7 @@ def test_a4_repeat_summary_shows_relative_path_with_full_title(home, tmp_path): 
 # --- A5: ?focus on a folded result redirects to its call node -------------------
 
 
-def test_focus_on_folded_result_redirects_to_the_call_node(home, tmp_path):  # noqa: F811
+def test_focus_on_folded_result_redirects_to_the_call_node(home, tmp_path):
     """``?focus`` on a RESULT is redirected to its CALL (same ``tool_use_id``): the
     call is the selectable tree entry and gets the pane, the folded result never is
     one. The trace column renders every node, so what this pins is the redirect —
@@ -209,7 +188,7 @@ def test_focus_opens_every_fold_ancestor_of_a_deeply_nested_node(tmp_path):
     assert r["focused_hidden"] is False      # the focused node is not fold-hidden
 
 
-def test_run_detail_survives_mixed_timezone_tool_timestamps(home, tmp_path):  # noqa: F811
+def test_run_detail_survives_mixed_timezone_tool_timestamps(home, tmp_path):
     """A1 (regression): a call with a timezone-naive ts and its result with a
     tz-aware (Z) ts must not crash the fold (datetime would raise TypeError). The
     run-detail page renders 200 with the pair folded and no duration."""
@@ -239,7 +218,7 @@ def _walk(nodes):
         yield from _walk(n.get("children") or [])
 
 
-def test_api_tree_keeps_the_unverdichtete_structure(home, tmp_path):  # noqa: F811
+def test_api_tree_keeps_the_unverdichtete_structure(home, tmp_path):
     client, slug, _repo = _client(tmp_path, comprehensive_lines())
     tree = client.get(f"/api/runs/{slug}/{RUN_ID}").json()["tree"]
     nodes = list(_walk(tree))

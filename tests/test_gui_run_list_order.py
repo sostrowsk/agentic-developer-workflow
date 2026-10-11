@@ -1,21 +1,9 @@
-"""RED tests for the run-list status ordering (AC4 / contract R4).
-
-The run list groups runs by status: every ``awaiting_approval`` run precedes
-every ``running`` run, which precedes every run in the remaining-status group.
-Within each group the existing newest-first ordering is preserved (Python's sort
-is stable). The ``dry_run`` value affects neither group membership nor ordering.
-
-Derived from .adw/spec.md (AC4), .adw/contract.yaml (x-behavior R4_run_list_order)
-and .adw/plan.md (B2). RED until the sort key groups ``awaiting_approval`` ahead
-of ``running`` ahead of the rest — today only ``running`` is pulled to the front,
-so an ``awaiting_approval`` run sinks below newer finished runs.
-"""
+"""Tests for the run-list status ordering."""
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
     rec,
     run_end_payload,
     run_start_payload,
@@ -70,7 +58,7 @@ def _order_client(tmp_path):
     return _client([repo])
 
 
-def test_status_groups_order_awaiting_then_running_then_rest(home, tmp_path):  # noqa: F811
+def test_status_groups_order_awaiting_then_running_then_rest(home, tmp_path):
     """AC4: ``awaiting_approval`` precedes ``running`` precedes the remaining
     statuses, regardless of start time."""
     data = _order_client(tmp_path).get("/api/runs").json()
@@ -87,7 +75,7 @@ def test_status_groups_order_awaiting_then_running_then_rest(home, tmp_path):  #
     assert by["cccc0040"]["status"] == "done"
 
 
-def test_newest_first_within_group_and_dry_run_does_not_reorder(home, tmp_path):  # noqa: F811
+def test_newest_first_within_group_and_dry_run_does_not_reorder(home, tmp_path):
     """AC4: within a group the newer start comes first, and ``dry_run`` changes
     neither group nor order — the dry-run ``done`` run has the newest start of all
     yet stays last."""

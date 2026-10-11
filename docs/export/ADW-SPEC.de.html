@@ -1142,10 +1142,12 @@ Parser <code>extract_review_result</code>.</td>
 </tr>
 <tr class="odd">
 <td><code>adw/state.py</code></td>
-<td style="text-align: right;">289</td>
+<td style="text-align: right;">296</td>
 <td><code>RunState</code>, <code>LaneState</code>, <code>Phase</code>;
 atomare Persistenz, Transaktionen, monotone Sequenz,
-<code>find_latest</code>.</td>
+<code>find_latest</code>; <code>runs_root</code>/<code>contained</code>
+— die Begrenzung auf den Runs-Baum, gemeinsam für GUI und
+Retention.</td>
 </tr>
 <tr class="even">
 <td><code>adw/gates.py</code></td>
@@ -1170,13 +1172,15 @@ Follow-up, Rest → Lane-Fixes), Limit-Prüfungen, Circuit-Breaker.</td>
 </tr>
 <tr class="odd">
 <td><code>adw/ci.py</code></td>
-<td style="text-align: right;">207</td>
+<td style="text-align: right;">246</td>
 <td>GitLab: SHA-gebundenes Pipeline-Polling über <code>glab api</code>,
-Abruf der Logs fehlgeschlagener Jobs.</td>
+Abruf der Logs fehlgeschlagener Jobs; das forge-neutrale
+<code>run_forge_cli</code> (gehärteter glab/gh-Aufruf) und
+<code>poll_until</code> (Warteschleife) für beide Forges.</td>
 </tr>
 <tr class="even">
 <td><code>adw/github.py</code></td>
-<td style="text-align: right;">172</td>
+<td style="text-align: right;">137</td>
 <td>GitHub Actions: SHA-gebundenes Polling der Workflow-Runs über
 <code>gh api</code>, <code>--log-failed</code>-Auszüge. Gleiches
 <code>CiResult</code> und gleiche Fehlerklassen wie
@@ -1198,71 +1202,78 @@ Rückfall auf GitLab).</td>
 Subprozess.</td>
 </tr>
 <tr class="odd">
+<td><code>adw/git.py</code></td>
+<td style="text-align: right;">30</td>
+<td><code>run_git()</code>: der eine gehärtete Git-Aufruf (Hooks aus,
+Env-Whitelist, Timeout des Aufrufers) für Orchestrator, CLI und
+GUI.</td>
+</tr>
+<tr class="even">
 <td><code>adw/events.py</code></td>
 <td style="text-align: right;">371</td>
 <td><code>EventEmitter</code>/<code>NoOpEmitter</code>: append-only
 JSON-Lines-Event-Log mit Spans, Seq pro Run, <code>flock</code>,
 Dateimodus 0600, <strong>fail-open</strong>.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/snapshots.py</code></td>
 <td style="text-align: right;">133</td>
 <td>Worktree-Snapshots pro Schritt als git-Refs
 <code>refs/adw/&lt;run_id&gt;/&lt;seq&gt;</code> (temporärer Index,
 <code>commit-tree</code>, <code>update-ref</code>), fail-open.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/retention.py</code></td>
 <td style="text-align: right;">477</td>
 <td>Lauf-Aufzählung, kanonische Datierung, Pruning (Worktrees → Refs →
 Verzeichnis), <code>--gzip</code>-Kompression der Event-Logs.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/models.py</code></td>
 <td style="text-align: right;">165</td>
 <td>Modell-Aktualitätsprüfung: neuestes Modell je Rolle (Claude-Aliase,
 codex-Katalog), 24-h-Cache, Ablehnungsmeldung.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/mock.py</code></td>
 <td style="text-align: right;">209</td>
 <td><code>MockAgentRunner</code>, <code>MockCodexRunner</code>:
 skriptbare Antwort-Queues, simulierte Dateischreibvorgänge,
 Aufrufaufzeichnung.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/reader.py</code></td>
 <td style="text-align: right;">131</td>
 <td>Inkrementeller, fehlertoleranter Event-Log-Reader (auch
 <code>.jsonl.gz</code>), meldet
 <code>seq_gap</code>/<code>bad_line</code>.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/model.py</code></td>
 <td style="text-align: right;">224</td>
 <td>Span-Baum aus Event-Records; Waisen aus Worker-Threads werden über
 zeitliches Enthaltensein eingehängt.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/registry.py</code></td>
 <td style="text-align: right;">203</td>
 <td><code>~/.adw/repos.json</code>: kanonischer Repo-Pfad → stabiler
 Slug; <code>adw run</code> registriert automatisch (fail-open).</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/app.py</code></td>
 <td style="text-align: right;">3073</td>
 <td>Read-only-FastAPI-App: Lauf-Liste, Lauf-Detail
 (Trace/Timeline/Artefakte/Raw), JSON-API, SSE-Live-Tail, Diff-Endpoint
 mit Ref-Allowlist.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/i18n.py</code></td>
 <td style="text-align: right;">353</td>
 <td>Wörterbuchbasierte EN/DE-Übersetzung der Oberfläche; Inhalte werden
 nie übersetzt.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/templates/</code>, <code>static/</code></td>
 <td style="text-align: right;">—</td>
 <td>Jinja2-Templates, <code>app.css</code> (Token-System, Dark Mode),

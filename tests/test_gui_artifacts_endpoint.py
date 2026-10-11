@@ -1,43 +1,25 @@
-"""RED tests for Aufgabe B — the read-only artifact-content endpoint.
+"""Tests for the read-only artifact-content endpoint."""
 
-``GET /api/runs/{repo}/{run_id}/artifacts/{name}`` serves the content of one
-whitelisted artifact of THIS run. ``{name}`` is a SINGLE path segment, never a
-filesystem path; it is resolved through a deterministic lookup against the fixed
-whitelist — a top-level name (``spec.md``) maps to the run directory, a flat draft
-name ``<stem>.<author>.<ext>`` (author ∈ {claude, codex}) maps to
-``drafts/<name>``. Every other name is unknown. Unknown / nested / encoded-
-separator / traversal names and escaping symlinks yield 404, never 5xx, and never
-read outside the run directory (B4/B5/B6).
-
-Derived from .adw/spec.md (B4–B7), .adw/contract.yaml (getRunArtifact,
-x-adw-artifact-mapping) and .adw/plan.md §2. Tested via FastAPI's TestClient
-against a fixture run directory. RED until the route exists.
-"""
-
-import os
 import pathlib
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
     LARGE_ARTIFACT_HEAD,
     LARGE_ARTIFACT_TAIL,
+    RUN_ID,
+    _slug_for,
     artifact_body,
-    home,
     large_artifact_body,
     tab_panel,
     write_artifacts_run,
     write_symlink_escape_artifact,
 )
 
-RUN_ID = "aaaa1111"
 SECRET_OUTSIDE = "SECRETOUTSIDECONTENTMUSTNEVERBESERVED"
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _artifacts_client(tmp_path, **kw):
@@ -66,7 +48,7 @@ def _read_spy(monkeypatch):
     return reads
 
 
-def test_draft_name_serves_the_flat_drafts_file(home, tmp_path):  # noqa: F811
+def test_draft_name_serves_the_flat_drafts_file(home, tmp_path):
     """B4: ``spec.claude.md`` (a flat draft name) maps to ``drafts/spec.claude.md``
     and is served in full — its content is the DRAFT's, distinct from the synthesis
     ``spec.md``."""
@@ -78,7 +60,7 @@ def test_draft_name_serves_the_flat_drafts_file(home, tmp_path):  # noqa: F811
     assert resp.text != artifact_body("spec.md")  # the draft, not the synthesis
 
 
-def test_top_level_name_serves_the_run_directory_file(home, tmp_path):  # noqa: F811
+def test_top_level_name_serves_the_run_directory_file(home, tmp_path):
     """B4: a top-level whitelist name (``spec.md``) maps to that file in the run
     directory; the served content matches exactly."""
     client, base = _artifacts_client(tmp_path)
@@ -88,7 +70,7 @@ def test_top_level_name_serves_the_run_directory_file(home, tmp_path):  # noqa: 
     assert resp.text == artifact_body("spec.md")
 
 
-def test_nested_encoded_and_traversal_names_are_404_without_a_read(home, tmp_path, monkeypatch):  # noqa: F811,E501
+def test_nested_encoded_and_traversal_names_are_404_without_a_read(home, tmp_path, monkeypatch):  # noqa: E501
     """B5: a ``drafts/…``-prefixed name, its encoded-separator form (``drafts%2F…``)
     and traversal attempts — ``..`` sequences, an absolute path, a raw or encoded
     ``/`` or ``\\`` in the name — fail the single-segment / whitelist check and
@@ -111,7 +93,7 @@ def test_nested_encoded_and_traversal_names_are_404_without_a_read(home, tmp_pat
     assert reads == []
 
 
-def test_escaping_symlink_is_404_and_target_is_never_read(home, tmp_path, monkeypatch):  # noqa: F811,E501
+def test_escaping_symlink_is_404_and_target_is_never_read(home, tmp_path, monkeypatch):  # noqa: E501
     """B5: a whitelisted name whose file is a symlink pointing OUT of the run
     directory yields 404; the target is never read and never served."""
     outside = tmp_path / "outside" / "secret.md"
@@ -132,7 +114,7 @@ def test_escaping_symlink_is_404_and_target_is_never_read(home, tmp_path, monkey
     assert not any(str(outside) in r for r in reads)  # the target is never read
 
 
-def test_symlink_to_sibling_run_is_404_and_target_never_read(home, tmp_path, monkeypatch):  # noqa: F811,E501
+def test_symlink_to_sibling_run_is_404_and_target_never_read(home, tmp_path, monkeypatch):  # noqa: E501
     """B4/B5/B6: a whitelisted name that is a symlink into a SIBLING run's directory
     resolves inside the runs tree but OUTSIDE this run's directory — it must be 404
     and the sibling target (here a ``*.FAILED`` marker that must never be served) is
@@ -161,7 +143,7 @@ def test_symlink_to_sibling_run_is_404_and_target_never_read(home, tmp_path, mon
     assert 'data-artifact="spec.md"' not in panel
 
 
-def test_unknown_flat_names_are_404(home, tmp_path):  # noqa: F811
+def test_unknown_flat_names_are_404(home, tmp_path):
     """B5: an unknown flat name — a draft with an unknown author (``spec.gpt.md``)
     or a real-but-non-whitelisted file (``state.json``) — is 404."""
     client, base = _artifacts_client(tmp_path)
@@ -171,7 +153,7 @@ def test_unknown_flat_names_are_404(home, tmp_path):  # noqa: F811
     assert client.get(f"{base}/events.jsonl").status_code == 404  # present, not whitelisted
 
 
-def test_failure_marker_has_no_external_name(home, tmp_path):  # noqa: F811
+def test_failure_marker_has_no_external_name(home, tmp_path):
     """B6: a ``*.FAILED`` marker in ``drafts/`` has no external name and is never
     served — neither by its marker name nor as the missing draft it stands in for."""
     client, base = _artifacts_client(
@@ -182,7 +164,7 @@ def test_failure_marker_has_no_external_name(home, tmp_path):  # noqa: F811
     assert client.get(f"{base}/spec.codex.md").status_code == 404      # the absent draft
 
 
-def test_large_artifact_is_served_in_full(home, tmp_path):  # noqa: F811
+def test_large_artifact_is_served_in_full(home, tmp_path):
     """B7 (server side): the route returns the COMPLETE large artifact — both the
     head and tail sentinels — so the display's bounded initial render always has
     the full content to draw on. No 5xx on a big artifact."""
@@ -196,7 +178,7 @@ def test_large_artifact_is_served_in_full(home, tmp_path):  # noqa: F811
     assert len(resp.text) >= 500 * 1024
 
 
-def test_artifact_content_is_served_byte_for_byte(home, tmp_path):  # noqa: F811
+def test_artifact_content_is_served_byte_for_byte(home, tmp_path):
     """B4/B7: the route returns the COMPLETE, faithful content of the file — the
     raw bytes, with no lossy UTF-8 decode. An artifact carrying invalid UTF-8 bytes
     comes back byte-for-byte identical (a ``errors='replace'`` decode would mangle
@@ -214,7 +196,7 @@ def test_artifact_content_is_served_byte_for_byte(home, tmp_path):  # noqa: F811
     assert resp.content == raw  # byte-for-byte, no lossy decode
 
 
-def test_absent_or_non_file_artifact_is_404_not_5xx(home, tmp_path):  # noqa: F811
+def test_absent_or_non_file_artifact_is_404_not_5xx(home, tmp_path):
     """B3: a resolvable-but-absent file (``escalation.md`` on a run that did not
     escalate) and a mapped name resolving to a NON-file (a directory) are 404 —
     a missing artifact is never a 5xx."""
@@ -233,7 +215,7 @@ def test_absent_or_non_file_artifact_is_404_not_5xx(home, tmp_path):  # noqa: F8
     assert client.get(f"{base}/contract.yaml").status_code == 404  # maps to a directory
 
 
-def test_artifact_route_keeps_containment_behavior(home, tmp_path):  # noqa: F811
+def test_artifact_route_keeps_containment_behavior(home, tmp_path):
     """B5 + existing containment: an unknown slug is 404, a run_id violating
     RUN_ID_RE is 400, a valid-format but absent run is 404 — never 5xx, even with a
     well-formed artifact name."""

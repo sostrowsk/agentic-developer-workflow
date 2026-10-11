@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
-from adw.env import safe_env
+from adw.git import run_git
 
 Forge = Literal["gitlab", "github"]
 
@@ -47,22 +47,7 @@ def detect_forge(repo: Path, override: Forge | None) -> Forge:
 
 def _origin_url(repo: Path) -> str | None:
     try:
-        result = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(repo),
-                "-c",
-                "core.hooksPath=/dev/null",
-                "remote",
-                "get-url",
-                "origin",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT,
-            env=safe_env(),
-        )
+        result = run_git(repo, "remote", "get-url", "origin", timeout=_GIT_TIMEOUT)
     except (subprocess.TimeoutExpired, OSError) as exc:
         raise ForgeError(f"{repo}: origin-Remote nicht lesbar — {exc}") from exc
     if result.returncode != 0:

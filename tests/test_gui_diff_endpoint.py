@@ -1,40 +1,20 @@
-"""RED tests for Aufgabe B — the read-only snapshot-diff endpoint.
-
-``GET /api/runs/{repo}/{run_id}/diff?from=REF&to=REF`` computes the diff between
-two snapshot refs of THIS run with ``git diff`` and returns the per-file +/-
-counts and the unified patch (AC-B1). Refs are accepted ONLY if their exact name
-appears in a ``snapshot`` event of exactly this run (AC-B2) — a pattern match
-alone is insufficient. Rejections are 400 or 404, never 5xx, and never execute
-git (AC-B2/B3). Allowed execution mirrors the orchestrator: no shell, disabled
-hooks, ``safe_env()``, a timeout, reads only (AC-B4).
-
-Derived from .adw/spec.md (AC-B1..B4, B7), .adw/contract.yaml
-(getRunSnapshotDiff, DiffResponse, x-adw-validation) and .adw/plan.md §3. Tested
-against temp git repos via FastAPI's TestClient. RED until the diff route exists.
-"""
+"""Tests for the read-only snapshot-diff endpoint."""
 
 import json
-import os
 import subprocess
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import _snapshot_refs, create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
     build_diff_run,
-    home,
     rec,
     run_end_payload,
     run_start_payload,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
-
-
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _diff_client(tmp_path, *, large=False):
@@ -45,7 +25,7 @@ def _diff_client(tmp_path, *, large=False):
     return client, info
 
 
-def test_diff_returns_exact_schema_counts_binary_and_git_order(home, tmp_path):  # noqa: F811
+def test_diff_returns_exact_schema_counts_binary_and_git_order(home, tmp_path):
     """AC-B1: two real snapshot refs yield HTTP 200 with the exact shape
     ``{"files":[{path,additions,deletions}],"patch":str}`` — per-file +/- counts,
     a binary file as null/null, and the files in the order git reports them."""
@@ -69,7 +49,7 @@ def test_diff_returns_exact_schema_counts_binary_and_git_order(home, tmp_path): 
     assert [f["path"] for f in body["files"]] == ["assets/logo.bin", "src/example.py"]
 
 
-def test_diff_of_a_ref_against_itself_is_the_empty_diff(home, tmp_path):  # noqa: F811
+def test_diff_of_a_ref_against_itself_is_the_empty_diff(home, tmp_path):
     """AC-B1: an empty diff (no changes between the two refs) is HTTP 200 with
     exactly ``{"files": [], "patch": ""}`` — not a 204, not an error."""
     client, info = _diff_client(tmp_path)
@@ -79,7 +59,7 @@ def test_diff_of_a_ref_against_itself_is_the_empty_diff(home, tmp_path):  # noqa
     assert resp.json() == {"files": [], "patch": ""}
 
 
-def test_missing_or_malformed_params_are_client_errors(home, tmp_path):  # noqa: F811
+def test_missing_or_malformed_params_are_client_errors(home, tmp_path):
     """AC-B3: a missing or malformed ``from``/``to`` yields 400 or 404, never 5xx
     (and never a 422 from an unvalidated required query param)."""
     client, info = _diff_client(tmp_path)
@@ -95,7 +75,7 @@ def test_missing_or_malformed_params_are_client_errors(home, tmp_path):  # noqa:
         assert resp.status_code in (400, 404), (params, resp.status_code)
 
 
-def test_refs_absent_from_this_runs_snapshot_events_are_rejected(home, tmp_path):  # noqa: F811
+def test_refs_absent_from_this_runs_snapshot_events_are_rejected(home, tmp_path):
     """AC-B2: any ref not drawn from THIS run's snapshot events is rejected with
     400/404 — arbitrary refs, a real-but-unlisted snapshot ref of this run, a
     foreign run's ref, a bare sha, revision ranges and option-like strings. Never
@@ -125,7 +105,7 @@ def test_refs_absent_from_this_runs_snapshot_events_are_rejected(home, tmp_path)
         assert status(good, bad) in (400, 404), bad
 
 
-def test_rejected_refs_never_execute_git(home, tmp_path, monkeypatch):  # noqa: F811
+def test_rejected_refs_never_execute_git(home, tmp_path, monkeypatch):
     """AC-B2: a ref outside the allowlist is refused BEFORE git runs — a git spy
     records no invocation on rejection, but does record one for an allowed pair."""
     client, info = _diff_client(tmp_path)
@@ -174,7 +154,7 @@ _MUTATING_SUBCOMMANDS = {
 }
 
 
-def test_allowed_diff_uses_safe_read_only_git_invocation(home, tmp_path, monkeypatch):  # noqa: F811
+def test_allowed_diff_uses_safe_read_only_git_invocation(home, tmp_path, monkeypatch):
     """AC-B4: an allowed diff runs git like the orchestrator — a list argv (no
     shell), ``-c core.hooksPath=/dev/null``, a ``timeout``, a filtered
     ``safe_env()`` (no leaked secret), and only the read-only ``diff`` subcommand
@@ -210,7 +190,7 @@ def test_allowed_diff_uses_safe_read_only_git_invocation(home, tmp_path, monkeyp
     assert any(_subcommand(cmd) == "diff" for cmd, _ in git_calls)
 
 
-def test_diff_endpoint_does_not_mutate_refs_head_or_worktree(home, tmp_path):  # noqa: F811
+def test_diff_endpoint_does_not_mutate_refs_head_or_worktree(home, tmp_path):
     """AC-B4 / read-only: computing a diff creates, updates or deletes no ref, and
     leaves HEAD and the worktree status byte-identical."""
     client, info = _diff_client(tmp_path)
@@ -232,7 +212,7 @@ def test_diff_endpoint_does_not_mutate_refs_head_or_worktree(home, tmp_path):  #
     assert snapshot() == before
 
 
-def test_diff_endpoint_keeps_containment_behavior(home, tmp_path):  # noqa: F811
+def test_diff_endpoint_keeps_containment_behavior(home, tmp_path):
     """AC-B2/B3 + existing containment: an unknown slug is 404, a run_id violating
     RUN_ID_RE is 400, a valid-format but absent run is 404 — never 5xx, even with
     otherwise well-formed refs."""
@@ -244,7 +224,7 @@ def test_diff_endpoint_keeps_containment_behavior(home, tmp_path):  # noqa: F811
     assert client.get(f"/api/runs/{info['slug']}/deadbeef/diff", params=good).status_code == 404
 
 
-def test_malformed_ref_recorded_in_event_log_is_rejected_without_git(home, tmp_path, monkeypatch):  # noqa: F811,E501
+def test_malformed_ref_recorded_in_event_log_is_rejected_without_git(home, tmp_path, monkeypatch):  # noqa: E501
     """AC-B2/B3 (P1): a value must have the exact ``refs/adw/<run_id>/<seq>``
     structure, not merely appear in a snapshot event. A crafted/corrupt snapshot
     event whose ``ref`` is option-like or range-like must be rejected (400/404)
@@ -279,7 +259,7 @@ def test_malformed_ref_recorded_in_event_log_is_rejected_without_git(home, tmp_p
     assert not any(isinstance(c, (list, tuple)) and c and c[0] == "git" for c in calls)
 
 
-def test_dangling_allowlisted_ref_is_not_a_false_empty_diff(home, tmp_path):  # noqa: F811
+def test_dangling_allowlisted_ref_is_not_a_false_empty_diff(home, tmp_path):
     """AC-B (P2): an allowlisted, well-formed ref whose git object is gone (deleted
     concurrently / gc'd) must NOT yield a 200 empty diff. git fails, so the endpoint
     returns a controlled non-5xx error instead of silently losing the diff."""
@@ -295,7 +275,7 @@ def test_dangling_allowlisted_ref_is_not_a_false_empty_diff(home, tmp_path):  # 
     assert resp.status_code < 500            # a controlled, non-5xx failure
 
 
-def test_one_sided_git_failure_is_not_reported_as_success(home, tmp_path, monkeypatch):  # noqa: F811,E501
+def test_one_sided_git_failure_is_not_reported_as_success(home, tmp_path, monkeypatch):  # noqa: E501
     """AC-B (P2): if one of the two git invocations fails (e.g. the patch call while
     numstat succeeded), the endpoint must not build a success from the partial
     output — an inconsistent files/patch pair is never returned as 200."""
@@ -316,7 +296,7 @@ def test_one_sided_git_failure_is_not_reported_as_success(home, tmp_path, monkey
     assert resp.status_code < 500
 
 
-def test_large_diff_patch_and_counts_are_fully_reachable(home, tmp_path):  # noqa: F811
+def test_large_diff_patch_and_counts_are_fully_reachable(home, tmp_path):
     """AC-B7 (server side): the endpoint returns the FULL large patch — at least
     100 changed files and at least 1500 changed lines in total — so the display's
     windowing always has the complete patch to draw on. No 5xx on a big diff."""
@@ -364,7 +344,7 @@ def test_snapshot_refs_ignores_non_mapping_payloads_without_raising():
     assert _snapshot_refs([_bad_snapshot(3, 42)]) == set()
 
 
-def test_non_mapping_snapshot_payloads_keep_the_valid_diff_at_200(home, tmp_path):  # noqa: F811
+def test_non_mapping_snapshot_payloads_keep_the_valid_diff_at_200(home, tmp_path):
     """A run carrying broken snapshot events still diffs its valid pair: the
     allowlist ignores the broken events, the endpoint stays 200 and the payload is
     unchanged."""
@@ -382,7 +362,7 @@ def test_non_mapping_snapshot_payloads_keep_the_valid_diff_at_200(home, tmp_path
     assert any(f["path"] == "src/example.py" for f in body["files"])
 
 
-def test_unlisted_ref_is_404_not_5xx_despite_non_mapping_payloads(home, tmp_path):  # noqa: F811
+def test_unlisted_ref_is_404_not_5xx_despite_non_mapping_payloads(home, tmp_path):
     """The rejection path is the one that actually broke: building the allowlist
     raised before it could answer. A structurally valid but unlisted ref must stay
     a clean 404 even when the log contains non-mapping snapshot payloads."""

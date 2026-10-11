@@ -1,14 +1,4 @@
-"""RED tests for Aufgabe B2 — the span-tree model (``adw.gui.model``).
-
-Derived from .adw/spec.md (AC 12–20), .adw/contract.yaml (``model_api`` /
-``span_tree_structure``) and docs/GUI-SPEC.md §4.2 (the normative, purely
-time-based orphan-containment rule) and §12 (resume seam).
-
-The module does not exist yet, so these tests are RED until it is built. Only
-the public surface is asserted: ``build_tree(events) -> list[SpanNode]`` and the
-node fields. A PointNode is distinguished from a SpanNode by the absence of a
-``children`` attribute.
-"""
+"""Tests for the span-tree model (``adw.gui.model``)."""
 
 from adw.gui.model import build_tree
 

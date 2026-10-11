@@ -1,29 +1,15 @@
-"""RED tests for Aufgabe A — GUI i18n (de/en), Spec-Schritt 12 (§7.5).
-
-Derived from .adw/spec.md (AC A1–A6), .adw/contract.yaml
-(x-adw-template-behavior.language) and .adw/plan.md §A. The observable surface is
-pinned; the concrete dictionary keys, their wording and the cookie NAME are NOT
-(contract: "Keine internen Helper-Signaturen, keine Dictionary-Schlüssel").
-Therefore the selection/cookie behaviour is exercised end-to-end through the two
-HTML routes, and the only module import is the language CATALOG the parity test
-(A6) runs the two dictionaries against each other over.
-
-RED until ``adw/gui/i18n.py`` exists and the handlers/templates consume it.
-``tests/test_gui_language.py`` must stay green unchanged (E3): the default
-request stays fully English.
-"""
+"""Tests for the GUI i18n (de/en, GUI-SPEC §7.5)."""
 
 import re
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
     FINAL_ANSWER,
     GATE_OUTPUT,
     PROMPT,
     comprehensive_lines,
-    home,
     write_run,
 )
 
@@ -81,7 +67,7 @@ def test_no_multiword_chrome_string_is_left_untranslated():
 # --- A2: selection order and English default ------------------------------------
 
 
-def test_default_request_renders_english(home, tmp_path):  # noqa: F811
+def test_default_request_renders_english(home, tmp_path):
     """A2: a request without any language signal (no ?lang, no cookie, no
     Accept-Language) renders fully English on both HTML routes."""
     app, slug, run_id = _build(tmp_path)
@@ -93,7 +79,7 @@ def test_default_request_renders_english(home, tmp_path):  # noqa: F811
     assert EN_CHROME_PHRASE in detail_html
 
 
-def test_query_lang_de_translates_chrome(home, tmp_path):  # noqa: F811
+def test_query_lang_de_translates_chrome(home, tmp_path):
     """A2: ``?lang=de`` renders German chrome — <html lang> flips to de and the
     English hint phrase is gone (translated)."""
     app, slug, run_id = _build(tmp_path)
@@ -102,7 +88,7 @@ def test_query_lang_de_translates_chrome(home, tmp_path):  # noqa: F811
     assert EN_CHROME_PHRASE not in html
 
 
-def test_accept_language_selects_first_supported(home, tmp_path):  # noqa: F811
+def test_accept_language_selects_first_supported(home, tmp_path):
     """A2: with no ?lang and no cookie, the first SUPPORTED language of
     Accept-Language wins — an unsupported leading entry is skipped, an
     all-unsupported header falls to English."""
@@ -121,7 +107,7 @@ def test_accept_language_selects_first_supported(home, tmp_path):  # noqa: F811
     assert _html_lang(unsupported) == "en"
 
 
-def test_query_beats_cookie_and_cookie_beats_accept_language(home, tmp_path):  # noqa: F811
+def test_query_beats_cookie_and_cookie_beats_accept_language(home, tmp_path):
     """A2: the precedence is query > cookie > Accept-Language. A valid ?lang wins
     over a differing cookie; absent a query, the cookie wins over Accept-Language.
     The cookie is exercised through the SAME client (its name is not pinned)."""
@@ -145,7 +131,7 @@ def test_query_beats_cookie_and_cookie_beats_accept_language(home, tmp_path):  #
 # --- A3: cookie behaviour -------------------------------------------------------
 
 
-def test_valid_query_sets_cookie_used_by_follow_up(home, tmp_path):  # noqa: F811
+def test_valid_query_sets_cookie_used_by_follow_up(home, tmp_path):
     """A3: an explicit valid ?lang=de sets the language cookie; a subsequent
     request WITHOUT ?lang (same client) renders German from that cookie."""
     app, slug, run_id = _build(tmp_path)
@@ -158,7 +144,7 @@ def test_valid_query_sets_cookie_used_by_follow_up(home, tmp_path):  # noqa: F81
     assert _html_lang(follow_up) == "de"
 
 
-def test_invalid_query_sets_no_cookie(home, tmp_path):  # noqa: F811
+def test_invalid_query_sets_no_cookie(home, tmp_path):
     """A3: an invalid ?lang value sets no language cookie — the follow-up request
     is still the English default."""
     app, slug, run_id = _build(tmp_path)
@@ -173,7 +159,7 @@ def test_invalid_query_sets_no_cookie(home, tmp_path):  # noqa: F811
 # --- A4: translation scope (chrome only, content never) -------------------------
 
 
-def test_content_is_byte_identical_across_languages(home, tmp_path):  # noqa: F811
+def test_content_is_byte_identical_across_languages(home, tmp_path):
     """A4/E2: only chrome is translated. The prompt, the agent's final answer and
     the gate output render byte-identically regardless of language, while the
     chrome differs (the English hint phrase drops out under de)."""
@@ -192,7 +178,7 @@ def test_content_is_byte_identical_across_languages(home, tmp_path):  # noqa: F8
 # --- A5: language switch preserves state ----------------------------------------
 
 
-def test_header_switch_link_preserves_window_and_toggles_language(home, tmp_path):  # noqa: F811
+def test_header_switch_link_preserves_window_and_toggles_language(home, tmp_path):
     """A5: the header carries a switch link that changes ONLY the language and
     keeps the windowed slice — offset, tools_offset and focus travel unchanged.
     On the English page the link targets de; on the German page it targets en."""
@@ -211,7 +197,7 @@ def test_header_switch_link_preserves_window_and_toggles_language(home, tmp_path
     assert "tools_offset=3" in to_en[0] and "focus=7" in to_en[0]
 
 
-def test_run_list_page_language_is_selectable(home, tmp_path):  # noqa: F811
+def test_run_list_page_language_is_selectable(home, tmp_path):
     """A2/A4: the run-list route honours the same selection — ?lang=de flips its
     <html lang> to de while the default stays en."""
     app, _slug, _run_id = _build(tmp_path)

@@ -1125,10 +1125,11 @@ process-group kill, token back-sync.</td>
 </tr>
 <tr class="odd">
 <td><code>adw/state.py</code></td>
-<td style="text-align: right;">289</td>
+<td style="text-align: right;">296</td>
 <td><code>RunState</code>, <code>LaneState</code>, <code>Phase</code>;
 atomic persistence, transactions, monotonic sequence,
-<code>find_latest</code>.</td>
+<code>find_latest</code>; <code>runs_root</code>/<code>contained</code>
+— the runs-tree containment shared by the GUI and retention.</td>
 </tr>
 <tr class="even">
 <td><code>adw/gates.py</code></td>
@@ -1153,13 +1154,15 @@ follow-up, rest → lane fixes), limit checks, circuit breaker.</td>
 </tr>
 <tr class="odd">
 <td><code>adw/ci.py</code></td>
-<td style="text-align: right;">207</td>
+<td style="text-align: right;">246</td>
 <td>GitLab: SHA-bound pipeline polling via <code>glab api</code>,
-failed-job log retrieval.</td>
+failed-job log retrieval; the forge-neutral <code>run_forge_cli</code>
+(hardened glab/gh call) and <code>poll_until</code> (wait loop) both
+forges use.</td>
 </tr>
 <tr class="even">
 <td><code>adw/github.py</code></td>
-<td style="text-align: right;">172</td>
+<td style="text-align: right;">137</td>
 <td>GitHub Actions: SHA-bound workflow-run polling via
 <code>gh api</code>, <code>--log-failed</code> excerpts. Same
 <code>CiResult</code> and error classes as <code>ci.py</code>.</td>
@@ -1180,70 +1183,76 @@ back to GitLab).</td>
 subprocess.</td>
 </tr>
 <tr class="odd">
+<td><code>adw/git.py</code></td>
+<td style="text-align: right;">30</td>
+<td><code>run_git()</code>: the one hardened git invocation (hooks off,
+env whitelist, caller's timeout) for orchestrator, CLI and GUI.</td>
+</tr>
+<tr class="even">
 <td><code>adw/events.py</code></td>
 <td style="text-align: right;">371</td>
 <td><code>EventEmitter</code>/<code>NoOpEmitter</code>: append-only JSON
 Lines event log with spans, per-run seq, <code>flock</code>, file mode
 0600, <strong>fail-open</strong>.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/snapshots.py</code></td>
 <td style="text-align: right;">133</td>
 <td>Per-step worktree snapshots as git refs
 <code>refs/adw/&lt;run_id&gt;/&lt;seq&gt;</code> (temporary index,
 <code>commit-tree</code>, <code>update-ref</code>), fail-open.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/retention.py</code></td>
 <td style="text-align: right;">477</td>
 <td>Run enumeration, canonical dating, pruning (worktrees → refs →
 directory), <code>--gzip</code> compression of event logs.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/models.py</code></td>
 <td style="text-align: right;">165</td>
 <td>Model freshness check: newest model per role (Claude aliases, codex
 catalog), 24 h cache, refusal message.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/mock.py</code></td>
 <td style="text-align: right;">209</td>
 <td><code>MockAgentRunner</code>, <code>MockCodexRunner</code>:
 scriptable response queues, simulated file writes, call recording.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/reader.py</code></td>
 <td style="text-align: right;">131</td>
 <td>Incremental, fault-tolerant event-log reader (also
 <code>.jsonl.gz</code>), reports
 <code>seq_gap</code>/<code>bad_line</code>.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/model.py</code></td>
 <td style="text-align: right;">224</td>
 <td>Span tree from event records; orphans from worker threads re-homed
 by time containment.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/registry.py</code></td>
 <td style="text-align: right;">203</td>
 <td><code>~/.adw/repos.json</code>: canonical repo path → stable slug;
 <code>adw run</code> registers automatically (fail-open).</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/app.py</code></td>
 <td style="text-align: right;">3073</td>
 <td>Read-only FastAPI app: run list, run detail
 (Trace/Timeline/Artifacts/Raw), JSON API, SSE live tail, diff endpoint
 with ref allowlist.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/i18n.py</code></td>
 <td style="text-align: right;">353</td>
 <td>Dictionary-based EN/DE chrome translation; content is never
 translated.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/templates/</code>, <code>static/</code></td>
 <td style="text-align: right;">—</td>
 <td>Jinja2 templates, <code>app.css</code> (token system, dark mode),

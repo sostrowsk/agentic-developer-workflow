@@ -1,9 +1,4 @@
-"""RED tests for Aufgabe B — the run list (`GET /api/runs` and `GET /`).
-
-Derived from .adw/spec.md (AC 9–11), .adw/contract.yaml (RunSummary / MissingRepo,
-x-adw-template-behavior.run_list) and GUI-SPEC §7.2 A. Tested against fixture logs
-with FastAPI's TestClient. RED until ``adw.gui.app.create_app`` exists.
-"""
+"""Tests for the run list (`GET /api/runs` and `GET /`)."""
 
 import shutil
 
@@ -11,8 +6,7 @@ from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.registry import register_repo
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
     simple_run_lines,
     write_run,
 )
@@ -28,7 +22,7 @@ def _by_id(entries, run_id):
     return next((e for e in entries if e.get("run_id") == run_id), None)
 
 
-def test_api_runs_lists_every_field_with_running_first(home, tmp_path):  # noqa: F811
+def test_api_runs_lists_every_field_with_running_first(home, tmp_path):
     """AC 9: each run carries run_id, repo (slug), repo_exists, issue (truncated),
     phase, status, start, duration, cost and event_count; running runs come
     first."""
@@ -67,7 +61,7 @@ def test_api_runs_lists_every_field_with_running_first(home, tmp_path):  # noqa:
     assert data.index(run) < data.index(fin)
 
 
-def test_api_runs_absent_values_are_null_not_errors(home, tmp_path):  # noqa: F811
+def test_api_runs_absent_values_are_null_not_errors(home, tmp_path):
     """AC 11: values absent from the log (a running run has no totals) are null,
     never an error."""
     repo = tmp_path / "repoA"
@@ -79,7 +73,7 @@ def test_api_runs_absent_values_are_null_not_errors(home, tmp_path):  # noqa: F8
     assert entry["cost"] is None
 
 
-def test_api_runs_missing_repo_becomes_placeholder_without_run_fields(home, tmp_path):  # noqa: F811
+def test_api_runs_missing_repo_becomes_placeholder_without_run_fields(home, tmp_path):
     """AC 10: a registered repo whose path is gone contributes exactly one
     placeholder (repo, repo_exists=false, hint) with no run fields, and never
     fails the response; other repos stay listed normally."""
@@ -107,7 +101,7 @@ def test_api_runs_missing_repo_becomes_placeholder_without_run_fields(home, tmp_
     assert any(e.get("run_id") == "dddd4444" for e in data)
 
 
-def test_run_list_html_mirrors_the_json_and_shows_missing_repo(home, tmp_path):  # noqa: F811
+def test_run_list_html_mirrors_the_json_and_shows_missing_repo(home, tmp_path):
     """AC 9/10: GET / renders the same data base server-side (English), links runs
     by slug + run_id, and shows the unreachable repo as a visible placeholder
     without erroring."""

@@ -1,19 +1,5 @@
-"""RED tests for the recovery-card MARKUP and i18n — the observable rendering on
-``GET /runs/{repo}/{run_id}`` (HTML) and the bilingual labels of ``adw/gui/i18n.py``.
-
-Derived from .adw/spec.md (AC 10, 11, 12), .adw/contract.yaml (P10_render,
-P11_readonly) and .adw/plan.md (B6). The page renders EXACTLY one recovery card,
-following the derived ``recovery`` object: in the escalation case anchored at the
-governing ``escalation`` node (``data-anchor-seq``) with reason, affected phase,
-its abort events, the new-run hint and the link to ``escalation.md``; in the
-approve/resume case at run level with the command text. Without a recovery object
-no card appears. The card is pure display; the command line is not translated.
-
-Markup/CSS is not part of the contract; these tests pin only the observable hooks
-this workstream introduces (``data-recovery-card``, ``data-recovery-kind``,
-``data-anchor-seq``, ``data-recovery-artifact``) and rendered label/command text.
-
-RED until the run-detail template renders the recovery card.
+"""Tests for the recovery-card MARKUP and i18n — the observable rendering on ``GET
+/runs/{repo}/{run_id}`` (HTML) and the bilingual labels of ``adw/gui/i18n.py``.
 """
 
 import os
@@ -23,15 +9,13 @@ from fastapi.testclient import TestClient
 from adw.gui.app import create_app
 from adw.gui.i18n import CATALOG
 from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
     comprehensive_lines,
     escalated_lines,
-    home,
     write_run,
     write_state_only_run,
 )
-
-RUN_ID = "aaaa1111"
 
 # The label keys this feature adds to BOTH language blocks (AC 12).
 RECOVERY_LABEL_KEYS = [
@@ -83,7 +67,7 @@ def _enclosing_open_tag(html: str, tag: str) -> str:
     return html[start:html.find(">", start) + 1]
 
 
-def test_escalated_card_is_anchored_at_the_escalation_node(home, tmp_path):  # noqa: F811
+def test_escalated_card_is_anchored_at_the_escalation_node(home, tmp_path):
     """AC 10/P10: exactly one card, structurally NESTED in the tree entry whose
     ``data-seq`` equals the governing escalation's ``anchor_seq`` — showing reason,
     affected phase, the new-run hint and the link to ``escalation.md``; no
@@ -107,10 +91,10 @@ def test_escalated_card_is_anchored_at_the_escalation_node(home, tmp_path):  # n
     assert "## Grund" not in card
 
 
-def test_escalated_card_lists_the_abort_events(home, tmp_path):  # noqa: F811
+def test_escalated_card_lists_the_abort_events(home, tmp_path):
     """AC 10 (with AC 6): the card shows the associated abort events' values —
     here a circuit_breaker scope carried verbatim."""
-    from tests.test_gui_recovery_api import escalation_history_lines
+    from tests.gui_app_helpers import escalation_history_lines
 
     client, slug, _p = _client(tmp_path, lines=escalation_history_lines(), phase="escalated")
     html = client.get(f"/runs/{slug}/{RUN_ID}").text
@@ -125,7 +109,7 @@ def test_escalated_card_lists_the_abort_events(home, tmp_path):  # noqa: F811
     assert "gate_iterations" in card                 # limit.hit value
 
 
-def test_approve_card_is_run_level_with_command_and_is_display_only(home, tmp_path):  # noqa: F811
+def test_approve_card_is_run_level_with_command_and_is_display_only(home, tmp_path):
     """AC 10/11: the approve/resume card sits at run level — INSIDE the
     ``main.detail`` live-refresh region (so an SSE swap can add/remove it) and
     before the tab container, not nested in a tree entry — and shows the command as
@@ -147,7 +131,7 @@ def test_approve_card_is_run_level_with_command_and_is_display_only(home, tmp_pa
     assert "<button" not in card
 
 
-def test_no_recovery_card_without_recovery_object(home, tmp_path):  # noqa: F811
+def test_no_recovery_card_without_recovery_object(home, tmp_path):
     """AC 10: a finished (``done``) run needs no human step -> no card at all."""
     client, slug, _p = _client(tmp_path, lines=comprehensive_lines(), phase="done")
     html = client.get(f"/runs/{slug}/{RUN_ID}").text
@@ -155,7 +139,7 @@ def test_no_recovery_card_without_recovery_object(home, tmp_path):  # noqa: F811
     assert "data-recovery-card" not in html
 
 
-def test_recovery_labels_are_bilingual(home, tmp_path):  # noqa: F811
+def test_recovery_labels_are_bilingual(home, tmp_path):
     """AC 12: every recovery label key exists in BOTH language blocks, non-empty,
     and the prose new-run hint differs between the languages."""
     for key in RECOVERY_LABEL_KEYS:
@@ -164,7 +148,7 @@ def test_recovery_labels_are_bilingual(home, tmp_path):  # noqa: F811
     assert CATALOG["en"]["recovery_new_run"] != CATALOG["de"]["recovery_new_run"]
 
 
-def test_command_line_is_not_translated(home, tmp_path):  # noqa: F811
+def test_command_line_is_not_translated(home, tmp_path):
     """AC 12: the command line is identical regardless of GUI language, and the
     German new-run hint renders in the German page."""
     client, slug, _p = _client(tmp_path, state_only=True, phase="build")

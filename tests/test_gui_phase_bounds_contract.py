@@ -1,16 +1,4 @@
-"""RED tests for A6 / AC 13 — ``phases[*].start`` and ``phases[*].end`` are added
-additively to ``GET /api/runs/{repo}/{run_id}``.
-
-Each ``phases`` entry gains ``start`` and ``end`` — the ISO-8601 timestamps
-``_phase_bar`` already derives internally, taken over verbatim, or ``null``. The
-addition is purely additive: ``name``, ``status`` and ``duration`` stay word for
-word, ``duration`` is NOT recomputed from start/end, an open phase's end stays
-``null`` (the page-build instant is a presentation rule of the timeline, never an
-API phase end), and the structure of ``tree`` is unchanged.
-
-Derived from .adw/spec.md (AC 13), .adw/contract.yaml (Phase schema; x-adw-invariants)
-and .adw/plan.md (B1). RED until ``_phase_bar`` emits the two fields.
-"""
+"""``phases[*].start``/``end`` in ``GET /api/runs/{repo}/{run_id}``."""
 
 import os
 
@@ -18,15 +6,12 @@ from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
     rec,
-    run_end_payload,
     run_start_payload,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
 
 # spec (0→2 s) and plan (3→7 s) run and end; build starts but never ends (active).
 _LINES = [
@@ -48,7 +33,7 @@ def _detail(tmp_path):
     return client.get(f"/api/runs/{slug}/{RUN_ID}").json()
 
 
-def test_each_phase_entry_carries_start_and_end_and_keeps_duration(home, tmp_path):  # noqa: F811
+def test_each_phase_entry_carries_start_and_end_and_keeps_duration(home, tmp_path):
     """AC 13: every ``phases`` entry has ``start`` and ``end`` alongside the
     unchanged ``name``/``status``/``duration``. The started phases carry their
     verbatim event-log start; the open ``build`` phase's end stays ``null`` (no
@@ -83,7 +68,7 @@ def test_each_phase_entry_carries_start_and_end_and_keeps_duration(home, tmp_pat
     assert by_name["build"]["duration"] is None
 
 
-def test_unparsable_and_non_string_timestamps_become_null(home, tmp_path):  # noqa: F811
+def test_unparsable_and_non_string_timestamps_become_null(home, tmp_path):
     """AC 13 / contract Phase schema: ``start``/``end`` must be a parsable ISO-8601
     STRING or ``null`` — never a copied non-string or an unparsable string. A crafted
     or corrupt event log whose phase records carry a garbage string or a numeric
@@ -120,7 +105,7 @@ def test_unparsable_and_non_string_timestamps_become_null(home, tmp_path):  # no
     assert by_name["plan"]["end"] == "2026-08-05T14:00:09.000Z"
 
 
-def test_start_end_addition_leaves_the_tree_structure_unchanged(home, tmp_path):  # noqa: F811
+def test_start_end_addition_leaves_the_tree_structure_unchanged(home, tmp_path):
     """AC 13 / x-adw-invariants: the addition touches only ``phases``. ``tree`` is
     still present and structurally intact (a list of nodes each with the usual
     keys), and the seven phases keep their pinned order and count."""

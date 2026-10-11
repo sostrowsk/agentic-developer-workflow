@@ -5,25 +5,30 @@ no network, real git in tmp_path. Finer-grained behavior tests live in the
 module test files; here each DoD criterion gets its acceptance path.
 """
 
-import json
 
 import pytest
 from typer.testing import CliRunner
 
 from adw.cli import app
 from adw.config import AdwConfig
-from adw.findings import ReviewResult
 from adw.mock import MockAgentRunner, MockCodexRunner
 from adw.phases import (
     EscalationError,
     RunContext,
     run_build_phase,
-    run_codex_review_phase,
     run_final_review_phase,
     run_spec_and_plan,
 )
 from adw.state import RunState
 from tests.conftest import git, write_config
+from tests.run_helpers import (
+    OK,
+    finding,
+    prepare_final_review,
+    review_json,
+    script_authoring,
+    script_draft_artifacts,
+)
 
 runner = CliRunner()
 
@@ -44,38 +49,10 @@ ci:
   staging_job: deploy-staging
 """
 
-OK = ReviewResult(verdict="ok", findings=[])
 
 
-def script_authoring(agents: MockAgentRunner) -> None:
-    """Draft authors and synthesis agents of both authoring phases."""
-    agents.script_files("spec_agent", {".adw/spec.md": "# Spec-Entwurf\n"})
-    agents.script_files(
-        "plan_agent",
-        {".adw/plan.md": "# Plan-Entwurf\n", ".adw/contract.yaml": "openapi: 3.1.0\n"},
-    )
-    agents.script_files(
-        "spec_synthesis", {".adw/spec.md": "# Spec\n", ".adw/spec-summary.md": "# Spec-Summary\n"}
-    )
-    agents.script_files(
-        "plan_synthesis",
-        {
-            ".adw/plan.md": "# Plan\n",
-            ".adw/contract.yaml": "openapi: 3.1.0\ninfo:\n  title: Synthese\n",
-            ".adw/plan-summary.md": "# Plan-Summary\n",
-        },
-    )
-    agents.script("spec_agent", "Spec-Entwurf")
-    agents.script("plan_agent", "Plan-Entwurf")
-    agents.script("spec_synthesis", "Spec")
-    agents.script("plan_synthesis", "Plan")
 
 
-def script_draft_artifacts(codex: MockCodexRunner) -> None:
-    codex.script_artifacts("spec", {"spec.md": "# Codex-Spec-Entwurf\n"})
-    codex.script_artifacts(
-        "plan", {"plan.md": "# Codex-Plan-Entwurf\n", "contract.yaml": "openapi: 3.1.0\n"}
-    )
 
 
 def cli_run(repo, *extra):
@@ -217,42 +194,10 @@ def test_dod3_no_approval_skips_the_pause(target_repo):
 # --- DoD 4: Triage nach dem finalen Review ------------------------------------
 
 
-def prepare_final_review(target_repo):
-    agents = MockAgentRunner()
-    script_authoring(agents)
-    agents.script_files("build_agent", {"src.py": "pass\n"})
-    agents.script("build_agent", *["gebaut"] * 8)
-    codex = MockCodexRunner()
-    script_draft_artifacts(codex)
-    codex.script(*[OK] * 8)
-    ctx = RunContext(
-        repo=target_repo,
-        config=AdwConfig.load(target_repo),
-        state=RunState.new(issue="DoD4", parallel=False),
-        agents=agents,
-        codex=codex,
-        skip_approval=True,
-    )
-    run_spec_and_plan(ctx)
-    run_build_phase(ctx)
-    run_codex_review_phase(ctx)
-    assert ctx.state.phase == "final_review"
-    return ctx
 
 
-def review_json(findings):
-    return json.dumps({"verdict": "needs_fixes" if findings else "ok", "findings": findings})
 
 
-def finding(issue, category, lane="backend"):
-    return {
-        "severity": "P2",
-        "lane": lane,
-        "file": "src.py",
-        "issue": issue,
-        "remediation_plan": ["fixen"],
-        "category": category,
-    }
 
 
 def test_dod4_scope_gap_becomes_followup_not_fix(target_repo):

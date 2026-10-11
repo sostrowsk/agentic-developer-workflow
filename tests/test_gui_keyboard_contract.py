@@ -16,27 +16,22 @@ Derived from .adw/spec.md (AC 13), .adw/contract.yaml (/api/runs,
 /api/runs/{repo}/{run_id}, x-adw-invariants) and .adw/plan.md (B2.13).
 """
 
-import os
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
     timeline_lines,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
 
 # Substrings no top-level detail key may contain — this feature adds no operability
 # field to the JSON (it lives only in markup/behaviour).
 _FORBIDDEN_KEY_MARKERS = ("tab", "focus", "select", "keyboard", "aria", "tabindex")
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _client(tmp_path):
@@ -46,7 +41,7 @@ def _client(tmp_path):
     return TestClient(create_app(repos=[str(repo)])), _slug_for(repo)
 
 
-def test_json_api_unchanged_by_the_operability_feature(home, tmp_path):  # noqa: F811
+def test_json_api_unchanged_by_the_operability_feature(home, tmp_path):
     """AC 13: for a run with a tree AND a timeline, ``GET /api/runs`` and ``GET
     /api/runs/{repo}/{run_id}`` are identical before and after an HTML render, and the
     detail payload carries no keyboard/focus/selection/tab field."""

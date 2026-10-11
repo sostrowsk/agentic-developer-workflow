@@ -1,21 +1,4 @@
-"""RED tests for Aufgabe C — the third measure ``adw:artifact``.
-
-Without this measure the promise "large artifacts do not block the surface" is
-again unverifiable — exactly the pattern that twice produced a worthless criterion.
-Opening an artifact is instrumented with the SAME construction as
-``adw:select``/``adw:tab``: a start mark at the opening input event, and the end
-mark + measure only AFTER the browser has painted the artifact's content (a task
-scheduled from a ``requestAnimationFrame`` callback — rAF -> task after paint).
-Asynchronously fetched content counts toward the measure: a loading indicator,
-request dispatch or response arrival is not completion.
-
-The completion semantics are verified BEHAVIOURALLY through the minimal
-dependency-free JS harness (no browser automation); the served-script text is
-asserted for the pinned names and the shared construction; and the guide documents
-the measure, its threshold and the A1 entry-node selectors. A missing ``node``
-runtime is a verification failure, never a skip. Derived from .adw/spec.md (C1/C3),
-.adw/contract.yaml (x-adw-measures) and .adw/plan.md §4/§5.
-"""
+"""Tests for the third measure ``adw:artifact``."""
 
 import os
 import pathlib
@@ -24,16 +7,14 @@ from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
     HUGE_ARTIFACT_HEAD,
     HUGE_ARTIFACT_TAIL,
-    home,
+    RUN_ID,
     huge_artifact_body,
     write_artifacts_run,
 )
 from tests.gui_js_harness import run_scenario
-
-RUN_ID = "aaaa1111"
 
 
 def _client_script():
@@ -85,7 +66,7 @@ def test_artifact_measure_counts_the_async_rendered_content(tmp_path):
 # --- C1: served-script text (pinned names + shared construction) ----------------
 
 
-def test_client_script_carries_the_artifact_marks_and_measure(home):  # noqa: F811
+def test_client_script_carries_the_artifact_marks_and_measure(home):
     """C1: the served client script carries the pinned ``adw:artifact`` mark and
     measure names and completes the measure through the SAME promise-gated,
     post-paint helper as node selection and tab switch."""
@@ -119,7 +100,7 @@ def test_guide_documents_the_artifact_measure_and_entry_selectors():
         assert token in text, token
 
 
-def test_huge_artifact_reference_is_at_least_2mb_and_fully_reachable(home, tmp_path):  # noqa: F811
+def test_huge_artifact_reference_is_at_least_2mb_and_fully_reachable(home, tmp_path):
     """C2 shape guard: the manual measurement's reference artifact is at least 2 MB
     and its COMPLETE content (head + tail) stays reachable through the read-only
     artifacts route, while the initial detail render does not inline the tail — the

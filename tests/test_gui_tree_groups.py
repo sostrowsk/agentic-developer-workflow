@@ -1,18 +1,4 @@
-"""RED test for the review finding — keyboard opening of collapsed groups and
-repetitions (A1 / plan B4).
-
-The trace-tree compaction folds repeated/adjacent operations into non-selectable
-``.trace-wrap`` group and repetition wrappers (collapsible ``<details>``). The
-keyboard path must let a mouse-free user navigate onto such a wrapper and open it to
-reach and select its children — otherwise the children of every collapsed group are
-mouse-only. The wrappers are fold rows in cursor navigation (→ opens, ← closes, →
-on an open row steps to the first child) without becoming selectable nodes, and the
-column stays exactly one sequential tab stop.
-
-Exercised through the Node harness against the served ``app.js``. Derived from
-.adw/spec.md (A1, the binding key table), .adw/plan.md (B4) and
-.adw/contract.yaml (x-adw-template-behavior.tree).
-"""
+"""Keyboard opening of collapsed groups and repetitions in the trace tree."""
 
 from tests.gui_js_harness import run_scenario
 

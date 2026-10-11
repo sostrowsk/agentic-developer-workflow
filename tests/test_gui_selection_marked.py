@@ -1,17 +1,4 @@
-"""RED test for A5 — the selection is exposed machine-readably (AC 10).
-
-Which node is selected lives today only in the CSS class ``selected`` (bold +
-underline). This brief additionally marks the state machine-readably so assistive
-technology knows it. The marking follows wherever ``applySelection`` sets the class —
-tree AND timeline, mouse AND keyboard, the initial selection and a ``?focus`` landing;
-a switch clears it on the previous node. A mere navigation cursor (Up/Down without
-Enter) is NOT a selection.
-
-Exercised through the Node harness against the served ``app.js``; the marker
-(``aria-selected`` on the node, beyond the ``.selected`` class) is client-set. Derived
-from .adw/spec.md (A5, AC 10), .adw/plan.md (B8) and .adw/contract.yaml
-(x-adw-template-behavior.selected_node).
-"""
+"""The selection is exposed machine-readably."""
 
 from tests.gui_js_harness import run_scenario
 

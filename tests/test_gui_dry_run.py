@@ -1,28 +1,11 @@
-"""RED tests for the dry-run identification (AC1–AC3).
-
-A dry run is derived exclusively from the ``dry_run`` field in the start payload
-of the ``run`` span (``_run_start_payload``, GUI-SPEC §4.4). Both read endpoints
-expose it as a boolean on the existing run record; both HTML surfaces mark a dry
-run visibly — the run list with a short language label on the row, the run detail
-with a viewport-persistent banner in the header. A missing field, a ``false``
-value or a completely absent ``run`` span all yield ``false``; missing
-``usage``/token data never participates (no heuristic).
-
-Derived from .adw/spec.md (AC1–AC3), .adw/contract.yaml (RunSummary.dry_run,
-x-behavior R1/R2/R3) and .adw/plan.md (B1/B3/B4/B5). Markup and CSS wording are
-NOT contractual, so the visible marking is checked as observable content and the
-persistence as a MECHANISM (a sticky/fixed rule on the dry-run marking), never as
-exact markup. RED until ``_summary`` derives ``dry_run`` and the templates/i18n
-render the marking.
-"""
+"""Tests for the dry-run identification."""
 
 import re
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
     rec,
     run_end_payload,
     run_start_payload,
@@ -82,7 +65,7 @@ def _detail_header(html):
 # --- AC1: the dry_run field on both endpoints -----------------------------------
 
 
-def test_dry_run_field_reflects_start_payload_in_both_endpoints(home, tmp_path):  # noqa: F811
+def test_dry_run_field_reflects_start_payload_in_both_endpoints(home, tmp_path):
     """AC1: ``dry_run: true`` in the start payload yields ``true``, explicit
     ``false`` yields ``false``, and the list and detail endpoints agree for the
     same event log."""
@@ -104,7 +87,7 @@ def test_dry_run_field_reflects_start_payload_in_both_endpoints(home, tmp_path):
         assert summary["dry_run"] == detail["dry_run"]  # cross-endpoint consistency
 
 
-def test_missing_field_and_missing_run_span_default_to_false(home, tmp_path):  # noqa: F811
+def test_missing_field_and_missing_run_span_default_to_false(home, tmp_path):
     """AC1 (E4): a start payload without the ``dry_run`` key and a run with no
     ``run`` span at all (a state-only legacy run) both default to ``false`` — never
     an error, on either endpoint."""
@@ -126,7 +109,7 @@ def test_missing_field_and_missing_run_span_default_to_false(home, tmp_path):  #
         assert detail.json()["run"]["dry_run"] is False
 
 
-def test_dry_run_value_is_not_inferred_from_usage(home, tmp_path):  # noqa: F811
+def test_dry_run_value_is_not_inferred_from_usage(home, tmp_path):
     """AC1 (E4): the value comes from the start payload, never from a
     missing-usage heuristic. A dry run that DOES carry token/usage totals stays
     ``true``; a real run with NO usage/token data stays ``false``."""
@@ -149,7 +132,7 @@ def test_dry_run_value_is_not_inferred_from_usage(home, tmp_path):  # noqa: F811
 # --- AC2: the run-list row marking ----------------------------------------------
 
 
-def test_run_list_marks_dry_run_rows_and_not_real_ones(home, tmp_path):  # noqa: F811
+def test_run_list_marks_dry_run_rows_and_not_real_ones(home, tmp_path):
     """AC2: a dry-run row carries the short dry-run label in the selected language;
     a real run's row carries no dry-run marking at all."""
     en_label, de_label = _dry_labels()
@@ -170,7 +153,7 @@ def test_run_list_marks_dry_run_rows_and_not_real_ones(home, tmp_path):  # noqa:
 # --- AC3: the run-detail header marking -----------------------------------------
 
 
-def test_run_detail_header_marks_dry_run_and_ignores_missing_tokens(home, tmp_path):  # noqa: F811
+def test_run_detail_header_marks_dry_run_and_ignores_missing_tokens(home, tmp_path):
     """AC3: the run-detail header of a dry run shows the short label in the selected
     language even when the run carries NO token/usage data; a real run shows no
     dry-run marking anywhere."""
@@ -200,7 +183,7 @@ def test_run_detail_header_marks_dry_run_and_ignores_missing_tokens(home, tmp_pa
     assert en_label not in real
 
 
-def test_dry_run_detail_marking_is_viewport_persistent(home, tmp_path):  # noqa: F811
+def test_dry_run_detail_marking_is_viewport_persistent(home, tmp_path):
     """AC3: the dry-run marking sits in the header AND is styled with a
     viewport-persistence MECHANISM (a sticky or fixed position on the dry-run
     marking) so it stays visible while the trace tree scrolls. A static

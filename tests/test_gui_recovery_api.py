@@ -1,14 +1,5 @@
-"""RED tests for the recovery-card JSON surface — the additive, derived
-``recovery`` object on ``GET /api/runs/{repo}/{run_id}``.
-
-Derived from .adw/spec.md (AC 1-9), .adw/contract.yaml
-(RunDetailRecoveryAddition / Recovery oneOf, x-behavior P1-P9) and .adw/plan.md
-(B1-B5). The recovery object is a pure projection of the already-loaded state
-(``state.phase``), the existing run-status derivation, the event stream and the
-server-resolved ``RepoRef.path``: it is PRESENT exactly when the run needs human
-intervention and ABSENT otherwise (never an empty object).
-
-RED until ``_run_detail`` hangs the derived ``recovery`` object on its result.
+"""Tests for the recovery-card JSON surface — the additive, derived ``recovery`` object on
+``GET /api/runs/{repo}/{run_id}``.
 """
 
 import copy
@@ -21,9 +12,10 @@ from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
+    RUN_ID,
     escalated_lines,
-    home,
+    escalation_history_lines,
     rec,
     run_end_payload,
     run_start_payload,
@@ -31,8 +23,6 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     write_run,
     write_state_only_run,
 )
-
-RUN_ID = "aaaa1111"
 
 
 def _real_path(repo):
@@ -61,34 +51,9 @@ def _detail(client, slug, run_id):
 # --- AC 1/2/5/6/9: escalated run -> kind `none` --------------------------------
 
 
-def escalation_history_lines():
-    """One run log carrying TWO escalations (as several ``run`` spans appended to
-    one file produce). The GOVERNING escalation is the one with the greatest
-    ``seq`` (seq 7). Its aborts are the ``limit.hit``/``circuit_breaker`` events
-    between the PRIOR escalation (seq 4) and it (seqs 5, 6) — the earlier
-    circuit_breaker (seq 3) belongs to the prior escalation and must NOT appear."""
-    return [
-        rec(1, "run", "start", "R", None, sec=0,
-            payload=run_start_payload("Escalation history")),
-        rec(2, "phase", "start", "B", "R", sec=1,
-            payload={"name": "build", "from_phase": "build"}),
-        rec(3, "circuit_breaker", "point", "B", sec=2,
-            payload={"keys": ["old|1|x"], "scope": "lane:backend"}),   # PRIOR's abort
-        rec(4, "escalation", "point", "B", sec=3,
-            payload={"reason": "old reason", "phase": "spec"}),         # PRIOR escalation
-        rec(5, "limit.hit", "point", "B", sec=4,
-            payload={"limit": "gate_iterations", "value": 10, "cap": 10}),
-        rec(6, "circuit_breaker", "point", "B", sec=5,
-            payload={"keys": ["new|2|y"], "scope": "lane:backend"}),
-        rec(7, "escalation", "point", "B", sec=6,
-            payload={"reason": "new reason", "phase": "build"}),        # GOVERNING
-        rec(8, "phase", "end", "B", "R", sec=7,
-            payload={"name": "build", "to_phase": None}),
-        rec(9, "run", "end", "R", None, sec=8, payload=run_end_payload("escalated")),
-    ]
 
 
-def test_escalated_run_yields_kind_none(home, tmp_path):  # noqa: F811
+def test_escalated_run_yields_kind_none(home, tmp_path):
     """AC 1/2/5/9: ``state.phase == escalated`` -> kind ``none``,
     ``needs_new_run`` true, no continuation command; reason/phase come verbatim
     from the escalation event; the artifact reference is ``escalation.md``. Never
@@ -110,7 +75,7 @@ def test_escalated_run_yields_kind_none(home, tmp_path):  # noqa: F811
     assert rc["anchor_seq"] == 3                     # the escalation event's seq
 
 
-def test_escalation_context_governing_event_reason_phase_and_aborts(home, tmp_path):  # noqa: F811
+def test_escalation_context_governing_event_reason_phase_and_aborts(home, tmp_path):
     """AC 5/6: reason/phase are taken from the escalation event with the GREATEST
     seq; ``aborts`` lists exactly the limit.hit/circuit_breaker events between the
     prior escalation and the governing one, in event order, payloads verbatim."""
@@ -134,7 +99,7 @@ def test_escalation_context_governing_event_reason_phase_and_aborts(home, tmp_pa
 
 
 @pytest.mark.parametrize("phase", ["awaiting_approval", "awaiting_spec_approval"])
-def test_approval_pause_yields_kind_approve(home, tmp_path, phase):  # noqa: F811
+def test_approval_pause_yields_kind_approve(home, tmp_path, phase):
     """AC 1/2/3: ``state.phase`` at an approval gate -> kind ``approve`` with the
     finished ``adw approve`` command; ``needs_new_run`` false; no escalation
     context fields (approve carries only the command)."""
@@ -152,7 +117,7 @@ def test_approval_pause_yields_kind_approve(home, tmp_path, phase):  # noqa: F81
 # --- AC 1/2/3: crash/abort in a work phase -> kind `resume` --------------------
 
 
-def test_work_phase_not_running_yields_kind_resume(home, tmp_path):  # noqa: F811
+def test_work_phase_not_running_yields_kind_resume(home, tmp_path):
     """AC 1/3: a work phase (``build``) whose derived run-status is not ``running``
     (here a state-only run: no span -> status None) -> kind ``resume`` with the
     ``adw resume`` command; ``needs_new_run`` false."""
@@ -164,7 +129,7 @@ def test_work_phase_not_running_yields_kind_resume(home, tmp_path):  # noqa: F81
     assert rc["command"] == f"adw resume {run_id} --repo {shlex.quote(path)}"
 
 
-def test_done_and_running_have_no_recovery(home, tmp_path):  # noqa: F811
+def test_done_and_running_have_no_recovery(home, tmp_path):
     """AC 1: ``state.phase == done`` and a work phase with derived status
     ``running`` carry NO recovery object — the key is absent, not an empty
     object."""
@@ -182,7 +147,7 @@ def test_done_and_running_have_no_recovery(home, tmp_path):  # noqa: F811
 # --- AC 3/4: command uses the real registry path, shell-safe -------------------
 
 
-def test_command_uses_real_registry_path_not_the_slug(home, tmp_path):  # noqa: F811
+def test_command_uses_real_registry_path_not_the_slug(home, tmp_path):
     """AC 3: the command carries the real, server-resolved registry path
     (``RepoRef.path``) and the real run_id — never the slug."""
     client, slug, path, run_id = _client(tmp_path, state_only=True, phase="build")
@@ -198,7 +163,7 @@ def test_command_uses_real_registry_path_not_the_slug(home, tmp_path):  # noqa: 
     "quote'dir",            # an embedded single quote
     "meta$(id)&dir",        # shell metacharacters
 ])
-def test_command_is_posix_shell_safe(home, tmp_path, repo_name):  # noqa: F811
+def test_command_is_posix_shell_safe(home, tmp_path, repo_name):
     """AC 4: run_id and path are rendered per ``shlex.quote`` semantics — parsed by
     a POSIX shell the text yields EXACTLY the intended argv (the path stays ONE
     ``--repo`` argument) and produces no extra command."""
@@ -213,7 +178,7 @@ def test_command_is_posix_shell_safe(home, tmp_path, repo_name):  # noqa: F811
 # --- AC 7: robustness -----------------------------------------------------------
 
 
-def test_escalated_without_event_log_stays_usable(home, tmp_path):  # noqa: F811
+def test_escalated_without_event_log_stays_usable(home, tmp_path):
     """AC 7: an escalated run with NO event log yields no 5xx and no invented
     values — ``kind``/``needs_new_run`` stay visible while the escalation context
     is null/empty (the card falls back to run level, never hidden)."""
@@ -231,7 +196,7 @@ def test_escalated_without_event_log_stays_usable(home, tmp_path):  # noqa: F811
 
 
 @pytest.mark.parametrize("bad_payload", ["a bare string", ["reason", "in", "a", "list"], 42])
-def test_non_mapping_escalation_payload_does_not_500(home, tmp_path, bad_payload):  # noqa: F811
+def test_non_mapping_escalation_payload_does_not_500(home, tmp_path, bad_payload):
     """AC 7: a truthy but non-mapping escalation payload (a crafted/corrupt string,
     list or number) yields no 5xx — reason/phase are null, never accessed via
     ``.get`` on a non-mapping, and the run still escalates (kind ``none``)."""
@@ -251,7 +216,7 @@ def test_non_mapping_escalation_payload_does_not_500(home, tmp_path, bad_payload
     assert rc["anchor_seq"] == 3
 
 
-def test_abort_payloads_are_carried_verbatim(home, tmp_path):  # noqa: F811
+def test_abort_payloads_are_carried_verbatim(home, tmp_path):
     """AC 6/7 (P7_robust): abort payloads are carried VERBATIM with no truthiness
     coercion — a present null/empty-list/populated payload survives unchanged. A
     genuinely ABSENT payload is represented as ``null`` (no value), NEVER a
@@ -280,7 +245,7 @@ def test_abort_payloads_are_carried_verbatim(home, tmp_path):  # noqa: F811
     ]
 
 
-def test_escalation_with_missing_payload_fields_is_robust(home, tmp_path):  # noqa: F811
+def test_escalation_with_missing_payload_fields_is_robust(home, tmp_path):
     """AC 7: an escalation event whose payload lacks ``reason``/``phase`` yields
     ``null`` for those, never a substitute — but the run still escalates
     (``kind`` none) and stays anchored at the event."""
@@ -302,7 +267,7 @@ def test_escalation_with_missing_payload_fields_is_robust(home, tmp_path):  # no
 # --- AC 8: the real repo path never leaks into a URL ---------------------------
 
 
-def test_real_path_appears_only_in_command_never_in_a_url(home, tmp_path):  # noqa: F811
+def test_real_path_appears_only_in_command_never_in_a_url(home, tmp_path):
     """AC 8: the real repo path appears ONLY in ``recovery.command``. The detail is
     addressed by slug; blanking the command removes every trace of the path from
     the response body."""

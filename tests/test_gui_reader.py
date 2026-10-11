@@ -1,12 +1,4 @@
-"""RED tests for Aufgabe B1 — the incremental, fault-tolerant log reader
-(``adw.gui.reader``). Derived from .adw/spec.md (AC 6–11), .adw/contract.yaml
-(``reader_api``) and docs/GUI-SPEC.md §4.2.
-
-The module does not exist yet, so importing it fails — these tests are RED until
-the reader is built. Everything asserted is the public surface only:
-``EventReader(path)``, ``EventReader.read() -> ReadResult`` (with ``events`` and
-``problems``), ``EventReader.offset`` and ``ReadProblem``.
-"""
+"""Tests for the incremental, fault-tolerant log reader (``adw.gui.reader``)."""
 
 import json
 

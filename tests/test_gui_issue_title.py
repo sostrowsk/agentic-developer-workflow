@@ -1,44 +1,15 @@
-"""RED tests for A3 — the Issue column becomes a one-line title (AC 7, 8).
+"""The Issue column shows a one-line title."""
 
-The list must show a single-line, truncated TITLE derived from the raw issue text
-(not raw markdown wrapped over many lines), with the full raw text reachable via
-the cell's ``title`` attribute. The derivation (spec "Normative Definitionen"):
-
-1. the first ``#`` heading among the first twelve lines (its text without the
-   ``#``); a heading that only names "Issue" (``^issue\b``, case-insensitive) is
-   skipped; a heading past line twelve does not win;
-2. otherwise the first non-empty line;
-3. a leading ``ADW-Issue:`` / ``Issue:`` is stripped;
-4. longer than 90 chars → truncated to 89 + ``…``;
-5. empty / missing → an empty cell, never a placeholder.
-
-It is text processing, not rendering (E7): neither the cell nor the ``title`` is
-interpreted as markdown/HTML. The API ``issue`` field is unchanged (truncated raw)
-and is NOT the source of the full-text ``title`` attribute.
-
-*Marker policy (declared here, as .adw/plan.md leaves markup to the
-implementation): the title cell keeps today's ``issue`` CSS class; the full raw
-text lives in that cell's ``title`` attribute.* Derived from .adw/spec.md (AC 7,
-8), .adw/contract.yaml (x-adw-template-behavior.issue_title) and .adw/plan.md (B4).
-"""
-
-import os
 import re
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
     rec,
     run_start_payload,
     write_run,
 )
-
-
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _issue_run(issue, run_id):
@@ -86,7 +57,7 @@ def _render(tmp_path, runs):
 # --- AC 7: heading selection ---------------------------------------------------
 
 
-def test_title_from_heading_skips_issue_heading_and_ignores_late_heading(home, tmp_path):  # noqa: F811
+def test_title_from_heading_skips_issue_heading_and_ignores_late_heading(home, tmp_path):
     """AC 7 (1): a ``#`` heading in the first twelve lines becomes the title without
     the ``#``; an "Issue"-only heading is skipped so the next heading wins; a heading
     only appearing after line twelve does not win (the first non-empty line does)."""
@@ -116,7 +87,7 @@ def test_title_from_heading_skips_issue_heading_and_ignores_late_heading(home, t
 # --- AC 7: first-line fallback and prefix stripping ----------------------------
 
 
-def test_title_falls_back_to_first_line_and_strips_issue_prefix(home, tmp_path):  # noqa: F811
+def test_title_falls_back_to_first_line_and_strips_issue_prefix(home, tmp_path):
     """AC 7 (2, 3): without a heading the first non-empty line is used, and a
     leading ``ADW-Issue:`` / ``Issue:`` is removed from the result."""
     html = _render(tmp_path, [
@@ -133,7 +104,7 @@ def test_title_falls_back_to_first_line_and_strips_issue_prefix(home, tmp_path):
 # --- AC 7: truncation and empty cell -------------------------------------------
 
 
-def test_long_title_truncated_and_empty_issue_is_blank(home, tmp_path):  # noqa: F811
+def test_long_title_truncated_and_empty_issue_is_blank(home, tmp_path):
     """AC 7 (4, 5): a title longer than 90 chars is cut to 89 + ``…``; an empty
     issue text yields an empty cell (never a placeholder)."""
     long_heading = "# " + ("A" * 120)
@@ -154,7 +125,7 @@ def test_long_title_truncated_and_empty_issue_is_blank(home, tmp_path):  # noqa:
 # --- AC 8: single line + full raw text in the (escaped) title attribute ---------
 
 
-def test_issue_cell_is_single_line_with_full_escaped_raw_in_title(home, tmp_path):  # noqa: F811
+def test_issue_cell_is_single_line_with_full_escaped_raw_in_title(home, tmp_path):
     """AC 8 / E7: the cell renders one line; the FULL raw text (well past the API
     ``issue`` truncation) sits in the ``title`` attribute, HTML-escaped, never
     interpreted as markdown/HTML — so it is not sourced from the truncated field."""
@@ -185,7 +156,7 @@ def test_issue_cell_is_single_line_with_full_escaped_raw_in_title(home, tmp_path
     assert ("&quot;" in title) or ("&#34;" in title)
 
 
-def test_issue_cell_css_clips_to_one_rendered_line(home, tmp_path):  # noqa: F811
+def test_issue_cell_css_clips_to_one_rendered_line(home, tmp_path):
     """AC 8 (rendered): the issue cell is styled to occupy ONE rendered line —
     `white-space: nowrap`, `overflow: hidden`, `text-overflow: ellipsis` — so a long
     title clips with an ellipsis instead of wrapping across rows (removing newlines

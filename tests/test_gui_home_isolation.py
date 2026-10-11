@@ -1,19 +1,4 @@
-"""RED tests for Aufgabe A — the test suite must never pollute the real home.
-
-Derived from .adw/spec.md (AC 1–3) and .adw/plan.md (A1–A3). The bug: ``adw run``
-auto-registers its target repo in ``~/.adw/repos.json`` (adw/gui/registry.py,
-fail-open), and the E2E dry-run tests use throwaway ``tmp_path`` repos, so their
-entries leak into the developer's REAL registry. The fix makes the registry path
-isolable and applies that isolation to every test that triggers ``adw run`` /
-auto-registration (a shared, autouse conftest fixture). The runtime behaviour of
-``adw run`` (fail-open write to ``~/.adw/repos.json`` in the pinned format) is
-unchanged.
-
-These tests are RED until the isolation exists: without it, the dry run below
-writes the ``tmp_path`` repo into the file at the real resolved home path, so the
-"real file unchanged" assertion fails. Each test snapshots and restores that file
-in a ``finally`` so a RED run never leaves lasting pollution behind.
-"""
+"""The test suite never pollutes the real home directory."""
 
 import os
 from pathlib import Path

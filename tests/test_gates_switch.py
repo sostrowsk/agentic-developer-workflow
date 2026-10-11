@@ -1,22 +1,4 @@
-"""CLI tests for the `--gates` switch (TDD RED step).
-
-`adw run` gains a single, speaking switch `--gates none|spec|plan|both` over
-the already-existing 4-way gate matrix (today spanned by the two independent
-booleans `--no-approval` and `--spec-approval`). These tests pin ONLY the
-externally observable surface named in the contract:
-
-  * the four `--gates` values and where the run halts (AC1),
-  * `--gates none` reaching `done`, escalation still halting (AC2),
-  * the implicit default `plan` (AC3),
-  * the three legacy-flag alias equivalences (AC4),
-  * rejection of contradiction and of an invalid value — nonzero exit, no
-    persistent run (AC5/AC6),
-  * backward compatibility of existing run states (AC7),
-  * the effective gate mode printed at start (AC8),
-  * `adw run --help` describing the matrix (AC9).
-
-All assertions go through the CLI (typer CliRunner), dry-run mode, real git.
-"""
+"""CLI tests for the `--gates` switch."""
 
 import json
 import re

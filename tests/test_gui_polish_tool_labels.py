@@ -1,28 +1,14 @@
-"""RED tests for Aufgabe C — readable tool-call/-result entries in the trace tree.
-
-Each ``agent.tool.call`` node exposes a ``label`` with the tool and its main
-argument (Read → file path, Bash → command, Grep → pattern; other tools → tool +
-identifiable main argument, else the tool alone). Each ``agent.tool.result`` node
-shows its outcome compactly (error/success; the Bash exit code when present).
-Nothing is invented: a missing tool name, a missing argument or missing outcome
-fields fall back to the bare type name / the tool name alone.
-
-Derived from .adw/spec.md (C1–C3), .adw/contract.yaml
-(x-adw-template-behavior.trace_tree_tool_entries) and .adw/plan.md. The label is
-observed on the serialized tree node (which also feeds the HTML tree row).
-"""
+"""Tests for readable tool-call/-result entries in the trace tree."""
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
     iter_nodes,
     tool_label_lines,
     write_run,
 )
-
-RUN_ID = "aaaa1111"
 
 
 def _labels_by_use_id(tmp_path):
@@ -50,7 +36,7 @@ def _labels_by_use_id(tmp_path):
     return merged
 
 
-def test_read_bash_grep_calls_show_tool_and_main_argument(home, tmp_path):  # noqa: F811
+def test_read_bash_grep_calls_show_tool_and_main_argument(home, tmp_path):
     """C1: the named cases carry tool + main argument per the field priority."""
     labels = _labels_by_use_id(tmp_path)
 
@@ -59,7 +45,7 @@ def test_read_bash_grep_calls_show_tool_and_main_argument(home, tmp_path):  # no
     assert "Grep" in labels["grep1"] and "RUN_ID_RE" in labels["grep1"]
 
 
-def test_other_tool_shows_tool_and_identifiable_argument(home, tmp_path):  # noqa: F811
+def test_other_tool_shows_tool_and_identifiable_argument(home, tmp_path):
     """C1: for a tool beyond the named cases (Write), the tool name plus an
     unambiguously identifiable main argument (the file path)."""
     labels = _labels_by_use_id(tmp_path)
@@ -67,7 +53,7 @@ def test_other_tool_shows_tool_and_identifiable_argument(home, tmp_path):  # noq
     assert "Write" in labels["write1"] and "new.py" in labels["write1"]
 
 
-def test_call_fallbacks_invent_nothing(home, tmp_path):  # noqa: F811
+def test_call_fallbacks_invent_nothing(home, tmp_path):
     """C3: no tool name → the bare type name; a tool with no identifiable argument
     → the tool name alone (no substitute value)."""
     labels = _labels_by_use_id(tmp_path)
@@ -76,7 +62,7 @@ def test_call_fallbacks_invent_nothing(home, tmp_path):  # noqa: F811
     assert labels["noarg1"] == "Read"
 
 
-def test_result_shows_outcome_and_bash_exit_code(home, tmp_path):  # noqa: F811
+def test_result_shows_outcome_and_bash_exit_code(home, tmp_path):
     """C2: a result shows error vs. success compactly, and the exit code when the
     payload carries one."""
     labels = _labels_by_use_id(tmp_path)
@@ -91,14 +77,14 @@ def test_result_shows_outcome_and_bash_exit_code(home, tmp_path):  # noqa: F811
     assert "error" not in ok.lower()
 
 
-def test_result_without_outcome_fields_keeps_type_name(home, tmp_path):  # noqa: F811
+def test_result_without_outcome_fields_keeps_type_name(home, tmp_path):
     """C3: a result payload with no outcome fields keeps the bare type name."""
     labels = _labels_by_use_id(tmp_path)
 
     assert labels["result:bare1"] == "agent.tool.result"
 
 
-def test_exit_code_only_result_outcome_follows_the_code(home, tmp_path):  # noqa: F811
+def test_exit_code_only_result_outcome_follows_the_code(home, tmp_path):
     """C2 (regression): with no ``is_error``, the outcome follows the numeric exit
     code — zero is success, nonzero is error. A nonzero code is never shown as
     ``ok``."""
@@ -111,7 +97,7 @@ def test_exit_code_only_result_outcome_follows_the_code(home, tmp_path):  # noqa
     assert zero != "agent.tool.result" and nonzero != "agent.tool.result"
 
 
-def test_content_only_result_keeps_type_name(home, tmp_path):  # noqa: F811
+def test_content_only_result_keeps_type_name(home, tmp_path):
     """C3 (regression): a result with a resolvable tool but only a ``content`` body
     (no ``is_error``/exit code) keeps the type name — content is not an outcome, so
     success is never invented."""
@@ -120,7 +106,7 @@ def test_content_only_result_keeps_type_name(home, tmp_path):  # noqa: F811
     assert labels["result:content1"] == "agent.tool.result"
 
 
-def test_unresolved_tool_name_result_keeps_type_name(home, tmp_path):  # noqa: F811
+def test_unresolved_tool_name_result_keeps_type_name(home, tmp_path):
     """C3 (regression): a result whose ``tool_use_id`` matches no call has no
     resolvable tool name and keeps the type name, even though it carries an
     outcome field."""

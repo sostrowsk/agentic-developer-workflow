@@ -1,30 +1,12 @@
-"""RED tests for A5 — server-side sorting and filtering of the run list.
+"""Tests for server-side sorting and filtering of the run list."""
 
-The list ``/`` gains four OPTIONAL query params, evaluated server-side like the Raw
-tab's ``?raw_q``/``?raw_type`` — no client state, no persistence (E2):
-
-* ``?sort`` ∈ {start, duration, cost, events}, ``?dir`` ∈ {asc, desc}; unknown or
-  missing values fall back to start/desc — never an error, never an empty list;
-* ``?repo`` (repo slug) and ``?status`` (status value); combined = intersection; an
-  unknown value yields an EMPTY result with a hint — never the unfiltered list,
-  never an error.
-
-The existing status grouping (``awaiting_approval`` first, then ``running``, then
-the rest; newest first within a group) is applied BEFORE the chosen sort and keeps
-priority. All four params survive the language switch because they ride in the URL
-(``switch_qs``). Derived from .adw/spec.md (AC 10–13), .adw/contract.yaml
-(x-adw-template-behavior sorting/filtering, invariants) and .adw/plan.md (B6).
-"""
-
-import os
 import re
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    _slug_for,
     rec,
     run_end_payload,
     run_start_payload,
@@ -37,8 +19,6 @@ D2 = "d2220002"
 D3 = "d3330003"
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _order(html):
@@ -93,7 +73,7 @@ def _sortable_repo(tmp_path):
 # --- AC 10: sorting, with the status grouping keeping priority -------------------
 
 
-def test_sort_keys_order_the_list_and_awaiting_stays_first(home, tmp_path):  # noqa: F811
+def test_sort_keys_order_the_list_and_awaiting_stays_first(home, tmp_path):
     """AC 10: each sort key/direction reorders the finished runs accordingly, while
     the ``awaiting_approval`` run stays above all others regardless of the sort."""
     client = TestClient(create_app(repos=[str(_sortable_repo(tmp_path))]))
@@ -111,7 +91,7 @@ def test_sort_keys_order_the_list_and_awaiting_stays_first(home, tmp_path):  # n
         assert order[1:] == expected_rest, f"{sort}/{direction}: {order[1:]} != {expected_rest}"
 
 
-def test_list_page_offers_visible_sort_and_filter_controls(home, tmp_path):  # noqa: F811
+def test_list_page_offers_visible_sort_and_filter_controls(home, tmp_path):
     """A5: the list carries visible server-side controls — sortable column links
     (carrying ``sort=``) and a filter control (a form/select). Today the rendered
     document has none (0 ``form``, 0 ``select``, 0 sortable ``th`` link)."""
@@ -123,7 +103,7 @@ def test_list_page_offers_visible_sort_and_filter_controls(home, tmp_path):  # n
 # --- AC 11: filtering by status / repo, and the empty-result hint ---------------
 
 
-def test_filter_by_status_and_repo_act_as_intersection(home, tmp_path):  # noqa: F811
+def test_filter_by_status_and_repo_act_as_intersection(home, tmp_path):
     """AC 11: ``?status`` keeps only that status; ``?repo`` keeps only that repo;
     combined they intersect."""
     repo_a = tmp_path / "repoA"
@@ -153,7 +133,7 @@ def test_filter_by_status_and_repo_act_as_intersection(home, tmp_path):  # noqa:
     assert intersection == {D1}
 
 
-def test_unknown_filter_value_gives_empty_result_not_the_full_list(home, tmp_path):  # noqa: F811
+def test_unknown_filter_value_gives_empty_result_not_the_full_list(home, tmp_path):
     """AC 11: an unknown filter value yields an EMPTY result (with a hint), not an
     error and not the unfiltered list."""
     client = TestClient(create_app(repos=[str(_sortable_repo(tmp_path))]))
@@ -170,7 +150,7 @@ def test_unknown_filter_value_gives_empty_result_not_the_full_list(home, tmp_pat
 # --- AC 12: robustness of unknown sort/dir -------------------------------------
 
 
-def test_dir_asc_without_sort_defaults_independently(home, tmp_path):  # noqa: F811
+def test_dir_asc_without_sort_defaults_independently(home, tmp_path):
     """P3: `sort` and `dir` default INDEPENDENTLY. `?dir=asc` with no `sort` sorts by
     `start` ASCENDING (not forced back to desc), and the control reflects `asc`."""
     client = TestClient(create_app(repos=[str(_sortable_repo(tmp_path))]))
@@ -183,7 +163,7 @@ def test_dir_asc_without_sort_defaults_independently(home, tmp_path):  # noqa: F
     assert 'name="dir" value="asc"' in resp.text  # the displayed direction matches
 
 
-def test_unknown_sort_and_dir_fall_back_to_default_without_error(home, tmp_path):  # noqa: F811
+def test_unknown_sort_and_dir_fall_back_to_default_without_error(home, tmp_path):
     """AC 12: unknown ``sort``/``dir`` values fall back to start/desc — no error,
     no empty list — and null metrics sort without raising (the awaiting run has
     no cost/duration)."""
@@ -200,7 +180,7 @@ def test_unknown_sort_and_dir_fall_back_to_default_without_error(home, tmp_path)
 # --- AC 13: sort/filter survive the language switch ----------------------------
 
 
-def test_sort_and_filter_survive_the_language_switch(home, tmp_path):  # noqa: F811
+def test_sort_and_filter_survive_the_language_switch(home, tmp_path):
     """AC 13: the language switch link keeps every sort/filter param (it flips only
     ``lang``), so switching language preserves the chosen sort and filter."""
     repo = _sortable_repo(tmp_path)

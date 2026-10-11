@@ -1,16 +1,9 @@
-"""RED tests for Aufgabe B — the server-rendered run-detail HTML and detail pane.
-
-Derived from .adw/spec.md (AC 12–17), .adw/contract.yaml (x-adw-template-behavior)
-and GUI-SPEC §7.2 B. Markup and CSS/JS structure are NOT contractual, so the
-assertions check observable rendered content (phase names, tab labels, node data,
-visible reader problems, generic unknown nodes, no external asset references) via
-substring, never exact markup. RED until ``adw.gui.app.create_app`` exists.
-"""
+"""Tests for the server-rendered run-detail HTML and detail pane."""
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
+from tests.gui_app_helpers import (
     CODEX_STDOUT,
     FINAL_ANSWER,
     GATE_CMD,
@@ -18,7 +11,6 @@ from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
     PHASE_ORDER,
     PROMPT,
     comprehensive_lines,
-    home,
     problems_lines,
     write_run,
 )
@@ -38,7 +30,7 @@ def _detail_html(tmp_path, run_id, lines, phase="done", focus=None):
     return resp.text
 
 
-def test_detail_html_renders_phase_bar_and_agent_tabs(home, tmp_path):  # noqa: F811
+def test_detail_html_renders_phase_bar_and_agent_tabs(home, tmp_path):
     """AC 12/14/E9: the header shows the seven phases; the agent.run pane shows the
     Prompt/Answer/Tools tabs with their content — and NO Diff tab for this
     snapshot-less run (a Diff tab only appears for bracketed nodes)."""
@@ -52,7 +44,7 @@ def test_detail_html_renders_phase_bar_and_agent_tabs(home, tmp_path):  # noqa: 
     assert "Read" in html  # the tool call appears in the Tools list
 
 
-def test_detail_html_renders_gate_and_codex_panes(home, tmp_path):  # noqa: F811
+def test_detail_html_renders_gate_and_codex_panes(home, tmp_path):
     """AC 14: the gate pane shows command/exit-code/full output; the codex.review
     pane shows the findings (severity, file, message) and the raw stdout."""
     html = _detail_html(tmp_path, "aaaa1111", comprehensive_lines())
@@ -62,7 +54,7 @@ def test_detail_html_renders_gate_and_codex_panes(home, tmp_path):  # noqa: F811
     assert CODEX_STDOUT in html
 
 
-def test_detail_html_shows_problems_unknown_nodes_and_no_external_refs(home, tmp_path):  # noqa: F811
+def test_detail_html_shows_problems_unknown_nodes_and_no_external_refs(home, tmp_path):
     """AC 15/16/17: reader problems are visibly shown, unknown event types render
     generically (type label + raw payload), and the page references no external
     resource."""

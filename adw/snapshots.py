@@ -23,11 +23,11 @@ emitter — the ref remains a usable snapshot, no rollback, no recovery mechanic
 
 import logging
 import os
-import subprocess
 import threading
 from pathlib import Path
 
 from adw.env import safe_env
+from adw.git import run_git
 
 logger = logging.getLogger(__name__)
 
@@ -107,13 +107,7 @@ def _next_ref_seq(worktree: Path, env: dict[str, str], run_id: str) -> int:
 
 
 def _run_git(cwd: Path, env: dict[str, str], *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(cwd), "-c", "core.hooksPath=/dev/null", *args],
-        capture_output=True,
-        text=True,
-        timeout=_GIT_TIMEOUT,
-        env=env,
-    )
+    result = run_git(cwd, *args, timeout=_GIT_TIMEOUT, env=env)
     if result.returncode != 0:
         raise RuntimeError(f"git {args[0]} failed: {result.stderr.strip()}")
     return result.stdout

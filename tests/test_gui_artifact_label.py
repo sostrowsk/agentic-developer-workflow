@@ -10,21 +10,19 @@ full path travels in the `title` exactly as a tool call's path argument does (A4
 the row is as informative as a tool row without getting longer.
 """
 
-import os
 
 from fastapi.testclient import TestClient
 
 from adw.gui.app import _display_label, _node_label, create_app
 from adw.gui.model import build_tree
-from adw.gui.registry import _slug
-from tests.gui_app_helpers import (  # noqa: F401 — home used as a fixture
-    home,
+from tests.gui_app_helpers import (
+    RUN_ID,
+    _slug_for,
     rec,
     run_start_payload,
     write_run,
 )
 
-RUN_ID = "aaaa1111"
 REPO_ROOT = "/repo/root"
 
 
@@ -64,8 +62,6 @@ def test_an_artifact_without_a_path_gets_no_title():
     assert _display_label(node, REPO_ROOT) == ("artifact spec.md", None)
 
 
-def _slug_for(repo):
-    return _slug(os.path.normpath(str(repo.resolve())))
 
 
 def _artifact_run_lines(names):
@@ -87,7 +83,7 @@ def _artifact_run_lines(names):
     return lines
 
 
-def test_a_collapsed_artifact_run_expands_to_distinct_names(home, tmp_path):  # noqa: F811
+def test_a_collapsed_artifact_run_expands_to_distinct_names(home, tmp_path):
     """The whole point of the change: the counted collector stays, and opening it now
     tells the reader WHICH artifacts they were."""
     repo = tmp_path / "repo"
@@ -107,7 +103,7 @@ def test_a_collapsed_artifact_run_expands_to_distinct_names(home, tmp_path):  # 
         assert f"artifact {name}" in trace
 
 
-def test_the_api_tree_label_names_the_artifact_too(home, tmp_path):  # noqa: F811
+def test_the_api_tree_label_names_the_artifact_too(home, tmp_path):
     """The label is built once in `_node_label`, so the JSON tree carries the same
     text the column shows — no second source of truth."""
     repo = tmp_path / "repo"
@@ -136,7 +132,7 @@ def test_a_corrupt_artifact_payload_never_crashes_the_page():
         assert _display_label(node, REPO_ROOT) == ("artifact", None)
 
 
-def test_a_run_with_a_corrupt_artifact_record_still_renders(home, tmp_path):  # noqa: F811
+def test_a_run_with_a_corrupt_artifact_record_still_renders(home, tmp_path):
     """End to end: the page stays a 200 and keeps rendering the healthy nodes."""
     repo = tmp_path / "repo"
     repo.mkdir(exist_ok=True)
