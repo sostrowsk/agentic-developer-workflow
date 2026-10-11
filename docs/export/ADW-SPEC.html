@@ -1,0 +1,2009 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang xml:lang>
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>ADW-SPEC</title>
+  <style>
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+
+ul.task-list[class]{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+font-size: inherit;
+width: 0.8em;
+margin: 0 0.8em 0.2em -1.6em;
+vertical-align: middle;
+}
+.display.math{display: block; text-align: center; margin: 0.5rem auto;}
+
+pre > code.sourceCode { white-space: pre; position: relative; }
+pre > code.sourceCode > span { line-height: 1.25; }
+pre > code.sourceCode > span:empty { height: 1.2em; }
+.sourceCode { overflow: visible; }
+code.sourceCode > span { color: inherit; text-decoration: inherit; }
+div.sourceCode { margin: 1em 0; }
+pre.sourceCode { margin: 0; }
+@media screen {
+div.sourceCode { overflow: auto; }
+}
+@media print {
+pre > code.sourceCode { white-space: pre-wrap; }
+pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+}
+pre.numberSource code
+{ counter-reset: source-line 0; }
+pre.numberSource code > span
+{ position: relative; left: -4em; counter-increment: source-line; }
+pre.numberSource code > span > a:first-child::before
+{ content: counter(source-line);
+position: relative; left: -1em; text-align: right; vertical-align: baseline;
+border: none; display: inline-block;
+-webkit-touch-callout: none; -webkit-user-select: none;
+-khtml-user-select: none; -moz-user-select: none;
+-ms-user-select: none; user-select: none;
+padding: 0 4px; width: 4em;
+color: #aaaaaa;
+}
+pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
+div.sourceCode
+{ }
+@media screen {
+pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+}
+code span.al { color: #ff0000; font-weight: bold; } 
+code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.at { color: #7d9029; } 
+code span.bn { color: #40a070; } 
+code span.bu { color: #008000; } 
+code span.cf { color: #007020; font-weight: bold; } 
+code span.ch { color: #4070a0; } 
+code span.cn { color: #880000; } 
+code span.co { color: #60a0b0; font-style: italic; } 
+code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.do { color: #ba2121; font-style: italic; } 
+code span.dt { color: #902000; } 
+code span.dv { color: #40a070; } 
+code span.er { color: #ff0000; font-weight: bold; } 
+code span.ex { } 
+code span.fl { color: #40a070; } 
+code span.fu { color: #06287e; } 
+code span.im { color: #008000; font-weight: bold; } 
+code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
+code span.kw { color: #007020; font-weight: bold; } 
+code span.op { color: #666666; } 
+code span.ot { color: #007020; } 
+code span.pp { color: #bc7a00; } 
+code span.sc { color: #4070a0; } 
+code span.ss { color: #bb6688; } 
+code span.st { color: #4070a0; } 
+code span.va { color: #19177c; } 
+code span.vs { color: #4070a0; } 
+code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
+</style>
+  <style type="text/css">
+:root {
+--fg: #1a1a1a;
+--bg: #ffffff;
+--muted: #555555;
+--border: #d0d0d0;
+--code-bg: #f4f4f4;
+--accent: #0b5cad;
+}
+html {
+font-size: 100%;
+}
+body {
+font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+line-height: 1.6;
+color: var(--fg);
+background: var(--bg);
+max-width: 46rem;
+margin: 2.5rem auto;
+padding: 0 1.25rem;
+overflow-wrap: break-word;
+}
+h1, h2, h3, h4, h5, h6 {
+line-height: 1.25;
+margin: 2rem 0 0.75rem;
+font-weight: 600;
+}
+h1 { font-size: 1.9rem; }
+h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+h3 { font-size: 1.25rem; }
+p, ul, ol, blockquote, table, pre {
+margin: 0 0 1rem;
+}
+a {
+color: var(--accent);
+text-decoration: underline;
+}
+blockquote {
+margin-left: 0;
+padding: 0.2rem 1rem;
+border-left: 4px solid var(--border);
+color: var(--muted);
+}
+img {
+max-width: 100%;
+height: auto;
+}
+table {
+border-collapse: collapse;
+width: 100%;
+display: block;
+overflow-x: auto;
+}
+th, td {
+border: 1px solid var(--border);
+padding: 0.4rem 0.6rem;
+text-align: left;
+}
+th {
+background: var(--code-bg);
+font-weight: 600;
+}
+code {
+font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
+"Liberation Mono", monospace;
+font-size: 0.9em;
+background: var(--code-bg);
+padding: 0.15em 0.35em;
+border-radius: 3px;
+}
+pre {
+background: var(--code-bg);
+padding: 0.9rem 1rem;
+border-radius: 5px;
+overflow-x: auto;
+}
+pre code {
+background: none;
+padding: 0;
+font-size: 0.85rem;
+}
+
+nav#TOC {
+border: 1px solid var(--border);
+border-radius: 5px;
+padding: 0.75rem 1rem;
+margin-bottom: 2rem;
+background: #fafafa;
+}
+nav#TOC ul {
+margin: 0;
+padding-left: 1.2rem;
+}
+@media (prefers-color-scheme: dark) {
+:root {
+--fg: #e6e6e6;
+--bg: #1b1b1b;
+--muted: #a0a0a0;
+--border: #444444;
+--code-bg: #2a2a2a;
+--accent: #6cb2ff;
+}
+th { background: var(--code-bg); }
+nav#TOC { background: #232323; }
+}
+</style>
+</head>
+<body>
+<h1 id="adw-specification--philosophy-architecture-contracts">ADW
+Specification — Philosophy, Architecture, Contracts</h1>
+<p><strong>English</strong> | <a href="ADW-SPEC.de.md">Deutsch</a></p>
+<blockquote>
+<p><strong>Audience:</strong> contributors to the ADW orchestrator —
+people who change <code>adw/</code>, review changes to it, or need to
+know <em>why</em> it is built the way it is. <strong>As of:</strong>
+version 0.26.1 (2026-10-11). <strong>Companion documents:</strong> <a href="ADW-WORKFLOW.md">ADW Workflow</a> (the seven phases in depth, for
+users and contributors) · <a href="ADW-HANDBOOK.md">ADW Handbook</a>
+(operating ADW as a developer).</p>
+</blockquote>
+<h2 id="how-this-document-relates-to-the-others">How this document
+relates to the others</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Document</th>
+<th>Role</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><a href="SPEC.md"><code>docs/SPEC.md</code></a></td>
+<td>The <strong>original target specification</strong> with the
+Definition of Done (§8) that the acceptance tests
+(<code>tests/test_e2e_dry_run.py</code>) map. It defines <em>what ADW
+must do</em>.</td>
+<td>Normative. Changes to target behaviour land there first.</td>
+</tr>
+<tr class="even">
+<td><a href="PLAN.md"><code>docs/PLAN.md</code></a></td>
+<td>The <strong>implementation plan</strong> of the 0.1.0 core (Tasks
+0–13).</td>
+<td>Historical — the plan was executed; it is not maintained as the code
+evolves.</td>
+</tr>
+<tr class="odd">
+<td><a href="GUI-SPEC.md"><code>docs/GUI-SPEC.md</code></a></td>
+<td>Normative specification of the event log, snapshots, retention and
+the Run Inspector GUI.</td>
+<td>Normative for everything under <code>adw/gui/</code>,
+<code>events.py</code>, <code>snapshots.py</code>,
+<code>retention.py</code>.</td>
+</tr>
+<tr class="even">
+<td><strong>This document</strong></td>
+<td>The <strong>as-built specification</strong>: the philosophy behind
+the design, the architecture as it stands at 0.26.1, the data contracts,
+invariants and extension points.</td>
+<td>Descriptive, verified against the code. Where it and
+<code>SPEC.md</code> disagree, the code is the fact and
+<code>SPEC.md</code> is the intent — file the gap.</td>
+</tr>
+<tr class="odd">
+<td><a href="../CHANGELOG.md"><code>CHANGELOG.md</code></a></td>
+<td>What changed, per release.</td>
+<td>Maintained with every push.</td>
+</tr>
+<tr class="even">
+<td><a href="FOLLOWUPS.md"><code>docs/FOLLOWUPS.md</code></a></td>
+<td>Register of open follow-up findings from ADW runs.</td>
+<td>Maintained by hand.</td>
+</tr>
+<tr class="odd">
+<td><a href="briefs/README.md"><code>docs/briefs/</code></a></td>
+<td>Issue briefs that ran through ADW without escalation — a template
+for writing new ones.</td>
+<td>Reference.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h1 id="part-i--philosophy">Part I — Philosophy</h1>
+<p>ADW exists because agentic coding fails in two predictable ways: the
+agent <em>decides the control flow</em> (and loops, skips checks, or
+declares victory), and the agent <em>grades its own work</em>. Every
+principle below closes one of those doors. Each one is stated as a rule,
+followed by the reason and the place in the code that enforces it — a
+principle that no code enforces is only a wish.</p>
+<h2 id="p1--control-flow-is-code-not-prompt">P1 — Control flow is code,
+not prompt</h2>
+<p><strong>Rule.</strong> Loops, gates, merges, dispatch, triage,
+limits, approval pauses and CI polling are deterministic Python. Agents
+are called only where judgment is needed: writing a spec or plan,
+writing code, assessing a review, assigning a failure to a lane.</p>
+<p><strong>Why.</strong> Repeatable work in a prompt costs tokens,
+behaves differently every time and cannot be tested. The same work in
+Python costs nothing, behaves identically and is covered by tests. An
+agent that is told &quot;repeat until the tests pass&quot; can stop early, loop
+forever or redefine &quot;pass&quot;; a <code>while</code> loop with a counter
+cannot.</p>
+<p><strong>Enforced by.</strong> <code>adw/phases.py</code> owns every
+loop; agents receive a single task string and return text. No agent is
+ever told &quot;now call the next phase&quot;.</p>
+<h2 id="p2--reviewers-never-fix">P2 — Reviewers never fix</h2>
+<p><strong>Rule.</strong> Every reviewer — Codex in phases 1, 2 and 5,
+the final reviewer in phase 6, the E2E triage agent, the CI log analyst
+— is read-only and answers only with Findings. Fixes are always done by
+the build agent of the affected lane.</p>
+<p><strong>Why.</strong> A reviewer that fixes &quot;just the trivial thing&quot;
+bypasses exactly the checks that should have caught its mistake, and it
+marks its own homework. Keeping the roles apart also keeps the reviewer
+honest: it has no stake in the code being fine.</p>
+<p><strong>Enforced by.</strong> The agent registry
+(<code>adw/agents.py</code>) gives every reviewer
+<code>READ_ONLY_TOOLS</code> (Read/Grep/Glob) and no write rule; Codex
+runs with <code>--sandbox read-only</code>.</p>
+<h2 id="p3--every-fix-takes-the-validated-path">P3 — Every fix takes the
+validated path</h2>
+<p><strong>Rule.</strong> A fix from any source (gate failure, E2E,
+Codex review, final review, CI) goes through the build agent, then
+through <strong>all</strong> gates of the lane — and in parallel mode
+again through merge + E2E. There is no shortcut for small fixes.</p>
+<p><strong>Why.</strong> &quot;Small&quot; is the agent&#39;s opinion, not a
+measurement. The cost of re-running the gates is seconds to minutes; the
+cost of an unchecked fix reaching the push is a red pipeline or
+worse.</p>
+<p><strong>Enforced by.</strong> <code>_dispatch_lane_fixes</code> is
+the single fix-routing function; it always ends in
+<code>_run_lane</code> (the gate loop). The review phases obtain their
+worktree through <code>_integration_loop</code>, so a review fix
+re-enters merge + E2E.</p>
+<h2 id="p4--everything-is-bounded-and-standstill-is-detected">P4 —
+Everything is bounded, and standstill is detected</h2>
+<p><strong>Rule.</strong> Every loop has a hard, persisted limit. In
+addition a circuit breaker stops a loop as soon as a round produces
+exactly the same failure set as the round before.</p>
+<p><strong>Why.</strong> An unbounded agent loop is the most expensive
+failure mode there is. Limits that live only in memory are reset by a
+crash, so they must be persisted with the work they guard. The circuit
+breaker catches the cheaper-to-detect case — &quot;nothing changed&quot; — long
+before the limit is spent.</p>
+<p><strong>Enforced by.</strong> <code>adw/triage.py</code>
+(<code>check_gate_iterations</code>, <code>check_fix_cycles</code>,
+<code>check_progress</code>) and the round counters in
+<code>RunState</code>/<code>LaneState</code>. Limit checks run
+<em>before</em> the expensive work, never after.</p>
+<h2 id="p5--escalation-is-a-first-class-result">P5 — Escalation is a
+first-class result</h2>
+<p><strong>Rule.</strong> An exhausted limit, a merge conflict, an
+unparseable reviewer answer or a broken invariant ends the run in a
+controlled way: <code>escalation.md</code> +
+<code>phase=escalated</code> + exit 1. Escalated runs are final.</p>
+<p><strong>Why.</strong> An orchestrator that &quot;somehow keeps going&quot;
+produces expensive garbage. A human gets the state reached and the
+concrete reason and decides.</p>
+<p><strong>Enforced by.</strong> <code>escalate()</code> in
+<code>phases.py</code>; <code>adw resume</code> refuses escalated
+runs.</p>
+<h2 id="p6--fail-fast-never-guess">P6 — Fail fast, never guess</h2>
+<p><strong>Rule.</strong> A missing or invalid config aborts before
+anything starts; there are no guessed defaults for project knowledge
+(gates, branches, lanes). Parsers accept exactly one well-defined shape
+and reject everything else.</p>
+<p><strong>Why.</strong> Silent defaults produce silent misbehaviour,
+and a tolerant parser accepts a stale or fabricated <code>ok</code> when
+in doubt. A parse error is safe (escalation); a false <code>ok</code>
+ships broken code.</p>
+<p><strong>Enforced by.</strong> <code>AdwConfig.load</code> (strict
+YAML loader rejecting duplicate keys, pydantic with
+<code>extra=&quot;forbid&quot;</code>); <code>extract_review_result</code>
+(whole-object JSON or the last <code>```json</code> fence, nothing
+else).</p>
+<h2 id="p7--verify-dont-trust-the-orchestrator-holds-the-evidence">P7 —
+Verify, don&#39;t trust: the orchestrator holds the evidence</h2>
+<p><strong>Rule.</strong> Every claim an agent could make about its own
+work is instead proven by the orchestrator and persisted in
+orchestrator-owned state: gates green (<code>gates_passed</code> +
+<code>gates_tree</code> hash), RED proven (<code>red_confirmed</code> +
+<code>red_test_paths</code>), HEAD unchanged
+(<code>expected_head</code>), branch unchanged. <strong>Only the
+orchestrator commits.</strong></p>
+<p><strong>Why.</strong> An agent-written commit message, flag or report
+is agent-falsifiable. A tree hash computed by the orchestrator binds
+&quot;the gates were green&quot; to exactly the content that was checked. The same
+reasoning rejects per-task self-reporting in the trace
+(<code>docs/SPEC.md</code> §6).</p>
+<p><strong>Enforced by.</strong> <code>_worktree_tree_hash</code>,
+<code>_require_no_agent_commit</code>,
+<code>_require_lane_branch</code>, <code>_require_expected_head</code>,
+<code>_commit_lane</code> in <code>phases.py</code>.</p>
+<h2 id="p8--least-privilege-for-agents">P8 — Least privilege for
+agents</h2>
+<p><strong>Rule.</strong> Each agent gets the smallest tool set and the
+narrowest path rules that let it do its job. Secret stores are
+deny-listed for everyone, run state is unwritable for everyone,
+neighbouring lanes are unreadable, Bash is sandboxed. Subprocesses
+inherit only a whitelisted environment.</p>
+<p><strong>Why.</strong> Agents read untrusted content (issue text,
+repository files, CI logs). Whatever an injected instruction could make
+them do, the tool boundary limits the damage.</p>
+<p><strong>Enforced by.</strong> <code>AgentSpec.tools</code> (restricts
+what is offered) + <code>allowed_tools</code> (artifact-exact path
+rules), <code>SECRET_STORE_DENY_RULES</code>, <code>sandbox_bash</code>,
+<code>deny_read_paths</code> per lane, <code>safe_env()</code>;
+protected artifacts are restored byte-exactly after every agent run.</p>
+<h2 id="p9--plan-billing-never-the-api-meter">P9 — Plan billing, never
+the API meter</h2>
+<p><strong>Rule.</strong> ADW talks to Claude only through the Claude
+Code CLI (spawned headless by the Agent SDK) with the stored login.
+API-key environment variables are actively blanked. An agent call that
+fails — typically an exhausted plan window — leaves the run at its
+checkpoint <strong>without escalating</strong>; <code>adw resume</code>
+continues after the reset.</p>
+<p><strong>Why.</strong> Cost control by construction instead of by
+discipline: an accidental token-by-token API drain is technically
+impossible. The price is an availability risk, which the crash-resume
+design covers anyway.</p>
+<p><strong>Enforced by.</strong> <code>_require_stored_login()</code>
+and the env overrides in <code>adw/agents.py</code>; the
+<code>AgentRunError</code> branch in <code>cli._execute</code>.</p>
+<h2 id="p10--crash-safe-by-construction">P10 — Crash-safe by
+construction</h2>
+<p><strong>Rule.</strong> Every transition and every open piece of
+feedback is checkpointed atomically. Budget increments are persisted in
+the <em>same</em> save as the work that justifies them. State that is
+cheap to rebuild (the integration branch, review worktrees) is thrown
+away and rebuilt instead of interpreted.</p>
+<p><strong>Why.</strong> Real runs take hours, hit plan limits and get
+killed. Interpreting a half-merged or half-written state correctly is
+error-prone; rebuilding it deterministically is cheap and provably
+correct.</p>
+<p><strong>Enforced by.</strong> <code>RunState.save/update</code> (tmp
++ <code>os.replace</code>, <code>flock</code>), the
+<code>mutate_staged</code> hook in <code>_dispatch_lane_fixes</code>,
+<code>_fresh_integration_worktree</code>,
+<code>_resume_pending_lanes</code>.</p>
+<h2 id="p11--one-code-path-the-dry-run-is-a-product-feature">P11 — One
+code path; the dry run is a product feature</h2>
+<p><strong>Rule.</strong> Single-lane mode is parallel mode with one
+lane — there is one code path and one CLI. <code>--dry-run</code>
+injects mocks into the <em>production</em> code path, including
+canonical failure fixtures (a gate that only turns green on the second
+attempt, an E2E failure resolved by a triaged lane fix).</p>
+<p><strong>Why.</strong> Two code paths drift apart. A dry run that
+exercises the real control flow lets a user accept a config and the
+whole flow at 0 tokens, and gives the acceptance tests something real to
+test.</p>
+<p><strong>Enforced by.</strong> <code>RunContext</code> as the
+dependency-injection root (all contact with the outside world goes
+through it);
+<code>cli._dry_run_runners/_dry_run_glab/_dry_run_gh</code>.</p>
+<h2 id="p12--tests-are-mocks-only-git-is-real">P12 — Tests are
+mocks-only, git is real</h2>
+<p><strong>Rule.</strong> No test needs the network or tokens. Agents,
+Codex, <code>glab</code> and <code>gh</code> are mocked at their
+interfaces; <strong>git is real</strong> (throwaway repos in
+<code>tmp_path</code>). Development is test-first: a red test before
+every behaviour change, and a regression test for every bugfix.</p>
+<p><strong>Why.</strong> The orchestrator&#39;s hardest guarantees are about
+git state, crash windows and worktrees — mocking git would test the
+mock. The external services are where the cost and the flakiness
+are.</p>
+<p><strong>Enforced by.</strong> <code>adw/mock.py</code>
+(<code>MockAgentRunner</code>, <code>MockCodexRunner</code>); the
+injectable <code>run_glab</code>/<code>run_gh</code>/<code>sleep</code>
+seams; a JS harness that drives the served <code>app.js</code> in plain
+<code>node</code> for the GUI.</p>
+<h2 id="p13--review-loops-converge-by-policy-descending-severity-findings-memory-cap-5">P13
+— Review loops converge by policy: descending severity, findings memory,
+cap 5</h2>
+<p><strong>Rule.</strong> Every Codex review loop — authoring
+(spec/plan) and code review — follows the same policy:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Round</th>
+<th>Findings acted on</th>
+<th>Others</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>1</td>
+<td>P1, P2, P3</td>
+<td>—</td>
+</tr>
+<tr class="even">
+<td>2</td>
+<td>P1, P2</td>
+<td>P3 → known limitations / follow-ups</td>
+</tr>
+<tr class="odd">
+<td>≥ 3</td>
+<td>P1 only</td>
+<td>P2, P3 → known limitations / follow-ups</td>
+</tr>
+<tr class="even">
+<td>cap 5</td>
+<td>open P1 → escalation</td>
+<td>everything else accepted and documented</td>
+</tr>
+</tbody>
+</table>
+<p>From round 2 on, Codex receives the previous rounds&#39; findings
+<strong>with their disposition</strong> (fixed / rejected + reason /
+below threshold) so settled points are not re-reported.</p>
+<p><strong>Why.</strong> Without this policy the loop does not converge
+on orchestration code: a deterministic reviewer finds an unbounded
+supply of edge cases at the lowest severity, and without memory it
+oscillates between &quot;too strict&quot; and &quot;too lenient&quot;. The same policy is
+the contributor&#39;s own per-commit review rule — ADW and its developers
+deliberately run the same loop.</p>
+<p><strong>Enforced by.</strong> <code>_actionable_severities</code>,
+<code>_split_by_severity</code>, <code>_severity_context</code>,
+<code>AUTHORING_MAX_ROUNDS = 5</code>,
+<code>MAX_REVIEW_ROUNDS = 5</code> in <code>phases.py</code>;
+dispositions persisted in <code>authoring_prior_context</code> /
+<code>review_prior_context</code>.</p>
+<h2 id="p14--proportionality-build-what-the-issue-asks-for">P14 —
+Proportionality: build what the issue asks for</h2>
+<p><strong>Rule.</strong> The spec and plan authors are bound by a
+proportionality rule: every acceptance criterion must trace back to the
+issue; process requirements (commit messages, branch topology, git
+history) do not belong in a spec. Scope gaps found at the end become
+follow-ups, not new work.</p>
+<p><strong>Why.</strong> Two strong authors plus a strict reviewer
+naturally inflate scope. The counterweight has to be written into the
+prompts of <em>both</em> authors and the synthesis, or the synthesis
+undoes it.</p>
+<p><strong>Enforced by.</strong> <code>_SPEC_CONTENT_RULES</code> /
+<code>_PLAN_CONTENT_RULES</code> — one shared constant each, used by the
+Claude author, the synthesis agent and the Codex author prompts;
+<code>scope_gap</code> triage into <code>followups.md</code>.</p>
+<h2 id="p15--documentation-is-bilingual-and-versioned-with-the-code">P15
+— Documentation is bilingual and versioned with the code</h2>
+<p><strong>Rule.</strong> All docs exist in English (default, no suffix)
+and German (<code>.de.</code> before the extension), kept in sync, with
+a language switcher under the H1. Every push to <code>main</code> is a
+release with a version bump, a changelog entry in both languages and a
+tag (see §18).</p>
+<p><strong>Why.</strong> The users and contributors work in both
+languages; a doc that exists in only one silently goes stale in the
+other. Releases per push keep &quot;which version introduced this?&quot;
+answerable.</p>
+<hr />
+<h1 id="part-ii--technical-specification-as-built-0261">Part II —
+Technical specification (as built, 0.26.1)</h1>
+<h2 id="1-architecture-and-module-map">1. Architecture and module
+map</h2>
+<pre><code>                         adw run / resume / approve / status / gui / runs
+                                          │
+                         ┌────────────────▼─────────────────┐
+                         │ cli.py (typer)                    │
+                         │ arg validation · gate modes ·     │
+                         │ preflight · run lock · dry-run    │
+                         │ wiring · exit codes 0/2/1         │
+                         └────────────────┬─────────────────┘
+                                          │ RunContext
+                         ┌────────────────▼─────────────────┐
+                         │ phases.py — the 7 phases          │
+                         │ loops · limits · dispatch ·       │
+                         │ triage · escalation · breakpoints │
+                         └──┬──────────┬───────────┬────────┘
+              judgment      │          │           │      deterministic core
+      ┌─────────────────────▼─┐  ┌─────▼──────┐  ┌─▼───────────────────────────┐
+      │ agents.py             │  │ codex.py   │  │ config  state  findings     │
+      │ SdkAgentRunner        │  │ CodexRunner│  │ gates   worktrees  triage   │
+      │ (Claude Agent SDK →   │  │ (codex exec│  │ ci  github  forge  env      │
+      │  Claude Code CLI)     │  │  read-only)│  │ mock (dry run / tests)      │
+      └───────────────────────┘  └────────────┘  └─────────────────────────────┘
+                     observability (fail-open, never on the critical path)
+      ┌──────────────────────────────────────────────────────────────────────────┐
+      │ events.py → .adw/runs/&lt;id&gt;/events.jsonl    snapshots.py → refs/adw/&lt;id&gt;/* │
+      │ retention.py (adw runs list/prune, auto-prune)                           │
+      └───────────────────────────────────┬──────────────────────────────────────┘
+                                          │ read-only
+                         ┌────────────────▼─────────────────┐
+                         │ gui/ (optional extra `adw[gui]`)  │
+                         │ reader · model · registry ·       │
+                         │ app (FastAPI) · i18n · templates  │
+                         └───────────────────────────────────┘</code></pre>
+<table>
+<thead>
+<tr class="header">
+<th>Module</th>
+<th style="text-align: right;">Lines</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>adw/cli.py</code></td>
+<td style="text-align: right;">1235</td>
+<td>typer entry point: <code>run</code>, <code>resume</code>,
+<code>approve</code>, <code>status</code>, <code>gui</code>,
+<code>runs list</code>, <code>runs prune</code>. Gate-mode resolution
+(<code>--gates</code> vs. legacy flags), issue intake (text,
+<code>glab</code>, <code>gh</code>), working-tree preflight with
+self-heal, per-run execution lock, run span, dry-run wiring,
+auto-prune.</td>
+</tr>
+<tr class="even">
+<td><code>adw/phases.py</code></td>
+<td style="text-align: right;">2674</td>
+<td>The seven phases over a <code>RunContext</code>: draft stage,
+synthesis, authoring loop, approval and breakpoint gates, lane gate loop
+incl. RED stage, integration + E2E, Codex review, final review + triage,
+push + CI. All limits, dispatch and escalation.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/agents.py</code></td>
+<td style="text-align: right;">595</td>
+<td>Agent registry (<code>REGISTRY</code>, <code>AgentSpec</code>),
+shared content rules, deny rules, <code>SdkAgentRunner</code>
+(stored-login enforcement, env sanitizing, sandbox, stream mirroring
+into the event log), <code>RunTotals</code>.</td>
+</tr>
+<tr class="even">
+<td><code>adw/codex.py</code></td>
+<td style="text-align: right;">473</td>
+<td><code>CodexRunner</code>: <code>review()</code> and
+<code>author()</code> via <code>codex exec --sandbox read-only</code>,
+isolated <code>CODEX_HOME</code>, marker-block protocol with per-call
+nonce, process-group kill, token back-sync.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/findings.py</code></td>
+<td style="text-align: right;">223</td>
+<td><code>Finding</code>, <code>ReviewResult</code>,
+<code>SCHEMA_INSTRUCTION</code> (one shared constant), strict parser
+<code>extract_review_result</code>.</td>
+</tr>
+<tr class="even">
+<td><code>adw/config.py</code></td>
+<td style="text-align: right;">154</td>
+<td><code>.adw/config.yaml</code> schema and loader
+(<code>AdwConfig</code>, <code>Gate</code>, <code>LaneConfig</code>,
+<code>E2eConfig</code>, <code>CiConfig</code>, <code>CodexConfig</code>,
+<code>TraceConfig</code>, <code>BreakpointName</code>).</td>
+</tr>
+<tr class="odd">
+<td><code>adw/state.py</code></td>
+<td style="text-align: right;">289</td>
+<td><code>RunState</code>, <code>LaneState</code>, <code>Phase</code>;
+atomic persistence, transactions, monotonic sequence,
+<code>find_latest</code>.</td>
+</tr>
+<tr class="even">
+<td><code>adw/gates.py</code></td>
+<td style="text-align: right;">187</td>
+<td>Gate runner: subprocess per gate with real timeout, process-group
+kill, bounded output tail (200 lines × max. 4 KiB), <code>gate</code>
+spans.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/worktrees.py</code></td>
+<td style="text-align: right;">219</td>
+<td>Lane worktrees (idempotent, ready marker, recovery from partial
+adds, serialized mutations), lane branches
+<code>adw/&lt;run_id&gt;/&lt;lane&gt;</code>, deterministic ports with
+bind check, self-ignoring <code>.adw/runs/.gitignore</code>.</td>
+</tr>
+<tr class="even">
+<td><code>adw/triage.py</code></td>
+<td style="text-align: right;">95</td>
+<td>Pure functions: final-review triage (<code>scope_gap</code> →
+follow-up, rest → lane fixes), limit checks, circuit breaker.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/ci.py</code></td>
+<td style="text-align: right;">207</td>
+<td>GitLab: SHA-bound pipeline polling via <code>glab api</code>,
+failed-job log retrieval.</td>
+</tr>
+<tr class="even">
+<td><code>adw/github.py</code></td>
+<td style="text-align: right;">172</td>
+<td>GitHub Actions: SHA-bound workflow-run polling via
+<code>gh api</code>, <code>--log-failed</code> excerpts. Same
+<code>CiResult</code> and error classes as <code>ci.py</code>.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/forge.py</code></td>
+<td style="text-align: right;">82</td>
+<td>GitLab vs. GitHub: <code>ci.provider</code> override, otherwise
+hostname of the <code>origin</code> URL; unknown host → fail fast.</td>
+</tr>
+<tr class="even">
+<td><code>adw/env.py</code></td>
+<td style="text-align: right;">39</td>
+<td><code>safe_env()</code>: environment whitelist for every
+subprocess.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/events.py</code></td>
+<td style="text-align: right;">371</td>
+<td><code>EventEmitter</code>/<code>NoOpEmitter</code>: append-only JSON
+Lines event log with spans, per-run seq, <code>flock</code>, file mode
+0600, <strong>fail-open</strong>.</td>
+</tr>
+<tr class="even">
+<td><code>adw/snapshots.py</code></td>
+<td style="text-align: right;">133</td>
+<td>Per-step worktree snapshots as git refs
+<code>refs/adw/&lt;run_id&gt;/&lt;seq&gt;</code> (temporary index,
+<code>commit-tree</code>, <code>update-ref</code>), fail-open.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/retention.py</code></td>
+<td style="text-align: right;">477</td>
+<td>Run enumeration, canonical dating, pruning (worktrees → refs →
+directory), <code>--gzip</code> compression of event logs.</td>
+</tr>
+<tr class="even">
+<td><code>adw/mock.py</code></td>
+<td style="text-align: right;">209</td>
+<td><code>MockAgentRunner</code>, <code>MockCodexRunner</code>:
+scriptable response queues, simulated file writes, call recording.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/gui/reader.py</code></td>
+<td style="text-align: right;">131</td>
+<td>Incremental, fault-tolerant event-log reader (also
+<code>.jsonl.gz</code>), reports
+<code>seq_gap</code>/<code>bad_line</code>.</td>
+</tr>
+<tr class="even">
+<td><code>adw/gui/model.py</code></td>
+<td style="text-align: right;">224</td>
+<td>Span tree from event records; orphans from worker threads re-homed
+by time containment.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/gui/registry.py</code></td>
+<td style="text-align: right;">203</td>
+<td><code>~/.adw/repos.json</code>: canonical repo path → stable slug;
+<code>adw run</code> registers automatically (fail-open).</td>
+</tr>
+<tr class="even">
+<td><code>adw/gui/app.py</code></td>
+<td style="text-align: right;">3073</td>
+<td>Read-only FastAPI app: run list, run detail
+(Trace/Timeline/Artifacts/Raw), JSON API, SSE live tail, diff endpoint
+with ref allowlist.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/gui/i18n.py</code></td>
+<td style="text-align: right;">353</td>
+<td>Dictionary-based EN/DE chrome translation; content is never
+translated.</td>
+</tr>
+<tr class="even">
+<td><code>adw/gui/templates/</code>, <code>static/</code></td>
+<td style="text-align: right;">—</td>
+<td>Jinja2 templates, <code>app.css</code> (token system, dark mode),
+<code>app.js</code> (no framework).</td>
+</tr>
+</tbody>
+</table>
+<h3 id="11-runcontext--the-dependency-injection-root">1.1
+<code>RunContext</code> — the dependency-injection root</h3>
+<p><code>RunContext</code> (dataclass in <code>phases.py</code>) carries
+everything a phase needs: <code>repo</code>, <code>config</code>,
+<code>state</code>, the two runner interfaces
+(<code>agents: AgentRunner</code>, <code>codex: CodexClient</code>), the
+seams <code>run_glab</code>, <code>run_gh</code>, <code>sleep</code>,
+the run&#39;s single <code>emitter</code>, the pinned flags
+<code>skip_approval</code>, <code>spec_approval</code>,
+<code>dry_run</code>, a <code>git_env</code>, and a
+<code>threading.RLock</code> (<code>state_lock</code>) that serializes
+state mutations across parallel lane threads. <code>ctx.save()</code>
+persists the state and mirrors a <code>state.saved</code> event
+<em>after</em> the write succeeded.</p>
+<p>Because every contact with the outside world goes through this
+object, the same production code runs against mocks in
+<code>--dry-run</code> and in the test suite.</p>
+<h3 id="12-the-two-judgment-interfaces">1.2 The two judgment
+interfaces</h3>
+<div class="sourceCode" id="cb2"><pre class="sourceCode python"><code class="sourceCode python"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> AgentRunner(Protocol):</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> run(<span class="va">self</span>, agent: AgentSpec, task: <span class="bu">str</span>, cwd: Path, resume: <span class="bu">str</span> <span class="op">|</span> <span class="va">None</span> <span class="op">=</span> <span class="va">None</span>,</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>            deny_read_paths: <span class="bu">list</span>[<span class="bu">str</span>] <span class="op">|</span> <span class="va">None</span> <span class="op">=</span> <span class="va">None</span>, emitter<span class="op">=</span><span class="va">None</span>, span<span class="op">=</span><span class="va">None</span>,</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>            on_session_id<span class="op">=</span><span class="va">None</span>) <span class="op">-&gt;</span> AgentResult: ...          <span class="co"># AgentResult(text, session_id)</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> CodexClient(Protocol):</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> review(<span class="va">self</span>, kind, content_refs, cwd, context<span class="op">=</span><span class="va">None</span>, emitter<span class="op">=</span><span class="va">None</span>, span<span class="op">=</span><span class="va">None</span>) <span class="op">-&gt;</span> ReviewResult: ...</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> author(<span class="va">self</span>, kind, task, cwd, marker_id<span class="op">=</span><span class="va">None</span>, emitter<span class="op">=</span><span class="va">None</span>, span<span class="op">=</span><span class="va">None</span>) <span class="op">-&gt;</span> <span class="bu">dict</span>[<span class="bu">str</span>, <span class="bu">str</span>]: ...</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a>                                                     <span class="co"># file name → content; kind: spec | plan</span></span></code></pre></div>
+<p><code>on_session_id</code> lets the runner report the SDK session id
+the moment it appears in the stream, so a crash mid-run still leaves a
+resumable session in the state.</p>
+<h2 id="2-state-machine">2. State machine</h2>
+<pre><code>             ┌──────────────┐  --gates spec|both   ┌────────────────────────┐
+  run ──────▶│     spec     │─────────────────────▶│ awaiting_spec_approval │──approve──┐
+             └──────┬───────┘                      └────────────────────────┘           │
+                    │ (no spec gate)                                                    ▼
+                    └────────────────────────────────────────────────────────────▶┌──────┐
+                                                                                  │ plan │
+             ┌──────────────────────────┐  --gates plan|both (default: plan)      └──┬───┘
+             │    awaiting_approval     │◀───────────────────────────────────────────┘
+             │ (plan gate or breakpoint)│──approve──▶ build ─▶ [before_integration] ─▶
+             └──────────────────────────┘
+        integration ─▶ codex_review ─▶ final_review ─▶ [before_push] ─▶ ci ─▶ done
+
+  any phase ──(limit / conflict / parse error / invariant)──▶ escalated   (final)
+  any phase ──(AgentRunError, crash, kill)──▶ unchanged phase, resumable with `adw resume`</code></pre>
+<ul>
+<li><code>Phase</code> is a closed <code>Literal</code> in
+<code>state.py</code>: <code>spec</code>,
+<code>awaiting_spec_approval</code>, <code>plan</code>,
+<code>awaiting_approval</code>, <code>build</code>,
+<code>integration</code>, <code>codex_review</code>,
+<code>final_review</code>, <code>ci</code>, <code>done</code>,
+<code>escalated</code>.</li>
+<li><strong>Breakpoints</strong> (<code>before_integration</code>,
+<code>before_push</code>) reuse <code>awaiting_approval</code>; which
+one waits is recorded in <code>pending_breakpoint</code> — not a new
+phase value. They pause only when enabled in the config and approval is
+not skipped (<code>--gates none</code> skips them too).</li>
+<li><code>cli._execute</code> always calls the complete phase chain;
+each phase function checks <code>ctx.state.phase</code> itself and
+returns immediately when it is not its turn. A resume therefore starts
+in the right phase without a dispatcher.</li>
+<li><strong>Exit codes:</strong> <code>0</code> done · <code>2</code>
+awaiting approval (gate or breakpoint) · <code>1</code> escalation,
+refusal, or interrupted agent call (the message distinguishes
+them).</li>
+</ul>
+<h2 id="3-phase-control-flow-summary">3. Phase control flow
+(summary)</h2>
+<p>The phases are explained step by step in <a href="ADW-WORKFLOW.md">ADW Workflow</a>. The contracts a contributor
+must preserve:</p>
+<table>
+<thead>
+<tr class="header">
+<th>Phase</th>
+<th>Function</th>
+<th>Contract</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>1–2 Spec, Plan</td>
+<td><code>run_spec_and_plan</code> → <code>_draft_stage</code>,
+<code>_reviewed_authoring_loop</code></td>
+<td>Claude author (Opus) and Codex author write drafts in parallel to
+<code>.adw/runs/&lt;id&gt;/drafts/</code>; idempotent over the files; a
+Codex failure degrades (marker <code>&lt;kind&gt;.codex.FAILED</code>),
+a missing Claude draft escalates. The synthesis agent (Fable) is round 1
+of the authoring loop and also writes the gate summary. Loop: Codex
+review → findings to the <em>same</em> session → P13 policy, cap 5.
+Protected files restored after every run; artifacts archived to the run
+dir, the checkout reset.</td>
+</tr>
+<tr class="even">
+<td>Gates</td>
+<td><code>cli._execute</code> / <code>cli.approve</code></td>
+<td>Spec gate (optional), plan gate (default), persisted in state;
+<code>awaited</code> / <code>granted</code> approval events.</td>
+</tr>
+<tr class="odd">
+<td>3 Build</td>
+<td><code>run_build_phase</code> → <code>_run_lane</code></td>
+<td>Per lane: worktree, seed artifacts + orchestrator commit, optional
+RED stage (<code>_confirm_red</code>), gate loop (limit → checkpoint →
+agent → invariants → restore → gates), evidence with tree hash,
+orchestrator commit. Lanes run in a thread pool under
+<code>--parallel</code>.</td>
+</tr>
+<tr class="even">
+<td>Breakpoint</td>
+<td><code>_breakpoint_gate(&quot;before_integration&quot;)</code></td>
+<td>Hold after all lanes are green.</td>
+</tr>
+<tr class="odd">
+<td>4 Integration</td>
+<td><code>run_integration_phase</code> →
+<code>_integration_loop</code></td>
+<td>Integration branch rebuilt fresh every round from the base branch;
+merge conflict → abort + escalation; E2E gate with both lanes&#39; ports;
+red → triage agent → lane fixes → re-integrate. Parallel mode only.</td>
+</tr>
+<tr class="even">
+<td>5 Codex review</td>
+<td><code>run_codex_review_phase</code></td>
+<td><code>_resume_pending_lanes</code> first (no ungated state reaches a
+review); limit check before dispatch; circuit breaker on the actionable
+finding set; P13 policy; dropped findings →
+<code>followups.md</code>.</td>
+</tr>
+<tr class="odd">
+<td>6 Final review</td>
+<td><code>run_final_review_phase</code></td>
+<td>Fable, read-only, mandatory <code>category</code>;
+<code>triage_final_review</code> routes <code>scope_gap</code> →
+follow-ups, others → fix cycles (max. 3 per lane); cycle increment
+persisted with the staged fix.</td>
+</tr>
+<tr class="even">
+<td>Breakpoint</td>
+<td><code>_breakpoint_gate(&quot;before_push&quot;)</code></td>
+<td>Hold before any push/CI work.</td>
+</tr>
+<tr class="odd">
+<td>7 CI</td>
+<td><code>run_ci_phase</code></td>
+<td><code>git push --force-with-lease -u origin &lt;branch&gt;</code>
+(integration branch in parallel mode, lane branch otherwise; skipped in
+dry run); SHA-bound polling; red with logs → log analyst → exactly one
+re-entry; red without logs → escalation.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="4-data-model">4. Data model</h2>
+<h3 id="41-target-repo-config--adwconfigyaml">4.1 Target-repo config —
+<code>.adw/config.yaml</code></h3>
+<p>Loaded by <code>AdwConfig.load(repo)</code>. Strict: duplicate YAML
+keys, unknown keys (<code>extra=&quot;forbid&quot;</code>), blank strings,
+non-positive timeouts and non-boolean <code>tdd</code> values are a
+<code>ConfigError</code> before anything runs.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Key</th>
+<th>Type / default</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>base_branch</code></td>
+<td>str, required</td>
+<td>Branch lanes fork from; diffs run against it.</td>
+</tr>
+<tr class="even">
+<td><code>lanes</code></td>
+<td>`{backend</td>
+<td>frontend: {gates: [...]}}`, ≥ 1 lane</td>
+</tr>
+<tr class="odd">
+<td><code>lanes.&lt;l&gt;.gates[]</code></td>
+<td><code>name</code>, <code>cmd</code>, <code>timeout</code> (s),
+<code>tdd</code> (bool, false)</td>
+<td>Run in order, fail fast. <code>tdd: true</code> marks a gate for the
+RED proof.</td>
+</tr>
+<tr class="even">
+<td><code>e2e</code></td>
+<td><code>cmd</code>, <code>timeout</code></td>
+<td>E2E command, used in parallel mode.</td>
+</tr>
+<tr class="odd">
+<td><code>ci</code></td>
+<td><code>poll_interval</code> 60, <code>timeout</code> 2700,
+<code>staging_job</code> null, <code>provider</code> null</td>
+<td>Polling; <code>provider</code> overrides origin-URL detection.</td>
+</tr>
+<tr class="even">
+<td><code>codex</code></td>
+<td><code>timeout</code> 900</td>
+<td>Limit of every <code>codex exec</code> subprocess (author and
+review).</td>
+</tr>
+<tr class="odd">
+<td><code>trace</code></td>
+<td><code>enabled</code> true, <code>keep_runs</code> 20</td>
+<td>Event log on/off; auto-prune after a successful run (0 =
+never).</td>
+</tr>
+<tr class="even">
+<td><code>breakpoints</code></td>
+<td>list of <code>before_integration</code>/<code>before_push</code>,
+empty</td>
+<td>Additional human holds. Pinned at run start.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42-runstate-and-lanestate">4.2 <code>RunState</code> and
+<code>LaneState</code></h3>
+<p>Persisted as <code>.adw/runs/&lt;run_id&gt;/state.json</code>.
+<code>run_id</code> is 8 hex characters.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Field</th>
+<th>Level</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>run_id</code>, <code>issue</code>, <code>phase</code>,
+<code>parallel</code></td>
+<td>run</td>
+<td>Identity and position.</td>
+</tr>
+<tr class="even">
+<td><code>dry_run</code>, <code>skip_approval</code>,
+<code>spec_approval</code></td>
+<td>run</td>
+<td>CLI decisions the resume invocation no longer knows.</td>
+</tr>
+<tr class="odd">
+<td><code>approval_granted</code>,
+<code>spec_approval_granted</code></td>
+<td>run</td>
+<td>Gate grants.</td>
+</tr>
+<tr class="even">
+<td><code>pending_breakpoint</code>,
+<code>pinned_breakpoints</code></td>
+<td>run</td>
+<td>Which breakpoint waits; the breakpoint set pinned at start
+(<code>None</code> = legacy state, follows config).</td>
+</tr>
+<tr class="odd">
+<td><code>pinned_base_branch</code></td>
+<td>run</td>
+<td>Effective base branch pinned at start; cannot change once lanes
+exist.</td>
+</tr>
+<tr class="even">
+<td><code>authoring_session</code>, <code>authoring_pending_task</code>,
+<code>authoring_last_findings</code>, <code>authoring_rounds</code>,
+<code>authoring_prior_context</code></td>
+<td>run</td>
+<td>Checkpoint of the spec/plan authoring loop.</td>
+</tr>
+<tr class="odd">
+<td><code>integration_rounds</code>,
+<code>integration_last_failures</code></td>
+<td>run</td>
+<td>E2E budget and circuit-breaker baseline.</td>
+</tr>
+<tr class="even">
+<td><code>review_rounds</code>, <code>review_last_failures</code>,
+<code>review_prior_context</code></td>
+<td>run</td>
+<td>Codex code-review budget, baseline, findings memory.</td>
+</tr>
+<tr class="odd">
+<td><code>final_review_last_failures</code></td>
+<td>run</td>
+<td>Circuit-breaker baseline of phase 6.</td>
+</tr>
+<tr class="even">
+<td><code>deferred_findings</code></td>
+<td>run</td>
+<td>Finding keys a fix run proved unactionable (pure P3); never trigger
+another fix or the breaker.</td>
+</tr>
+<tr class="odd">
+<td><code>ci_reentries</code></td>
+<td>run</td>
+<td>CI re-entry budget.</td>
+</tr>
+<tr class="even">
+<td><code>seq</code></td>
+<td>run</td>
+<td>Monotonic save sequence used by <code>find_latest</code>.</td>
+</tr>
+<tr class="odd">
+<td><code>lanes.&lt;l&gt;.worktree</code>, <code>branch</code>,
+<code>ports</code>, <code>base_sha</code></td>
+<td>lane</td>
+<td>Isolation; <code>base_sha</code> is the pinned fork point.</td>
+</tr>
+<tr class="even">
+<td><code>session_id</code></td>
+<td>lane</td>
+<td>SDK session for session resume.</td>
+</tr>
+<tr class="odd">
+<td><code>gate_iterations</code>, <code>fix_cycles</code></td>
+<td>lane</td>
+<td>Budgets.</td>
+</tr>
+<tr class="even">
+<td><code>completed</code>, <code>gates_passed</code>,
+<code>gates_tree</code></td>
+<td>lane</td>
+<td>Evidence; <code>gates_tree</code> binds green gates to a tree
+hash.</td>
+</tr>
+<tr class="odd">
+<td><code>red_confirmed</code>, <code>red_test_paths</code></td>
+<td>lane</td>
+<td>RED proof and the tests that delivered it.</td>
+</tr>
+<tr class="even">
+<td><code>pending_task</code>, <code>last_failures</code>,
+<code>pending_findings</code></td>
+<td>lane</td>
+<td>Open fix task, breaker baseline, findings of the staged fix.</td>
+</tr>
+<tr class="odd">
+<td><code>expected_head</code></td>
+<td>lane</td>
+<td>HEAD at the last checkpoint — detects foreign commits across a crash
+window.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Persistence mechanics.</strong> Snapshot to a temp file +
+<code>os.replace</code> (no half-written state ever exists); exclusive
+<code>flock</code> on <code>.adw/runs/.seq</code> around every write;
+<code>RunState.update()</code> gives lane threads a load → mutate →
+write transaction; a corrupt <code>.seq</code> is reconstructed from the
+persisted states.</p>
+<h3 id="43-findings--the-one-reviewer-contract">4.3 Findings — the one
+reviewer contract</h3>
+<p>Every reviewer (Codex, final reviewer, E2E triage, log analyst)
+answers in the same schema, embedded via the shared constant
+<code>SCHEMA_INSTRUCTION</code>:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;verdict&quot;</span><span class="fu">:</span> <span class="st">&quot;ok | needs_fixes&quot;</span><span class="fu">,</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>  <span class="dt">&quot;findings&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="fu">{</span></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;severity&quot;</span><span class="fu">:</span> <span class="st">&quot;P1 | P2 | P3&quot;</span><span class="fu">,</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;lane&quot;</span><span class="fu">:</span> <span class="st">&quot;frontend | backend | unknown&quot;</span><span class="fu">,</span></span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;file&quot;</span><span class="fu">:</span> <span class="st">&quot;path/relative/to/repo&quot;</span><span class="fu">,</span></span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;issue&quot;</span><span class="fu">:</span> <span class="st">&quot;description&quot;</span><span class="fu">,</span></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;remediation_plan&quot;</span><span class="fu">:</span> <span class="ot">[</span><span class="st">&quot;step 1&quot;</span><span class="ot">,</span> <span class="st">&quot;step 2&quot;</span><span class="ot">]</span><span class="fu">,</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>    <span class="dt">&quot;category&quot;</span><span class="fu">:</span> <span class="st">&quot;scope_gap | implementation | trivial&quot;</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">}</span><span class="ot">]</span></span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a><span class="fu">}</span></span></code></pre></div>
+<ul>
+<li><code>extra=&quot;forbid&quot;</code>; <code>ok</code> only with an empty
+list, <code>needs_fixes</code> with ≥ 1 finding.</li>
+<li><code>category</code> is mandatory for the final reviewer (missing →
+escalation, no silent default), optional elsewhere.</li>
+<li>The parser accepts <strong>only</strong> a whole-JSON answer or the
+content of the <strong>last</strong> <code>```json</code> fence.
+Duplicate keys, nesting &gt; 100 and integers &gt; 100 digits fail
+closed in linear time. Schema violations (<code>ValidationError</code>)
+escalate like parse errors.</li>
+<li>A finding&#39;s identity for the circuit breaker, deferral and
+dispositions is the key <code>&quot;&lt;file&gt;|&lt;issue&gt;&quot;</code>.</li>
+<li>A lane value that is <code>unknown</code> or not active in this run
+is dispatched to <strong>all</strong> active lanes — better checked
+twice than lost.</li>
+</ul>
+<h3 id="44-run-artifacts-and-directory-layout">4.4 Run artifacts and
+directory layout</h3>
+<pre><code>&lt;target-repo&gt;/
+  .adw/
+    config.yaml                     project config (protected, restored after agent runs)
+    issue.md  spec.md  plan.md  contract.yaml  spec-summary.md  plan-summary.md
+                                    authoring artifacts in the checkout during phases 1–2;
+                                    reset afterwards; the only files the preflight self-heals
+    runs/
+      .gitignore                    &quot;*&quot; — run data never shows in git status
+      .seq                          save-sequence lock/counter
+      .lock-&lt;run_id&gt;                per-run execution lock (resume/approve)
+      &lt;run_id&gt;/
+        state.json                  RunState
+        events.jsonl[.gz]           event log (mode 0600)
+        drafts/                     &lt;artifact&gt;.claude.&lt;ext&gt;, &lt;artifact&gt;.codex.&lt;ext&gt;, *.codex.FAILED
+        spec.md plan.md contract.yaml spec-summary.md plan-summary.md   archived artifacts
+        authoring-&lt;kind&gt;-known-findings.md   findings accepted at threshold/cap
+        followups.md                scope gaps, below-threshold and deferred findings
+        escalation.md               only when escalated
+        trees/&lt;lane&gt;/               lane worktrees (+ trees/integration in parallel mode)
+  refs/adw/&lt;run_id&gt;/&lt;seq&gt;           snapshot refs (in the git object store)
+  branches adw/&lt;run_id&gt;/&lt;lane&gt;      lane and integration branches</code></pre>
+<p><code>contract.yaml</code> is the interface contract between lanes
+(OpenAPI/types/events). Its top-level <code>x-adw-*</code> blocks (e.g.
+a declared scope) are shown by the GUI next to the actual change scope —
+without any automatic verdict.</p>
+<h3 id="45-event-log">4.5 Event log</h3>
+<p><code>.adw/runs/&lt;run_id&gt;/events.jsonl</code>, one JSON object
+per line:</p>
+<div class="sourceCode" id="cb6"><pre class="sourceCode json"><code class="sourceCode json"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="fu">{</span><span class="dt">&quot;seq&quot;</span><span class="fu">:</span> <span class="dv">17</span><span class="fu">,</span> <span class="dt">&quot;ts&quot;</span><span class="fu">:</span> <span class="st">&quot;2026-09-13T10:02:03.123Z&quot;</span><span class="fu">,</span> <span class="dt">&quot;type&quot;</span><span class="fu">:</span> <span class="st">&quot;gate&quot;</span><span class="fu">,</span> <span class="dt">&quot;kind&quot;</span><span class="fu">:</span> <span class="st">&quot;start|end|point&quot;</span><span class="fu">,</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;span&quot;</span><span class="fu">:</span> <span class="st">&quot;&lt;id&gt;&quot;</span><span class="fu">,</span> <span class="dt">&quot;parent&quot;</span><span class="fu">:</span> <span class="st">&quot;&lt;id|null&gt;&quot;</span><span class="fu">,</span> <span class="dt">&quot;phase&quot;</span><span class="fu">:</span> <span class="st">&quot;build&quot;</span><span class="fu">,</span> <span class="dt">&quot;lane&quot;</span><span class="fu">:</span> <span class="st">&quot;backend&quot;</span><span class="fu">,</span></span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a> <span class="dt">&quot;round&quot;</span><span class="fu">:</span> <span class="kw">null</span><span class="fu">,</span> <span class="dt">&quot;payload&quot;</span><span class="fu">:</span> <span class="fu">{</span><span class="er">...</span><span class="fu">}}</span></span></code></pre></div>
+<ul>
+<li><strong>Span types:</strong> <code>run</code>, <code>phase</code>,
+<code>lane</code>, <code>round</code>, <code>agent.run</code>,
+<code>gate</code>, <code>codex.review</code>, <code>codex.author</code>,
+<code>ci.wait</code>.</li>
+<li><strong>Point types:</strong> <code>agent.message</code>,
+<code>agent.tool.call</code>, <code>agent.tool.result</code>,
+<code>snapshot</code>, <code>red.check</code>, <code>commit</code>,
+<code>merge</code>, <code>ci.poll</code>, <code>ci.reentry</code>,
+<code>triage.decision</code>, <code>limit.hit</code>,
+<code>circuit_breaker</code>, <code>escalation</code>,
+<code>approval</code>, <code>artifact</code>, <code>followup</code>,
+<code>state.saved</code>, <code>log</code>.</li>
+<li>Payloads are specified in <a href="GUI-SPEC.md"><code>GUI-SPEC.md</code> §4.4</a>.
+<code>agent.run</code> start carries the full prompt; the log therefore
+contains <strong>unredacted</strong> agent input and output and is
+created with mode 0600.</li>
+<li><strong>Fail-open is the defining invariant:</strong> no emitter
+error (disk full, permissions, unserializable payload) ever reaches the
+caller. On the first internal error the emitter warns once and disables
+itself for that run. <code>state.json</code> — not the event log — is
+the resume authority, so <code>fsync</code> is deliberately not
+issued.</li>
+<li><code>seq</code> is assigned under <code>flock</code> across
+processes; a crash-truncated tail line is healed by starting the next
+record on a fresh line.</li>
+<li>Spans opened in worker threads (parallel lanes, the draft pool)
+carry <code>parent: null</code>; the GUI model re-homes them by time
+containment.</li>
+</ul>
+<h3 id="46-snapshots">4.6 Snapshots</h3>
+<p>At every step boundary of a lane (<code>before_agent</code>,
+<code>after_agent</code>, <code>after_gates</code>, <code>red</code>)
+<code>snapshots.capture()</code> builds a tree over a temporary index,
+creates a commit object with
+<code>commit-tree -p &lt;base_sha&gt;</code> and pins it as
+<code>refs/adw/&lt;run_id&gt;/&lt;seq&gt;</code>, then emits a
+<code>snapshot</code> event. The GUI computes step diffs lazily from
+these refs; no diff is ever written into the log. Fail-open like the
+emitter.</p>
+<h2 id="5-agent-registry">5. Agent registry</h2>
+<p>Each agent is a frozen
+<code>AgentSpec(name, model, tools, allowed_tools, system_append, permission_mode=&quot;default&quot;, sandbox_bash=False)</code>.
+<code>tools</code> <strong>restricts</strong> what the agent is offered
+at all; <code>allowed_tools</code> approves (path-scoped). Both are
+needed.</p>
+<table>
+<thead>
+<tr class="header">
+<th>Agent</th>
+<th>Model</th>
+<th>Tools</th>
+<th>Write rules</th>
+<th>Mission</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><code>spec_agent</code></td>
+<td>Opus 4.8</td>
+<td>Read/Grep/Glob/Write/Edit</td>
+<td><code>.adw/spec.md</code></td>
+<td>Spec draft (goal, scope, non-goals, acceptance criteria, DoD)</td>
+</tr>
+<tr class="even">
+<td><code>plan_agent</code></td>
+<td>Opus 4.8</td>
+<td>same</td>
+<td><code>.adw/plan.md</code>, <code>.adw/contract.yaml</code></td>
+<td>Plan draft with <code>## Workstream:</code> sections + contract</td>
+</tr>
+<tr class="odd">
+<td><code>spec_synthesis</code></td>
+<td>Fable 5</td>
+<td>same</td>
+<td><code>.adw/spec.md</code>, <code>.adw/spec-summary.md</code></td>
+<td>Best-of merge of both drafts + gate summary</td>
+</tr>
+<tr class="even">
+<td><code>plan_synthesis</code></td>
+<td>Fable 5</td>
+<td>same</td>
+<td><code>.adw/plan.md</code>, <code>.adw/contract.yaml</code>,
+<code>.adw/plan-summary.md</code></td>
+<td>Best-of merge + gate summary</td>
+</tr>
+<tr class="odd">
+<td><code>build_agent</code></td>
+<td>Opus 4.8</td>
+<td>+ Bash (sandboxed)</td>
+<td><code>./**</code> (worktree-relative)</td>
+<td>Implements its workstream against the contract, TDD; does not
+commit; may deviate from fix plans with justification</td>
+</tr>
+<tr class="even">
+<td><code>e2e_triage</code></td>
+<td>Sonnet 5</td>
+<td>Read/Grep/Glob</td>
+<td>—</td>
+<td>Assigns E2E failures to lanes; findings JSON only</td>
+</tr>
+<tr class="odd">
+<td><code>log_analyst</code></td>
+<td>Sonnet 5</td>
+<td>Read/Grep/Glob</td>
+<td>—</td>
+<td>CI logs → findings with lane; findings JSON only</td>
+</tr>
+<tr class="even">
+<td><code>final_reviewer</code></td>
+<td>Fable 5</td>
+<td>Read/Grep/Glob</td>
+<td>—</td>
+<td>Implementation vs. spec; findings with mandatory
+<code>category</code></td>
+</tr>
+</tbody>
+</table>
+<p>Model ids are constants in <code>agents.py</code>:
+<code>FABLE = &quot;claude-fable-5&quot;</code>,
+<code>OPUS = &quot;claude-opus-4-8&quot;</code>,
+<code>SONNET = &quot;claude-sonnet-5&quot;</code>.</p>
+<p><strong>Model economics.</strong> Opus does the deep work (drafts,
+build). Fable — broader and cheaper — merges drafts and reviews the
+result. Sonnet does assembly-line triage.</p>
+<p><strong>Shared prompt constants.</strong>
+<code>_SPEC_CONTENT_RULES</code>, <code>_PLAN_CONTENT_RULES</code>,
+<code>_BEST_OF_MERGE_RULES</code>, <code>_SUMMARY_FORMAT_RULES</code>
+exist once and are reused by every agent that needs them, including the
+Codex author prompts — if they drifted, the synthesis would undo the
+author&#39;s proportionality counterweight.</p>
+<p><strong>Rules every agent gets.</strong></p>
+<ul>
+<li>Read rules are scoped to the cwd (<code>Read(./**)</code>, …).</li>
+<li>Write rules are <strong>artifact-exact</strong>
+(<code>Write(.adw/spec.md)</code>, never <code>.adw/**</code>, which
+would make <code>state.json</code> writable).</li>
+<li><code>SECRET_STORE_DENY_RULES</code>: <code>~/.ssh</code>,
+<code>~/.aws</code>, <code>~/.claude</code>, <code>~/.gnupg</code>,
+<code>~/.config</code>, <code>~/.docker</code>, <code>~/.kube</code>,
+<code>~/.azure</code>, <code>~/.codex</code>, credential files and shell
+start-up/history files are unreadable; <code>.adw/runs/**</code> is
+unwritable. Deny beats allow. Each store is listed both as a glob and as
+a plain directory because the Linux sandbox ignores glob-only
+denies.</li>
+<li>Under <code>--parallel</code>, each lane gets the other lanes&#39;
+worktrees as <code>deny_read_paths</code>.</li>
+</ul>
+<p><strong><code>SdkAgentRunner</code>.</strong> Builds
+<code>ClaudeAgentOptions</code> with the <code>claude_code</code> system
+prompt preset + <code>system_append</code>, <code>cwd</code>,
+<code>resume</code>, <code>setting_sources=[]</code> and
+<code>strict_mcp_config=True</code> (no repo-controlled hooks, settings
+or MCP servers), and — for <code>sandbox_bash</code> agents — a sandbox
+with <code>allowUnsandboxedCommands: False</code> and no excluded
+commands (git stays sandboxed too). It mirrors assistant text and tool
+calls/results into the event log and accumulates cost/tokens in
+<code>RunTotals</code>.</p>
+<h2 id="6-gate-runner">6. Gate runner</h2>
+<p><code>run_gates(gates, cwd, extra_env, emitter) → GateReport</code>:</p>
+<ul>
+<li>Gates run in config order, <strong>fail fast</strong> at the first
+failure.</li>
+<li>Each gate is a subprocess with <code>safe_env(extra_env)</code>
+(lane ports are passed as extra env), the config timeout,
+<code>start_new_session=True</code> and a process-group kill on every
+exit path — no orphaned children.</li>
+<li>Output is collected by pump threads into a RAM-bounded tail: at most
+200 lines of at most 4 KiB each. That tail is what the build agent sees
+as the fix task (the RED stage shortens it further to 40 lines).</li>
+<li>Each started gate is one <code>gate</code> span
+(<code>passed</code>, <code>exit_code</code>, <code>timed_out</code>,
+<code>output</code>).</li>
+</ul>
+<h2 id="7-codex-integration">7. Codex integration</h2>
+<p><code>CodexRunner</code> runs
+<code>codex exec --sandbox read-only -c mcp_servers={} …</code> as a
+subprocess with:</p>
+<ul>
+<li>an <strong>isolated <code>CODEX_HOME</code></strong> — a temp dir
+containing only a copy of <code>auth.json</code> from the real home, so
+user-configured MCP servers and settings stay out. A token rotated
+during the call is synced back via compare-and-swap under
+<code>flock</code>.</li>
+<li>the configured timeout (<code>codex.timeout</code>, default 900 s)
+and a process-group kill.</li>
+<li>bounded stdout (5 MiB tail) / stderr (256 KiB tail) buffers.</li>
+</ul>
+<p><strong><code>review(kind, content_refs, cwd, context)</code></strong>
+— <code>kind</code> is <code>spec</code>, <code>plan</code> or
+<code>code</code>; the prompt embeds <code>SCHEMA_INSTRUCTION</code>;
+the answer is parsed with <code>extract_review_result</code>. From round
+2 on, <code>context</code> carries the severity floor and the previous
+rounds&#39; dispositions.</p>
+<p><strong><code>author(kind, task, cwd)</code></strong> — the read-only
+sandbox cannot write, so Codex must return file contents in marker
+blocks <code>===BEGIN &lt;name&gt; &lt;nonce&gt;===</code> …
+<code>===END &lt;name&gt; &lt;nonce&gt;===</code> with a fresh nonce per
+call. Parsing starts from the last begin marker of the first name; a
+mere prompt echo yields empty blocks and raises
+<code>CodexAuthorError</code>. The orchestrator writes the returned
+content to the drafts directory.</p>
+<h2 id="8-ci-and-forge-abstraction">8. CI and forge abstraction</h2>
+<ul>
+<li><code>forge.detect_forge(repo, override)</code> →
+<code>&quot;gitlab&quot;</code> | <code>&quot;github&quot;</code>: the
+<code>ci.provider</code> key wins; otherwise the hostname of the
+<code>origin</code> URL; unknown host → <code>ForgeError</code>, which
+escalates phase 7 in a real run (no poll against the wrong API). The dry
+run falls back to GitLab.</li>
+<li><strong>GitLab</strong> (<code>ci.py</code>):
+<code>glab api projects/:id/pipelines?ref=…&amp;sha=…</code> — the
+pipeline is queried server-side by the pushed SHA, so neither an older
+terminal pipeline nor a foreign newer one can be mistaken for the one
+being waited on. Terminal statuses: <code>success</code>,
+<code>failed</code>, <code>canceled</code>, <code>skipped</code>.
+Optional <code>staging_job</code> must be green too. Failed-job logs are
+fetched as a 200-line excerpt.</li>
+<li><strong>GitHub</strong> (<code>github.py</code>): all workflow runs
+of the push SHA (<code>actions/runs?head_sha=…</code>) until all are
+completed; green conclusions are <code>success</code>,
+<code>skipped</code>, <code>neutral</code>; red runs deliver
+<code>gh run view --log-failed</code> excerpts.</li>
+<li>Both return the same <code>CiResult</code> and raise the same
+<code>CiError</code>/<code>CiTimeoutError</code>. The time budget is
+tracked as remaining time; the sleep is capped to it.
+<code>run_glab</code> / <code>run_gh</code> / <code>sleep</code> are
+injectable seams with 120 s subprocess timeouts.</li>
+<li><strong>To add a forge:</strong> implement a
+<code>poll_ci(repo, branch, cfg, run_x, sha, emitter)</code> returning
+<code>CiResult</code>, extend the <code>Forge</code> literal and
+<code>detect_forge</code>, add the provider value to
+<code>CiConfig.provider</code>, wire it in <code>run_ci_phase</code>,
+add a dry-run fake in <code>cli.py</code>, and an issue fetcher if the
+forge has issues.</li>
+</ul>
+<h2 id="9-resume-approval-and-concurrency-semantics">9. Resume, approval
+and concurrency semantics</h2>
+<ul>
+<li><strong><code>adw resume &lt;run_id&gt;</code></strong> continues
+exactly at the persisted checkpoint. It refuses escalated runs. It
+reloads the state under the per-run execution lock, resolves the config
+through <code>_config_for_continuation</code> (pinned base branch and
+pinned breakpoints beat the current file; <code>--base-branch</code> can
+only change before lanes exist), runs the working-tree preflight, then
+<code>_execute</code>.</li>
+<li><strong><code>adw approve &lt;run_id&gt;</code></strong> is valid
+only in <code>awaiting_approval</code> /
+<code>awaiting_spec_approval</code>. Under the same lock it reloads and
+revalidates, so two concurrent approvals produce exactly one release and
+one downstream execution (a double push at <code>before_push</code> is
+impossible). A breakpoint release advances the phase and clears
+<code>pending_breakpoint</code> in one atomic save; the
+<code>granted</code> event is emitted log-checked by
+<code>_catch_up_granted_breakpoints</code>, which closes the crash
+window between save and log append without an extra state field.</li>
+<li><strong>Working-tree preflight</strong> (<code>run</code>,
+<code>resume</code>, <code>approve</code>): a clean checkout proceeds; a
+dirty set consisting <strong>only</strong> of the six ADW authoring
+artifacts is healed from <code>HEAD</code>
+(<code>git checkout HEAD -- &lt;path&gt;</code>, or index entry dropped
++ file removed if absent from HEAD) and re-checked; any foreign change
+refuses the command, discarding nothing. The preflight never
+escalates.</li>
+<li><strong>Interrupted agent calls</strong>
+(<code>AgentRunError</code>) leave the phase unchanged and print a
+resume hint (P9).</li>
+<li><strong>Session resume:</strong> fix tasks go to the same SDK
+session (<code>resume=session_id</code>); the session id is checkpointed
+as soon as it appears.</li>
+<li><strong>Revalidation:</strong> before every review phase
+<code>_resume_pending_lanes</code> sends every lane through
+<code>_run_lane</code> — unfinished fixes catch up, finished lanes are
+revalidated against <code>gates_tree</code>; a lane whose tree no longer
+matches goes back into the loop.</li>
+</ul>
+<h2 id="10-observability-retention-and-the-registry">10. Observability,
+retention and the registry</h2>
+<ul>
+<li><strong>Retention</strong> (<code>adw runs list</code>,
+<code>adw runs prune [--keep N] [--older-than DAYS] [--gzip]</code>, and
+auto-prune with <code>trace.keep_runs</code> after a run reaches
+<code>done</code>): only <code>done</code>/<code>escalated</code> runs
+are candidates; a run with uncommitted changes in any worktree is
+skipped and named; deletion order is worktrees (via git&#39;s worktree
+management, lane branches survive) → snapshot refs → directory;
+<code>--gzip</code> compresses the event log atomically and keeps the
+run whole. Auto-prune is fail-open: it never changes the finished run&#39;s
+phase or exit code.</li>
+<li><strong>Registry</strong> <code>~/.adw/repos.json</code> (version
+1): canonical repo path → stable URL-safe slug + <code>last_seen</code>.
+Written atomically; <code>adw run</code> registers automatically,
+fail-open.</li>
+</ul>
+<h2 id="11-gui-architecture-run-inspector">11. GUI architecture (Run
+Inspector)</h2>
+<p>The GUI is specified normatively in <a href="GUI-SPEC.md"><code>docs/GUI-SPEC.md</code></a>; this section only
+fixes the architectural boundaries a core contributor must not
+break.</p>
+<ul>
+<li><strong>Optional extra.</strong> FastAPI, uvicorn, Jinja2,
+markdown-it-py live in the <code>gui</code> extra. The core
+<code>adw run</code> path never imports them; <code>adw gui</code>
+imports lazily and prints an install hint if they are missing.</li>
+<li><strong>Strictly read-only.</strong> No write route, no external
+program, reads only below <code>.adw/runs/&lt;run_id&gt;/</code>, the
+registry and its packaged assets. Diffs only through an explicit ref
+allowlist.</li>
+<li><strong>Loopback by default.</strong> A non-loopback
+<code>--host</code> requires <code>--i-know</code>, because the event
+log contains unredacted agent output.</li>
+<li><strong>Layers.</strong> <code>reader</code> (incremental, tolerant)
+→ <code>model</code> (span tree) → <code>app</code> (derived views:
+trace tree, timeline, run context, recovery card, plan skeleton, change
+scope, metrics). Everything shown is <em>derived</em> from the event
+log, the state and the artifacts — the GUI adds no event, no persistence
+and no sidecar file.</li>
+<li><strong>Robustness guarantee.</strong> A malformed or non-mapping
+payload never yields a 5xx; every read goes through
+<code>_as_mapping()</code> / <code>_mapping_payload()</code>.</li>
+<li><strong>Routes.</strong> <code>/</code>,
+<code>/runs/{repo}/{run_id}</code>, and <code>/api/runs</code>,
+<code>/api/runs/{repo}/{run_id}</code>, <code>…/events</code>,
+<code>…/diff</code>, <code>…/artifacts/{name}</code>,
+<code>…/stream</code> (SSE). JSON API changes are additive only.</li>
+<li><strong>Contract for core contributors:</strong> if you add an event
+type or payload field, update <code>GUI-SPEC.md</code> §4.4 and make
+sure unknown types still render as generic nodes. Never make the emitter
+or snapshotter able to fail a run.</li>
+</ul>
+<h2 id="12-security-model">12. Security model</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Layer</th>
+<th>Mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Agent tools</td>
+<td><code>tools</code> restricts the offering;
+<code>allowed_tools</code> with artifact-exact path rules; reviewers
+strictly read-only; build Bash sandboxed, no unsandboxed escape
+hatch.</td>
+</tr>
+<tr class="even">
+<td>Secrets</td>
+<td><code>SECRET_STORE_DENY_RULES</code> for every agent;
+<code>safe_env()</code> whitelist (<code>PATH</code>, <code>HOME</code>,
+<code>USER</code>, <code>SHELL</code>, <code>TERM</code>,
+<code>TMPDIR</code>, <code>LANG</code>, <code>LANGUAGE</code>,
+<code>TZ</code>, <code>VIRTUAL_ENV</code>, <code>PYTHONPATH</code>,
+<code>NODE_ENV</code>, <code>CI</code>, <code>CLAUDE_CONFIG_DIR</code>,
+<code>LC_*</code>) for every subprocess. The SDK merges
+<code>os.environ</code>, so non-whitelisted variables are blanked with
+<code>&quot;&quot;</code> overrides. <code>CODEX_HOME</code> only reaches the
+Codex runner.</td>
+</tr>
+<tr class="odd">
+<td>Auth &amp; billing</td>
+<td>Stored Claude CLI login only (<code>_require_stored_login()</code>,
+fail fast before tokens flow); <code>ANTHROPIC_API_KEY</code> &amp; co.
+blanked. Codex with isolated <code>CODEX_HOME</code>.</td>
+</tr>
+<tr class="even">
+<td>Settings isolation</td>
+<td><code>setting_sources=[]</code>, <code>strict_mcp_config=True</code>
+for agents; <code>mcp_servers={}</code> for Codex — the target repo
+cannot inject hooks, settings or MCP servers.</td>
+</tr>
+<tr class="odd">
+<td>Git integrity</td>
+<td>Orchestrator git runs with <code>core.hooksPath=/dev/null</code> and
+the env whitelist. Only the orchestrator commits; agent commits, branch
+switches and HEAD movement across a crash window are detected and
+escalate.</td>
+</tr>
+<tr class="even">
+<td>Artifact integrity</td>
+<td><code>config.yaml</code>, and from phase 2 on the reviewed spec
+(from phase 3 spec/plan/contract), are restored byte-exactly after every
+agent run; symlink/directory replacements are detected and replaced,
+never followed.</td>
+</tr>
+<tr class="odd">
+<td>Lane isolation</td>
+<td>One worktree per lane, neighbours unreadable, deterministic ports
+(<code>backend</code> 9100–9149, <code>frontend</code> 9200–9249, offset
+from the run id) with bind check.</td>
+</tr>
+<tr class="even">
+<td>Data protection</td>
+<td>Event log mode 0600 and <code>.gz</code> inherits it; GUI
+loopback-only by default.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="13-invariants">13. Invariants</h2>
+<p>Contributors must keep all of these true. Most have dedicated
+tests.</p>
+<ol type="1">
+<li><strong>I1</strong> Only the orchestrator commits. Any commit by an
+agent escalates.</li>
+<li><strong>I2</strong> No state reaches a review, a merge or a push
+without green gates bound to its current tree hash.</li>
+<li><strong>I3</strong> Every loop checks its limit <em>before</em>
+doing the expensive work.</li>
+<li><strong>I4</strong> Every budget increment is persisted in the same
+save as the work it pays for.</li>
+<li><strong>I5</strong> Circuit-breaker baselines advance only
+<em>after</em> the fix dispatch.</li>
+<li><strong>I6</strong> Reviewer output is parsed strictly; any
+unparseable or schema-violating answer escalates — never defaults to
+<code>ok</code>.</li>
+<li><strong>I7</strong> Protected artifacts and the config are
+byte-identical after every agent run.</li>
+<li><strong>I8</strong> Run-start decisions (base branch, breakpoints,
+gate mode, dry run) are pinned in the state; a continuation never
+re-reads them from the CLI or a changed config.</li>
+<li><strong>I9</strong> Escalation is final; an interrupted agent call
+is not an escalation.</li>
+<li><strong>I10</strong> The event log, snapshots, registry and
+auto-prune are fail-open and never change a run&#39;s outcome.</li>
+<li><strong>I11</strong> The preflight never discards foreign changes
+and never escalates.</li>
+<li><strong>I12</strong> The GUI never writes and never returns 5xx for
+malformed log data.</li>
+<li><strong>I13</strong> The core install never imports the web
+stack.</li>
+<li><strong>I14</strong> No subprocess runs without a timeout or with
+the full environment.</li>
+</ol>
+<h2 id="14-limits">14. Limits</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Loop</th>
+<th>Limit (constant)</th>
+<th>Additionally</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Gate loop per lane</td>
+<td>10 per task (<code>MAX_GATE_ITERATIONS</code>,
+<code>triage.py</code>), reset on a new fix task</td>
+<td>Circuit breaker; the RED check consumes no iteration</td>
+</tr>
+<tr class="even">
+<td>Integration / E2E</td>
+<td>10 rounds run-wide (<code>MAX_E2E_ROUNDS</code>)</td>
+<td>Circuit breaker</td>
+</tr>
+<tr class="odd">
+<td>Authoring loop</td>
+<td>5 rounds per artifact (<code>AUTHORING_MAX_ROUNDS</code>)</td>
+<td>P13 policy; open P1 at cap → escalation</td>
+</tr>
+<tr class="even">
+<td>Codex code review</td>
+<td>5 rounds (<code>MAX_REVIEW_ROUNDS</code>)</td>
+<td>P13 policy; breaker on actionable set</td>
+</tr>
+<tr class="odd">
+<td>Final-review fix cycles</td>
+<td>3 per lane (<code>MAX_FIX_CYCLES</code>)</td>
+<td>Breaker</td>
+</tr>
+<tr class="even">
+<td>CI re-entry</td>
+<td>1 (<code>MAX_CI_REENTRIES</code>)</td>
+<td>Red without logs → immediate escalation</td>
+</tr>
+<tr class="odd">
+<td>RED stage</td>
+<td>exactly 1 test-only pass</td>
+<td>All marked gates green → escalation</td>
+</tr>
+<tr class="even">
+<td>Subprocesses</td>
+<td>gate timeout from config; Codex 900 s (configurable);
+<code>glab</code>/<code>gh</code> 120 s; git 30–120 s; CI budget 2700 s
+(configurable)</td>
+<td>Process-group kill</td>
+</tr>
+</tbody>
+</table>
+<h2 id="15-extension-points">15. Extension points</h2>
+<table>
+<thead>
+<tr class="header">
+<th>You want to …</th>
+<th>Touch</th>
+<th>Watch out for</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Add an agent</strong></td>
+<td><code>REGISTRY</code> in <code>agents.py</code>; a call site in
+<code>phases.py</code> via <code>_agent_run</code>; a mock response in
+<code>cli._dry_run_runners</code> and tests</td>
+<td>Smallest tool set; artifact-exact write rules; reviewers answer in
+<code>SCHEMA_INSTRUCTION</code>; reuse shared prompt constants instead
+of copying text.</td>
+</tr>
+<tr class="even">
+<td><strong>Add a phase</strong></td>
+<td><code>Phase</code> literal in <code>state.py</code>; a
+<code>run_&lt;x&gt;_phase(ctx)</code> guarded by
+<code>ctx.state.phase</code> and wrapped in <code>@_phase_span</code>;
+insert into <code>cli._execute</code>; transitions in neighbours</td>
+<td>Persist every counter before work; add a limit + breaker; update the
+GUI phase band (<code>GUI-SPEC.md</code>) and the dry run; extend
+<code>tests/test_e2e_dry_run.py</code>.</td>
+</tr>
+<tr class="odd">
+<td><strong>Add a breakpoint</strong></td>
+<td><code>BreakpointName</code> literal in <code>config.py</code>; a
+<code>_breakpoint_gate(ctx, &quot;&lt;name&gt;&quot;)</code> call;
+<code>_breakpoint_resume_phase</code> in <code>cli.py</code></td>
+<td>Reuse <code>awaiting_approval</code>; never add a phase value for a
+hold.</td>
+</tr>
+<tr class="even">
+<td><strong>Add a gate type / gate option</strong></td>
+<td><code>Gate</code> model in <code>config.py</code>;
+<code>gates.py</code></td>
+<td>Keep fail-fast, real timeouts and <code>safe_env</code>. Gates are
+project knowledge — no defaults.</td>
+</tr>
+<tr class="odd">
+<td><strong>Add a lane</strong></td>
+<td><code>LaneName</code> in <code>config.py</code>, the
+<code>lane</code> literal in <code>findings.py</code>, port base in
+<code>worktrees.py</code>, <code>--parallel</code> validation</td>
+<td>Lanes are a closed set today (<code>backend</code>,
+<code>frontend</code>) by design.</td>
+</tr>
+<tr class="even">
+<td><strong>Add a forge</strong></td>
+<td>see §8</td>
+<td>Fail fast on unknown hosts; SHA-bound polling.</td>
+</tr>
+<tr class="odd">
+<td><strong>Add an event type or field</strong></td>
+<td>emit site + <code>GUI-SPEC.md</code> §4.4</td>
+<td>Additive only; fail-open; GUI must tolerate unknown types.</td>
+</tr>
+<tr class="even">
+<td><strong>Add a config key</strong></td>
+<td><code>config.py</code> model with <code>extra=&quot;forbid&quot;</code>,
+<code>examples/config.yaml</code>, README config table, handbook</td>
+<td>Strict types (<code>strict=True</code> for booleans); documented
+defaults only.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="16-testing-strategy-and-development-workflow">16. Testing
+strategy and development workflow</h2>
+<ul>
+<li><strong>Suite:</strong> 1278 tests in <code>tests/</code> (as of
+0.26.1), developed test-first, mocks-only, real git. Run with
+<code>uv run pytest</code>. CI (<code>.github/workflows/ci.yml</code>)
+runs <code>uv sync --locked</code>, <code>uv run ruff check .</code>,
+<code>uv run pytest -q</code> with <code>NO_COLOR=1</code>.</li>
+<li><strong>Mock backbone:</strong> <code>MockAgentRunner</code>
+(response queues per agent, file outputs as a static map or
+<code>Callable(cwd)</code>, full call recording including
+<code>resume</code> and <code>deny_read_paths</code>),
+<code>MockCodexRunner</code> (review and author queues).</li>
+<li><strong>Crash windows:</strong> many phase tests manipulate the
+state between two checkpoints, &quot;kill&quot; the process and resume; others
+simulate agent misbehaviour (foreign commits, symlinked artifacts,
+rewritten config, deleted tests).</li>
+<li><strong>Acceptance:</strong> <code>tests/test_e2e_dry_run.py</code>
+maps the DoD of <code>docs/SPEC.md</code> §8 — full CLI dry runs (single
+and parallel), gate fail → same-session fix, approval gates, triage
+paths, crash resume, dual authoring, both RED paths.</li>
+<li><strong>GUI:</strong> FastAPI <code>TestClient</code> tests at
+endpoint level (including the payload robustness matrix) and a
+dependency-free JS harness (<code>tests/gui_js_harness.js</code>) that
+drives the served <code>app.js</code> in <code>node</code> — a missing
+<code>node</code> fails, not skips.</li>
+<li><strong>Lint:</strong> <code>uv run ruff check .</code> (rules E, F,
+W, I, UP, B; line length 100; py312). <code>ruff format</code> is
+<strong>not</strong> enforced — large parts of the tree are not
+formatted, and ADW&#39;s own lane config deliberately does not gate on it.
+Do not use flake8, isort or black in this repo.</li>
+<li><strong>Per-change gate:</strong> red test → implementation →
+<code>uv run ruff check .</code> + <code>uv run pytest</code> →
+<code>codex review --uncommitted</code>, with the P13 round policy
+applied by hand (note: <code>--uncommitted</code> does not accept a
+custom prompt argument, so the dispositions are tracked by the
+contributor). Fix P1 before committing.</li>
+<li><strong>ADW on itself:</strong> <code>.adw/config.yaml</code> in
+this repo defines a single <code>backend</code> lane with
+<code>ruff check</code> and <code>pytest</code> (<code>tdd: true</code>)
+gates and GitHub CI. Changes are often built by ADW itself — see the
+briefs in <a href="briefs/README.md"><code>docs/briefs/</code></a> for
+how to write an issue that converges.</li>
+</ul>
+<h2 id="17-technology">17. Technology</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Component</th>
+<th>Version</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>Python</td>
+<td>≥ 3.12</td>
+<td>Runtime; <code>uv</code> for environments and the lock file</td>
+</tr>
+<tr class="even">
+<td><code>pydantic</code></td>
+<td>≥ 2</td>
+<td>Config, state, findings</td>
+</tr>
+<tr class="odd">
+<td><code>typer</code></td>
+<td>≥ 0.12</td>
+<td>CLI</td>
+</tr>
+<tr class="even">
+<td><code>pyyaml</code></td>
+<td>≥ 6</td>
+<td>Config, with a strict loader</td>
+</tr>
+<tr class="odd">
+<td><code>claude-agent-sdk</code></td>
+<td>≥ 0.2.118</td>
+<td>Spawns the Claude Code CLI headless; lower bound for
+<code>tools</code>, <code>setting_sources</code>,
+<code>strict_mcp_config</code>, <code>sandbox</code></td>
+</tr>
+<tr class="even">
+<td><code>anyio</code></td>
+<td>≥ 4</td>
+<td>Sync wrapper around the async SDK stream</td>
+</tr>
+<tr class="odd">
+<td><code>fastapi</code>, <code>uvicorn</code>, <code>jinja2</code>,
+<code>markdown-it-py</code></td>
+<td>extra <code>gui</code></td>
+<td>Run Inspector</td>
+</tr>
+<tr class="even">
+<td><code>pytest</code>, <code>pytest-asyncio</code>, <code>ruff</code>,
+<code>httpx</code></td>
+<td>dev group</td>
+<td>Tests and lint</td>
+</tr>
+<tr class="odd">
+<td>External</td>
+<td><code>git</code>, <code>codex</code>, <code>glab</code> or
+<code>gh</code>, <code>node</code> (tests only)</td>
+<td>Worktrees/merges, reviews and drafts, CI, JS harness</td>
+</tr>
+</tbody>
+</table>
+<h2 id="18-release-process">18. Release process</h2>
+<p>Binding, from the project <code>CLAUDE.md</code>:</p>
+<ol type="1">
+<li>Every push to <code>main</code> is a release (SemVer 0.x): feature
+push → minor bump, pure docs/fix push → patch bump.</li>
+<li>Bump the version <strong>only</strong> in
+<code>pyproject.toml</code> (<code>project.version</code>).
+<code>adw/__init__.py</code> reads it from package metadata; never
+maintain a literal there
+(<code>tests/test_smoke.py::test_version_matches_pyproject</code>).</li>
+<li>Update <code>CHANGELOG.md</code> <strong>and</strong>
+<code>CHANGELOG.de.md</code> (Keep a Changelog): give the
+<code>Unreleased</code> section its number and date, add the compare
+link; new work collects in a fresh <code>Unreleased</code> section.</li>
+<li><code>git tag vX.Y.Z</code> on the release commit, then
+<code>git push &amp;&amp; git push --tags</code>.</li>
+<li>Docs are bilingual (P15): update both language versions in the same
+change.</li>
+</ol>
+<h2 id="19-known-limitations-and-open-follow-ups">19. Known limitations
+and open follow-ups</h2>
+<p><strong>Deliberately accepted (by design):</strong></p>
+<table>
+<thead>
+<tr class="header">
+<th>Limitation</th>
+<th>Assessment</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td>The target repo&#39;s git configuration (filters, signing) is
+trusted.</td>
+<td>User-controlled and outside agent write paths.</td>
+</tr>
+<tr class="even">
+<td>Codex&#39;s read-only sandbox prevents writes, not reads outside the
+cwd.</td>
+<td>Mitigated by a secret-free env and disabled MCP servers.</td>
+</tr>
+<tr class="odd">
+<td>During the draft stage the Codex author reads the same checkout as
+the parallel Claude author.</td>
+<td>Worktree isolation would hide the phase inputs; the Claude draft is
+validated and the checkout reset before synthesis.</td>
+</tr>
+<tr class="even">
+<td>The Codex token back-sync does not hold its lock for the whole
+review.</td>
+<td>Otherwise parallel reviews would serialize for minutes; worst case a
+one-off <code>codex login</code>.</td>
+</tr>
+<tr class="odd">
+<td>A crash between the CI re-entry checkpoint and the next poll can
+escalate without a second fix attempt.</td>
+<td>Bounded, on the safe side.</td>
+</tr>
+<tr class="even">
+<td>The circuit breaker compares exact texts — varying output
+(timestamps) bypasses it.</td>
+<td>The hard limits take over.</td>
+</tr>
+<tr class="odd">
+<td>The RED proof is bound to test <em>paths</em>, not content; a
+test-only pass that also writes production code is not detected; no
+green baseline run precedes the test pass.</td>
+<td>Content immutability would turn legitimate test repairs into
+escalations; watered-down tests are left to the Codex code review.</td>
+</tr>
+<tr class="even">
+<td>Lanes are a closed set (<code>backend</code>,
+<code>frontend</code>); <code>--parallel</code> needs both.</td>
+<td>Deliberate simplicity; see §15.</td>
+</tr>
+<tr class="odd">
+<td>Per-task attribution in the trace is not built.</td>
+<td><code>docs/SPEC.md</code> §6: the workstream is the unit of
+dispatch.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Open follow-ups</strong> (see <a href="FOLLOWUPS.md"><code>docs/FOLLOWUPS.md</code></a>):</p>
+<ul>
+<li><strong>#3</strong> GUI A4 response-time evidence on a run with ≥
+2000 tool nodes — waiting for a genuinely large run.</li>
+<li><strong>#6</strong> A lazy payload request in flight during a live
+region swap may land in a detached element — needs a reproduction
+first.</li>
+<li><strong>#9</strong> Retention&#39;s dirty check is not atomic across
+several worktrees of one run — only reachable with
+<code>--parallel</code>.</li>
+<li>GUI-SPEC §7.2 A: the run list&#39;s live update is not implemented
+yet.</li>
+<li>GUI 0.26.0 AC 5 (reference size measurement) is recorded as
+unverified.</li>
+</ul>
+<h2 id="20-glossary">20. Glossary</h2>
+<table>
+<thead>
+<tr class="header">
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>Lane</strong></td>
+<td>One workstream (<code>backend</code> / <code>frontend</code>) with
+its own worktree, branch, ports and SDK session.</td>
+</tr>
+<tr class="even">
+<td><strong>Gate</strong></td>
+<td>A project command from the config (lint, tests, …) run by the
+orchestrator with a timeout.</td>
+</tr>
+<tr class="odd">
+<td><strong>Gate evidence</strong></td>
+<td><code>gates_passed</code> + <code>gates_tree</code>: tree hash of
+the full worktree content (incl. untracked) via a temporary git
+index.</td>
+</tr>
+<tr class="even">
+<td><strong>RED stage</strong></td>
+<td>Initial build of a lane with a <code>tdd: true</code> gate:
+test-only pass, then the orchestrator proves the marked gates red.</td>
+</tr>
+<tr class="odd">
+<td><strong>Draft stage / synthesis</strong></td>
+<td>Phases 1–2: Claude and Codex draft in parallel; the synthesis agent
+merges them and writes the gate summary.</td>
+</tr>
+<tr class="even">
+<td><strong>Dispatch</strong></td>
+<td><code>_dispatch_lane_fixes</code>: group findings per lane, stage
+the lane state atomically (optionally with a budget increment via
+<code>mutate_staged</code>), then run the regular lane loop.</td>
+</tr>
+<tr class="odd">
+<td><strong>Circuit breaker</strong></td>
+<td><code>check_progress</code>: same failure/finding set as the
+previous round → escalate immediately.</td>
+</tr>
+<tr class="even">
+<td><strong>Deferred finding</strong></td>
+<td>A pure-P3 finding a fix run left untouched; recorded as follow-up
+and ignored by later dispatches and the breaker.</td>
+</tr>
+<tr class="odd">
+<td><strong>Breakpoint</strong></td>
+<td>Optional human hold <code>before_integration</code> /
+<code>before_push</code>, using the approval mechanics.</td>
+</tr>
+<tr class="even">
+<td><strong>Escalation</strong></td>
+<td>Controlled, final run end: <code>escalation.md</code> +
+<code>phase=escalated</code> + exit 1.</td>
+</tr>
+<tr class="odd">
+<td><strong>Span</strong></td>
+<td>A start/end pair in the event log with an id; spans nest via
+<code>parent</code> or, for worker threads, by time.</td>
+</tr>
+<tr class="even">
+<td><strong>Snapshot ref</strong></td>
+<td><code>refs/adw/&lt;run_id&gt;/&lt;seq&gt;</code>, a commit object
+pinning a worktree state for step diffs.</td>
+</tr>
+<tr class="odd">
+<td><strong>Fail-open</strong></td>
+<td>A component whose failure is logged and swallowed so it can never
+change a run&#39;s outcome.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p>ADW Specification · source version <strong>0.26.1</strong> · written
+2026-10-11 · verified against <code>adw/</code> on <code>main</code> ·
+Sources: code under <code>adw/</code>, <code>docs/SPEC.md</code>,
+<code>docs/PLAN.md</code>, <code>docs/GUI-SPEC.md</code>,
+<code>CHANGELOG.md</code>, <code>docs/FOLLOWUPS.md</code>,
+<code>docs/briefs/</code>, <code>CLAUDE.md</code>.</p>
+</body>
+</html>
