@@ -550,3 +550,66 @@ def test_bundled_claude_cli_supports_the_registry_models():
     out = subprocess.run([str(cli), "--version"], capture_output=True, text=True, timeout=60)
     version = tuple(int(p) for p in re.match(r"(\d+)\.(\d+)\.(\d+)", out.stdout).groups())
     assert version >= (2, 1, 280), out.stdout
+
+
+def test_resolve_model_alias_reports_the_model_behind_the_alias(monkeypatch):
+    from types import SimpleNamespace
+
+    from adw.agents import resolve_model_alias
+
+    captured = {}
+
+    def fake_query(*, prompt, options):
+        captured["options"] = options
+
+        async def stream():
+            yield SimpleNamespace(subtype="init", data={})
+            yield SimpleNamespace(model="claude-opus-9", content=[])
+            yield SimpleNamespace(result="OK", is_error=False)
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", fake_query)
+    monkeypatch.setattr("adw.agents._require_stored_login", lambda: None)
+    assert resolve_model_alias("opus") == "claude-opus-9"
+    options = captured["options"]
+    assert options.model == "opus"
+    assert options.tools == [] and options.setting_sources == [] and options.max_turns == 1
+
+
+def test_resolve_model_alias_rejects_a_failed_probe(monkeypatch):
+    """Rate limit / auth error: the SDK yields model="<synthetic>" and an error
+    result without raising — that must never pass for the newest model."""
+    from types import SimpleNamespace
+
+    from adw.agents import AgentRunError, resolve_model_alias
+
+    def fake_query(*, prompt, options):
+        async def stream():
+            yield SimpleNamespace(model="<synthetic>", content=[])
+            yield SimpleNamespace(result="rate limited", is_error=True)
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", fake_query)
+    monkeypatch.setattr("adw.agents._require_stored_login", lambda: None)
+    with pytest.raises(AgentRunError):
+        resolve_model_alias("opus")
+
+
+def test_resolve_model_alias_times_out_instead_of_hanging(monkeypatch):
+    import anyio
+
+    from adw.agents import AgentRunError, resolve_model_alias
+
+    def fake_query(*, prompt, options):
+        async def stream():
+            await anyio.sleep(30)
+            yield None
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", fake_query)
+    monkeypatch.setattr("adw.agents._require_stored_login", lambda: None)
+    with pytest.raises(AgentRunError, match="Zeitlimit"):
+        resolve_model_alias("opus", timeout=0.2)

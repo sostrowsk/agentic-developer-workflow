@@ -136,6 +136,12 @@ State existiert:
    bekannt ist — `ci.provider` oder ein Origin-Host mit `gitlab`/`github`.
    Sonst wird das Kommando abgelehnt, bevor ein Agent läuft (auch vor `resume`
    und `approve`); ein Dry-Run fällt auf GitLab zurück.
+   Danach fragt der **Modell-Check** (nur echte Läufe), ob es neuere Modelle gibt
+   als die in ADW gepinnten: Die CLI-Aliase `opus`/`fable`/`sonnet` zeigen auf die
+   neuesten Claude-Modelle, der Katalog der codex-CLI nennt das neueste GPT-Modell
+   der gepinnten Stufe. Ist eines neuer, wird das Kommando abgelehnt — erst ADW
+   aktualisieren. Das Ergebnis wird 24 h gecacht; ein Check, der nicht laufen kann
+   (offline, Plan-Limit), warnt nur.
 4. **Arbeitsbaum-Vorflug:** Der Haupt-Checkout muss sauber sein. Sind *ausschließlich*
    ADWs sechs eigene Authoring-Artefakte dirty (`.adw/issue.md`, `spec.md`,
    `plan.md`, `contract.yaml`, `spec-summary.md`, `plan-summary.md`), werden sie

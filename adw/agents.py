@@ -444,6 +444,48 @@ def _map_usage(raw: dict | None) -> dict:
     }
 
 
+def resolve_model_alias(alias: str, timeout: float = 120) -> str:
+    """Which model a CLI alias (``opus``, ``fable``, ``sonnet``) currently resolves
+    to — the aliases always point at the newest model of their line. One minimal
+    call without tools, settings or MCP, under the same login and env as the agents."""
+    _require_stored_login()
+    options = ClaudeAgentOptions(
+        model=alias,
+        tools=[],
+        allowed_tools=[],
+        setting_sources=[],
+        strict_mcp_config=True,
+        mcp_servers={},
+        max_turns=1,
+        env=_env_overrides(),
+    )
+    resolved: list[str] = []
+    failures: list[str] = []
+
+    async def probe() -> None:
+        with anyio.fail_after(timeout):
+            await collect()
+
+    async def collect() -> None:
+        async for message in query(prompt="OK", options=options):
+            if getattr(message, "is_error", False) is True:
+                failures.append(str(getattr(message, "result", "")))
+            model = getattr(message, "model", None)
+            # Rate limit / auth errors come back as model="<synthetic>" WITHOUT an
+            # exception — only a real claude-* id may count as the newest model.
+            if isinstance(model, str) and model.startswith("claude-"):
+                resolved.append(model)
+
+    try:
+        anyio.run(probe)
+    except TimeoutError as exc:
+        raise AgentRunError(f"Alias {alias!r}: Zeitlimit {timeout}s überschritten") from exc
+    if failures or not resolved:
+        reason = failures[0] if failures else "kein Modell in der Antwort"
+        raise AgentRunError(f"Alias {alias!r}: {reason}")
+    return resolved[0]
+
+
 class SdkAgentRunner:
     """Executes an agent node via the Claude Agent SDK (headless)."""
 

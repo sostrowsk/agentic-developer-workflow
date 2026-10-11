@@ -62,3 +62,18 @@ def target_repo(tmp_path: Path) -> Path:
     git(repo, "add", ".")
     git(repo, "commit", "-m", "init")
     return repo
+
+
+@pytest.fixture(autouse=True)
+def _no_live_model_probe(tmp_path_factory, monkeypatch):
+    """The model freshness check must never call the real SDK or read the real
+    ~/.codex catalog in tests: aliases resolve to the pinned models, no Codex
+    catalog, and the cache lives in a throwaway file."""
+    from adw import agents, codex, models
+
+    pinned = {"opus": agents.OPUS, "fable": agents.FABLE, "sonnet": agents.SONNET}
+    monkeypatch.setattr(models, "resolve_claude_alias", lambda alias: pinned[alias])
+    monkeypatch.setattr(models, "load_codex_catalog", lambda: None)
+    cache = tmp_path_factory.mktemp("adw-model-check") / "model-check.json"
+    monkeypatch.setenv("ADW_MODEL_CHECK_PATH", str(cache))
+    assert codex.CODEX_MODEL

@@ -377,7 +377,7 @@ adw runs prune [--repo PATH] [--keep N] [--older-than DAYS] [--gzip]
 | `--base-branch NAME` | Override `base_branch` for this run (pinned). |
 
 Order of checks: exactly one issue source → gate mode → config → forge
-preflight (real runs only) → working-tree preflight → issue fetch → run creation. A failure at any step creates no run.
+preflight → model check (both real runs only) → working-tree preflight → issue fetch → run creation. A failure at any step creates no run.
 
 ### `adw resume RUN_ID`
 
@@ -672,6 +672,13 @@ ADW stops **before** it burns budget or causes damage. Every escalation writes
 
 **`Fehler: …/.adw/config.yaml: config.yaml fehlt — das Ziel-Repo ist nicht ADW-fähig`**
 No config in the target repo. Copy `examples/config.yaml` (§3).
+
+**`Es gibt neuere Modelle als die in ADW eingestellten — Lauf NICHT gestartet`**
+The model check found a newer Claude or GPT model than ADW pins. The message names
+role, pinned → newest model and the constant to change (`adw/agents.py`,
+`adw/codex.py`). Update ADW first (constants, tests, docs, release), then start the
+run again. The check runs at most once per 24 h (`~/.adw/model-check.json`); delete
+that file to force a fresh check. A check that cannot run only prints a warning.
 
 **`Fehler: genau EINE Issue-Quelle angeben …`**
 Pass exactly one of `--issue`, `--gitlab-issue`, `--github-issue`.

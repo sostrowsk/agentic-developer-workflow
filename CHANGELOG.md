@@ -12,6 +12,15 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.29.0] — 2026-10-11
+
+### Added
+- **Model check in the preflight.** Before a real `adw run`, `adw resume` or `adw approve`, ADW now checks whether newer models exist than the ones it pins. If so, it stops with exit 1, before any agent runs and without creating a run. The message names each outdated model with its newer replacement and the constant to change in `adw/agents.py` or `adw/codex.py`. Update ADW first, then start the run again.
+  - **How it checks:** for Claude, the CLI aliases `opus`, `fable` and `sonnet` resolve to the newest model of each line, so one minimal SDK call per alias tells which model that is. For Codex, the codex CLI's model catalog (`models_cache.json`) gives the newest listed model of the pinned tier, or an announced upgrade.
+  - **How often:** the result is cached for 24 hours in `~/.adw/model-check.json`. A fresh check takes about 10 seconds; a cached one is instant.
+  - **When the check itself fails** (offline, plan limit, a probe hanging past 120 s, a codex catalog that is missing, malformed or older than 7 days, an unwritable cache), ADW prints a warning and carries on. Only a proven newer model blocks a run.
+  - **Dry runs** skip the check, so they stay at 0 tokens.
+
 ## [0.28.1] — 2026-10-11
 
 ### Fixed
@@ -957,6 +966,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.29.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.1...v0.29.0
 [0.28.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.2...v0.27.0

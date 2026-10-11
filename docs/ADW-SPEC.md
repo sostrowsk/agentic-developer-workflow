@@ -290,6 +290,7 @@ introduced this?" answerable.
 | `adw/events.py` | 371 | `EventEmitter`/`NoOpEmitter`: append-only JSON Lines event log with spans, per-run seq, `flock`, file mode 0600, **fail-open**. |
 | `adw/snapshots.py` | 133 | Per-step worktree snapshots as git refs `refs/adw/<run_id>/<seq>` (temporary index, `commit-tree`, `update-ref`), fail-open. |
 | `adw/retention.py` | 477 | Run enumeration, canonical dating, pruning (worktrees → refs → directory), `--gzip` compression of event logs. |
+| `adw/models.py` | 165 | Model freshness check: newest model per role (Claude aliases, codex catalog), 24 h cache, refusal message. |
 | `adw/mock.py` | 209 | `MockAgentRunner`, `MockCodexRunner`: scriptable response queues, simulated file writes, call recording. |
 | `adw/gui/reader.py` | 131 | Incremental, fault-tolerant event-log reader (also `.jsonl.gz`), reports `seq_gap`/`bad_line`. |
 | `adw/gui/model.py` | 224 | Span tree from event records; orphans from worker threads re-homed by time containment. |
@@ -650,6 +651,15 @@ directory.
 - **Forge preflight** (`run`, `resume`, `approve`; real runs only): `detect_forge`
   must succeed, otherwise the command is refused with the `ci.provider` hint —
   no run created, no state change, never an escalation.
+- **Model check** (`run`, `resume`, `approve`; real runs only; `adw/models.py`):
+  `agents.resolve_model_alias` resolves `opus`/`fable`/`sonnet` with one minimal
+  SDK call each (no tools, no settings); the codex CLI's `models_cache.json` gives
+  the newest listed model of the pinned tier or an announced upgrade. Any pinned
+  model that differs refuses the command with the constant to change. Cached for
+  24 h in `~/.adw/model-check.json` (`ADW_MODEL_CHECK_PATH` overrides) together with
+  the pins it was taken against — new pins invalidate it; only a complete result is
+  cached; a failed probe (error result, `<synthetic>` model, 120 s timeout), a missing,
+  malformed or > 7 days old codex catalog or an unwritable cache warns and never blocks.
 - **Interrupted agent calls** (`AgentRunError`) leave the phase unchanged and print a
   resume hint (P9).
 - **Session resume:** fix tasks go to the same SDK session (`resume=session_id`); the

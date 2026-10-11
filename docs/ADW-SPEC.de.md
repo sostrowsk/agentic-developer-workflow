@@ -294,6 +294,7 @@ nur in einer gibt, veraltet still in der anderen. Releases pro Push halten die F
 | `adw/events.py` | 371 | `EventEmitter`/`NoOpEmitter`: append-only JSON-Lines-Event-Log mit Spans, Seq pro Run, `flock`, Dateimodus 0600, **fail-open**. |
 | `adw/snapshots.py` | 133 | Worktree-Snapshots pro Schritt als git-Refs `refs/adw/<run_id>/<seq>` (temporärer Index, `commit-tree`, `update-ref`), fail-open. |
 | `adw/retention.py` | 477 | Lauf-Aufzählung, kanonische Datierung, Pruning (Worktrees → Refs → Verzeichnis), `--gzip`-Kompression der Event-Logs. |
+| `adw/models.py` | 165 | Modell-Aktualitätsprüfung: neuestes Modell je Rolle (Claude-Aliase, codex-Katalog), 24-h-Cache, Ablehnungsmeldung. |
 | `adw/mock.py` | 209 | `MockAgentRunner`, `MockCodexRunner`: skriptbare Antwort-Queues, simulierte Dateischreibvorgänge, Aufrufaufzeichnung. |
 | `adw/gui/reader.py` | 131 | Inkrementeller, fehlertoleranter Event-Log-Reader (auch `.jsonl.gz`), meldet `seq_gap`/`bad_line`. |
 | `adw/gui/model.py` | 224 | Span-Baum aus Event-Records; Waisen aus Worker-Threads werden über zeitliches Enthaltensein eingehängt. |
@@ -669,6 +670,17 @@ Entwurfsverzeichnis.
 - **Forge-Vorflug** (`run`, `resume`, `approve`; nur echte Läufe): `detect_forge`
   muss gelingen, sonst wird das Kommando mit dem `ci.provider`-Hinweis abgelehnt —
   kein Lauf angelegt, keine State-Änderung, nie eine Eskalation.
+- **Modell-Check** (`run`, `resume`, `approve`; nur echte Läufe; `adw/models.py`):
+  `agents.resolve_model_alias` löst `opus`/`fable`/`sonnet` mit je einem minimalen
+  SDK-Aufruf auf (ohne Tools, ohne Settings); `models_cache.json` der codex-CLI
+  liefert das neueste gelistete Modell der gepinnten Stufe oder ein angekündigtes
+  Upgrade. Weicht ein gepinntes Modell ab, wird das Kommando mit der zu ändernden
+  Konstante abgelehnt. 24 h gecacht in `~/.adw/model-check.json`
+  (`ADW_MODEL_CHECK_PATH` überschreibt) samt den Pins, gegen die er lief — neue Pins
+  machen ihn ungültig; nur ein vollständiges Ergebnis wird gecacht; ein
+  fehlgeschlagener Probe (Fehler-Result, `<synthetic>`-Modell, Zeitlimit 120 s), ein
+  fehlender, kaputter oder über 7 Tage alter codex-Katalog oder ein nicht
+  schreibbarer Cache warnt und blockiert nie.
 - **Abgebrochene Agent-Aufrufe** (`AgentRunError`) lassen die Phase unverändert und
   geben einen Resume-Hinweis aus (P9).
 - **Session-Resume:** Fix-Tasks gehen an dieselbe SDK-Session

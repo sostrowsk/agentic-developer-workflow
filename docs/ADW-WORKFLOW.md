@@ -134,6 +134,11 @@ state exists:
    forge is known — `ci.provider` or an origin host containing `gitlab`/`github`.
    Otherwise the command is refused before any agent runs (also before `resume`
    and `approve`); a dry run falls back to GitLab.
+   Then the **model check** (real runs only) asks whether newer models exist than
+   the ones ADW pins: the CLI aliases `opus`/`fable`/`sonnet` resolve to the newest
+   Claude models, the codex CLI's catalog names the newest GPT model of the pinned
+   tier. If one is newer, the command is refused — update ADW first. The result is
+   cached for 24 h; a check that cannot run (offline, plan limit) only warns.
 4. **Working-tree preflight:** the main checkout must be clean. If the *only*
    dirty files are ADW's own six authoring artifacts (`.adw/issue.md`,
    `spec.md`, `plan.md`, `contract.yaml`, `spec-summary.md`,

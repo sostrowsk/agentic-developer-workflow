@@ -116,6 +116,7 @@ adw/
   github.py     GitHub-Actions-Polling (gh) — gleiches Interface wie ci.py
   forge.py      GitLab-oder-GitHub-Erkennung (origin-URL, ci.provider-Override)
   mock.py       skriptbare Mock-Runner für --dry-run und Tests
+  models.py     Modell-Aktualitätsprüfung: verweigert Läufe, solange neuere Modelle existieren
   env.py        Env-Whitelist für Agents, Gates und Subprozesse
   events.py     Append-only-Event-Log (events.jsonl) je Run
   snapshots.py  Artefakt-Snapshots je Phase für den Run-Inspector

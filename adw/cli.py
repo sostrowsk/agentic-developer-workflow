@@ -17,7 +17,7 @@ from typing import Annotated, get_args
 import typer
 from pydantic import ValidationError
 
-from adw import ci, github, retention
+from adw import ci, github, models, retention
 from adw.agents import AgentRunError, RunTotals, SdkAgentRunner
 from adw.codex import CodexRunner
 from adw.config import AdwConfig, BreakpointName, ConfigError
@@ -271,6 +271,18 @@ def _preflight_forge(repo: Path, config: AdwConfig, dry_run: bool) -> None:
         raise _fail(str(exc)) from exc
 
 
+def _preflight_models(dry_run: bool) -> None:
+    """Refuse a real run while ADW pins older models than the newest (checked at
+    most once per 24 h). A probe that cannot run only warns. Dry run: 0 tokens."""
+    if dry_run:
+        return
+    outdated, warnings = models.check()
+    for warning in warnings:
+        typer.echo(f"Warnung: {warning}", err=True)
+    if outdated:
+        raise _fail(models.outdated_message(outdated))
+
+
 def _adw_version() -> str:
     try:
         return version("adw")
@@ -401,6 +413,7 @@ def run(
     # Repo, das ohnehin keine gültige .adw/config.yaml hat.
     config = _load_config(repo, base_branch)
     _preflight_forge(repo, config, dry_run)
+    _preflight_models(dry_run)
     # Arbeitsbaum-Vorflug VOR jeder State-Mutation: eine Verweigerung legt keinen
     # Run an und macht keinen Netzaufruf (B1/B4). Nie Eskalation.
     _preflight_worktree(repo)
@@ -478,6 +491,7 @@ def resume(
             )
         config, rebased = _config_for_continuation(repo, state, base_branch)
         _preflight_forge(repo, config, state.dry_run)
+        _preflight_models(state.dry_run)
         # Arbeitsbaum-Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save):
         # eine Verweigerung lässt den Run-State unverändert und resumierbar (B1).
         _preflight_worktree(repo)
@@ -522,6 +536,7 @@ def approve(
         # below (inside the run span) persists it together with the approval grant.
         config, _rebased = _config_for_continuation(repo, state, base_branch)
         _preflight_forge(repo, config, state.dry_run)
+        _preflight_models(state.dry_run)
         # Arbeitsbaum-Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung
         # lässt die Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
         _preflight_worktree(repo)

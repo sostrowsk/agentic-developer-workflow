@@ -1218,45 +1218,51 @@ Dateimodus 0600, <strong>fail-open</strong>.</td>
 Verzeichnis), <code>--gzip</code>-Kompression der Event-Logs.</td>
 </tr>
 <tr class="even">
+<td><code>adw/models.py</code></td>
+<td style="text-align: right;">165</td>
+<td>Modell-Aktualitätsprüfung: neuestes Modell je Rolle (Claude-Aliase,
+codex-Katalog), 24-h-Cache, Ablehnungsmeldung.</td>
+</tr>
+<tr class="odd">
 <td><code>adw/mock.py</code></td>
 <td style="text-align: right;">209</td>
 <td><code>MockAgentRunner</code>, <code>MockCodexRunner</code>:
 skriptbare Antwort-Queues, simulierte Dateischreibvorgänge,
 Aufrufaufzeichnung.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/reader.py</code></td>
 <td style="text-align: right;">131</td>
 <td>Inkrementeller, fehlertoleranter Event-Log-Reader (auch
 <code>.jsonl.gz</code>), meldet
 <code>seq_gap</code>/<code>bad_line</code>.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/model.py</code></td>
 <td style="text-align: right;">224</td>
 <td>Span-Baum aus Event-Records; Waisen aus Worker-Threads werden über
 zeitliches Enthaltensein eingehängt.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/registry.py</code></td>
 <td style="text-align: right;">203</td>
 <td><code>~/.adw/repos.json</code>: kanonischer Repo-Pfad → stabiler
 Slug; <code>adw run</code> registriert automatisch (fail-open).</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/app.py</code></td>
 <td style="text-align: right;">3073</td>
 <td>Read-only-FastAPI-App: Lauf-Liste, Lauf-Detail
 (Trace/Timeline/Artefakte/Raw), JSON-API, SSE-Live-Tail, Diff-Endpoint
 mit Ref-Allowlist.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/i18n.py</code></td>
 <td style="text-align: right;">353</td>
 <td>Wörterbuchbasierte EN/DE-Übersetzung der Oberfläche; Inhalte werden
 nie übersetzt.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/templates/</code>, <code>static/</code></td>
 <td style="text-align: right;">—</td>
 <td>Jinja2-Templates, <code>app.css</code> (Token-System, Dark Mode),
@@ -2095,6 +2101,22 @@ eskaliert nie.</li>
 <code>detect_forge</code> muss gelingen, sonst wird das Kommando mit dem
 <code>ci.provider</code>-Hinweis abgelehnt — kein Lauf angelegt, keine
 State-Änderung, nie eine Eskalation.</li>
+<li><strong>Modell-Check</strong> (<code>run</code>,
+<code>resume</code>, <code>approve</code>; nur echte Läufe;
+<code>adw/models.py</code>): <code>agents.resolve_model_alias</code>
+löst <code>opus</code>/<code>fable</code>/<code>sonnet</code> mit je
+einem minimalen SDK-Aufruf auf (ohne Tools, ohne Settings);
+<code>models_cache.json</code> der codex-CLI liefert das neueste
+gelistete Modell der gepinnten Stufe oder ein angekündigtes Upgrade.
+Weicht ein gepinntes Modell ab, wird das Kommando mit der zu ändernden
+Konstante abgelehnt. 24 h gecacht in
+<code>~/.adw/model-check.json</code> (<code>ADW_MODEL_CHECK_PATH</code>
+überschreibt) samt den Pins, gegen die er lief — neue Pins machen ihn
+ungültig; nur ein vollständiges Ergebnis wird gecacht; ein
+fehlgeschlagener Probe (Fehler-Result,
+<code>&lt;synthetic&gt;</code>-Modell, Zeitlimit 120 s), ein fehlender,
+kaputter oder über 7 Tage alter codex-Katalog oder ein nicht
+schreibbarer Cache warnt und blockiert nie.</li>
 <li><strong>Abgebrochene Agent-Aufrufe</strong>
 (<code>AgentRunError</code>) lassen die Phase unverändert und geben
 einen Resume-Hinweis aus (P9).</li>

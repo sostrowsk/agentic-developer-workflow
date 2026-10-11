@@ -384,7 +384,7 @@ adw runs prune [--repo PFAD] [--keep N] [--older-than TAGE] [--gzip]
 | `--base-branch NAME` | `base_branch` für diesen Lauf überschreiben (gepinnt). |
 
 Reihenfolge der Prüfungen: genau eine Issue-Quelle → Gate-Modus → Config →
-Forge-Vorflug (nur echte Läufe) → Arbeitsbaum-Vorflug → Issue holen → Lauf anlegen. Ein Fehler in einem dieser
+Forge-Vorflug → Modell-Check (beide nur echte Läufe) → Arbeitsbaum-Vorflug → Issue holen → Lauf anlegen. Ein Fehler in einem dieser
 Schritte legt keinen Lauf an.
 
 ### `adw resume RUN_ID`
@@ -692,6 +692,14 @@ schreibt `escalation.md` und endet mit Exit 1.
 
 **`Fehler: …/.adw/config.yaml: config.yaml fehlt — das Ziel-Repo ist nicht ADW-fähig`**
 Keine Config im Ziel-Repo. `examples/config.yaml` kopieren (§3).
+
+**`Es gibt neuere Modelle als die in ADW eingestellten — Lauf NICHT gestartet`**
+Der Modell-Check hat ein neueres Claude- oder GPT-Modell gefunden, als ADW pinnt. Die
+Meldung nennt Rolle, gepinntes → neuestes Modell und die zu ändernde Konstante
+(`adw/agents.py`, `adw/codex.py`). Erst ADW aktualisieren (Konstanten, Tests, Doku,
+Release), dann den Lauf neu starten. Der Check läuft höchstens einmal in 24 h
+(`~/.adw/model-check.json`); Datei löschen erzwingt eine frische Prüfung. Ein Check,
+der nicht laufen kann, gibt nur eine Warnung aus.
 
 **`Fehler: genau EINE Issue-Quelle angeben …`**
 Genau eines von `--issue`, `--gitlab-issue`, `--github-issue` angeben.

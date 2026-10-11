@@ -1200,44 +1200,50 @@ Lines event log with spans, per-run seq, <code>flock</code>, file mode
 directory), <code>--gzip</code> compression of event logs.</td>
 </tr>
 <tr class="even">
+<td><code>adw/models.py</code></td>
+<td style="text-align: right;">165</td>
+<td>Model freshness check: newest model per role (Claude aliases, codex
+catalog), 24 h cache, refusal message.</td>
+</tr>
+<tr class="odd">
 <td><code>adw/mock.py</code></td>
 <td style="text-align: right;">209</td>
 <td><code>MockAgentRunner</code>, <code>MockCodexRunner</code>:
 scriptable response queues, simulated file writes, call recording.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/reader.py</code></td>
 <td style="text-align: right;">131</td>
 <td>Incremental, fault-tolerant event-log reader (also
 <code>.jsonl.gz</code>), reports
 <code>seq_gap</code>/<code>bad_line</code>.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/model.py</code></td>
 <td style="text-align: right;">224</td>
 <td>Span tree from event records; orphans from worker threads re-homed
 by time containment.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/registry.py</code></td>
 <td style="text-align: right;">203</td>
 <td><code>~/.adw/repos.json</code>: canonical repo path → stable slug;
 <code>adw run</code> registers automatically (fail-open).</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/app.py</code></td>
 <td style="text-align: right;">3073</td>
 <td>Read-only FastAPI app: run list, run detail
 (Trace/Timeline/Artifacts/Raw), JSON API, SSE live tail, diff endpoint
 with ref allowlist.</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td><code>adw/gui/i18n.py</code></td>
 <td style="text-align: right;">353</td>
 <td>Dictionary-based EN/DE chrome translation; content is never
 translated.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/templates/</code>, <code>static/</code></td>
 <td style="text-align: right;">—</td>
 <td>Jinja2 templates, <code>app.css</code> (token system, dark mode),
@@ -2059,6 +2065,20 @@ escalates.</li>
 <code>detect_forge</code> must succeed, otherwise the command is refused
 with the <code>ci.provider</code> hint — no run created, no state
 change, never an escalation.</li>
+<li><strong>Model check</strong> (<code>run</code>, <code>resume</code>,
+<code>approve</code>; real runs only; <code>adw/models.py</code>):
+<code>agents.resolve_model_alias</code> resolves
+<code>opus</code>/<code>fable</code>/<code>sonnet</code> with one
+minimal SDK call each (no tools, no settings); the codex CLI's
+<code>models_cache.json</code> gives the newest listed model of the
+pinned tier or an announced upgrade. Any pinned model that differs
+refuses the command with the constant to change. Cached for 24 h in
+<code>~/.adw/model-check.json</code> (<code>ADW_MODEL_CHECK_PATH</code>
+overrides) together with the pins it was taken against — new pins
+invalidate it; only a complete result is cached; a failed probe (error
+result, <code>&lt;synthetic&gt;</code> model, 120 s timeout), a missing,
+malformed or &gt; 7 days old codex catalog or an unwritable cache warns
+and never blocks.</li>
 <li><strong>Interrupted agent calls</strong>
 (<code>AgentRunError</code>) leave the phase unchanged and print a
 resume hint (P9).</li>
