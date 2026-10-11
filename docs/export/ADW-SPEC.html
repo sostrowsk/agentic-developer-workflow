@@ -2060,8 +2060,9 @@ as the fix task (the RED stage shortens it further to 40 lines).</li>
 </ul>
 <h2 id="7-codex-integration">7. Codex integration</h2>
 <p><code>CodexRunner</code> runs
-<code>codex exec -m gpt-6-astra --sandbox read-only -c mcp_servers={} …</code>
-as a subprocess with:</p>
+<code>codex exec -m gpt-6-astra --sandbox read-only -c mcp_servers={} … -</code>
+(prompt on stdin — a long file list exceeded Linux's 128 KiB
+per-argument limit) as a subprocess with:</p>
 <ul>
 <li>an <strong>isolated <code>CODEX_HOME</code></strong> — a temp dir
 containing only a copy of <code>auth.json</code> from the real home, so

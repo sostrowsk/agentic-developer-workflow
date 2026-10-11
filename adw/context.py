@@ -84,7 +84,11 @@ def _codex_review(ctx, kind, content_refs, cwd, context=None):
     (GUI-SPEC §6). The full argv is built up front (shared builder) so it is
     complete in the start event and identical to what the runner executes."""
     argv = ctx.codex.effective_argv(kind, content_refs, cwd, context)
-    start = {"kind": kind, "argv": argv, "cwd": str(cwd), "custom_prompt": context}
+    # The prompt travels on stdin (argv limit) — recorded here so the trace keeps it.
+    prompt = ctx.codex.effective_prompt(kind, content_refs, context)
+    start = {
+        "kind": kind, "argv": argv, "cwd": str(cwd), "custom_prompt": context, "prompt": prompt,
+    }
     with ctx.emitter.span("codex.review", start) as handle:
         return ctx.codex.review(kind, content_refs, cwd=cwd, context=context, span=handle)
 

@@ -593,7 +593,8 @@ calls/results into the event log and accumulates cost/tokens in `RunTotals`.
 
 ## 7. Codex integration
 
-`CodexRunner` runs `codex exec -m gpt-6-astra --sandbox read-only -c mcp_servers={} …` as a
+`CodexRunner` runs `codex exec -m gpt-6-astra --sandbox read-only -c mcp_servers={} … -` (prompt on
+stdin — a long file list exceeded Linux's 128 KiB per-argument limit) as a
 subprocess with:
 
 - an **isolated `CODEX_HOME`** — a temp dir containing only a copy of `auth.json`

@@ -259,11 +259,44 @@ def _review_worktree(ctx: RunContext, lanes: list[str]) -> Path:
     return create_lane_worktree(ctx.repo, ctx.state.run_id, lanes[0], ctx.config.base_branch)
 
 
+# Mass deletions (e.g. dropping a vendored icon set) would flood the review prompt
+# with tens of thousands of paths — beyond the model's context and, before 0.31.1,
+# beyond the argv limit. Deletions are summarised per directory; the whole list is
+# capped. The reviewer still sees WHAT was removed, just not every file name.
+_MAX_LISTED_DELETIONS = 50
+_MAX_REVIEW_REFS = 2000
+
+
+def _deletion_summary(paths: list[str]) -> list[str]:
+    groups: dict[str, int] = {}
+    for path in paths:
+        parts = path.split("/")
+        key = "/".join(parts[: min(2, len(parts) - 1)])
+        groups[key] = groups.get(key, 0) + 1
+    return [
+        f"{directory or '.'}/ — {count} files deleted (contents not listed; "
+        "check that removing them is intended)"
+        for directory, count in sorted(groups.items())
+    ]
+
+
 def _changed_files(ctx: RunContext, worktree: Path) -> list[str]:
-    changed = _git(
-        ctx, worktree, "diff", "--name-only", f"{ctx.config.base_branch}...HEAD"
-    ).splitlines()
-    return [name for name in changed if name]
+    diff = f"{ctx.config.base_branch}...HEAD"
+
+    def names(diff_filter: str) -> list[str]:
+        out = _git(ctx, worktree, "diff", "--name-only", f"--diff-filter={diff_filter}", diff)
+        return [name for name in out.splitlines() if name]
+
+    deleted = names("D")
+    if len(deleted) > _MAX_LISTED_DELETIONS:
+        deleted = _deletion_summary(deleted)
+    refs = names("d") + deleted  # lowercase d: everything except deletions
+    if len(refs) > _MAX_REVIEW_REFS:
+        rest = len(refs) - _MAX_REVIEW_REFS
+        refs = refs[:_MAX_REVIEW_REFS] + [
+            f"… and {rest} more changed paths (see `git diff --stat {diff}`)"
+        ]
+    return refs
 
 
 def _advance_review_round(

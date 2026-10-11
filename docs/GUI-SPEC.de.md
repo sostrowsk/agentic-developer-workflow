@@ -206,8 +206,8 @@ Span-bildend (`start`/`end`):
 | `round` | `loop` (`authoring`\|`gates`\|`integration`\|`codex_review`\|`final_review`), `n`, `cap` | `outcome` |
 | `agent.run` | `agent`, `model`, `tools[]`, `allowed_tools[]`, `cwd`, `resume_session`, **`prompt`** (voller Task-String), `system_append` | `session_id`, **`result_text`**, `usage` (`input`, `output`, `cache_read`, `cache_creation`), `cost_usd`, `is_error` |
 | `gate` | `name`, `cmd`, `timeout`, `cwd` | `passed`, `exit_code`, `timed_out`, **`output`** |
-| `codex.review` | `kind`, `argv[]`, `cwd`, `custom_prompt` | `findings[]` (vollständige `Finding`-Objekte), `raw_stdout` (die finale Antwort, `codex exec -o`), `parse_ok`, `usage` (Token-Zahlen aus `--json`) |
-| `codex.author` | `kind`, `argv[]`, `cwd`, `task` | `artifacts[]` (zurückgelieferte Dateinamen), `raw_stdout` (die finale Antwort), `parse_ok`, `usage` — Dual Authoring ist ein erheblicher Zeit- und Kostenblock; ohne diesen Span zeigt die Timeline dort eine Lücke, wo der Codex-Entwurf entstand |
+| `codex.review` | `kind`, `argv[]`, `cwd`, `custom_prompt`, `prompt` (geht über stdin; argv endet auf `-`) | `findings[]` (vollständige `Finding`-Objekte), `raw_stdout` (die finale Antwort, `codex exec -o`), `parse_ok`, `usage` (Token-Zahlen aus `--json`) |
+| `codex.author` | `kind`, `argv[]`, `cwd`, `task`, `prompt` | `artifacts[]` (zurückgelieferte Dateinamen), `raw_stdout` (die finale Antwort), `parse_ok`, `usage` — Dual Authoring ist ein erheblicher Zeit- und Kostenblock; ohne diesen Span zeigt die Timeline dort eine Lücke, wo der Codex-Entwurf entstand |
 | `ci.wait` | `provider`, `pipeline_ref` | `status`, `polls`, `duration` |
 
 Punkt-Events:

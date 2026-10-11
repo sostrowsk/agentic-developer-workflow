@@ -66,7 +66,7 @@ def test_dry_run_codex_author_span_start_and_end_payload_fields(target_repo):
     (end,) = of_type(records, "codex.author", "end")
     assert start["span"] == end["span"]  # same span id (contract invariant)
 
-    assert set(start["payload"]) == {"kind", "argv", "cwd", "task"}
+    assert set(start["payload"]) == {"kind", "argv", "cwd", "task", "prompt"}
     assert start["payload"]["kind"] == "spec"
     assert start["payload"]["cwd"] == str(ctx.repo)
     assert start["payload"]["task"] == "Meine Aufgabe"
@@ -94,9 +94,9 @@ def test_codex_author_start_argv_identical_to_executed_argv(target_repo, monkeyp
     byte identical to what the real runner executes (shared per-call marker_id)."""
     captured: dict = {}
 
-    def fake_execute(argv, env, workdir):
+    def fake_execute(argv, env, workdir, prompt=""):
         captured["argv"] = list(argv)
-        (workdir / argv[argv.index("-o") + 1]).write_text(_author_output_for_prompt(argv[-1]))
+        (workdir / argv[argv.index("-o") + 1]).write_text(_author_output_for_prompt(prompt))
         return ""
 
     monkeypatch.setattr(CodexRunner, "_execute", staticmethod(fake_execute))
@@ -163,7 +163,7 @@ def test_dry_run_via_cli_emits_closed_codex_author_spans(target_repo):
     # every start is a closed pair with the right payload fields
     assert {r["span"] for r in starts} == {r["span"] for r in ends}
     for start in starts:
-        assert set(start["payload"]) == {"kind", "argv", "cwd", "task"}
+        assert set(start["payload"]) == {"kind", "argv", "cwd", "task", "prompt"}
         assert start["payload"]["kind"] in {"spec", "plan"}
     for end in ends:
         assert set(end["payload"]) == {"artifacts", "raw_stdout", "parse_ok"}

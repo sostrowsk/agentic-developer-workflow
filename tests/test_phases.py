@@ -4293,3 +4293,42 @@ def test_followup_whose_issue_prefixes_another_is_still_recorded(ctx):
     text = (ctx.run_dir / "followups.md").read_text()
     assert text.count("a.py: Name unklar und zu lang\n") == 1
     assert text.count("a.py: Name unklar\n") == 1
+
+
+# --- E2BIG / context: mass deletions are summarised in the code-review refs -----------
+
+
+def test_changed_files_summarises_mass_deletions(ctx, target_repo):
+    from adw.phases import _changed_files
+    from tests.conftest import git
+
+    vendor = target_repo / "static" / "vendor"
+    vendor.mkdir(parents=True)
+    for i in range(120):
+        (vendor / f"icon-{i:03d}.svg").write_text("<svg/>")
+    git(target_repo, "add", ".")
+    git(target_repo, "commit", "-m", "vendor icons")
+    git(target_repo, "checkout", "-q", "-b", "feature")
+    git(target_repo, "rm", "-q", "-r", "static/vendor")
+    (target_repo / "app.py").write_text("print('new')\n")
+    git(target_repo, "add", ".")
+    git(target_repo, "commit", "-m", "drop vendor, add app")
+
+    refs = _changed_files(ctx, target_repo)
+    assert "app.py" in refs
+    assert not any(ref.endswith(".svg") for ref in refs)
+    summary = [ref for ref in refs if "static/vendor/" in ref]
+    assert len(summary) == 1 and "120" in summary[0]
+
+
+def test_changed_files_lists_few_deletions_individually(ctx, target_repo):
+    from adw.phases import _changed_files
+    from tests.conftest import git
+
+    (target_repo / "old.py").write_text("x = 1\n")
+    git(target_repo, "add", ".")
+    git(target_repo, "commit", "-m", "old")
+    git(target_repo, "checkout", "-q", "-b", "feature")
+    git(target_repo, "rm", "-q", "old.py")
+    git(target_repo, "commit", "-m", "drop old")
+    assert _changed_files(ctx, target_repo) == ["old.py"]

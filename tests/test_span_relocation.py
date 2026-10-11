@@ -91,7 +91,7 @@ def test_dry_run_emits_closed_codex_review_span_with_start_and_end_payloads(targ
     assert starts and ends, "the dry run must emit at least one codex.review span"
 
     start = starts[0]
-    assert set(start["payload"]) == {"kind", "argv", "cwd", "custom_prompt"}
+    assert set(start["payload"]) == {"kind", "argv", "cwd", "custom_prompt", "prompt"}
     assert isinstance(start["payload"]["argv"], list)
     end = next(e for e in ends if e["span"] == start["span"])
     assert set(end["payload"]) == {"findings", "raw_stdout", "parse_ok"}
@@ -184,7 +184,7 @@ def test_codex_review_start_argv_matches_the_executed_argv(target_repo, monkeypa
 
     executed: dict = {}
 
-    def fake_execute(argv, env, workdir):
+    def fake_execute(argv, env, workdir, prompt=""):
         executed["argv"] = list(argv)
         (workdir / argv[argv.index("-o") + 1]).write_text('{"verdict": "ok", "findings": []}')
         return ""

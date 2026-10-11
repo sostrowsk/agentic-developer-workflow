@@ -607,7 +607,8 @@ in `RunTotals`.
 
 ## 7. Codex-Integration
 
-`CodexRunner` startet `codex exec -m gpt-6-astra --sandbox read-only -c mcp_servers={} …` als
+`CodexRunner` startet `codex exec -m gpt-6-astra --sandbox read-only -c mcp_servers={} … -` (Prompt über
+stdin — eine lange Dateiliste überschritt Linux' 128-KiB-Grenze pro Argument) als
 Subprozess mit:
 
 - einem **isolierten `CODEX_HOME`** — ein Temp-Verzeichnis, das nur eine Kopie von

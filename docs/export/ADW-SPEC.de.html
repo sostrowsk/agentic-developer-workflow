@@ -2093,8 +2093,9 @@ Zeilen).</li>
 </ul>
 <h2 id="7-codex-integration">7. Codex-Integration</h2>
 <p><code>CodexRunner</code> startet
-<code>codex exec -m gpt-6-astra --sandbox read-only -c mcp_servers={} …</code>
-als Subprozess mit:</p>
+<code>codex exec -m gpt-6-astra --sandbox read-only -c mcp_servers={} … -</code>
+(Prompt über stdin — eine lange Dateiliste überschritt Linux'
+128-KiB-Grenze pro Argument) als Subprozess mit:</p>
 <ul>
 <li>einem <strong>isolierten <code>CODEX_HOME</code></strong> — ein
 Temp-Verzeichnis, das nur eine Kopie von <code>auth.json</code> aus dem

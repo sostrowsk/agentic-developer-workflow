@@ -462,6 +462,7 @@ def _codex_draft(
         author_argv = ctx.codex.effective_author_argv(kind, task, ctx.repo, marker_id)
         start_payload = {
             "kind": kind, "argv": author_argv, "cwd": str(ctx.repo), "task": task,
+            "prompt": ctx.codex.effective_author_prompt(kind, task, marker_id),
         }
         with ctx.emitter.span("codex.author", start_payload) as handle:
             # Deterministic defaults so a failed/empty draft still writes a

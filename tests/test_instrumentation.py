@@ -343,7 +343,7 @@ def test_gate_span_end_uses_exception_defaults_and_propagates(target_repo, monke
 
 
 def test_codex_review_emits_span_with_findings_payload(target_repo, monkeypatch):
-    def fake_execute(argv, env, workdir):
+    def fake_execute(argv, env, workdir, prompt=""):
         (workdir / argv[argv.index("-o") + 1]).write_text('{"verdict": "ok", "findings": []}')
         return ""
 

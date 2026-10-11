@@ -22,17 +22,20 @@ def captured_run(monkeypatch):
 
             captured["argv"] = argv
             captured["kwargs"] = kwargs
-            answer = captured.get("stdout", '{"verdict": "ok", "findings": []}')
-            # Callable-Antwort: Authoring-Marker tragen eine Nonce aus dem
-            # Prompt — die Antwort kann erst beim Aufruf gebaut werden.
-            answer = answer(argv) if callable(answer) else answer
-            workdir = kwargs.get("cwd")
-            # codex -o: die finale Antwort landet in einer Datei im Prozess-cwd.
-            if workdir and "-o" in argv and not captured.get("no_last_message"):
-                (Path(workdir) / argv[argv.index("-o") + 1]).write_text(answer)
-            if workdir:
-                captured["workdir_files"] = sorted(os.listdir(workdir))
-                schema = Path(workdir) / "review-schema.json"
+            self._argv, self._workdir = argv, kwargs.get("cwd")
+            fake = self
+
+            class FakeStdin(io.BytesIO):
+                # codex exec - : the prompt arrives on stdin; closing it is the
+                # moment codex "answers" (the -o file appears in the process cwd).
+                def close(self):
+                    if not self.closed:
+                        fake._answer(self.getvalue().decode())
+                    super().close()
+
+            self.stdin = FakeStdin()
+            if self._workdir:
+                schema = Path(self._workdir) / "review-schema.json"
                 if schema.exists():
                     captured["schema"] = schema.read_text()
             events = captured.get(
@@ -43,6 +46,18 @@ def captured_run(monkeypatch):
             self.stdout = io.BytesIO(events.encode())
             self.stderr = io.BytesIO(captured.get("stderr", "").encode())
             self._timed_out_once = False
+
+        def _answer(self, prompt):
+            captured["prompt"] = prompt
+            answer = captured.get("stdout", '{"verdict": "ok", "findings": []}')
+            # Callable-Antwort: Authoring-Marker tragen eine Nonce aus dem
+            # Prompt — die Antwort kann erst beim Aufruf gebaut werden.
+            answer = answer(prompt) if callable(answer) else answer
+            argv, workdir = self._argv, self._workdir
+            if workdir and "-o" in argv and not captured.get("no_last_message"):
+                (Path(workdir) / argv[argv.index("-o") + 1]).write_text(answer)
+            if workdir:
+                captured["workdir_files"] = sorted(os.listdir(workdir))
 
         def wait(self, timeout=None):
             if timeout is not None:
@@ -89,7 +104,7 @@ def test_codex_pins_the_frontier_model(captured_run, tmp_path):
 
 def test_prompt_contains_schema_and_content(captured_run, tmp_path):
     CodexRunner().review("spec", [".adw/spec.md"], cwd=tmp_path)
-    prompt = captured_run["argv"][-1]
+    prompt = captured_run["prompt"]
     assert "verdict" in prompt and "remediation_plan" in prompt
     assert ".adw/spec.md" in prompt
     assert "spec" in prompt.lower()
@@ -100,7 +115,7 @@ def test_spec_and_plan_review_flag_process_requirements(captured_run, tmp_path):
     im ADW committet der Orchestrator, nicht der Implementierungs-Agent."""
     for kind in ("spec", "plan"):
         CodexRunner().review(kind, [".adw/spec.md"], cwd=tmp_path)
-        prompt = captured_run["argv"][-1].lower()
+        prompt = captured_run["prompt"].lower()
         assert "commit" in prompt, kind
 
 
@@ -109,18 +124,18 @@ def test_prompt_contains_review_context_between_refs_and_schema(captured_run, tm
     der Schema-Instruktion — das Antwortformat bleibt die letzte Anweisung."""
     context = "This is review round 2 of max 5.\n- [P2] a.py: kaputt — disposition: fix dispatched"
     CodexRunner().review("code", ["src.py"], cwd=tmp_path, context=context)
-    prompt = captured_run["argv"][-1]
+    prompt = captured_run["prompt"]
     assert context in prompt
     assert prompt.index("- src.py") < prompt.index(context) < prompt.index('"verdict"')
 
 
 def test_prompt_without_context_is_unchanged(captured_run, tmp_path):
     CodexRunner().review("code", ["src.py"], cwd=tmp_path)
-    without_context = captured_run["argv"][-1]
+    without_context = captured_run["prompt"]
     CodexRunner().review("code", ["src.py"], cwd=tmp_path, context=None)
-    assert captured_run["argv"][-1] == without_context
+    assert captured_run["prompt"] == without_context
     CodexRunner().review("code", ["src.py"], cwd=tmp_path, context="   ")
-    assert captured_run["argv"][-1] == without_context
+    assert captured_run["prompt"] == without_context
 
 
 def test_broken_codex_output_raises_parse_error(captured_run, tmp_path):
@@ -313,8 +328,8 @@ def _marker_id(prompt: str) -> str:
 def _blocks(**named: str):
     """Stdout-Builder: baut die Marker-Blöcke mit der Nonce des echten Prompts."""
 
-    def build(argv: list[str]) -> str:
-        nonce = _marker_id(argv[-1])
+    def build(prompt: str) -> str:
+        nonce = _marker_id(prompt)
         return "\n".join(
             f"===BEGIN {name} {nonce}===\n{body}\n===END {name} {nonce}==="
             for name, body in named.items()
@@ -343,7 +358,7 @@ def test_author_is_invoked_read_only_in_cwd(captured_run, tmp_path):
 def test_author_prompt_carries_task_and_marker_contract(captured_run, tmp_path):
     captured_run["stdout"] = _blocks(**{"spec.md": "x"})
     CodexRunner().author("spec", "Setze Issue #7 um", cwd=tmp_path)
-    prompt = captured_run["argv"][-1]
+    prompt = captured_run["prompt"]
     nonce = _marker_id(prompt)
     assert "Setze Issue #7 um" in prompt
     assert f"===BEGIN spec.md {nonce}===" in prompt and f"===END spec.md {nonce}===" in prompt
@@ -354,9 +369,9 @@ def test_author_markers_carry_a_fresh_nonce_per_call(captured_run, tmp_path):
     das Marker-Format schreiben, können den Block nicht früh beenden."""
     captured_run["stdout"] = _blocks(**{"spec.md": "x"})
     CodexRunner().author("spec", "Issue", cwd=tmp_path)
-    first = _marker_id(captured_run["argv"][-1])
+    first = _marker_id(captured_run["prompt"])
     CodexRunner().author("spec", "Issue", cwd=tmp_path)
-    assert _marker_id(captured_run["argv"][-1]) != first
+    assert _marker_id(captured_run["prompt"]) != first
 
 
 def test_author_keeps_content_that_mentions_the_bare_markers(captured_run, tmp_path):
@@ -371,10 +386,10 @@ def test_author_rejects_a_pure_prompt_echo_as_answer(captured_run, tmp_path):
     keine Antwort — sonst landeten Platzhalter als Artefakte auf der Platte."""
     from adw.codex import CodexAuthorError
 
-    captured_run["stdout"] = lambda argv: argv[-1]
+    captured_run["stdout"] = lambda prompt: prompt
     with pytest.raises(CodexAuthorError, match="[Ll]eer"):
         CodexRunner().author("spec", "Issue", cwd=tmp_path)
-    captured_run["stdout"] = lambda argv: argv[-1]
+    captured_run["stdout"] = lambda prompt: prompt
     with pytest.raises(CodexAuthorError, match="[Ll]eer"):
         CodexRunner().author("plan", "Aus .adw/spec.md", cwd=tmp_path)
 
@@ -384,7 +399,7 @@ def test_author_spec_prompt_mirrors_the_spec_agent_requirements(captured_run, tm
     'Deferred' section, no process/git requirements."""
     captured_run["stdout"] = _blocks(**{"spec.md": "x"})
     CodexRunner().author("spec", "Issue", cwd=tmp_path)
-    prompt = captured_run["argv"][-1].lower()
+    prompt = captured_run["prompt"].lower()
     assert "proportionality" in prompt
     assert "deferred" in prompt
     assert "commit" in prompt
@@ -398,11 +413,11 @@ def test_author_prompts_carry_the_shared_content_rules_verbatim(captured_run, tm
 
     captured_run["stdout"] = _blocks(**{"spec.md": "x"})
     CodexRunner().author("spec", "Issue", cwd=tmp_path)
-    assert _SPEC_CONTENT_RULES in captured_run["argv"][-1]
+    assert _SPEC_CONTENT_RULES in captured_run["prompt"]
 
     captured_run["stdout"] = _blocks(**{"plan.md": "x", "contract.yaml": "y"})
     CodexRunner().author("plan", "Aus .adw/spec.md", cwd=tmp_path)
-    assert _PLAN_CONTENT_RULES in captured_run["argv"][-1]
+    assert _PLAN_CONTENT_RULES in captured_run["prompt"]
 
 
 def test_author_plan_prompt_requires_plan_and_contract_blocks(captured_run, tmp_path):
@@ -410,7 +425,7 @@ def test_author_plan_prompt_requires_plan_and_contract_blocks(captured_run, tmp_
         **{"plan.md": "## Workstream backend", "contract.yaml": "routes: []"}
     )
     artifacts = CodexRunner().author("plan", "Aus .adw/spec.md", cwd=tmp_path)
-    prompt = captured_run["argv"][-1]
+    prompt = captured_run["prompt"]
     nonce = _marker_id(prompt)
     assert f"===BEGIN plan.md {nonce}===" in prompt
     assert f"===BEGIN contract.yaml {nonce}===" in prompt
@@ -613,10 +628,12 @@ def test_author_argv_has_no_review_schema(captured_run, tmp_path):
     assert argv[argv.index("-o") + 1] == "last-message.txt"
 
 
-def test_codex_runs_in_private_workdir_with_closed_stdin(captured_run, tmp_path):
+def test_codex_runs_in_private_workdir_and_closes_stdin_after_the_prompt(captured_run, tmp_path):
     CodexRunner().review("code", ["diff"], cwd=tmp_path)
     kwargs = captured_run["kwargs"]
-    assert kwargs["stdin"] is subprocess.DEVNULL  # an open stdin made codex wait for input
+    assert kwargs["stdin"] is subprocess.PIPE
+    # The prompt arrives and stdin is CLOSED — an open stdin made codex wait for input.
+    assert "prompt" in captured_run
     workdir = Path(kwargs["cwd"])
     assert workdir != tmp_path  # -o/--output-schema never land in the target repo
     assert not workdir.exists()  # cleaned up after the call
@@ -690,3 +707,40 @@ def test_failure_reports_the_json_error_event(captured_run, tmp_path):
     )
     with pytest.raises(CodexError, match="stream disconnected"):
         CodexRunner().review("code", ["diff"], cwd=tmp_path)
+
+
+# --- E2BIG: the prompt travels on stdin, never as an argv string -------------------------
+
+
+def test_prompt_goes_to_stdin_not_argv(captured_run, tmp_path):
+    CodexRunner().review("code", ["a.py"], cwd=tmp_path)
+    argv = captured_run["argv"]
+    assert argv[-1] == "-"  # codex exec reads the prompt from stdin
+    assert not any("independent reviewer" in arg for arg in argv)
+    assert "a.py" in captured_run["prompt"]
+    assert captured_run["kwargs"]["stdin"] is subprocess.PIPE
+
+
+def test_huge_review_prompt_does_not_hit_the_argv_limit(captured_run, tmp_path):
+    # Linux caps ONE argv string at 128 KiB (MAX_ARG_STRLEN) -> E2BIG before codex runs.
+    refs = [f"static/vendor/icons/file-{i:06d}.svg" for i in range(20_000)]
+    CodexRunner().review("code", refs, cwd=tmp_path)
+    assert len(captured_run["prompt"]) > 128 * 1024
+    assert max(len(arg) for arg in captured_run["argv"]) < 4096
+
+
+def test_effective_prompt_matches_what_is_sent(captured_run, tmp_path):
+    runner = CodexRunner()
+    runner.review("code", ["a.py"], cwd=tmp_path, context="Round 2")
+    assert runner.effective_prompt("code", ["a.py"], "Round 2") == captured_run["prompt"]
+
+
+def test_review_prompt_stays_under_codex_input_limit(captured_run, tmp_path):
+    """codex rejects input over 1,048,576 characters (input_too_large) — the file
+    list is cut with a note to the reviewer instead."""
+    refs = [f"static/vendor/icons/{'x' * 80}-{i:07d}.svg" for i in range(30_000)]
+    CodexRunner().review("code", refs, cwd=tmp_path)
+    prompt = captured_run["prompt"]
+    assert len(prompt) < 1_000_000
+    assert "truncated" in prompt
+    assert prompt.rstrip().endswith("all fields are mandatory.")  # schema instruction kept

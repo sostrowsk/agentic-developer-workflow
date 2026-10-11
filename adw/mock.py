@@ -143,8 +143,11 @@ class MockCodexRunner:
         start event in a dry run too (its exact content is not contract-pinned)."""
         return [
             "codex", "exec", "--sandbox", "read-only", "-c", "mcp_servers={}",
-            "-C", str(cwd), f"[mock-author:{kind}:{marker_id}]",
+            "-C", str(cwd), "-",
         ]
+
+    def effective_author_prompt(self, kind: str, task: str, marker_id: str) -> str:
+        return f"[mock-author:{kind}:{marker_id}]"
 
     def author(
         self,
@@ -182,8 +185,13 @@ class MockCodexRunner:
         event in a dry run too (its exact content is not contract-pinned)."""
         return [
             "codex", "exec", "--sandbox", "read-only", "-c", "mcp_servers={}",
-            "-C", str(cwd), f"[mock:{kind}]",
+            "-C", str(cwd), "-",
         ]
+
+    def effective_prompt(
+        self, kind: str, content_refs: list[str], context: str | None = None
+    ) -> str:
+        return f"[mock:{kind}]"
 
     def review(
         self,

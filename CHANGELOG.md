@@ -12,6 +12,19 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.31.1] — 2026-10-11
+
+### Fixed
+- **The Codex code review failed on very large diffs.** A run that removed a vendored icon set (33,737 files) escalated right after a green build.
+  - First the prompt, passed as a command-line argument, exceeded Linux's per-argument limit (`[Errno 7] Argument list too long`).
+  - Passed on stdin instead, it still exceeded codex's input limit of 1,048,576 characters (`input_too_large`).
+  - **Three fixes:**
+    - **Prompt on stdin:** it is now always sent on stdin (`codex exec … -`) and recorded as `prompt` in the span start event, so the GUI still shows it.
+    - **Deletions summarised:** from 50 deleted files on, deletions are listed per directory with a count, e.g. `static/fontawesome-pro/ — 33737 files deleted`, instead of file by file. The whole list is capped at 2000 entries.
+    - **Hard cap:** as a final safety net, the file list in the prompt is cut at 400,000 characters, with a note to the reviewer.
+  - **Result:** for the affected run, the prompt shrinks from 1.93 million to about 12,000 characters.
+  - A run that escalated this way keeps `codex_review` as its state, so `adw resume` simply repeats the review.
+
 ## [0.31.0] — 2026-10-11
 
 ### Changed
@@ -1055,6 +1068,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.31.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.3...v0.31.0
 [0.30.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.2...v0.30.3
 [0.30.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.1...v0.30.2

@@ -118,6 +118,10 @@ _AUTHOR_INSTRUCTIONS: dict[AuthorKind, str] = {
 }
 
 
+# Upper bound for the file list in a review prompt — codex accepts at most
+# 1,048,576 input characters; the rest of the prompt stays far below the margin.
+_MAX_REFS_CHARS = 400_000
+
 # The top GPT model offered by the codex CLI (frontier tier, not the workhorse).
 CODEX_MODEL = "gpt-6-astra"
 
@@ -219,10 +223,26 @@ class CodexClient(Protocol):
         self, kind: AuthorKind, task: str, cwd: Path, marker_id: str
     ) -> list[str]: ...
 
+    def effective_prompt(
+        self, kind: ReviewKind, content_refs: list[str], context: str | None = None
+    ) -> str: ...
+
+    def effective_author_prompt(self, kind: AuthorKind, task: str, marker_id: str) -> str: ...
+
 
 _CHUNK_BYTES = 8192
 _STDOUT_TAIL_CHUNKS = 640  # × 8 KiB = max. 5 MiB — reicht für jedes finale JSON
 _STDERR_TAIL_CHUNKS = 32  # × 8 KiB = max. 256 KiB Fehlerkontext
+
+
+def _feed(stream, data: bytes) -> None:
+    try:
+        stream.write(data)
+    except (BrokenPipeError, OSError, ValueError):
+        pass  # codex exited early — its exit code / stderr tell why
+    finally:
+        with contextlib.suppress(BrokenPipeError, OSError, ValueError):
+            stream.close()
 
 
 def _pump(stream, tail: collections.deque) -> None:
@@ -356,7 +376,13 @@ class CodexRunner:
         """The exact argv this runner will execute for such a review — a static,
         side-effect-free builder so the call site can write the full argv into the
         codex.review span start event before the subprocess runs (GUI-SPEC §6)."""
-        return self._argv(cwd, self._build_prompt(kind, content_refs, context), schema=True)
+        return self._argv(cwd, schema=True)
+
+    def effective_prompt(
+        self, kind: ReviewKind, content_refs: list[str], context: str | None = None
+    ) -> str:
+        """The exact prompt such a review sends on stdin (for the span start event)."""
+        return self._build_prompt(kind, content_refs, context)
 
     def review(
         self,
@@ -394,7 +420,11 @@ class CodexRunner:
         into the codex.author span start event BEFORE the subprocess runs. The
         per-call ``marker_id`` is passed in (and reused by ``author``) so the
         start-event argv is byte-identical to the executed one (GUI-SPEC §4.4)."""
-        return self._argv(cwd, self._build_author_prompt(kind, task, marker_id))
+        return self._argv(cwd)
+
+    def effective_author_prompt(self, kind: AuthorKind, task: str, marker_id: str) -> str:
+        """The exact prompt such an authoring call sends on stdin."""
+        return self._build_author_prompt(kind, task, marker_id)
 
     def author(
         self,
@@ -433,7 +463,7 @@ class CodexRunner:
         return files
 
     @staticmethod
-    def _argv(cwd: Path, prompt: str, schema: bool = False) -> list[str]:
+    def _argv(cwd: Path, schema: bool = False) -> list[str]:
         return [
             "codex",
             "exec",
@@ -456,7 +486,9 @@ class CodexRunner:
             *(["--output-schema", _SCHEMA_FILE] if schema else []),
             "-C",
             str(cwd),
-            prompt,
+            # The prompt goes on stdin: a file list can exceed Linux's per-argument
+            # limit (128 KiB, E2BIG) long before it exceeds anything codex accepts.
+            "-",
         ]
 
     def _run(self, prompt: str, cwd: Path, handle, schema: dict | None = None) -> str:
@@ -465,7 +497,7 @@ class CodexRunner:
         try:
             if schema is not None:
                 (workdir / _SCHEMA_FILE).write_text(json.dumps(schema), encoding="utf-8")
-            events = self._run_in(self._argv(cwd, prompt, schema is not None), workdir)
+            events = self._run_in(self._argv(cwd, schema is not None), prompt, workdir)
             usage = _usage(events)
             handle.end_payload["usage"] = usage
             if self._totals is not None:
@@ -480,7 +512,7 @@ class CodexRunner:
         finally:
             shutil.rmtree(workdir, ignore_errors=True)
 
-    def _run_in(self, argv: list[str], workdir: Path) -> str:
+    def _run_in(self, argv: list[str], prompt: str, workdir: Path) -> str:
         env = safe_env()
         # Isoliertes CODEX_HOME: nur auth.json, KEINE config.toml — sonst
         # starten user-konfigurierte MCP-Server außerhalb der read-only-
@@ -488,7 +520,7 @@ class CodexRunner:
         isolated_home, source_home, original_auth = _isolated_codex_home()
         env["CODEX_HOME"] = str(isolated_home)
         try:
-            return self._execute(argv, env, workdir)
+            return self._execute(argv, env, workdir, prompt)
         finally:
             _keep_catalog(isolated_home)
             # Rotierte Tokens zurücksyncen (codex refresht auth.json ggf.),
@@ -504,16 +536,18 @@ class CodexRunner:
                     file=sys.stderr,
                 )
 
-    def _execute(self, argv: list[str], env: dict[str, str], workdir: Path) -> str:
+    def _execute(
+        self, argv: list[str], env: dict[str, str], workdir: Path, prompt: str = ""
+    ) -> str:
         timeout = self._timeout
         try:
             # Eigene Session: Bei Timeout/Interrupt stirbt die GANZE
             # Prozessgruppe (Codex spawnt Shell-Kommandos/MCP-Server).
             proc = subprocess.Popen(
                 argv,
-                # Geschlossenes stdin: sonst wartet codex exec auf weitere Eingabe
-                # ("Reading additional input from stdin…") bis zum Timeout.
-                stdin=subprocess.DEVNULL,
+                # Der Prompt kommt über stdin (argv-Limit); danach wird stdin
+                # geschlossen — offen bliebe codex exec bis zum Timeout hängen.
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=env,
@@ -530,6 +564,9 @@ class CodexRunner:
         pumps = [
             threading.Thread(target=_pump, args=(proc.stdout, out_tail), daemon=True),
             threading.Thread(target=_pump, args=(proc.stderr, err_tail), daemon=True),
+            # In a thread: a codex that never reads stdin must not block us past
+            # the timeout — the process-group kill breaks the pipe and ends it.
+            threading.Thread(target=_feed, args=(proc.stdin, prompt.encode()), daemon=True),
         ]
         for pump in pumps:
             pump.start()
@@ -571,6 +608,14 @@ class CodexRunner:
     @staticmethod
     def _build_prompt(kind: ReviewKind, content_refs: list[str], context: str | None = None) -> str:
         refs = "\n".join(f"- {ref}" for ref in content_refs)
+        if len(refs) > _MAX_REFS_CHARS:
+            # codex rejects input over 1,048,576 characters (input_too_large).
+            cut = refs.rfind("\n", 0, _MAX_REFS_CHARS)
+            omitted = refs[cut:].count("\n- ")
+            refs = (
+                f"{refs[:cut]}\n- … list truncated: {omitted} more paths omitted "
+                "(inspect them with git diff in the worktree)"
+            )
         # Kontextblock (Runde, Severity-Schwelle, Findings der Vorrunden) zwischen
         # Refs und Schema — die Antwortformat-Instruktion bleibt die letzte.
         block = f"{context.strip()}\n\n" if context and context.strip() else ""
