@@ -104,8 +104,8 @@ Erlaubte Lane-Namen sind `backend` und `frontend`; `--parallel` verlangt beide.
 adw/
   cli.py        typer-Eingang: run/resume/approve/status/gui/runs, Dry-Run-Verdrahtung
   phases.py     die 7 Phasen über einem RunContext — Loops, Limits, Dispatch
-  agents.py     Agent-Registry (Fable 5 / Opus 4.8 / Sonnet 5) + SDK-Runner
-  codex.py      Codex-CLI als read-only-Subprocess, striktes Findings-Parsing
+  agents.py     Agent-Registry (Fable 5.1 / Opus 5.5 / Sonnet 5.5) + SDK-Runner
+  codex.py      Codex-CLI (gpt-6-astra) als read-only-Subprocess, striktes Findings-Parsing
   findings.py   Findings-Schema (pydantic) + strikter Parser-Kontrakt
   config.py     .adw/config.yaml-Loader (fail fast)
   state.py      RunState: atomar persistiert, Grundlage für `adw resume`

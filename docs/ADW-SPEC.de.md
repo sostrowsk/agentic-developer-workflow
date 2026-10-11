@@ -280,7 +280,7 @@ nur in einer gibt, veraltet still in der anderen. Releases pro Push halten die F
 | `adw/cli.py` | 1235 | typer-Einstieg: `run`, `resume`, `approve`, `status`, `gui`, `runs list`, `runs prune`. Auflösung des Gate-Modus (`--gates` vs. Altflags), Issue-Übernahme (Text, `glab`, `gh`), Forge-Vorflug, Arbeitsbaum-Vorflug mit Selbstheilung, Run-Ausführungs-Lock, Run-Span, Dry-Run-Verdrahtung, Auto-Prune. |
 | `adw/phases.py` | 2674 | Die sieben Phasen über einem `RunContext`: Entwurfsstufe, Synthese, Authoring-Loop, Freigabe- und Breakpoint-Gates, Lane-Gate-Schleife inkl. RED-Stufe, Integration + E2E, Codex-Review, Final-Review + Triage, Push + CI. Alle Limits, Dispatch und Eskalation. |
 | `adw/agents.py` | 595 | Agent-Registry (`REGISTRY`, `AgentSpec`), geteilte Inhaltsregeln, Deny-Regeln, `SdkAgentRunner` (Stored-Login-Pflicht, Env-Bereinigung, Sandbox, Spiegelung des Streams ins Event-Log), `RunTotals`. |
-| `adw/codex.py` | 473 | `CodexRunner`: `review()` und `author()` über `codex exec --sandbox read-only`, isoliertes `CODEX_HOME`, Marker-Block-Protokoll mit Nonce pro Aufruf, Prozessgruppen-Kill, Token-Rücksync. |
+| `adw/codex.py` | 473 | `CodexRunner`: `review()` und `author()` über `codex exec -m gpt-6-astra --sandbox read-only`, isoliertes `CODEX_HOME`, Marker-Block-Protokoll mit Nonce pro Aufruf, Prozessgruppen-Kill, Token-Rücksync. |
 | `adw/findings.py` | 223 | `Finding`, `ReviewResult`, `SCHEMA_INSTRUCTION` (eine geteilte Konstante), strikter Parser `extract_review_result`. |
 | `adw/config.py` | 154 | Schema und Loader von `.adw/config.yaml` (`AdwConfig`, `Gate`, `LaneConfig`, `E2eConfig`, `CiConfig`, `CodexConfig`, `TraceConfig`, `BreakpointName`). |
 | `adw/state.py` | 289 | `RunState`, `LaneState`, `Phase`; atomare Persistenz, Transaktionen, monotone Sequenz, `find_latest`. |
@@ -536,20 +536,23 @@ system_append, permission_mode="default", sandbox_bash=False)`. `tools`
 
 | Agent | Modell | Tools | Schreibregeln | Auftrag |
 | --- | --- | --- | --- | --- |
-| `spec_agent` | Opus 4.8 | Read/Grep/Glob/Write/Edit | `.adw/spec.md` | Spec-Entwurf (Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, DoD) |
-| `plan_agent` | Opus 4.8 | dito | `.adw/plan.md`, `.adw/contract.yaml` | Plan-Entwurf mit `## Workstream:`-Abschnitten + Kontrakt |
-| `spec_synthesis` | Fable 5 | dito | `.adw/spec.md`, `.adw/spec-summary.md` | Best-of-Merge beider Entwürfe + Gate-Zusammenfassung |
-| `plan_synthesis` | Fable 5 | dito | `.adw/plan.md`, `.adw/contract.yaml`, `.adw/plan-summary.md` | Best-of-Merge + Gate-Zusammenfassung |
-| `build_agent` | Opus 4.8 | + Bash (Sandbox) | `./**` (worktree-relativ) | Setzt seinen Workstream gegen den Kontrakt um, TDD; committet nicht; darf mit Begründung von Fix-Plänen abweichen |
-| `e2e_triage` | Sonnet 5 | Read/Grep/Glob | — | Ordnet E2E-Fehler Lanes zu; nur Findings-JSON |
-| `log_analyst` | Sonnet 5 | Read/Grep/Glob | — | CI-Logs → Findings mit Lane; nur Findings-JSON |
-| `final_reviewer` | Fable 5 | Read/Grep/Glob | — | Implementierung gegen Spec; Findings mit Pflichtfeld `category` |
+| `spec_agent` | Opus 5.5 | Read/Grep/Glob/Write/Edit | `.adw/spec.md` | Spec-Entwurf (Ziel, Scope, Nicht-Ziele, Akzeptanzkriterien, DoD) |
+| `plan_agent` | Opus 5.5 | dito | `.adw/plan.md`, `.adw/contract.yaml` | Plan-Entwurf mit `## Workstream:`-Abschnitten + Kontrakt |
+| `spec_synthesis` | Fable 5.1 | dito | `.adw/spec.md`, `.adw/spec-summary.md` | Best-of-Merge beider Entwürfe + Gate-Zusammenfassung |
+| `plan_synthesis` | Fable 5.1 | dito | `.adw/plan.md`, `.adw/contract.yaml`, `.adw/plan-summary.md` | Best-of-Merge + Gate-Zusammenfassung |
+| `build_agent` | Opus 5.5 | + Bash (Sandbox) | `./**` (worktree-relativ) | Setzt seinen Workstream gegen den Kontrakt um, TDD; committet nicht; darf mit Begründung von Fix-Plänen abweichen |
+| `e2e_triage` | Sonnet 5.5 | Read/Grep/Glob | — | Ordnet E2E-Fehler Lanes zu; nur Findings-JSON |
+| `log_analyst` | Sonnet 5.5 | Read/Grep/Glob | — | CI-Logs → Findings mit Lane; nur Findings-JSON |
+| `final_reviewer` | Fable 5.1 | Read/Grep/Glob | — | Implementierung gegen Spec; Findings mit Pflichtfeld `category` |
 
-Modell-IDs sind Konstanten in `agents.py`: `FABLE = "claude-fable-5"`,
-`OPUS = "claude-opus-4-8"`, `SONNET = "claude-sonnet-5"`.
+Modell-IDs sind Konstanten in `agents.py`: `FABLE = "claude-fable-5-1"`,
+`OPUS = "claude-opus-5-5"`, `SONNET = "claude-sonnet-5-5"`. Codex ist in `codex.py`
+gepinnt: `CODEX_MODEL = "gpt-6-astra"` (als `-m` übergeben; das isolierte
+`CODEX_HOME` hat keine `config.toml`, ohne es nähme codex seinen eingebauten Default).
 
-**Modell-Ökonomie.** Opus macht die tiefe Arbeit (Entwürfe, Build). Fable — breiter
-und günstiger — führt Entwürfe zusammen und reviewt das Ergebnis. Sonnet erledigt
+**Modell-Ökonomie.** Opus macht die Massenarbeit (Entwürfe, Build — viele Turns, die
+günstigere Preisstufe pro Token). Fable, das leistungsstärkste Modell, bleibt dem
+Urteil vorbehalten: Entwürfe zusammenführen und der finale Review. Sonnet erledigt
 die Fließband-Triage.
 
 **Geteilte Prompt-Konstanten.** `_SPEC_CONTENT_RULES`, `_PLAN_CONTENT_RULES`,
@@ -594,7 +597,7 @@ in `RunTotals`.
 
 ## 7. Codex-Integration
 
-`CodexRunner` startet `codex exec --sandbox read-only -c mcp_servers={} …` als
+`CodexRunner` startet `codex exec -m gpt-6-astra --sandbox read-only -c mcp_servers={} …` als
 Subprozess mit:
 
 - einem **isolierten `CODEX_HOME`** — ein Temp-Verzeichnis, das nur eine Kopie von

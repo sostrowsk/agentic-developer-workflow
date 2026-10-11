@@ -72,16 +72,16 @@ Three rules follow from this and shape every phase:
 | Role | Implemented by | Model / tool | May write? |
 |---|---|---|---|
 | Orchestrator (loops, limits, git, commits, CI polling, triage) | `adw/phases.py`, `adw/cli.py`, `adw/triage.py` | deterministic Python | everything it needs |
-| Spec author A | `spec_agent` | Opus 4.8 (`claude-opus-4-8`) | `.adw/spec.md` only |
-| Spec/plan author B (second opinion) | Codex CLI, `codex exec --sandbox read-only` | Codex | nothing — returns text |
-| Spec synthesis | `spec_synthesis` | Fable 5 (`claude-fable-5`) | `.adw/spec.md`, `.adw/spec-summary.md` |
-| Plan author A | `plan_agent` | Opus 4.8 | `.adw/plan.md`, `.adw/contract.yaml` |
-| Plan synthesis | `plan_synthesis` | Fable 5 | plan, contract, `.adw/plan-summary.md` |
-| Spec/plan/code reviewer | Codex CLI (read-only) | Codex | nothing |
-| Builder | `build_agent` | Opus 4.8 | its own lane worktree (+ `Bash`) |
-| E2E triage | `e2e_triage` | Sonnet 5 (`claude-sonnet-5`) | nothing (read-only) |
-| Final reviewer | `final_reviewer` | Fable 5 | nothing (read-only) |
-| CI log analyst | `log_analyst` | Sonnet 5 | nothing (read-only) |
+| Spec author A | `spec_agent` | Opus 5.5 (`claude-opus-5-5`) | `.adw/spec.md` only |
+| Spec/plan author B (second opinion) | Codex CLI, `codex exec -m gpt-6-astra --sandbox read-only` | GPT-6-Astra (`gpt-6-astra`) | nothing — returns text |
+| Spec synthesis | `spec_synthesis` | Fable 5.1 (`claude-fable-5-1`) | `.adw/spec.md`, `.adw/spec-summary.md` |
+| Plan author A | `plan_agent` | Opus 5.5 | `.adw/plan.md`, `.adw/contract.yaml` |
+| Plan synthesis | `plan_synthesis` | Fable 5.1 | plan, contract, `.adw/plan-summary.md` |
+| Spec/plan/code reviewer | Codex CLI (read-only) | GPT-6-Astra | nothing |
+| Builder | `build_agent` | Opus 5.5 | its own lane worktree (+ `Bash`) |
+| E2E triage | `e2e_triage` | Sonnet 5.5 (`claude-sonnet-5-5`) | nothing (read-only) |
+| Final reviewer | `final_reviewer` | Fable 5.1 | nothing (read-only) |
+| CI log analyst | `log_analyst` | Sonnet 5.5 | nothing (read-only) |
 | Gates | `adw/gates.py` | your lint/test/E2E commands | — |
 
 All Claude agents run through the **Claude Code CLI** (spawned headless by the
@@ -160,7 +160,7 @@ that is what makes `resume` trivial (§15).
 | | |
 |---|---|
 | **Input** | Issue text (written as `.adw/issue.md`, regenerated from the state) |
-| **Actors** | `spec_agent` (Opus 4.8) and Codex as parallel authors · `spec_synthesis` (Fable 5) · Codex reviewer |
+| **Actors** | `spec_agent` (Opus 5.5) and Codex as parallel authors · `spec_synthesis` (Fable 5.1) · Codex reviewer |
 | **Output** | `.adw/runs/<id>/spec.md`, `spec-summary.md`, `drafts/spec.claude.md`, `drafts/spec.codex.md` |
 | **Loop** | Authoring review loop, max **5 rounds** |
 
@@ -183,7 +183,7 @@ on resume.
 
 ### Step 2 — Synthesis + Codex review loop
 
-`spec_synthesis` (Fable 5) reads the issue and both drafts, writes the
+`spec_synthesis` (Fable 5.1) reads the issue and both drafts, writes the
 **best-of merge** to `.adw/spec.md`, and writes `.adw/spec-summary.md` — the
 document the human reads at the gate (decisions, scope, provenance: which draft
 contributed what, where the authors disagreed).
@@ -215,7 +215,7 @@ folder at once. With `--gates spec|both` the run pauses in
 | | |
 |---|---|
 | **Input** | approved `spec.md` (+ `spec-summary.md`), issue, active lanes |
-| **Actors** | `plan_agent` (Opus 4.8) and Codex as parallel authors · `plan_synthesis` (Fable 5) · Codex reviewer |
+| **Actors** | `plan_agent` (Opus 5.5) and Codex as parallel authors · `plan_synthesis` (Fable 5.1) · Codex reviewer |
 | **Output** | `plan.md`, `contract.yaml`, `plan-summary.md`, `drafts/plan.*.md`, `drafts/contract.*.yaml` |
 | **Loop** | Authoring review loop, max **5 rounds** (same mechanics as phase 1) |
 
@@ -280,7 +280,7 @@ only hold when the plan gate is active (`--gates plan` or `both`); the modes
 | | |
 |---|---|
 | **Input** | archived spec/plan/contract; lane config (gates) |
-| **Actors** | `build_agent` (Opus 4.8) per lane · gates (deterministic) · orchestrator (git, commits) |
+| **Actors** | `build_agent` (Opus 5.5) per lane · gates (deterministic) · orchestrator (git, commits) |
 | **Output** | lane branch `adw/<run_id>/<lane>` with orchestrator commits; snapshot refs |
 | **Loop** | gate loop, max **10 iterations** per task; circuit breaker |
 
@@ -346,7 +346,7 @@ When all lanes are complete: optional `before_integration` breakpoint, then
 | | |
 |---|---|
 | **Input** | all green lane branches |
-| **Actors** | orchestrator (merge) · E2E gate · `e2e_triage` (Sonnet 5) |
+| **Actors** | orchestrator (merge) · E2E gate · `e2e_triage` (Sonnet 5.5) |
 | **Output** | branch `adw/<run_id>/integration` |
 | **Loop** | max **10 rounds**, run-wide; circuit breaker |
 
@@ -398,7 +398,7 @@ an unreadable review is an escalation, never a silent "ok".
 | | |
 |---|---|
 | **Input** | the same worktree as phase 5, `spec.md`, `contract.yaml` |
-| **Actors** | `final_reviewer` (Fable 5, read-only) · `adw/triage.py` |
+| **Actors** | `final_reviewer` (Fable 5.1, read-only) · `adw/triage.py` |
 | **Loop** | max **3 fix cycles per lane**; circuit breaker |
 
 Codex looked at the **diff**; the final reviewer looks at the **result against
@@ -425,7 +425,7 @@ Then: optional `before_push` breakpoint, then `ci`.
 | | |
 |---|---|
 | **Input** | lane branch (single) or integration branch (parallel, after a fresh green E2E) |
-| **Actors** | orchestrator (push, polling) · `log_analyst` (Sonnet 5) |
+| **Actors** | orchestrator (push, polling) · `log_analyst` (Sonnet 5.5) |
 | **Loop** | **1 CI re-entry**, then a human |
 
 ![Phase 7: push, SHA-bound polling and the single CI re-entry](diagrams/workflow/ci.svg)

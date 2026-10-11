@@ -64,6 +64,14 @@ def test_codex_is_invoked_read_only_in_cwd(captured_run, tmp_path):
     assert result.verdict == "ok"
 
 
+def test_codex_pins_the_frontier_model(captured_run, tmp_path):
+    # Isolated CODEX_HOME carries no config.toml — without -m codex would fall back
+    # to its built-in default instead of the top GPT model.
+    CodexRunner().review("code", ["diff gegen staging"], cwd=tmp_path)
+    argv = captured_run["argv"]
+    assert "-m" in argv and argv[argv.index("-m") + 1] == "gpt-6-astra"
+
+
 def test_prompt_contains_schema_and_content(captured_run, tmp_path):
     CodexRunner().review("spec", [".adw/spec.md"], cwd=tmp_path)
     prompt = captured_run["argv"][-1]

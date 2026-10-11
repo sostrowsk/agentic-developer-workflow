@@ -13,6 +13,13 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.28.0] — 2026-10-11
+
+### Geändert
+- **Agents und Codex laufen jetzt auf den neuesten Modellen.** Die Opus-Agents (Entwürfe für Spec und Plan, Build) wechseln von Opus 4.8 auf **Opus 5.5** (`claude-opus-5-5`). Die Fable-Agents (Synthese von Spec und Plan, finaler Review) wechseln von Fable 5 auf **Fable 5.1** (`claude-fable-5-1`). Die Sonnet-Agents (`e2e_triage`, `log_analyst`) wechseln von Sonnet 5 auf **Sonnet 5.5** (`claude-sonnet-5-5`). Alle drei sind mit einem echten Aufruf über die Claude-Code-CLI geprüft.
+- **Codex ist jetzt auf `gpt-6-astra` gepinnt**, das Spitzenmodell der codex-CLI, übergeben als `-m`. Bisher hat ADW gar kein Modell übergeben. Weil ADW codex mit einem isolierten `CODEX_HOME` ohne `config.toml` startet, lief codex dadurch unbemerkt auf seinem eingebauten Default. Ein Regressionstest prüft den Aufruf.
+- **Doku und Diagramme verwenden die neuen Modellnamen** (EN und DE). Die Spec nennt Fable nicht mehr das „günstigere“ Modell; zu aktuellen Preisen ist Fable das teurere, deshalb bleibt es der Synthese und dem finalen Review vorbehalten.
+
 ## [0.27.0] — 2026-10-11
 
 ### Geändert
@@ -1017,6 +1024,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.28.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.2...v0.27.0
 [0.26.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.1...v0.26.2
 [0.26.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.0...v0.26.1

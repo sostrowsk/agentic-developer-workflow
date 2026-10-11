@@ -65,12 +65,12 @@ Who does what:
 
 | Role | Model / tool | Writes? |
 |---|---|---|
-| Spec agent, plan agent (draft authors) | Opus 4.8 (`claude-opus-4-8`) | yes — only their artifact |
-| Second draft author + all Codex reviews | Codex CLI (`codex exec --sandbox read-only`) | no (returns text) |
-| Spec synthesis, plan synthesis | Fable 5 (`claude-fable-5`) | yes — artifact + summary |
-| Build agent (one per lane) | Opus 4.8 | yes — its lane worktree only |
-| E2E triage, CI log analyst | Sonnet 5 (`claude-sonnet-5`) | no (read-only) |
-| Final reviewer | Fable 5 | no (strictly read-only) |
+| Spec agent, plan agent (draft authors) | Opus 5.5 (`claude-opus-5-5`) | yes — only their artifact |
+| Second draft author + all Codex reviews | Codex CLI (`codex exec -m gpt-6-astra --sandbox read-only`) | no (returns text) |
+| Spec synthesis, plan synthesis | Fable 5.1 (`claude-fable-5-1`) | yes — artifact + summary |
+| Build agent (one per lane) | Opus 5.5 | yes — its lane worktree only |
+| E2E triage, CI log analyst | Sonnet 5.5 (`claude-sonnet-5-5`) | no (read-only) |
+| Final reviewer | Fable 5.1 | no (strictly read-only) |
 | Gates, merges, commits, push, CI polling | the orchestrator (Python) | — |
 
 How the phases work in detail — the loops, the RED stage, triage, the review
@@ -90,7 +90,7 @@ round policy — is the subject of [ADW-WORKFLOW.md](ADW-WORKFLOW.md).
 | **Claude Code CLI, logged in** | every Claude agent runs through it | `~/.claude/.credentials.json` exists (or the macOS keychain entry) |
 | **Codex CLI, logged in** | second author and every Codex review | `~/.codex/auth.json` exists (or `$CODEX_HOME/auth.json`) |
 | `glab` (GitLab) **or** `gh` (GitHub), authenticated | fetching issues, CI polling | `glab auth status` / `gh auth status` |
-| A plan that includes Fable 5, Opus 4.8 and Sonnet 5 | the agent registry uses all three | in practice: a Max plan |
+| A plan that includes Fable 5.1, Opus 5.5 and Sonnet 5.5 | the agent registry uses all three | in practice: a Max plan |
 
 Installation:
 
@@ -724,8 +724,8 @@ Intended. Use an SSH tunnel (`ssh -L 8765:127.0.0.1:8765 host`) or, knowingly,
 Only state-derived information is available.
 
 **What does a run cost?**
-Dry run: nothing. Real run: plan quota only — Fable 5 for synthesis and final
-review, Opus 4.8 for authoring drafts and building, Sonnet 5 for triage/log
+Dry run: nothing. Real run: plan quota only — Fable 5.1 for synthesis and final
+review, Opus 5.5 for authoring drafts and building, Sonnet 5.5 for triage/log
 analysis, Codex on its own subscription. The limits cap the worst case.
 
 ---
@@ -739,7 +739,7 @@ analysis, Codex on its own subscription. The limits cap the worst case.
 | **Lane** | A workstream (`backend`/`frontend`) with its own worktree, branch, agent session and ports. |
 | **Gate** | A configured check command with a hard timeout. All green = condition for every commit. |
 | **RED stage** | Test-only pass + proof that `tdd: true` gates fail, before implementation. |
-| **Draft / synthesis** | Two independent drafts (Claude + Codex) merged by Fable 5 into one best-of artifact plus a summary. |
+| **Draft / synthesis** | Two independent drafts (Claude + Codex) merged by Fable 5.1 into one best-of artifact plus a summary. |
 | **Contract** | `.adw/contract.yaml` — the agreed interface both lanes build against. |
 | **Finding** | Structured review result: severity P1–P3, lane, file, problem, fix plan, optional category. |
 | **`scope_gap`** | "Missing, but never planned" — becomes a follow-up, triggers no rework. |

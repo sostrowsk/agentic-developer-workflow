@@ -19,9 +19,9 @@ from claude_agent_sdk import (
 from adw.env import safe_env
 from adw.events import NoOpEmitter, SpanHandle
 
-FABLE = "claude-fable-5"
-OPUS = "claude-opus-4-8"
-SONNET = "claude-sonnet-5"
+FABLE = "claude-fable-5-1"
+OPUS = "claude-opus-5-5"
+SONNET = "claude-sonnet-5-5"
 
 _IS_MACOS = sys.platform == "darwin"
 

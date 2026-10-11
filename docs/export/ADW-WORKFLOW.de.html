@@ -626,61 +626,62 @@ Eskalations-Report, auf dessen Basis ein Mensch handeln kann.</li>
 <tr class="even">
 <td>Spec-Autor A</td>
 <td><code>spec_agent</code></td>
-<td>Opus 4.8 (<code>claude-opus-4-8</code>)</td>
+<td>Opus 5.5 (<code>claude-opus-5-5</code>)</td>
 <td>nur <code>.adw/spec.md</code></td>
 </tr>
 <tr class="odd">
 <td>Spec-/Plan-Autor B (Zweitmeinung)</td>
-<td>Codex-CLI, <code>codex exec --sandbox read-only</code></td>
-<td>Codex</td>
+<td>Codex-CLI,
+<code>codex exec -m gpt-6-astra --sandbox read-only</code></td>
+<td>GPT-6-Astra (<code>gpt-6-astra</code>)</td>
 <td>nichts — liefert Text zurück</td>
 </tr>
 <tr class="even">
 <td>Spec-Synthese</td>
 <td><code>spec_synthesis</code></td>
-<td>Fable 5 (<code>claude-fable-5</code>)</td>
+<td>Fable 5.1 (<code>claude-fable-5-1</code>)</td>
 <td><code>.adw/spec.md</code>, <code>.adw/spec-summary.md</code></td>
 </tr>
 <tr class="odd">
 <td>Plan-Autor A</td>
 <td><code>plan_agent</code></td>
-<td>Opus 4.8</td>
+<td>Opus 5.5</td>
 <td><code>.adw/plan.md</code>, <code>.adw/contract.yaml</code></td>
 </tr>
 <tr class="even">
 <td>Plan-Synthese</td>
 <td><code>plan_synthesis</code></td>
-<td>Fable 5</td>
+<td>Fable 5.1</td>
 <td>Plan, Kontrakt, <code>.adw/plan-summary.md</code></td>
 </tr>
 <tr class="odd">
 <td>Spec-/Plan-/Code-Reviewer</td>
 <td>Codex-CLI (read-only)</td>
-<td>Codex</td>
+<td>GPT-6-Astra</td>
 <td>nichts</td>
 </tr>
 <tr class="even">
 <td>Builder</td>
 <td><code>build_agent</code></td>
-<td>Opus 4.8</td>
+<td>Opus 5.5</td>
 <td>sein eigener Lane-Worktree (+ <code>Bash</code>)</td>
 </tr>
 <tr class="odd">
 <td>E2E-Triage</td>
 <td><code>e2e_triage</code></td>
-<td>Sonnet 5 (<code>claude-sonnet-5</code>)</td>
+<td>Sonnet 5.5 (<code>claude-sonnet-5-5</code>)</td>
 <td>nichts (read-only)</td>
 </tr>
 <tr class="even">
 <td>Finaler Reviewer</td>
 <td><code>final_reviewer</code></td>
-<td>Fable 5</td>
+<td>Fable 5.1</td>
 <td>nichts (read-only)</td>
 </tr>
 <tr class="odd">
 <td>CI-Log-Analyst</td>
 <td><code>log_analyst</code></td>
-<td>Sonnet 5</td>
+<td>Sonnet 5.5</td>
 <td>nichts (read-only)</td>
 </tr>
 <tr class="even">
@@ -728,12 +729,12 @@ Tokens, keine Secrets).</p>
 <g data-step="14"><path d="M872 290 L872 319" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/><polygon points="872,330 866.5,319 877.5,319" fill="#b91c1c"/></g>
 <g data-step="13"><path class="flow" d="M933 290 L933 319" fill="none" stroke="#475569" stroke-width="2"/><polygon points="933,330 927.5,319 938.5,319" fill="#475569"/></g>
 <g data-step="1" data-info="Die Eingabe: Issue-Text aus --issue, ein GitLab-Issue (glab) oder ein GitHub-Issue (gh). Genau eine Quelle ist erlaubt."><rect x="10" y="197" width="72" height="60" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="46" y="232.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="46" dy="0">Issue</tspan></text></g>
-<g data-step="2" data-info="Phase 1: Opus 4.8 und Codex entwerfen die Spec parallel, Fable 5 führt zusammen, Codex reviewt in bis zu 5 Runden."><rect x="96" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="153" y="207.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="153" dy="0">1 Spec</tspan></text><text x="153" y="224.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="153" dy="0">Dual-Draft</tspan></text><text x="153" y="241.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="153" dy="0">+ Synthese</tspan></text><text x="153" y="258.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="153" dy="0">+ Codex-Review</tspan></text></g>
+<g data-step="2" data-info="Phase 1: Opus 5.5 und Codex entwerfen die Spec parallel, Fable 5.1 führt zusammen, Codex reviewt in bis zu 5 Runden."><rect x="96" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="153" y="207.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="153" dy="0">1 Spec</tspan></text><text x="153" y="224.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="153" dy="0">Dual-Draft</tspan></text><text x="153" y="241.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="153" dy="0">+ Synthese</tspan></text><text x="153" y="258.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="153" dy="0">+ Codex-Review</tspan></text></g>
 <g data-step="4" data-info="Phase 2: dasselbe Muster für plan.md und contract.yaml; am Ende werden alle Artefakte in den Run-Ordner archiviert."><rect x="224" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="281" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="281" dy="0">2 Plan +</tspan></text><text x="281" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="281" dy="0">Kontrakt</tspan></text><text x="281" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="281" dy="0">Plan + Kontrakt</tspan></text><text x="281" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="281" dy="0">Dual-Draft</tspan></text><text x="281" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="281" dy="0">+ Codex-Review</tspan></text></g>
 <g data-step="6" data-info="Phase 3: ein Build-Agent je Lane im eigenen Worktree; optional RED-Beweis, dann der Gate-Loop. Nur der Orchestrator committet."><rect x="352" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="409" y="207.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="409" dy="0">3 Build</tspan></text><text x="409" y="224.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="409" dy="0">Lanes + RED</tspan></text><text x="409" y="241.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="409" dy="0">Gate-Loop</tspan></text><text x="409" y="258.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="409" dy="0">≤ 10 Iterationen</tspan></text></g>
 <g data-step="8" data-info="Phase 4 (nur Parallel-Modus): alle Lanes frisch von der Basis mergen, E2E-Gate laufen lassen, rote Tests an die Lanes zurückgeben."><rect x="480" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="537" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="537" dy="0">4 Integration</tspan></text><text x="537" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="537" dy="0">+ E2E</tspan></text><text x="537" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="537" dy="0">Merge + E2E</tspan></text><text x="537" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="537" dy="0">nur --parallel</tspan></text><text x="537" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="537" dy="0">≤ 10 Runden</tspan></text></g>
 <g data-step="9" data-info="Phase 5: Codex reviewt den Diff read-only; Findings über der Schwelle der Runde gehen als Fix-Aufträge zurück an die Lanes."><rect x="608" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="665" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="665" dy="0">5 Codex-</tspan></text><text x="665" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="665" dy="0">Review</tspan></text><text x="665" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="665" dy="0">Diff-Review</tspan></text><text x="665" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="665" dy="0">Schwelle sinkt</tspan></text><text x="665" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="665" dy="0">≤ 5 Runden</tspan></text></g>
-<g data-step="10" data-info="Phase 6: Fable 5 prüft das Ergebnis gegen die Akzeptanzkriterien; Scope-Lücken werden Follow-ups, alles andere ein Fix."><rect x="736" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="793" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="793" dy="0">6 Finaler</tspan></text><text x="793" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="793" dy="0">Review</tspan></text><text x="793" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="793" dy="0">vs. Spec + DoD</tspan></text><text x="793" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="793" dy="0">Triage per Code</tspan></text><text x="793" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="793" dy="0">≤ 3 Fix-Zyklen</tspan></text></g>
+<g data-step="10" data-info="Phase 6: Fable 5.1 prüft das Ergebnis gegen die Akzeptanzkriterien; Scope-Lücken werden Follow-ups, alles andere ein Fix."><rect x="736" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="793" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="793" dy="0">6 Finaler</tspan></text><text x="793" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="793" dy="0">Review</tspan></text><text x="793" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="793" dy="0">vs. Spec + DoD</tspan></text><text x="793" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="793" dy="0">Triage per Code</tspan></text><text x="793" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="793" dy="0">≤ 3 Fix-Zyklen</tspan></text></g>
 <g data-step="12" data-info="Phase 7: der Orchestrator pusht, pollt die Pipeline gebunden an den gepushten SHA und erlaubt genau einen CI-Fix-Re-Entry."><rect x="864" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="921" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="921" dy="0">7 Push</tspan></text><text x="921" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="921" dy="0">+ CI</tspan></text><text x="921" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="921" dy="0">Push, CI-Poll</tspan></text><text x="921" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="921" dy="0">SHA-gebunden</tspan></text><text x="921" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="921" dy="0">1 Re-Entry</tspan></text></g>
 <g data-step="3" data-info="Optionaler Halt nach der reviewten Spec. spec-summary.md + spec.md lesen, dann adw approve."><rect x="142.0" y="30" width="150" height="52" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="217" y="52.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="217" dy="0">Spec-Gate</tspan></text><text x="217" y="69.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="217" dy="0">--gates spec | both</tspan></text></g>
 <g data-step="5" data-info="Der Standard-Halt: plan-summary.md, plan.md und contract.yaml lesen, bevor Code gebaut wird, dann adw approve."><rect x="265.0" y="96" width="160" height="52" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="345" y="118.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="345" dy="0">Plan-Gate (Default)</tspan></text><text x="345" y="135.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="345" dy="0">--gates plan | both</tspan></text></g>
@@ -869,8 +870,8 @@ State regeneriert)</td>
 </tr>
 <tr class="even">
 <td><strong>Akteure</strong></td>
-<td><code>spec_agent</code> (Opus 4.8) und Codex als parallele Autoren ·
-<code>spec_synthesis</code> (Fable 5) · Codex-Reviewer</td>
+<td><code>spec_agent</code> (Opus 5.5) und Codex als parallele Autoren ·
+<code>spec_synthesis</code> (Fable 5.1) · Codex-Reviewer</td>
 </tr>
 <tr class="odd">
 <td><strong>Output</strong></td>
@@ -906,8 +907,8 @@ loggt eine Warnung, und die Synthese arbeitet einquellig.</li>
 Entwurf wird beim Resume nie neu erzeugt.</p>
 <h3 id="schritt-2--synthese--codex-review-loop">Schritt 2 — Synthese +
 Codex-Review-Loop</h3>
-<p><code>spec_synthesis</code> (Fable 5) liest Issue und beide Entwürfe,
-schreibt den <strong>Best-of-Merge</strong> nach
+<p><code>spec_synthesis</code> (Fable 5.1) liest Issue und beide
+Entwürfe, schreibt den <strong>Best-of-Merge</strong> nach
 <code>.adw/spec.md</code> und dazu <code>.adw/spec-summary.md</code> —
 das Dokument, das der Mensch am Gate liest (Entscheidungen, Scope,
 Provenienz: welcher Entwurf was beigesteuert hat, wo die Autoren uneins
@@ -937,10 +938,10 @@ waren).</p>
 <g data-step="9"><path d="M470 450 L411 450" fill="none" stroke="#475569" stroke-width="2"/><polygon points="400,450 411,444.5 411,455.5" fill="#475569"/><text x="435" y="442" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="435" dy="0">umsetzbar</tspan></text></g>
 <g data-step="9"><path class="flow" d="M300 410 L300 395 L455 395 L455 128 L459 128" fill="none" stroke="#475569" stroke-width="2"/><polygon points="470,128 459,133.5 459,122.5" fill="#475569"/><text x="310" y="387" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="310" dy="0">Runde n+1</tspan></text></g>
 <g data-step="1" data-info="Der Issue-Text ist Eingabe beider Autoren und des Reviewers."><rect x="20" y="60" width="140" height="70" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="90" y="91.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="90" dy="0">Issue</tspan></text><text x="90" y="108.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="90" dy="0">(issue.md)</tspan></text></g>
-<g data-step="2" data-info="Schreibt .adw/spec.md (bzw. Plan + Kontrakt); der Orchestrator kopiert nach drafts/ und eskaliert bei fehlend, leer oder veraltet."><rect x="200" y="20" width="220" height="60" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="310" y="38.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="310" dy="0">Claude-Draft</tspan></text><text x="310" y="55.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="310" dy="0">spec_agent / plan_agent</tspan></text><text x="310" y="72.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="310" dy="0">Opus 4.8</tspan></text></g>
-<g data-step="2" data-info="Die zweite Meinung: Codex läuft read-only, der Orchestrator schreibt den Draft nach drafts/*.codex.*."><rect x="200" y="100" width="220" height="60" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="310" y="126.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="310" dy="0">Codex-Draft</tspan></text><text x="310" y="143.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="310" dy="0">read-only, liefert Text</tspan></text></g>
+<g data-step="2" data-info="Schreibt .adw/spec.md (bzw. Plan + Kontrakt); der Orchestrator kopiert nach drafts/ und eskaliert bei fehlend, leer oder veraltet."><rect x="200" y="20" width="220" height="60" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="310" y="38.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="310" dy="0">Claude-Draft</tspan></text><text x="310" y="55.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="310" dy="0">spec_agent / plan_agent</tspan></text><text x="310" y="72.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="310" dy="0">Opus 5.5</tspan></text></g>
+<g data-step="2" data-info="Die zweite Meinung: Codex läuft read-only, der Orchestrator schreibt den Draft nach drafts/*.codex.*."><rect x="200" y="100" width="220" height="60" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="310" y="126.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="310" dy="0">Codex-Draft</tspan></text><text x="310" y="143.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="310" dy="0">GPT-6-Astra, read-only</tspan></text></g>
 <g data-step="2" data-info="Codex ist hier optional: bei Fehler degradiert ADW, statt zu eskalieren."><rect x="200" y="175" width="220" height="50" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="310" y="196.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="310" dy="0">Codex scheitert → *.codex.FAILED,</tspan></text><text x="310" y="213.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="310" dy="0">Synthese mit einer Quelle</tspan></text></g>
-<g data-step="3" data-info="Fable 5 liest Issue und beide Drafts, schreibt das zusammengeführte Artefakt und die *-summary.md mit Herkunft und Differenzen."><rect x="470" y="55" width="220" height="90" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="580" y="79.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">Synthese</tspan></text><text x="580" y="96.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">spec_synthesis / plan_synthesis</tspan></text><text x="580" y="113.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">Fable 5</tspan></text><text x="580" y="130.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">Best-of-Merge + Summary</tspan></text></g>
+<g data-step="3" data-info="Fable 5.1 liest Issue und beide Drafts, schreibt das zusammengeführte Artefakt und die *-summary.md mit Herkunft und Differenzen."><rect x="470" y="55" width="220" height="90" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="580" y="79.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">Synthese</tspan></text><text x="580" y="96.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">spec_synthesis / plan_synthesis</tspan></text><text x="580" y="113.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">Fable 5.1</tspan></text><text x="580" y="130.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">Best-of-Merge + Summary</tspan></text></g>
 <g data-step="4" data-info="Der Orchestrator prüft das Ergebnis selbst, statt dem Agenten zu glauben."><rect x="470" y="180" width="220" height="60" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="580" y="206.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">Pflichtdateien vorhanden</tspan></text><text x="580" y="223.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">&amp; nicht leer?</tspan></text></g>
 <g data-step="4" data-info="Ein Reparaturversuch in derselben Session, dann Eskalation."><rect x="740" y="180" width="240" height="60" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="860" y="206.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">nein → ein Reparatur-Lauf;</tspan></text><text x="860" y="223.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">fehlt weiter → ESKALATION</tspan></text></g>
 <g data-step="5" data-info="Codex bekommt das Issue bewusst zur Prüfung der Verhältnismäßigkeit; ab Runde 2 auch alle früheren Findings mit Disposition."><rect x="470" y="290" width="220" height="70" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="580" y="313.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">Codex-Review</tspan></text><text x="580" y="330.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">Issue + Artefakt</tspan></text><text x="580" y="347.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">Runde n von 5</tspan></text></g>
@@ -992,8 +993,8 @@ Issue, aktive Lanes</td>
 </tr>
 <tr class="even">
 <td><strong>Akteure</strong></td>
-<td><code>plan_agent</code> (Opus 4.8) und Codex als parallele Autoren ·
-<code>plan_synthesis</code> (Fable 5) · Codex-Reviewer</td>
+<td><code>plan_agent</code> (Opus 5.5) und Codex als parallele Autoren ·
+<code>plan_synthesis</code> (Fable 5.1) · Codex-Reviewer</td>
 </tr>
 <tr class="odd">
 <td><strong>Output</strong></td>
@@ -1125,7 +1126,7 @@ funktioniert.</em></p>
 </tr>
 <tr class="even">
 <td><strong>Akteure</strong></td>
-<td><code>build_agent</code> (Opus 4.8) je Lane · Gates
+<td><code>build_agent</code> (Opus 5.5) je Lane · Gates
 (deterministisch) · Orchestrator (git, Commits)</td>
 </tr>
 <tr class="odd">
@@ -1223,7 +1224,7 @@ löschen ist kein Weg zu Grün.</p>
 <g data-step="10" data-info="Nächste Iteration: zurück zum Limit-Check."><path class="flow" d="M70 588 L40 588 L40 43 L59 43" fill="none" stroke="#475569" stroke-width="2"/><polygon points="70,43 59,48.5 59,37.5" fill="#475569"/></g>
 <g data-step="1" data-info="10 Iterationen je Auftrag; ein neu dispatchter Fix-Auftrag bekommt frisches Budget."><rect x="70" y="20" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="47.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">Limit-Check: Iteration ≤ 10?</tspan></text></g>
 <g data-step="2" data-info="Vor dem teuren Schritt persistiert, damit ein Crash nichts verliert oder zurücksetzt."><rect x="70" y="82" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="101" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">Checkpoint (erwarteter HEAD, Zähler)</tspan></text><text x="240" y="118" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">Snapshot before_agent</tspan></text></g>
-<g data-step="3" data-info="Opus 4.8 arbeitet nur in seinem Lane-Worktree; danach Snapshot after_agent."><rect x="70" y="144" width="340" height="46" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="240" y="163.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">Build-Agent — dieselbe Session</tspan></text><text x="240" y="180.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">Auftrag: implementieren / Gate-Fehler fixen</tspan></text></g>
+<g data-step="3" data-info="Opus 5.5 arbeitet nur in seinem Lane-Worktree; danach Snapshot after_agent."><rect x="70" y="144" width="340" height="46" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="240" y="163.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">Build-Agent — dieselbe Session</tspan></text><text x="240" y="180.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">Auftrag: implementieren / Gate-Fehler fixen</tspan></text></g>
 <g data-step="4" data-info="Agents dürfen weder committen noch den Branch wechseln."><rect x="70" y="206" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="225.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">Guards: kein Agent-Commit,</tspan></text><text x="240" y="242.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">noch auf dem Lane-Branch</tspan></text></g>
 <g data-step="5" data-info="Die freigegebenen Artefakte sind für Agents unveränderlich."><rect x="70" y="268" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="287.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">Spec / Plan / Kontrakt</tspan></text><text x="240" y="304.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">+ config.yaml wiederherstellen</tspan></text></g>
 <g data-step="6" data-info="Ein untätiger Agent darf nicht als Erfolg durchgehen."><rect x="70" y="330" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="357.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">1. Iteration: etwas geändert?</tspan></text></g>
@@ -1276,7 +1277,7 @@ Integration + E2E (nur im Parallel-Modus)</h2>
 <tr class="even">
 <td><strong>Akteure</strong></td>
 <td>Orchestrator (Merge) · E2E-Gate · <code>e2e_triage</code> (Sonnet
-5)</td>
+5.5)</td>
 </tr>
 <tr class="odd">
 <td><strong>Output</strong></td>
@@ -1311,7 +1312,7 @@ Integration + E2E (nur im Parallel-Modus)</h2>
 <g data-step="4" data-info="Gemergt und E2E-grün: weiter zum Code-Review."><rect x="720" y="90" width="260" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="850" y="121.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">grün → Phase 5</tspan></text><text x="850" y="138.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="850" dy="0">codex_review</tspan></text></g>
 <g data-step="5"><rect x="480" y="240" width="180" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="570" y="262.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="570" dy="0">Runde persistiert;</tspan></text><text x="570" y="279.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="570" dy="0">dieselbe Ausgabe</tspan></text><text x="570" y="296.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="570" dy="0">wie zuvor?</tspan></text></g>
 <g data-step="5"><rect x="720" y="240" width="260" height="70" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="850" y="271.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">identisch → ESKALATION</tspan></text><text x="850" y="288.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">(Circuit-Breaker)</tspan></text></g>
-<g data-step="6" data-info="Read-only; jeder Fehler wird ein Finding für frontend, backend oder unknown (= alle Lanes)."><rect x="230" y="240" width="200" height="70" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="330" y="263.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="330" dy="0">e2e_triage</tspan></text><text x="330" y="280.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="330" dy="0">Sonnet 5</tspan></text><text x="330" y="297.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="330" dy="0">ordnet Fehler Lanes zu</tspan></text></g>
+<g data-step="6" data-info="Read-only; jeder Fehler wird ein Finding für frontend, backend oder unknown (= alle Lanes)."><rect x="230" y="240" width="200" height="70" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="330" y="263.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="330" dy="0">e2e_triage</tspan></text><text x="330" y="280.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="330" dy="0">Sonnet 5.5</tspan></text><text x="330" y="297.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="330" dy="0">ordnet Fehler Lanes zu</tspan></text></g>
 <g data-step="7" data-info="Die Lanes fahren erneut ihren Gate-Loop und bekommen einen Orchestrator-Commit; dann mergt die nächste Runde neu."><rect x="20" y="240" width="160" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="100" y="271.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="100" dy="0">Fixes dispatchen</tspan></text><text x="100" y="288.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="100" dy="0">an Lanes (§13.3)</tspan></text></g>
 <text x="20" y="350" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="20" dy="0">Max. 10 Runden für den ganzen Lauf — Review- und CI-Fixes im Parallel-Modus laufen erneut durch Merge + E2E und teilen dieses Budget.</tspan></text>
 </svg></div>
@@ -1410,7 +1411,7 @@ der Spec?</em></p>
 </tr>
 <tr class="even">
 <td><strong>Akteure</strong></td>
-<td><code>final_reviewer</code> (Fable 5, read-only) ·
+<td><code>final_reviewer</code> (Fable 5.1, read-only) ·
 <code>adw/triage.py</code></td>
 </tr>
 <tr class="odd">
@@ -1462,7 +1463,7 @@ frisch grünem E2E)</td>
 <tr class="even">
 <td><strong>Akteure</strong></td>
 <td>Orchestrator (Push, Polling) · <code>log_analyst</code> (Sonnet
-5)</td>
+5.5)</td>
 </tr>
 <tr class="odd">
 <td><strong>Loop</strong></td>
@@ -1495,7 +1496,7 @@ frisch grünem E2E)</td>
 <g data-step="5" data-info="Ein Analyst ohne Logs würde nur halluzinieren."><rect x="650" y="170" width="170" height="70" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="735" y="201.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="735" dy="0">nein → ESKALATION</tspan></text><text x="735" y="218.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="735" dy="0">(keine Evidenz)</tspan></text></g>
 <g data-step="6"><rect x="440" y="290" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="525" y="321.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="525" dy="0">Re-Entry schon</tspan></text><text x="525" y="338.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="525" dy="0">verbraucht?</tspan></text></g>
 <g data-step="6" data-info="Genau ein automatischer CI-Re-Entry pro Lauf; danach übernimmt ein Mensch."><rect x="650" y="290" width="170" height="70" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="735" y="312.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="735" dy="0">wieder rot →</tspan></text><text x="735" y="329.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="735" dy="0">ESKALATION</tspan></text><text x="735" y="346.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="735" dy="0">mit Log-Auszug</tspan></text></g>
-<g data-step="7" data-info="Read-only-Analyse der Job-Logs."><rect x="230" y="290" width="170" height="70" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="315" y="313.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">log_analyst</tspan></text><text x="315" y="330.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">Sonnet 5</tspan></text><text x="315" y="347.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">Logs → Lane-Findings</tspan></text></g>
+<g data-step="7" data-info="Read-only-Analyse der Job-Logs."><rect x="230" y="290" width="170" height="70" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="315" y="313.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">log_analyst</tspan></text><text x="315" y="330.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">Sonnet 5.5</tspan></text><text x="315" y="347.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">Logs → Lane-Findings</tspan></text></g>
 <g data-step="8" data-info="Zähler und Fix-Aufträge in einem atomaren Save; dann erneut pushen und pollen."><rect x="230" y="170" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="315" y="192.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">an Lanes dispatchen</tspan></text><text x="315" y="209.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">Re-Entry-Zähler +1</tspan></text><text x="315" y="226.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">(parallel: Merge/E2E)</tspan></text></g>
 </svg></div>
 <figcaption aria-hidden="true">Phase 7: Push, SHA-gebundenes Polling und

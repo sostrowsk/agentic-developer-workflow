@@ -430,14 +430,14 @@ def test_all_read_rules_are_workspace_scoped():
 
 def test_registry_models_match_spec():
     # Entwurfs-Autoren laufen auf Opus, die Best-of-Synthese auf Fable.
-    assert REGISTRY["spec_agent"].model == "claude-opus-4-8"
-    assert REGISTRY["plan_agent"].model == "claude-opus-4-8"
-    assert REGISTRY["spec_synthesis"].model == "claude-fable-5"
-    assert REGISTRY["plan_synthesis"].model == "claude-fable-5"
-    assert REGISTRY["final_reviewer"].model == "claude-fable-5"
-    assert REGISTRY["build_agent"].model == "claude-opus-4-8"
-    assert REGISTRY["e2e_triage"].model == "claude-sonnet-5"
-    assert REGISTRY["log_analyst"].model == "claude-sonnet-5"
+    assert REGISTRY["spec_agent"].model == "claude-opus-5-5"
+    assert REGISTRY["plan_agent"].model == "claude-opus-5-5"
+    assert REGISTRY["spec_synthesis"].model == "claude-fable-5-1"
+    assert REGISTRY["plan_synthesis"].model == "claude-fable-5-1"
+    assert REGISTRY["final_reviewer"].model == "claude-fable-5-1"
+    assert REGISTRY["build_agent"].model == "claude-opus-5-5"
+    assert REGISTRY["e2e_triage"].model == "claude-sonnet-5-5"
+    assert REGISTRY["log_analyst"].model == "claude-sonnet-5-5"
 
 
 def test_synthesis_agents_may_write_exactly_artifact_and_summary():

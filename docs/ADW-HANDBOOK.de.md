@@ -67,12 +67,12 @@ Wer macht was:
 
 | Rolle | Modell / Werkzeug | Schreibt? |
 |---|---|---|
-| Spec-Agent, Plan-Agent (Entwurfsautoren) | Opus 4.8 (`claude-opus-4-8`) | ja — nur ihr Artefakt |
-| Zweiter Entwurfsautor + alle Codex-Reviews | Codex CLI (`codex exec --sandbox read-only`) | nein (liefert Text) |
-| Spec-Synthese, Plan-Synthese | Fable 5 (`claude-fable-5`) | ja — Artefakt + Zusammenfassung |
-| Build-Agent (einer pro Lane) | Opus 4.8 | ja — nur sein Lane-Worktree |
-| E2E-Triage, CI-Log-Analyst | Sonnet 5 (`claude-sonnet-5`) | nein (read-only) |
-| Finaler Reviewer | Fable 5 | nein (strikt read-only) |
+| Spec-Agent, Plan-Agent (Entwurfsautoren) | Opus 5.5 (`claude-opus-5-5`) | ja — nur ihr Artefakt |
+| Zweiter Entwurfsautor + alle Codex-Reviews | Codex CLI (`codex exec -m gpt-6-astra --sandbox read-only`) | nein (liefert Text) |
+| Spec-Synthese, Plan-Synthese | Fable 5.1 (`claude-fable-5-1`) | ja — Artefakt + Zusammenfassung |
+| Build-Agent (einer pro Lane) | Opus 5.5 | ja — nur sein Lane-Worktree |
+| E2E-Triage, CI-Log-Analyst | Sonnet 5.5 (`claude-sonnet-5-5`) | nein (read-only) |
+| Finaler Reviewer | Fable 5.1 | nein (strikt read-only) |
 | Gates, Merges, Commits, Push, CI-Polling | der Orchestrator (Python) | — |
 
 Wie die Phasen im Detail funktionieren — die Schleifen, die RED-Stufe, die
@@ -92,7 +92,7 @@ Triage, die Review-Runden-Policy — beschreibt [ADW-WORKFLOW.de.md](ADW-WORKFLO
 | **Claude Code CLI, angemeldet** | jeder Claude-Agent läuft darüber | `~/.claude/.credentials.json` existiert (oder Eintrag im macOS-Schlüsselbund) |
 | **Codex CLI, angemeldet** | zweiter Autor und jedes Codex-Review | `~/.codex/auth.json` existiert (oder `$CODEX_HOME/auth.json`) |
 | `glab` (GitLab) **oder** `gh` (GitHub), authentifiziert | Issues holen, CI pollen | `glab auth status` / `gh auth status` |
-| Ein Plan, der Fable 5, Opus 4.8 und Sonnet 5 enthält | die Agent-Registry nutzt alle drei | in der Praxis: Max-Plan |
+| Ein Plan, der Fable 5.1, Opus 5.5 und Sonnet 5.5 enthält | die Agent-Registry nutzt alle drei | in der Praxis: Max-Plan |
 
 Installation:
 
@@ -749,8 +749,8 @@ Für diesen Lauf war `trace.enabled: false` gesetzt, oder der Lauf ist älter al
 das Ereignis-Log. Es gibt dann nur aus dem State abgeleitete Informationen.
 
 **Was kostet ein Lauf?**
-Dry Run: nichts. Echter Lauf: nur Plan-Kontingent — Fable 5 für Synthese und
-finales Review, Opus 4.8 für Authoring-Entwürfe und Build, Sonnet 5 für
+Dry Run: nichts. Echter Lauf: nur Plan-Kontingent — Fable 5.1 für Synthese und
+finales Review, Opus 5.5 für Authoring-Entwürfe und Build, Sonnet 5.5 für
 Triage/Log-Analyse, Codex über sein eigenes Abo. Die Limits deckeln den
 schlimmsten Fall.
 
@@ -765,7 +765,7 @@ schlimmsten Fall.
 | **Lane** | Ein Workstream (`backend`/`frontend`) mit eigenem Worktree, Branch, Agent-Session und Ports. |
 | **Gate** | Ein konfiguriertes Prüfkommando mit hartem Timeout. Alle grün = Bedingung für jeden Commit. |
 | **RED-Stufe** | Reiner Test-Lauf + Beweis, dass `tdd: true`-Gates fehlschlagen, vor der Implementierung. |
-| **Entwurf / Synthese** | Zwei unabhängige Entwürfe (Claude + Codex), von Fable 5 zu einem Best-of-Artefakt plus Zusammenfassung zusammengeführt. |
+| **Entwurf / Synthese** | Zwei unabhängige Entwürfe (Claude + Codex), von Fable 5.1 zu einem Best-of-Artefakt plus Zusammenfassung zusammengeführt. |
 | **Kontrakt** | `.adw/contract.yaml` — die vereinbarte Schnittstelle, gegen die beide Lanes bauen. |
 | **Finding** | Strukturiertes Review-Ergebnis: Severity P1–P3, Lane, Datei, Problem, Fix-Plan, optional Kategorie. |
 | **`scope_gap`** | „Fehlt, war aber nie geplant" — wird zum Follow-up, löst keine Nacharbeit aus. |

@@ -107,6 +107,10 @@ _AUTHOR_INSTRUCTIONS: dict[AuthorKind, str] = {
 }
 
 
+# The top GPT model offered by the codex CLI (frontier tier, not the workhorse).
+CODEX_MODEL = "gpt-6-astra"
+
+
 class CodexError(Exception):
     """codex exec failed (exit code, timeout, not installed)."""
 
@@ -366,6 +370,10 @@ class CodexRunner:
         return [
             "codex",
             "exec",
+            # Explizit pinnen: das isolierte CODEX_HOME hat keine config.toml,
+            # ohne -m fiele codex auf seinen eingebauten Default zurück.
+            "-m",
+            CODEX_MODEL,
             "--sandbox",
             "read-only",
             # User-konfigurierte MCP-Server abschalten: --sandbox read-only

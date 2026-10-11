@@ -73,16 +73,16 @@ Daraus folgen drei Regeln, die jede Phase prägen:
 | Rolle | Umgesetzt durch | Modell / Werkzeug | Darf schreiben? |
 |---|---|---|---|
 | Orchestrator (Loops, Limits, git, Commits, CI-Polling, Triage) | `adw/phases.py`, `adw/cli.py`, `adw/triage.py` | deterministisches Python | alles, was er braucht |
-| Spec-Autor A | `spec_agent` | Opus 4.8 (`claude-opus-4-8`) | nur `.adw/spec.md` |
-| Spec-/Plan-Autor B (Zweitmeinung) | Codex-CLI, `codex exec --sandbox read-only` | Codex | nichts — liefert Text zurück |
-| Spec-Synthese | `spec_synthesis` | Fable 5 (`claude-fable-5`) | `.adw/spec.md`, `.adw/spec-summary.md` |
-| Plan-Autor A | `plan_agent` | Opus 4.8 | `.adw/plan.md`, `.adw/contract.yaml` |
-| Plan-Synthese | `plan_synthesis` | Fable 5 | Plan, Kontrakt, `.adw/plan-summary.md` |
-| Spec-/Plan-/Code-Reviewer | Codex-CLI (read-only) | Codex | nichts |
-| Builder | `build_agent` | Opus 4.8 | sein eigener Lane-Worktree (+ `Bash`) |
-| E2E-Triage | `e2e_triage` | Sonnet 5 (`claude-sonnet-5`) | nichts (read-only) |
-| Finaler Reviewer | `final_reviewer` | Fable 5 | nichts (read-only) |
-| CI-Log-Analyst | `log_analyst` | Sonnet 5 | nichts (read-only) |
+| Spec-Autor A | `spec_agent` | Opus 5.5 (`claude-opus-5-5`) | nur `.adw/spec.md` |
+| Spec-/Plan-Autor B (Zweitmeinung) | Codex-CLI, `codex exec -m gpt-6-astra --sandbox read-only` | GPT-6-Astra (`gpt-6-astra`) | nichts — liefert Text zurück |
+| Spec-Synthese | `spec_synthesis` | Fable 5.1 (`claude-fable-5-1`) | `.adw/spec.md`, `.adw/spec-summary.md` |
+| Plan-Autor A | `plan_agent` | Opus 5.5 | `.adw/plan.md`, `.adw/contract.yaml` |
+| Plan-Synthese | `plan_synthesis` | Fable 5.1 | Plan, Kontrakt, `.adw/plan-summary.md` |
+| Spec-/Plan-/Code-Reviewer | Codex-CLI (read-only) | GPT-6-Astra | nichts |
+| Builder | `build_agent` | Opus 5.5 | sein eigener Lane-Worktree (+ `Bash`) |
+| E2E-Triage | `e2e_triage` | Sonnet 5.5 (`claude-sonnet-5-5`) | nichts (read-only) |
+| Finaler Reviewer | `final_reviewer` | Fable 5.1 | nichts (read-only) |
+| CI-Log-Analyst | `log_analyst` | Sonnet 5.5 | nichts (read-only) |
 | Gates | `adw/gates.py` | eure Lint-/Test-/E2E-Kommandos | — |
 
 Alle Claude-Agenten laufen über die **Claude-Code-CLI** (vom Agent SDK headless
@@ -164,7 +164,7 @@ genau das macht `resume` trivial (§15).
 | | |
 |---|---|
 | **Input** | Issue-Text (als `.adw/issue.md` geschrieben, aus dem State regeneriert) |
-| **Akteure** | `spec_agent` (Opus 4.8) und Codex als parallele Autoren · `spec_synthesis` (Fable 5) · Codex-Reviewer |
+| **Akteure** | `spec_agent` (Opus 5.5) und Codex als parallele Autoren · `spec_synthesis` (Fable 5.1) · Codex-Reviewer |
 | **Output** | `.adw/runs/<id>/spec.md`, `spec-summary.md`, `drafts/spec.claude.md`, `drafts/spec.codex.md` |
 | **Loop** | Authoring-Review-Loop, max. **5 Runden** |
 
@@ -188,7 +188,7 @@ Resume nie neu erzeugt.
 
 ### Schritt 2 — Synthese + Codex-Review-Loop
 
-`spec_synthesis` (Fable 5) liest Issue und beide Entwürfe, schreibt den
+`spec_synthesis` (Fable 5.1) liest Issue und beide Entwürfe, schreibt den
 **Best-of-Merge** nach `.adw/spec.md` und dazu `.adw/spec-summary.md` — das
 Dokument, das der Mensch am Gate liest (Entscheidungen, Scope, Provenienz: welcher
 Entwurf was beigesteuert hat, wo die Autoren uneins waren).
@@ -220,7 +220,7 @@ sonst geht es nach `plan`.
 | | |
 |---|---|
 | **Input** | approvte `spec.md` (+ `spec-summary.md`), Issue, aktive Lanes |
-| **Akteure** | `plan_agent` (Opus 4.8) und Codex als parallele Autoren · `plan_synthesis` (Fable 5) · Codex-Reviewer |
+| **Akteure** | `plan_agent` (Opus 5.5) und Codex als parallele Autoren · `plan_synthesis` (Fable 5.1) · Codex-Reviewer |
 | **Output** | `plan.md`, `contract.yaml`, `plan-summary.md`, `drafts/plan.*.md`, `drafts/contract.*.yaml` |
 | **Loop** | Authoring-Review-Loop, max. **5 Runden** (gleiche Mechanik wie Phase 1) |
 
@@ -285,7 +285,7 @@ halten nur, wenn das Plan-Gate aktiv ist (`--gates plan` oder `both`); die Modi
 | | |
 |---|---|
 | **Input** | archivierte Spec/Plan/Kontrakt; Lane-Config (Gates) |
-| **Akteure** | `build_agent` (Opus 4.8) je Lane · Gates (deterministisch) · Orchestrator (git, Commits) |
+| **Akteure** | `build_agent` (Opus 5.5) je Lane · Gates (deterministisch) · Orchestrator (git, Commits) |
 | **Output** | Lane-Branch `adw/<run_id>/<lane>` mit Orchestrator-Commits; Snapshot-Refs |
 | **Loop** | Gate-Loop, max. **10 Iterationen** je Task; Circuit-Breaker |
 
@@ -352,7 +352,7 @@ Sind alle Lanes fertig: optionaler Breakpoint `before_integration`, dann
 | | |
 |---|---|
 | **Input** | alle grünen Lane-Branches |
-| **Akteure** | Orchestrator (Merge) · E2E-Gate · `e2e_triage` (Sonnet 5) |
+| **Akteure** | Orchestrator (Merge) · E2E-Gate · `e2e_triage` (Sonnet 5.5) |
 | **Output** | Branch `adw/<run_id>/integration` |
 | **Loop** | max. **10 Runden**, laufweit; Circuit-Breaker |
 
@@ -404,7 +404,7 @@ unlesbares Review ist eine Eskalation, nie ein stilles „ok".
 | | |
 |---|---|
 | **Input** | derselbe Worktree wie in Phase 5, `spec.md`, `contract.yaml` |
-| **Akteure** | `final_reviewer` (Fable 5, read-only) · `adw/triage.py` |
+| **Akteure** | `final_reviewer` (Fable 5.1, read-only) · `adw/triage.py` |
 | **Loop** | max. **3 Fix-Zyklen je Lane**; Circuit-Breaker |
 
 Codex hat auf den **Diff** geschaut; der finale Reviewer schaut auf das **Ergebnis
@@ -431,7 +431,7 @@ Dann: optionaler Breakpoint `before_push`, danach `ci`.
 | | |
 |---|---|
 | **Input** | Lane-Branch (Single-Lane) oder Integrations-Branch (parallel, nach frisch grünem E2E) |
-| **Akteure** | Orchestrator (Push, Polling) · `log_analyst` (Sonnet 5) |
+| **Akteure** | Orchestrator (Push, Polling) · `log_analyst` (Sonnet 5.5) |
 | **Loop** | **1 CI-Re-Entry**, dann ein Mensch |
 
 ![Phase 7: Push, SHA-gebundenes Polling und der eine CI-Re-Entry](diagrams/workflow/ci.de.svg)
