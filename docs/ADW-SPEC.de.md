@@ -47,7 +47,7 @@ identisch und ist durch Tests abgedeckt. Ein Agent mit der Anweisung „wiederho
 bis die Tests grün sind" kann zu früh aufhören, endlos laufen oder „grün" umdeuten;
 eine `while`-Schleife mit Zähler nicht.
 
-**Durchgesetzt durch.** `adw/phases.py` besitzt jede Schleife; Agents bekommen einen
+**Durchgesetzt durch.** Die Phasen-Module (`adw/authoring.py`, `lanes.py`, `phases.py`) besitzen jede Schleife; Agents bekommen einen
 einzelnen Task-String und liefern Text. Kein Agent wird je angewiesen, „jetzt die
 nächste Phase aufzurufen".
 
@@ -106,7 +106,7 @@ Reviewer-Antwort oder eine verletzte Invariante beendet den Lauf kontrolliert:
 **Warum.** Ein Orchestrator, der „irgendwie weitermacht", produziert teuren Müll.
 Ein Mensch bekommt den erreichten Stand und den konkreten Grund und entscheidet.
 
-**Durchgesetzt durch.** `escalate()` in `phases.py`; `adw resume` verweigert
+**Durchgesetzt durch.** `escalate()` in `context.py`; `adw resume` verweigert
 eskalierte Läufe.
 
 ## P6 — Fail fast, nie raten
@@ -137,7 +137,7 @@ grün" an genau den geprüften Inhalt. Dieselbe Begründung lehnt Task-Selbstaus
 im Trace ab (`docs/SPEC.md` §6).
 
 **Durchgesetzt durch.** `_worktree_tree_hash`, `_require_no_agent_commit`,
-`_require_lane_branch`, `_require_expected_head`, `_commit_lane` in `phases.py`.
+`_require_lane_branch`, `_require_expected_head`, `_commit_lane` in `lanes.py`.
 
 ## P8 — Minimale Rechte für Agents
 
@@ -197,7 +197,7 @@ Kontrollfluss durchläuft, lässt Anwender eine Config und den ganzen Ablauf fü
 0 Tokens abnehmen und gibt den Abnahmetests etwas Echtes zu prüfen.
 
 **Durchgesetzt durch.** `RunContext` als Dependency-Injection-Wurzel (aller Kontakt
-mit der Außenwelt läuft darüber); `cli._dry_run_runners/_dry_run_glab/_dry_run_gh`.
+mit der Außenwelt läuft darüber); `adw/dry_run.py` (`runners`, `glab`, `gh`).
 
 ## P12 — Tests sind reine Mocks, git ist echt
 
@@ -237,8 +237,8 @@ tolerant". Dieselbe Policy ist die Review-Regel der Contributors pro Commit — 
 seine Entwickler fahren bewusst denselben Loop.
 
 **Durchgesetzt durch.** `_actionable_severities`, `_split_by_severity`,
-`_severity_context`, `AUTHORING_MAX_ROUNDS = 5`, `MAX_REVIEW_ROUNDS = 5` in
-`phases.py`; Dispositionen persistiert in `authoring_prior_context` /
+`_severity_context` in `review_policy.py`, `AUTHORING_MAX_ROUNDS = 5` in
+`authoring.py`, `MAX_REVIEW_ROUNDS = 5` in `phases.py`; Dispositionen persistiert in `authoring_prior_context` /
 `review_prior_context`.
 
 ## P14 — Verhältnismäßigkeit: bauen, was das Issue verlangt
@@ -277,8 +277,14 @@ nur in einer gibt, veraltet still in der anderen. Releases pro Push halten die F
 
 | Modul | Zeilen | Verantwortung |
 | --- | ---: | --- |
-| `adw/cli.py` | 1235 | typer-Einstieg: `run`, `resume`, `approve`, `status`, `gui`, `runs list`, `runs prune`. Auflösung des Gate-Modus (`--gates` vs. Altflags), Issue-Übernahme (Text, `glab`, `gh`), Forge-Vorflug, Arbeitsbaum-Vorflug mit Selbstheilung, Run-Ausführungs-Lock, Run-Span, Dry-Run-Verdrahtung, Auto-Prune. |
-| `adw/phases.py` | 2674 | Die sieben Phasen über einem `RunContext`: Entwurfsstufe, Synthese, Authoring-Loop, Freigabe- und Breakpoint-Gates, Lane-Gate-Schleife inkl. RED-Stufe, Integration + E2E, Codex-Review, Final-Review + Triage, Push + CI. Alle Limits, Dispatch und Eskalation. |
+| `adw/cli.py` | 936 | typer-Einstieg: `run`, `resume`, `approve`, `status`, `gui`, `runs list`, `runs prune`. Auflösung des Gate-Modus (`--gates` vs. Altflags), Issue-Übernahme (Text, `glab`, `gh`), `_preflight` (Verweigerung → Exit 1), Run-Ausführungs-Lock, Run-Span, `_build_context`, Auto-Prune. |
+| `adw/preflight.py` | 199 | Prüfungen vor run/resume/approve in fester Reihenfolge (`run_all`): Forge bekannt → Haupt-Checkout sauber (Selbstheilung der sechs ADW-Authoring-Artefakte) → Modell-Aktualität. Eskaliert nie, verändert außer der Selbstheilung nichts; verweigert mit `PreflightRefused`. |
+| `adw/dry_run.py` | 161 | Dry-Run-Verdrahtung: kanonische Fixtures, geskriptete Mock-Runner für Agents/Codex, synthetische Gates, simulierte grüne GitLab-/GitHub-CI. |
+| `adw/phases.py` | 645 | Phasen 4–7 (Integration + E2E, Codex-Review, finaler Review + Triage, Push + CI) und die Fassade, aus der die CLI alle sieben Einstiegspunkte importiert. |
+| `adw/context.py` | 370 | Gemeinsamer Kern: `RunContext`, `escalate`, Exceptions, Phasen-/Lane-Spans, `_breakpoint_gate`, das eskalierende `_git`, Agent-/Codex-Aufrufstellen mit Spans, Checkpoint-Helfer. |
+| `adw/authoring.py` | 851 | Phasen 1–2: Entwurfsstufe mit zwei Autoren, Synthese, reviewter Authoring-Loop (Runden-Cap, Akzeptanz mit Known Findings), Spec-/Plan-Gates, Archivierung der Artefakte. |
+| `adw/lanes.py` | 710 | Phase 3 und jeder Fix-Zyklus: Lane-Worktrees, TDD-RED-Stufe, Gate-Loop mit Circuit-Breaker, Commits durch den Orchestrator, `_dispatch_lane_fixes`. |
+| `adw/review_policy.py` | 151 | Review-Loop-Policy: Severity-Schwelle je Runde, Findings-Gedächtnis mit Disposition, Circuit-Breaker-Schlüssel, Follow-up-Report. |
 | `adw/agents.py` | 595 | Agent-Registry (`REGISTRY`, `AgentSpec`), geteilte Inhaltsregeln, Deny-Regeln, `SdkAgentRunner` (Stored-Login-Pflicht, Env-Bereinigung, Sandbox, Spiegelung des Streams ins Event-Log), `RunTotals`. |
 | `adw/codex.py` | 473 | `CodexRunner`: `review()` und `author()` über `codex exec -m gpt-6-astra --sandbox read-only`, isoliertes `CODEX_HOME`, Marker-Block-Protokoll mit Nonce pro Aufruf, Prozessgruppen-Kill, Token-Rücksync. |
 | `adw/findings.py` | 223 | `Finding`, `ReviewResult`, `SCHEMA_INSTRUCTION` (eine geteilte Konstante), strikter Parser `extract_review_result`. |
@@ -300,7 +306,8 @@ nur in einer gibt, veraltet still in der anderen. Releases pro Push halten die F
 | `adw/gui/reader.py` | 131 | Inkrementeller, fehlertoleranter Event-Log-Reader (auch `.jsonl.gz`), meldet `seq_gap`/`bad_line`. |
 | `adw/gui/model.py` | 224 | Span-Baum aus Event-Records; Waisen aus Worker-Threads werden über zeitliches Enthaltensein eingehängt. |
 | `adw/gui/registry.py` | 203 | `~/.adw/repos.json`: kanonischer Repo-Pfad → stabiler Slug; `adw run` registriert automatisch (fail-open). |
-| `adw/gui/app.py` | 3073 | Read-only-FastAPI-App: Lauf-Liste, Lauf-Detail (Trace/Timeline/Artefakte/Raw), JSON-API, SSE-Live-Tail, Diff-Endpoint mit Ref-Allowlist. |
+| `adw/gui/app.py` | 464 | Read-only-FastAPI-App: Routen für Lauf-Liste, Lauf-Detail (Trace/Timeline/Artefakte/Raw), JSON-API, SSE-Live-Tail, Diff-Endpoint mit Ref-Allowlist; Template-Filter. |
+| `adw/gui/trace.py`, `fmt.py`, `runs.py`, `serialize.py`, `timeline.py`, `artifacts.py`, `diffs.py`, `projections.py` | 682 / 286 / 619 / 326 / 322 / 74 / 218 / 274 | Die Projektionen hinter den Routen: Trace-Fensterung + Verdichtung + Labels; Formatierungs-Filter; Lauf-Metadaten, Zusammenfassung und Lauf-Liste; Baum-Serialisierung + Prompt-Diff + Raw-Ansicht; Timeline + Knotenzeit-Kontext; Artefakt-Liste; Snapshot-Diffs + Änderungsumfang; Plan-Skelett, Recovery-Karte, zusammengesetztes Lauf-Detail. |
 | `adw/gui/i18n.py` | 353 | Wörterbuchbasierte EN/DE-Übersetzung der Oberfläche; Inhalte werden nie übersetzt. |
 | `adw/gui/templates/`, `static/` | — | Jinja2-Templates, `app.css` (Token-System, Dark Mode), `app.js` (ohne Framework). |
 
@@ -308,13 +315,14 @@ nur in einer gibt, veraltet still in der anderen. Releases pro Push halten die F
 
 ### 1.1 `RunContext` — die Dependency-Injection-Wurzel
 
-`RunContext` (Dataclass in `phases.py`) trägt alles, was eine Phase braucht:
+`RunContext` (Dataclass in `context.py`) trägt alles, was eine Phase braucht:
 `repo`, `config`, `state`, die beiden Runner-Schnittstellen (`agents: AgentRunner`,
 `codex: CodexClient`), die Seams `run_glab`, `run_gh`, `sleep`, den einen `emitter`
-des Laufs, die gepinnten Flags `skip_approval`, `spec_approval`, `dry_run`, ein
-`git_env` und ein `threading.RLock` (`state_lock`), das State-Mutationen über
+des Laufs, ein `git_env` und ein `threading.RLock` (`state_lock`), das State-Mutationen über
 parallele Lane-Threads serialisiert. `ctx.save()` persistiert den State und spiegelt
-*nach* erfolgreichem Schreiben ein `state.saved`-Event.
+*nach* erfolgreichem Schreiben ein `state.saved`-Event. Gate-Modus (`skip_approval`,
+`spec_approval`) und `dry_run` leben nur im persistierten `RunState`: `adw run` pinnt
+sie vor dem ersten Save, Resume und Approve sehen so genau den gestarteten Modus.
 
 Weil jeder Kontakt mit der Außenwelt über dieses Objekt läuft, läuft derselbe
 produktive Code im `--dry-run` und in der Testsuite gegen Mocks.
@@ -656,7 +664,7 @@ Entwurfsverzeichnis.
 - **Eine Forge hinzufügen:** ein `poll_ci(repo, branch, cfg, run_x, sha, emitter)`
   implementieren, das `CiResult` liefert; das `Forge`-Literal und `detect_forge`
   erweitern; den Providerwert in `CiConfig.provider` ergänzen; in `run_ci_phase`
-  verdrahten; einen Dry-Run-Fake in `cli.py` und — falls die Forge Issues hat — einen
+  verdrahten; einen Dry-Run-Fake in `adw/dry_run.py` und — falls die Forge Issues hat — einen
   Issue-Abruf ergänzen.
 
 ## 9. Semantik von Resume, Freigabe und Nebenläufigkeit
@@ -809,7 +817,7 @@ Contributors müssen alle diese Aussagen wahr halten. Die meisten haben eigene T
 
 | Ich will … | Anfassen | Achtung |
 | --- | --- | --- |
-| **einen Agent hinzufügen** | `REGISTRY` in `agents.py`; eine Aufrufstelle in `phases.py` über `_agent_run`; eine Mock-Antwort in `cli._dry_run_runners` und Tests | Kleinste Tool-Menge; artefaktgenaue Schreibregeln; Reviewer antworten in `SCHEMA_INSTRUCTION`; geteilte Prompt-Konstanten wiederverwenden statt Text kopieren. |
+| **einen Agent hinzufügen** | `REGISTRY` in `agents.py`; eine Aufrufstelle in einem Phasen-Modul (`authoring.py`, `lanes.py`, `phases.py`) über `_agent_run`; eine Mock-Antwort in `dry_run.runners` und Tests | Kleinste Tool-Menge; artefaktgenaue Schreibregeln; Reviewer antworten in `SCHEMA_INSTRUCTION`; geteilte Prompt-Konstanten wiederverwenden statt Text kopieren. |
 | **eine Phase hinzufügen** | `Phase`-Literal in `state.py`; eine `run_<x>_phase(ctx)` mit `ctx.state.phase`-Guard und `@_phase_span`; Einfügen in `cli._execute`; Übergänge in den Nachbarn | Jeden Zähler vor der Arbeit persistieren; Limit + Breaker ergänzen; GUI-Phasenband (`GUI-SPEC.md`) und Dry-Run nachziehen; `tests/test_e2e_dry_run.py` erweitern. |
 | **einen Breakpoint hinzufügen** | `BreakpointName`-Literal in `config.py`; ein Aufruf `_breakpoint_gate(ctx, "<name>")`; `_breakpoint_resume_phase` in `cli.py` | `awaiting_approval` wiederverwenden; für einen Halt nie einen Phasenwert hinzufügen. |
 | **eine Gate-Option hinzufügen** | `Gate`-Modell in `config.py`; `gates.py` | Fail fast, echte Timeouts und `safe_env` beibehalten. Gates sind Projektwissen — keine Defaults. |

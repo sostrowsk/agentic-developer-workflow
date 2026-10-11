@@ -10,7 +10,7 @@ resolution-markers = [
 
 [[package]]
 name = "adw"
-version = "0.30.2"
+version = "0.30.3"
 source = { editable = "." }
 dependencies = [
     { name = "anyio" },

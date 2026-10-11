@@ -7,6 +7,7 @@ import threading
 
 import pytest
 
+from adw.authoring import _draft_stage
 from adw.codex import CodexError
 from adw.config import AdwConfig
 from adw.findings import Finding, ReviewResult
@@ -16,7 +17,6 @@ from adw.phases import (
     EscalationError,
     RunContext,
     WorktreeRefusedError,
-    _draft_stage,
     run_build_phase,
     run_ci_phase,
     run_codex_review_phase,
@@ -100,7 +100,6 @@ def ctx(target_repo):
         state=state,
         agents=agents,
         codex=codex,
-        skip_approval=False,
     )
 
 
@@ -131,7 +130,7 @@ def test_spec_findings_go_back_to_same_session(ctx):
 
 
 def test_no_approval_flag_skips_the_pause(ctx):
-    ctx.skip_approval = True
+    ctx.state.skip_approval = True
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(OK, OK)
@@ -564,7 +563,7 @@ def prepare_approved(ctx):
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(OK, OK)
-    ctx.skip_approval = True
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     assert ctx.state.phase == "build"
 
@@ -823,7 +822,7 @@ def test_no_approval_choice_survives_resume(ctx):
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(OK, OK)
-    ctx.skip_approval = True
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     # Simulierter Crash direkt nach der awaiting_approval-Persistenz:
     ctx.state.phase = "awaiting_approval"
@@ -834,15 +833,17 @@ def test_no_approval_choice_survives_resume(ctx):
         state=RunState.load(ctx.repo, ctx.state.run_id),
         agents=ctx.agents,
         codex=ctx.codex,
-        skip_approval=False,  # der Resume-Aufruf kennt das Flag nicht mehr
     )
     run_spec_and_plan(resumed)  # darf NICHT AwaitingApproval werfen
     assert resumed.state.phase == "build"
 
 
-def test_no_approval_is_persisted_before_spec_starts(ctx):
-    """Regression: --no-approval must be on disk BEFORE the first agent run."""
-    ctx.skip_approval = True
+def test_pinned_gate_mode_survives_a_crash_in_phase_one(ctx):
+    """The gate mode lives only in the state (`adw run` pins it before the first
+    save — tests/test_gates_switch.py); phase 1 never resets it, not even when it
+    crashes in the spec agent."""
+    ctx.state.skip_approval = True
+    ctx.state.save(ctx.repo)
     with pytest.raises(AssertionError):  # kein Script = simulierter Crash im Spec-Agent
         run_spec_and_plan(ctx)
     assert RunState.load(ctx.repo, ctx.state.run_id).skip_approval is True
@@ -1398,8 +1399,8 @@ def test_untracked_config_created_by_agent_is_not_committed(tmp_path):
         state=state,
         agents=agents,
         codex=codex,
-        skip_approval=True,
     )
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     run_build_phase(ctx)
     worktree = repo / ".adw" / "runs" / state.run_id / "trees" / "backend"
@@ -1504,7 +1505,7 @@ def test_restore_survives_deleted_adw_directory(ctx):
     """Regression: a deleted .adw in the Worktree must not crash the restoration."""
     import shutil
 
-    from adw.phases import _restore_approved_artifacts
+    from adw.lanes import _restore_approved_artifacts
     from adw.worktrees import create_lane_worktree
 
     prepare_approved(ctx)
@@ -1712,8 +1713,8 @@ def test_directory_shaped_injected_config_is_removed_safely(tmp_path):
         state=state,
         agents=agents,
         codex=codex,
-        skip_approval=True,
     )
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     run_build_phase(ctx)  # darf nicht mit IsADirectoryError crashen
     worktree = repo / ".adw" / "runs" / state.run_id / "trees" / "backend"
@@ -1806,7 +1807,7 @@ def test_config_restore_uses_pinned_fork_point_not_moving_base(ctx):
 def test_symlinked_artifact_is_replaced_not_followed(ctx):
     """Regression: a symlink instead of an artifact must neither overwrite foreign
     files nor bypass the restoration."""
-    from adw.phases import _restore_approved_artifacts
+    from adw.lanes import _restore_approved_artifacts
     from adw.worktrees import create_lane_worktree
 
     prepare_approved(ctx)
@@ -1874,7 +1875,7 @@ def test_symlinked_adw_directory_is_replaced_not_followed(ctx):
     """Regression: .adw as a symlink must not let the orchestrator write outside the Lane."""
     import shutil
 
-    from adw.phases import _restore_approved_artifacts
+    from adw.lanes import _restore_approved_artifacts
     from adw.worktrees import create_lane_worktree
 
     prepare_approved(ctx)
@@ -1937,8 +1938,8 @@ def test_config_symlink_to_directory_is_removed_safely(tmp_path):
         state=state,
         agents=symlinking,
         codex=codex,
-        skip_approval=True,
     )
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     run_build_phase(ctx)  # darf nicht an rmtree-auf-Symlink crashen
     assert (repo / "opfer-verzeichnis").is_dir()  # Referent unangetastet
@@ -1975,7 +1976,7 @@ def test_file_shaped_adw_directory_is_replaced(ctx):
     """Regression: .adw as a FILE must not crash mkdir with FileExistsError."""
     import shutil
 
-    from adw.phases import _restore_approved_artifacts
+    from adw.lanes import _restore_approved_artifacts
     from adw.worktrees import create_lane_worktree
 
     prepare_approved(ctx)
@@ -2007,8 +2008,8 @@ def test_parallel_lanes_build_isolated_worktrees(target_repo):
         state=state,
         agents=agents,
         codex=codex,
-        skip_approval=True,
     )
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     run_build_phase(ctx)
     for lane in ("backend", "frontend"):
@@ -2068,13 +2069,13 @@ def pctx(target_repo):
     codex = MockCodexRunner()
     script_draft_artifacts(codex)
     state = RunState.new(issue="ISSUE-2: parallel", parallel=True)
+    state.skip_approval = True
     return RunContext(
         repo=target_repo,
         config=AdwConfig.load(target_repo),
         state=state,
         agents=agents,
         codex=codex,
-        skip_approval=True,
     )
 
 
@@ -3239,7 +3240,7 @@ def severity_finding(severity: str, issue: str = "x") -> Finding:
 
 
 def test_actionable_severities_descend_per_round():
-    from adw.phases import _actionable_severities
+    from adw.review_policy import _actionable_severities
 
     assert _actionable_severities(1) == {"P1", "P2", "P3"}
     assert _actionable_severities(2) == {"P1", "P2"}
@@ -3248,7 +3249,7 @@ def test_actionable_severities_descend_per_round():
 
 
 def test_split_by_severity_returns_actionable_and_dropped():
-    from adw.phases import _split_by_severity
+    from adw.review_policy import _split_by_severity
 
     findings = [severity_finding("P1"), severity_finding("P2"), severity_finding("P3")]
     actionable, dropped = _split_by_severity(findings, 1)
@@ -3263,7 +3264,7 @@ def test_split_by_severity_returns_actionable_and_dropped():
 
 
 def test_severity_context_lists_prior_findings_and_threshold():
-    from adw.phases import _severity_context
+    from adw.review_policy import _severity_context
 
     prior = ["- [P2] a.py: kaputt — disposition: fix dispatched (round 1)"]
     context = _severity_context(2, 5, prior)
@@ -3274,7 +3275,7 @@ def test_severity_context_lists_prior_findings_and_threshold():
 
 
 def test_severity_context_is_none_without_prior_findings():
-    from adw.phases import _severity_context
+    from adw.review_policy import _severity_context
 
     assert _severity_context(1, 5, []) is None
 
@@ -3320,7 +3321,7 @@ def test_authoring_accepts_when_all_findings_are_below_the_threshold(ctx):
     ctx.agents.script("spec_synthesis", "v1", "v2", "v3")
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(needs_fixes("A"), needs_fixes("B"), needs_fixes("C"), OK)
-    ctx.skip_approval = True
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     assert ctx.state.phase == "build"
     known = ctx.run_dir / "authoring-spec-known-findings.md"
@@ -3355,7 +3356,7 @@ def test_authoring_fix_task_carries_only_actionable_findings(ctx):
         OK,
         OK,
     )
-    ctx.skip_approval = True
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     spec_calls = [c for c in ctx.agents.calls if c.agent == "spec_synthesis"]
     assert "kritische Lücke" in spec_calls[2].task
@@ -3368,7 +3369,7 @@ def test_authoring_passes_prior_findings_with_dispositions_as_context(ctx):
     ctx.agents.script("spec_synthesis", "v1", "v2")
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(needs_fixes("Akzeptanzkriterien fehlen"), OK, OK)
-    ctx.skip_approval = True
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     spec_reviews = [c for c in ctx.codex.calls if c.kind == "spec"]
     assert spec_reviews[0].context is None  # Runde 1: Prompt unverändert
@@ -3395,8 +3396,8 @@ def test_authoring_context_survives_crash_and_resume(ctx):
         state=saved,
         agents=ctx.agents,
         codex=ctx.codex,
-        skip_approval=True,
     )
+    resumed.state.skip_approval = True
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(OK, OK)
     run_spec_and_plan(resumed)
@@ -3411,7 +3412,7 @@ def test_authoring_ok_before_cap_writes_no_known_findings(ctx):
     ctx.agents.script("spec_synthesis", "v1", "v2")
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(needs_fixes("A"), OK, OK)  # Spec: 1 Fix, dann ok; Plan ok
-    ctx.skip_approval = True
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     assert ctx.state.phase == "build"
     assert not (ctx.run_dir / "authoring-spec-known-findings.md").is_file()
@@ -3431,8 +3432,8 @@ def test_authoring_round_counter_survives_resume(ctx):
         state=RunState.load(ctx.repo, ctx.state.run_id),
         agents=ctx.agents,
         codex=ctx.codex,
-        skip_approval=True,
     )
+    resumed.state.skip_approval = True
     ctx.agents.script("plan_synthesis", "Plan")
     # Runde 2 fixt, Runde 3 liegt unter der Schwelle → Accept; Plan ok
     ctx.codex.script(needs_fixes("B"), needs_fixes("C"), OK)
@@ -3446,7 +3447,7 @@ def test_authoring_round_counter_survives_resume(ctx):
 
 def test_spec_approval_pauses_after_spec_phase(ctx):
     """B2(a): --spec-approval pausiert nach der Spec, vor dem Plan."""
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.codex.script(OK)  # nur Spec-Review; Plan wird nicht erreicht
     with pytest.raises(AwaitingApproval):
@@ -3459,7 +3460,7 @@ def test_spec_approval_pauses_after_spec_phase(ctx):
 
 def test_granted_spec_approval_continues_into_plan(ctx):
     """B2(b): nach erteiltem Spec-Approval läuft der Run in die Plan-Phase."""
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.codex.script(OK)
     with pytest.raises(AwaitingApproval):
@@ -3475,8 +3476,8 @@ def test_granted_spec_approval_continues_into_plan(ctx):
         state=RunState.load(ctx.repo, ctx.state.run_id),
         agents=ctx.agents,
         codex=ctx.codex,
-        skip_approval=True,
     )
+    resumed.state.skip_approval = True
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(OK)
     run_spec_and_plan(resumed)
@@ -3495,7 +3496,7 @@ def test_no_spec_approval_flag_does_not_pause_after_spec(ctx):
 
 def test_resume_at_spec_approval_pauses_again(ctx):
     """B2(e): Resume bei awaiting_spec_approval pausiert erneut."""
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.codex.script(OK)
     with pytest.raises(AwaitingApproval):
@@ -3515,7 +3516,7 @@ def test_resume_at_spec_approval_pauses_again(ctx):
 def test_spec_approval_flag_read_from_state_on_resume(ctx):
     """B2(f): Crash nach Spec-Archivierung → Resume landet wieder im Spec-Stopp
     (Flag aus State, nicht aus dem Resume-Kontext); Spec liegt archiviert."""
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.codex.script(OK)
     with pytest.raises(AwaitingApproval):
@@ -3539,7 +3540,7 @@ def test_spec_approval_flag_read_from_state_on_resume(ctx):
 def test_authoring_rounds_reset_across_spec_approval_gate(ctx):
     """B1/B2-Wechselwirkung: der Plan-Loop startet mit authoring_rounds=0,
     auch wenn der Spec-Loop Fix-Runden hatte."""
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.script("spec_synthesis", "v1", "v2")
     ctx.codex.script(needs_fixes("A"), OK)  # Spec: 1 Fix-Runde, dann ok
     with pytest.raises(AwaitingApproval):
@@ -3663,7 +3664,7 @@ def test_preexisting_foreign_issue_md_is_not_silently_destroyed(ctx):
 
 def test_own_regenerated_issue_md_is_no_op_overwrite(ctx):
     """P1-Fix: identischer (eigener) Inhalt darf NICHT eskalieren — Resume-Fall."""
-    from adw.phases import _write_issue
+    from adw.authoring import _write_issue
 
     data = _write_issue(ctx)  # erzeugt .adw/issue.md aus dem State
     # Zweiter Aufruf mit identischem Inhalt (wie beim Resume) ist ein No-op:
@@ -3674,7 +3675,7 @@ def test_spec_approval_pause_leaves_checkout_clean(ctx):
     """P2-Fix: der Spec-Gate-Stopp archiviert + säubert wie das Plan-Gate."""
     from tests.conftest import git
 
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.codex.script(OK)
     with pytest.raises(AwaitingApproval):
@@ -3708,7 +3709,7 @@ def test_spec_approval_pause_retries_cleanup_on_resume(ctx):
     die Archivierung nach und säubert den Checkout."""
     from tests.conftest import git
 
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.codex.script(OK)
     with pytest.raises(AwaitingApproval):
@@ -3741,7 +3742,7 @@ def test_spec_approval_resume_preserves_reviewed_archive_when_spec_tracked(ctx):
     spec_path.write_text("# ALTE gemergte Spec\n")
     git(ctx.repo, "add", ".adw/spec.md")
     git(ctx.repo, "commit", "-m", "alt")
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.codex.script(OK)
     with pytest.raises(AwaitingApproval):
@@ -3772,7 +3773,7 @@ def test_ok_verdict_clears_stale_known_findings_report(ctx):
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(OK, OK)
-    ctx.skip_approval = True
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     assert ctx.state.phase == "build"
     assert not stale.is_file()
@@ -3871,7 +3872,7 @@ def test_summary_survives_a_crash_at_the_spec_gate(ctx):
     liegt schon im Run-Ordner und überlebt den Resume."""
     from tests.conftest import git
 
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.script("spec_synthesis", "Spec")
     ctx.agents.script("plan_synthesis", "Plan")
     ctx.codex.script(OK)
@@ -4044,7 +4045,7 @@ def test_codex_author_failure_completes_phase_single_source_no_escalation(ctx):
     ctx.codex.script(OK, OK)  # Spec-Review ok, Plan-Review ok
     ctx.agents.script("spec_synthesis", "Spec einquellig")
     ctx.agents.script("plan_synthesis", "Plan einquellig")
-    ctx.skip_approval = True
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)  # kein Traceback / keine Exception
     assert ctx.state.phase == "build"
     drafts = ctx.run_dir / "drafts"
@@ -4082,7 +4083,7 @@ def test_synthesis_retry_repairs_missing_summary_in_the_same_session(ctx):
     über die vorhandene Session nachgefordert. Der Retry benennt das fehlende
     Artefakt, das bereits korrekte bleibt erhalten und verbraucht keine
     Authoring-/Review-Runde (nur EIN Spec-Review nach Vollständigkeit)."""
-    ctx.spec_approval = True  # nach der Spec anhalten, Plan-Scripting sparen
+    ctx.state.spec_approval = True  # nach der Spec anhalten, Plan-Scripting sparen
     ctx.agents.file_writes["spec_synthesis"] = _stateful_spec_writes(
         [
             {".adw/spec.md": "# Spec (Synthese)\nZiel: Demo\n"},  # Summary fehlt
@@ -4110,7 +4111,7 @@ def test_synthesis_retry_repairs_missing_summary_in_the_same_session(ctx):
 def test_synthesis_retry_treats_whitespace_artifact_as_empty(ctx):
     """C1: ein nur aus Whitespace bestehendes Pflicht-Artefakt zählt als leer und
     löst denselben einmaligen Retry aus."""
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.file_writes["spec_synthesis"] = _stateful_spec_writes(
         [
             {".adw/spec.md": "# Spec\nZiel\n", ".adw/spec-summary.md": "   \n\n"},  # leer
@@ -4128,7 +4129,7 @@ def test_synthesis_retry_treats_whitespace_artifact_as_empty(ctx):
 def test_synthesis_retry_gives_up_after_exactly_one_retry(ctx):
     """C2/C5(b)/E4: liefert auch der Reparaturaufruf das Artefakt nicht,
     eskaliert der Lauf nach GENAU ZWEI Aufrufen — kein zweiter Retry."""
-    ctx.spec_approval = True
+    ctx.state.spec_approval = True
     ctx.agents.file_writes["spec_synthesis"] = _stateful_spec_writes(
         [{".adw/spec.md": "# Spec\nZiel\n"}]  # Summary NIE geliefert
     )
@@ -4281,7 +4282,7 @@ def test_log_analyst_without_routable_findings_escalates_without_reentry(ctx, ta
 def test_followup_whose_issue_prefixes_another_is_still_recorded(ctx):
     """Regression: the substring dedupe dropped a finding whose issue text is the
     beginning of an already recorded one (same file)."""
-    from adw.phases import _write_followups
+    from adw.review_policy import _write_followups
 
     long = Finding(severity="P3", lane="backend", file="a.py", issue="Name unklar und zu lang",
                    remediation_plan=["umbenennen"])

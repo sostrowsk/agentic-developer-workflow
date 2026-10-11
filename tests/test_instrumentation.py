@@ -812,7 +812,8 @@ def test_dry_run_tdd_gate_emits_red_check(target_repo):
 def test_write_followups_emits_followup_point(target_repo):
     """followup: recorded only after the follow-up was actually written (AC 9)."""
     from adw.config import AdwConfig
-    from adw.phases import RunContext, _write_followups
+    from adw.phases import RunContext
+    from adw.review_policy import _write_followups
 
     ctx = RunContext(
         repo=target_repo,
@@ -834,7 +835,8 @@ def test_log_warning_mirrors_to_a_log_point(target_repo):
     """log: an orchestrator warning is mirrored as a log point (logging behaviour
     unchanged)."""
     from adw.config import AdwConfig
-    from adw.phases import RunContext, _log_warning
+    from adw.context import _log_warning
+    from adw.phases import RunContext
 
     ctx = RunContext(
         repo=target_repo,
@@ -894,9 +896,11 @@ def test_escalate_with_span_id_keeps_state_saved_and_escalation_non_null(target_
 def test_codex_draft_degradation_log_has_non_null_span(target_repo):
     """P2: the Codex draft runs in a pool worker; its degradation `log` point
     must still carry the enclosing phase span, never null."""
+    from adw.authoring import _draft_stage
     from adw.codex import CodexError
     from adw.config import AdwConfig
-    from adw.phases import SPEC_SUMMARY, RunContext, _draft_stage
+    from adw.context import SPEC_SUMMARY
+    from adw.phases import RunContext
 
     agents = MockAgentRunner()
     agents.script_files("spec_agent", {".adw/spec.md": "# Draft Claude\n"})
@@ -960,7 +964,7 @@ def test_ci_reentry_emits_reentry_point(target_repo):
     run_final_review_phase(ctx)  # reach phase "ci" (green path, NoOp emitter)
     assert ctx.state.phase == "ci"
     ctx.emitter = EventEmitter(ctx.repo, ctx.state.run_id)
-    ctx.dry_run = True  # skip the real push
+    ctx.state.dry_run = True  # skip the real push
 
     sha_seen: dict = {"red_done": False}
 
@@ -1053,14 +1057,14 @@ def test_plan_phase_to_phase_stays_null_when_archival_fails(target_repo, monkeyp
         agents=agents,
         codex=codex,
         emitter=EventEmitter(target_repo, state.run_id),
-        skip_approval=True,
     )
+    ctx.state.skip_approval = True
     boom = RuntimeError("archival kaputt")
 
     def raising(_ctx, overwrite_existing_archive=True):
         raise boom
 
-    monkeypatch.setattr("adw.phases._archive_artifacts", raising)
+    monkeypatch.setattr("adw.authoring._archive_artifacts", raising)
     with pytest.raises(RuntimeError) as excinfo:
         run_spec_and_plan(ctx)
     assert excinfo.value is boom  # propagates unchanged

@@ -12,6 +12,21 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.30.3] — 2026-10-11
+
+### Changed
+Structure only — no change in behaviour (Pakete 5 and 6 of the improvement review). Same 1349 tests, all unchanged in what they assert:
+- **The orchestrator is split by phase.** `adw/phases.py` (about 2,560 lines) now holds phases 4–7 and is the facade the CLI imports all seven entry points from. Phases 1–2 (drafts, synthesis, the reviewed authoring loop) moved to `adw/authoring.py`, phase 3 and the fix dispatch to `adw/lanes.py`, the review-loop policy to `adw/review_policy.py`, and the shared core (`RunContext`, `escalate`, spans, the escalating git wrapper) to `adw/context.py`.
+- **The GUI is split along its sections.** `adw/gui/app.py` (about 3,050 lines) keeps the routes. The projections behind them live in `trace.py`, `fmt.py`, `runs.py`, `serialize.py`, `timeline.py`, `artifacts.py`, `diffs.py` and `projections.py`.
+- **The CLI is slimmer.** The checks before `run`, `resume` and `approve` live in `adw/preflight.py`: forge, then working tree with self-heal, then models, in one fixed order. The dry-run fixtures and mock wiring live in `adw/dry_run.py`.
+- **The gate mode and `dry_run` live only in the run state.** `RunContext` no longer carries its own copies of these flags, and phase 1 no longer re-pins them; `adw run` pins them before the first save, as before.
+- **Less duplication in the authoring loop.**
+  - One helper performs the agent step, the session checkpoint and the restore of protected files.
+  - One exit accepts an artifact with known findings.
+  - The draft stage and the loop share the missing-artifact and leftover checks.
+- **Phase functions no longer repeat their own guard.** `@_phase_span` returns early for a skipped phase.
+- **Docs:** the module tables and extension points in the spec and the README architecture list were updated, and the module-layers diagram was regenerated from the actual imports.
+
 ## [0.30.2] — 2026-10-11
 
 ### Changed
@@ -1031,6 +1046,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.30.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.2...v0.30.3
 [0.30.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.2...v0.30.0

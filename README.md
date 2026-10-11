@@ -102,8 +102,15 @@ Allowed Lane names are `backend` and `frontend`; `--parallel` requires both.
 
 ```
 adw/
-  cli.py        typer entry point: run/resume/approve/status/gui/runs, dry-run wiring
-  phases.py     the 7 phases over a RunContext — loops, limits, dispatch
+  cli.py        typer entry point: run/resume/approve/status/gui/runs
+  preflight.py  checks before run/resume/approve: forge, clean checkout, models
+  dry_run.py    dry-run fixtures and mock wiring (0 tokens, no network)
+  phases.py     phases 4–7 + facade for all seven phase entry points
+  context.py    RunContext, escalation, spans, escalating git wrapper
+  authoring.py  phases 1–2: dual drafts, synthesis, reviewed authoring loop
+  lanes.py      phase 3 + fix dispatch: lane worktrees, RED stage, gate loop
+  review_policy.py  severity floor, findings memory, follow-ups
+  git.py        the one hardened git invocation
   agents.py     agent registry (Fable 5.1 / Opus 5.5 / Sonnet 5.5) + SDK runner
   codex.py      Codex CLI (gpt-6-astra) as a read-only subprocess, strict findings parsing
   findings.py   Findings schema (pydantic) + strict parser contract
@@ -121,7 +128,8 @@ adw/
   events.py     append-only event log (events.jsonl) per run
   snapshots.py  artifact snapshots per phase for the Run Inspector
   retention.py  `adw runs list|prune`, automatic pruning
-  gui/          read-only Run Inspector (FastAPI, optional extra `gui`)
+  gui/          read-only Run Inspector (FastAPI, optional extra `gui`): app.py routes +
+                trace, fmt, runs, serialize, timeline, artifacts, diffs, projections
 ```
 
 - **Lanes:** one dedicated git worktree per workstream (`.adw/runs/<id>/trees/<lane>`),

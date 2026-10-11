@@ -759,9 +759,11 @@ Python costs nothing, behaves identically and is covered by tests. An
 agent that is told "repeat until the tests pass" can stop early, loop
 forever or redefine "pass"; a <code>while</code> loop with a counter
 cannot.</p>
-<p><strong>Enforced by.</strong> <code>adw/phases.py</code> owns every
-loop; agents receive a single task string and return text. No agent is
-ever told "now call the next phase".</p>
+<p><strong>Enforced by.</strong> The phase modules
+(<code>adw/authoring.py</code>, <code>lanes.py</code>,
+<code>phases.py</code>) own every loop; agents receive a single task
+string and return text. No agent is ever told "now call the next
+phase".</p>
 <h2 id="p2--reviewers-never-fix">P2 — Reviewers never fix</h2>
 <p><strong>Rule.</strong> Every reviewer — Codex in phases 1, 2 and 5,
 the final reviewer in phase 6, the E2E triage agent, the CI log analyst
@@ -843,7 +845,7 @@ controlled way: <code>escalation.md</code> +
 produces expensive garbage. A human gets the state reached and the
 concrete reason and decides.</p>
 <p><strong>Enforced by.</strong> <code>escalate()</code> in
-<code>phases.py</code>; <code>adw resume</code> refuses escalated
+<code>context.py</code>; <code>adw resume</code> refuses escalated
 runs.</p>
 <h2 id="p6--fail-fast-never-guess">P6 — Fail fast, never guess</h2>
 <p><strong>Rule.</strong> A missing or invalid config aborts before
@@ -876,7 +878,7 @@ reasoning rejects per-task self-reporting in the trace
 <p><strong>Enforced by.</strong> <code>_worktree_tree_hash</code>,
 <code>_require_no_agent_commit</code>,
 <code>_require_lane_branch</code>, <code>_require_expected_head</code>,
-<code>_commit_lane</code> in <code>phases.py</code>.</p>
+<code>_commit_lane</code> in <code>lanes.py</code>.</p>
 <h2 id="p8--least-privilege-for-agents">P8 — Least privilege for
 agents</h2>
 <p><strong>Rule.</strong> Each agent gets the smallest tool set and the
@@ -936,8 +938,8 @@ whole flow at 0 tokens, and gives the acceptance tests something real to
 test.</p>
 <p><strong>Enforced by.</strong> <code>RunContext</code> as the
 dependency-injection root (all contact with the outside world goes
-through it);
-<code>cli._dry_run_runners/_dry_run_glab/_dry_run_gh</code>.</p>
+through it); <code>adw/dry_run.py</code> (<code>runners</code>,
+<code>glab</code>, <code>gh</code>).</p>
 <h2 id="p12--tests-are-mocks-only-git-is-real">P12 — Tests are
 mocks-only, git is real</h2>
 <p><strong>Rule.</strong> No test needs the network or tokens. Agents,
@@ -1001,10 +1003,11 @@ oscillates between "too strict" and "too lenient". The same policy is
 the contributor's own per-commit review rule — ADW and its developers
 deliberately run the same loop.</p>
 <p><strong>Enforced by.</strong> <code>_actionable_severities</code>,
-<code>_split_by_severity</code>, <code>_severity_context</code>,
-<code>AUTHORING_MAX_ROUNDS = 5</code>,
-<code>MAX_REVIEW_ROUNDS = 5</code> in <code>phases.py</code>;
-dispositions persisted in <code>authoring_prior_context</code> /
+<code>_split_by_severity</code>, <code>_severity_context</code> in
+<code>review_policy.py</code>, <code>AUTHORING_MAX_ROUNDS = 5</code> in
+<code>authoring.py</code>, <code>MAX_REVIEW_ROUNDS = 5</code> in
+<code>phases.py</code>; dispositions persisted in
+<code>authoring_prior_context</code> /
 <code>review_prior_context</code>.</p>
 <h2 id="p14--proportionality-build-what-the-issue-asks-for">P14 —
 Proportionality: build what the issue asks for</h2>
@@ -1074,22 +1077,64 @@ observability and the read-only GUI</figcaption>
 <tbody>
 <tr class="odd">
 <td><code>adw/cli.py</code></td>
-<td style="text-align: right;">1235</td>
+<td style="text-align: right;">936</td>
 <td>typer entry point: <code>run</code>, <code>resume</code>,
 <code>approve</code>, <code>status</code>, <code>gui</code>,
 <code>runs list</code>, <code>runs prune</code>. Gate-mode resolution
 (<code>--gates</code> vs. legacy flags), issue intake (text,
-<code>glab</code>, <code>gh</code>), forge preflight, working-tree
-preflight with self-heal, per-run execution lock, run span, dry-run
-wiring, auto-prune.</td>
+<code>glab</code>, <code>gh</code>), <code>_preflight</code> (refusal →
+exit 1), per-run execution lock, run span, <code>_build_context</code>,
+auto-prune.</td>
+</tr>
+<tr class="even">
+<td><code>adw/preflight.py</code></td>
+<td style="text-align: right;">199</td>
+<td>Checks before run/resume/approve, in fixed order
+(<code>run_all</code>): forge known → main checkout clean (self-heal of
+ADW's six authoring artifacts) → model freshness. Never escalates,
+mutates nothing but the self-heal; refuses with
+<code>PreflightRefused</code>.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/dry_run.py</code></td>
+<td style="text-align: right;">161</td>
+<td>Dry-run wiring: canonical fixtures, scripted mock agent/Codex
+runners, synthetic gates, simulated green GitLab/GitHub CI.</td>
 </tr>
 <tr class="even">
 <td><code>adw/phases.py</code></td>
-<td style="text-align: right;">2674</td>
-<td>The seven phases over a <code>RunContext</code>: draft stage,
-synthesis, authoring loop, approval and breakpoint gates, lane gate loop
-incl. RED stage, integration + E2E, Codex review, final review + triage,
-push + CI. All limits, dispatch and escalation.</td>
+<td style="text-align: right;">645</td>
+<td>Phases 4–7 (integration + E2E, Codex review, final review + triage,
+push + CI) and the facade the CLI imports all seven entry points
+from.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/context.py</code></td>
+<td style="text-align: right;">370</td>
+<td>Shared core: <code>RunContext</code>, <code>escalate</code>,
+exceptions, phase/lane spans, <code>_breakpoint_gate</code>, the
+escalating <code>_git</code>, agent/Codex call sites with spans,
+checkpoint helpers.</td>
+</tr>
+<tr class="even">
+<td><code>adw/authoring.py</code></td>
+<td style="text-align: right;">851</td>
+<td>Phases 1–2: dual-author draft stage, synthesis, reviewed authoring
+loop (round cap, accept with known findings), spec/plan gates, artifact
+archival.</td>
+</tr>
+<tr class="odd">
+<td><code>adw/lanes.py</code></td>
+<td style="text-align: right;">710</td>
+<td>Phase 3 and every fix cycle: lane worktrees, TDD RED stage, gate
+loop with circuit breaker, orchestrator commits,
+<code>_dispatch_lane_fixes</code>.</td>
+</tr>
+<tr class="even">
+<td><code>adw/review_policy.py</code></td>
+<td style="text-align: right;">151</td>
+<td>Review-loop policy: severity floor per round, findings memory with
+dispositions, circuit-breaker keys, follow-up report.</td>
 </tr>
 <tr class="odd">
 <td><code>adw/agents.py</code></td>
@@ -1241,18 +1286,31 @@ by time containment.</td>
 </tr>
 <tr class="even">
 <td><code>adw/gui/app.py</code></td>
-<td style="text-align: right;">3073</td>
-<td>Read-only FastAPI app: run list, run detail
+<td style="text-align: right;">464</td>
+<td>Read-only FastAPI app: routes for run list, run detail
 (Trace/Timeline/Artifacts/Raw), JSON API, SSE live tail, diff endpoint
-with ref allowlist.</td>
+with ref allowlist; template filters.</td>
 </tr>
 <tr class="odd">
+<td><code>adw/gui/trace.py</code>, <code>fmt.py</code>,
+<code>runs.py</code>, <code>serialize.py</code>,
+<code>timeline.py</code>, <code>artifacts.py</code>,
+<code>diffs.py</code>, <code>projections.py</code></td>
+<td style="text-align: right;">682 / 286 / 619 / 326 / 322 / 74 / 218 /
+274</td>
+<td>The projections behind the routes: trace windowing + compaction +
+labels; formatting filters; run metadata, summary and run list; tree
+serialization + prompt diff + raw view; timeline + node-time context;
+artifacts listing; snapshot diffs + change scope; plan skeleton,
+recovery card, assembled run detail.</td>
+</tr>
+<tr class="even">
 <td><code>adw/gui/i18n.py</code></td>
 <td style="text-align: right;">353</td>
 <td>Dictionary-based EN/DE chrome translation; content is never
 translated.</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td><code>adw/gui/templates/</code>, <code>static/</code></td>
 <td style="text-align: right;">—</td>
 <td>Jinja2 templates, <code>app.css</code> (token system, dark mode),
@@ -1261,49 +1319,70 @@ translated.</td>
 </tbody>
 </table>
 <figure>
-<div class="dia" data-diagram="spec/module-layers"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" width="960" height="520" role="img">
+<div class="dia" data-diagram="spec/module-layers"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640" role="img">
 <title>ADW module layers: every import points downward</title>
-<desc>adw modules arranged by import depth; the gui package on the right is imported by the core only through cli.</desc>
-<rect x="0" y="0" width="960" height="520" fill="#ffffff"/>
-<rect x="66" y="34" width="576" height="448" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="1.5" stroke-dasharray="6 4"/>
-<text x="76" y="54" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="start" fill="#475569">core package adw/</text>
-<rect x="666" y="34" width="282" height="448" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="1.5" stroke-dasharray="6 4"/>
-<text x="676" y="54" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="start" fill="#475569">optional package adw/gui/</text>
-<text x="40" y="464" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L0</text>
-<text x="40" y="410" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L1</text>
-<text x="40" y="356" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L2</text>
-<text x="40" y="302" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L3</text>
-<text x="40" y="248" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L4</text>
-<text x="40" y="194" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L5</text>
-<text x="40" y="140" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L6</text>
-<text x="40" y="86" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L7</text>
-<g data-step="8" data-info="cli.py — imports: agents, codex, config, env, events, findings, mock, phases, state, worktrees, ci, github, retention, gui.registry (+ gui.app lazily)"><rect x="80" y="64" width="128" height="34" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="144.0" y="86.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">cli</text></g>
-<g data-step="7" data-info="phases.py — imports: agents, codex, config, env, events, findings, forge, gates, state, triage, worktrees, ci, github, snapshots"><rect x="80" y="118" width="128" height="34" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="144.0" y="140.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">phases</text></g>
-<g data-step="6" data-info="codex.py — imports: agents, env, events, findings"><rect x="80" y="172" width="128" height="34" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="144.0" y="194.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">codex</text></g>
-<g data-step="6" data-info="github.py — imports: ci, config, env, events"><rect x="220" y="172" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="284.0" y="194.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">github</text></g>
-<g data-step="6" data-info="mock.py — imports: agents, findings"><rect x="360" y="172" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="424.0" y="194.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">mock</text></g>
-<g data-step="5" data-info="agents.py — imports: env, events"><rect x="80" y="226" width="128" height="34" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="144.0" y="248.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">agents</text></g>
-<g data-step="5" data-info="ci.py — imports: config, env, events"><rect x="220" y="226" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="284.0" y="248.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">ci</text></g>
-<g data-step="4" data-info="events.py — imports: state, worktrees"><rect x="80" y="280" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="144.0" y="302.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">events</text></g>
-<g data-step="4" data-info="retention.py — imports: env, state, worktrees"><rect x="220" y="280" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="284.0" y="302.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">retention</text></g>
-<g data-step="3" data-info="triage.py — imports: findings, state"><rect x="80" y="334" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="144.0" y="356.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">triage</text></g>
-<g data-step="3" data-info="worktrees.py — imports: config, env, gates, state"><rect x="220" y="334" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="284.0" y="356.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">worktrees</text></g>
-<g data-step="2" data-info="state.py — imports: config, findings"><rect x="80" y="388" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="144.0" y="410.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">state</text></g>
-<g data-step="2" data-info="gates.py — imports: config, env"><rect x="220" y="388" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="284.0" y="410.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">gates</text></g>
-<g data-step="2" data-info="forge.py — imports: env"><rect x="360" y="388" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="424.0" y="410.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">forge</text></g>
-<g data-step="2" data-info="snapshots.py — imports: env"><rect x="500" y="388" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="564.0" y="410.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">snapshots</text></g>
-<g data-step="1" data-info="config.py — imports no adw module — a leaf."><rect x="80" y="442" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="144.0" y="464.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">config</text></g>
-<g data-step="1" data-info="findings.py — imports no adw module — a leaf."><rect x="220" y="442" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="284.0" y="464.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">findings</text></g>
-<g data-step="1" data-info="env.py — imports no adw module — a leaf."><rect x="360" y="442" width="128" height="34" rx="6" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="424.0" y="464.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">env</text></g>
-<g data-step="9" data-info="gui.app.py — imports: env, state, gui.i18n, gui.model, gui.reader, gui.registry"><rect x="812" y="334" width="128" height="34" rx="6" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="876.0" y="356.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">gui.app</text></g>
-<g data-step="9" data-info="gui.model.py — imports no adw module — a leaf."><rect x="678" y="388" width="128" height="34" rx="6" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="742.0" y="410.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">gui.model</text></g>
-<g data-step="9" data-info="gui.reader.py — imports no adw module — a leaf."><rect x="812" y="388" width="128" height="34" rx="6" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="876.0" y="410.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">gui.reader</text></g>
-<g data-step="9" data-info="gui.i18n.py — imports no adw module — a leaf."><rect x="678" y="442" width="128" height="34" rx="6" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="742.0" y="464.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">gui.i18n</text></g>
-<g data-step="9" data-info="gui.registry.py — imports no adw module — a leaf."><rect x="812" y="442" width="128" height="34" rx="6" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="876.0" y="464.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="normal" text-anchor="middle" fill="#0f172a">gui.registry</text></g>
-<g data-step="9"><path d="M208 76 L954 76 L954 459.0 L951.0 459.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="940,459.0 951.0,452.9 951.0,465.1" fill="#475569"/><text x="430" y="70" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" font-weight="normal" text-anchor="middle" fill="#475569">register_repo (fail-open)</text></g>
-<g data-step="9"><path d="M208 90 L876.0 90 L876.0 323.0" stroke="#475569" stroke-width="2" fill="none" stroke-dasharray="6 4"/><polygon points="876.0,334 870.0,323.0 882.0,323.0" fill="#475569"/><text x="430" y="106" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" font-weight="normal" text-anchor="middle" fill="#475569">lazy, only for adw gui</text></g>
-<g data-step="9"><path d="M812 351.0 L661.0 351.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="650,351.0 661.0,344.9 661.0,357.1" fill="#475569"/><text x="736" y="328" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" font-weight="normal" text-anchor="middle" fill="#475569">reads core: state, env</text></g>
-<text x="480" y="506" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#0f172a">Rule: a module imports only from rows below it. No cycles.</text>
+<desc>adw modules arranged by import depth (computed from the module-level imports); the gui package on the right is imported by the core only through cli.</desc>
+<rect x="0" y="0" width="1000" height="640" fill="#ffffff"/>
+<rect x="52" y="34" width="536" height="544" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="62" y="54" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" fill="#475569">core package adw/</text>
+<rect x="626" y="226" width="364" height="352" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="1.5" stroke-dasharray="6 4"/>
+<text x="636" y="244" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" fill="#475569">optional package adw/gui/</text>
+<text x="32" y="553" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L0</text>
+<text x="32" y="507" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L1</text>
+<text x="32" y="461" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L2</text>
+<text x="32" y="415" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L3</text>
+<text x="32" y="369" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L4</text>
+<text x="32" y="323" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L5</text>
+<text x="32" y="277" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L6</text>
+<text x="32" y="231" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L7</text>
+<text x="32" y="185" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L8</text>
+<text x="32" y="139" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L9</text>
+<text x="32" y="93" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#475569">L10</text>
+<g data-step="5" data-info="agents.py — imports: env, events"><rect x="193.0" y="348" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="254.0" y="369" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">agents</text></g>
+<g data-step="5" data-info="ci.py — imports: config, env, events"><rect x="325.0" y="348" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="386.0" y="369" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">ci</text></g>
+<g data-step="9" data-info="authoring.py — imports: agents, codex, context, findings, review_policy, worktrees"><rect x="193.0" y="164" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="254.0" y="185" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">authoring</text></g>
+<g data-step="9" data-info="lanes.py — imports: agents, config, context, env, findings, gates, git, review_policy, snapshots, state, triage, worktrees"><rect x="325.0" y="164" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="386.0" y="185" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">lanes</text></g>
+<g data-step="11" data-info="cli.py — imports: agents, ci, codex, config, dry_run, events, github, gui.registry, phases, preflight, retention, state, worktrees"><rect x="259.0" y="72" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="320.0" y="93" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">cli</text></g>
+<g data-step="6" data-info="codex.py — imports: agents, env, events, findings, gates"><rect x="127.0" y="302" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="188.0" y="323" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">codex</text></g>
+<g data-step="6" data-info="github.py — imports: ci, config"><rect x="259.0" y="302" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="320.0" y="323" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">github</text></g>
+<g data-step="6" data-info="mock.py — imports: agents, findings"><rect x="391.0" y="302" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="452.0" y="323" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">mock</text></g>
+<g data-step="1" data-info="config.py — imports: no adw imports"><rect x="127.0" y="532" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="188.0" y="553" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">config</text></g>
+<g data-step="1" data-info="env.py — imports: no adw imports"><rect x="259.0" y="532" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="320.0" y="553" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">env</text></g>
+<g data-step="1" data-info="findings.py — imports: no adw imports"><rect x="391.0" y="532" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="452.0" y="553" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">findings</text></g>
+<g data-step="7" data-info="context.py — imports: agents, ci, codex, config, env, events, gates, git, github, state, triage, worktrees"><rect x="127.0" y="256" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="188.0" y="277" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">context</text></g>
+<g data-step="7" data-info="dry_run.py — imports: ci, config, findings, github, mock"><rect x="259.0" y="256" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="320.0" y="277" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">dry_run</text></g>
+<g data-step="7" data-info="models.py — imports: agents, codex"><rect x="391.0" y="256" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="452.0" y="277" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">models</text></g>
+<g data-step="4" data-info="events.py — imports: state, worktrees"><rect x="193.0" y="394" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="254.0" y="415" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">events</text></g>
+<g data-step="4" data-info="retention.py — imports: git, state, worktrees"><rect x="325.0" y="394" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="386.0" y="415" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">retention</text></g>
+<g data-step="3" data-info="forge.py — imports: git"><rect x="61.0" y="440" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="122.0" y="461" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">forge</text></g>
+<g data-step="3" data-info="snapshots.py — imports: env, git"><rect x="193.0" y="440" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="254.0" y="461" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">snapshots</text></g>
+<g data-step="3" data-info="triage.py — imports: findings, state"><rect x="325.0" y="440" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="386.0" y="461" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">triage</text></g>
+<g data-step="3" data-info="worktrees.py — imports: config, gates, git, state"><rect x="457.0" y="440" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="518.0" y="461" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">worktrees</text></g>
+<g data-step="2" data-info="gates.py — imports: config, env"><rect x="127.0" y="486" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="188.0" y="507" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">gates</text></g>
+<g data-step="2" data-info="git.py — imports: env"><rect x="259.0" y="486" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="320.0" y="507" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">git</text></g>
+<g data-step="2" data-info="state.py — imports: config, findings"><rect x="391.0" y="486" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="452.0" y="507" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">state</text></g>
+<g data-step="10" data-info="phases.py — imports: agents, authoring, ci, config, context, env, findings, forge, gates, git, github, lanes, review_policy, triage, worktrees"><rect x="259.0" y="118" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="320.0" y="139" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">phases</text></g>
+<g data-step="8" data-info="preflight.py — imports: config, forge, git, models"><rect x="193.0" y="210" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="254.0" y="231" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">preflight</text></g>
+<g data-step="8" data-info="review_policy.py — imports: context, findings"><rect x="325.0" y="210" width="122" height="32" rx="6" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="386.0" y="231" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">review_policy</text></g>
+<g data-step="1" data-info="gui/fmt.py — imports: no adw imports"><rect x="636.0" y="532" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="690.0" y="553" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">fmt</text></g>
+<g data-step="1" data-info="gui/i18n.py — imports: no adw imports"><rect x="754.0" y="532" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="808.0" y="553" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">i18n</text></g>
+<g data-step="1" data-info="gui/model.py — imports: no adw imports"><rect x="872.0" y="532" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="926.0" y="553" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">model</text></g>
+<g data-step="2" data-info="gui/registry.py — imports: no adw imports"><rect x="636.0" y="486" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="690.0" y="507" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">registry</text></g>
+<g data-step="2" data-info="gui/reader.py — imports: no adw imports"><rect x="754.0" y="486" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="808.0" y="507" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">reader</text></g>
+<g data-step="2" data-info="gui/trace.py — imports: gui.fmt"><rect x="872.0" y="486" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="926.0" y="507" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">trace</text></g>
+<g data-step="3" data-info="gui/artifacts.py — imports: state"><rect x="695.0" y="440" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="749.0" y="461" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">artifacts</text></g>
+<g data-step="3" data-info="gui/runs.py — imports: gui.fmt, gui.reader, gui.registry, state"><rect x="813.0" y="440" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="867.0" y="461" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">runs</text></g>
+<g data-step="4" data-info="gui/diffs.py — imports: git, gui.artifacts, gui.fmt, state"><rect x="695.0" y="394" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="749.0" y="415" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">diffs</text></g>
+<g data-step="4" data-info="gui/timeline.py — imports: gui.fmt, gui.runs, gui.trace"><rect x="813.0" y="394" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="867.0" y="415" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">timeline</text></g>
+<g data-step="5" data-info="gui/serialize.py — imports: gui.diffs, gui.fmt, gui.timeline, gui.trace"><rect x="754.0" y="348" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="808.0" y="369" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">serialize</text></g>
+<g data-step="6" data-info="gui/projections.py — imports: gui.artifacts, gui.diffs, gui.fmt, gui.model, gui.runs, gui.serialize, gui.timeline, gui.trace, state"><rect x="754.0" y="302" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="808.0" y="323" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">projections</text></g>
+<g data-step="7" data-info="gui/app.py — imports: gui.artifacts, gui.diffs, gui.fmt, gui.i18n, gui.projections, gui.reader, gui.runs, gui.serialize, gui.timeline, gui.trace, state"><rect x="754.0" y="256" width="108" height="32" rx="6" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="808.0" y="277" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a">app</text></g>
+<g data-step="11" data-info="cli imports gui.app inside `adw gui` only, so a plain `adw run` install needs no web stack."><path class="flow" d="M381.0,82.0 L612,82.0 L612,272.0 L744.0,272.0" stroke="#475569" stroke-width="1.8" fill="none" stroke-dasharray="6 4"/><polygon points="754.0,272.0 743.0,267.0 743.0,277.0" fill="#475569"/></g>
+<g data-step="11" data-info="cli imports gui.registry at module level, but only to register the repo — a registry error never blocks a run."><path class="flow" d="M381.0,94.0 L602,94.0 L602,502.0 L626.0,502.0" stroke="#475569" stroke-width="1.8" fill="none"/><polygon points="636.0,502.0 625.0,497.0 625.0,507.0" fill="#475569"/></g>
+<text x="395.0" y="70" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" fill="#475569">lazy, only for adw gui</text>
+<text x="395.0" y="118" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" fill="#475569">register_repo (fail-open)</text>
+<g data-info="The GUI only reads: run state, event logs and snapshot diffs (read-only git diff)."><rect x="636" y="586" width="344" height="26" rx="6" fill="#ffffff" stroke="#6d28d9" stroke-width="1.5"/><text x="808.0" y="604" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a">gui reads core: state, git</text></g>
+<text x="52" y="626" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#475569">Rule: a module imports only from rows below it. No cycles. Row = longest import chain.</text>
 </svg></div>
 <figcaption aria-hidden="true">Import layers of adw/ — every import
 points to a lower row (HTML: hover a module for its exact
@@ -1311,18 +1390,20 @@ imports)</figcaption>
 </figure>
 <h3 id="11-runcontext--the-dependency-injection-root">1.1
 <code>RunContext</code> — the dependency-injection root</h3>
-<p><code>RunContext</code> (dataclass in <code>phases.py</code>) carries
-everything a phase needs: <code>repo</code>, <code>config</code>,
-<code>state</code>, the two runner interfaces
+<p><code>RunContext</code> (dataclass in <code>context.py</code>)
+carries everything a phase needs: <code>repo</code>,
+<code>config</code>, <code>state</code>, the two runner interfaces
 (<code>agents: AgentRunner</code>, <code>codex: CodexClient</code>), the
 seams <code>run_glab</code>, <code>run_gh</code>, <code>sleep</code>,
-the run's single <code>emitter</code>, the pinned flags
-<code>skip_approval</code>, <code>spec_approval</code>,
-<code>dry_run</code>, a <code>git_env</code>, and a
+the run's single <code>emitter</code>, a <code>git_env</code>, and a
 <code>threading.RLock</code> (<code>state_lock</code>) that serializes
 state mutations across parallel lane threads. <code>ctx.save()</code>
 persists the state and mirrors a <code>state.saved</code> event
-<em>after</em> the write succeeded.</p>
+<em>after</em> the write succeeded. The gate mode
+(<code>skip_approval</code>, <code>spec_approval</code>) and
+<code>dry_run</code> live only in the persisted <code>RunState</code>:
+<code>adw run</code> pins them before the first save, so resume and
+approve see exactly the started mode.</p>
 <p>Because every contact with the outside world goes through this
 object, the same production code runs against mocks in
 <code>--dry-run</code> and in the test suite.</p>
@@ -2054,8 +2135,8 @@ injectable seams with 120 s subprocess timeouts.</li>
 <code>CiResult</code>, extend the <code>Forge</code> literal and
 <code>detect_forge</code>, add the provider value to
 <code>CiConfig.provider</code>, wire it in <code>run_ci_phase</code>,
-add a dry-run fake in <code>cli.py</code>, and an issue fetcher if the
-forge has issues.</li>
+add a dry-run fake in <code>adw/dry_run.py</code>, and an issue fetcher
+if the forge has issues.</li>
 </ul>
 <h2 id="9-resume-approval-and-concurrency-semantics">9. Resume, approval
 and concurrency semantics</h2>
@@ -2369,9 +2450,10 @@ the full environment.</li>
 <tbody>
 <tr class="odd">
 <td><strong>Add an agent</strong></td>
-<td><code>REGISTRY</code> in <code>agents.py</code>; a call site in
-<code>phases.py</code> via <code>_agent_run</code>; a mock response in
-<code>cli._dry_run_runners</code> and tests</td>
+<td><code>REGISTRY</code> in <code>agents.py</code>; a call site in a
+phase module (<code>authoring.py</code>, <code>lanes.py</code>,
+<code>phases.py</code>) via <code>_agent_run</code>; a mock response in
+<code>dry_run.runners</code> and tests</td>
 <td>Smallest tool set; artifact-exact write rules; reviewers answer in
 <code>SCHEMA_INSTRUCTION</code>; reuse shared prompt constants instead
 of copying text.</td>

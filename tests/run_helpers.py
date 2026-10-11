@@ -107,8 +107,8 @@ def prepare_final_review(target_repo):
         state=RunState.new(issue="DoD4", parallel=False),
         agents=agents,
         codex=codex,
-        skip_approval=True,
     )
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     run_build_phase(ctx)
     run_codex_review_phase(ctx)

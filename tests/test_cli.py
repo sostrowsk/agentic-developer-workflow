@@ -833,7 +833,7 @@ def test_in_phase_worktree_refusal_maps_to_nonzero_exit_without_escalation(
         raise WorktreeRefusedError(".adw/spec.md ist getrackt und hat uncommittete Änderungen")
 
     # Vorflug sah einen sauberen Baum; erst danach wird er dirty → der Guard greift.
-    monkeypatch.setattr(cli_mod, "_preflight_worktree", lambda repo: None)
+    monkeypatch.setattr("adw.preflight.check_worktree", lambda repo: None)
     monkeypatch.setattr(cli_mod, "run_spec_and_plan", refuse)
     res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
     assert res.exit_code == 1
@@ -847,10 +847,10 @@ def test_in_phase_worktree_refusal_maps_to_nonzero_exit_without_escalation(
 
 
 def _git_plain_with_failure(monkeypatch, failing_subcommand: str):
-    """Ersetzt cli._git_plain so, dass genau ein Git-Subkommando fehlschlägt."""
-    import adw.cli as cli_mod
+    """Ersetzt preflight.git_plain so, dass genau ein Git-Subkommando fehlschlägt."""
+    from adw import preflight
 
-    real = cli_mod._git_plain
+    real = preflight.git_plain
 
     def wrapper(repo, *args):
         if args[:1] == (failing_subcommand,):
@@ -859,7 +859,7 @@ def _git_plain_with_failure(monkeypatch, failing_subcommand: str):
             )
         return real(repo, *args)
 
-    monkeypatch.setattr(cli_mod, "_git_plain", wrapper)
+    monkeypatch.setattr(preflight, "git_plain", wrapper)
 
 
 def test_run_refuses_when_git_status_fails_without_creating_a_run(target_repo, monkeypatch):

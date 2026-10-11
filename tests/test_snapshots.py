@@ -288,9 +288,9 @@ def _build_ready_ctx(target_repo) -> RunContext:
         state=state,
         agents=agents,
         codex=codex,
-        skip_approval=True,
         emitter=EventEmitter(target_repo, state.run_id),
     )
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     assert ctx.state.phase == "build"
     return ctx

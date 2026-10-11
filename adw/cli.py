@@ -7,7 +7,6 @@ Exit codes: 0 = done, 2 = awaiting_approval (plan-approval pause),
 import contextlib
 import fcntl
 import json
-import re
 import subprocess
 import time
 from importlib.metadata import PackageNotFoundError, version
@@ -17,16 +16,13 @@ from typing import Annotated, get_args
 import typer
 from pydantic import ValidationError
 
-from adw import ci, github, models, retention
+from adw import ci, github, preflight, retention
+from adw import dry_run as dry
 from adw.agents import AgentRunError, RunTotals, SdkAgentRunner
 from adw.codex import CodexRunner
 from adw.config import AdwConfig, BreakpointName, ConfigError
 from adw.events import EventEmitter
-from adw.findings import Finding, ReviewResult
-from adw.forge import ForgeError, detect_forge
-from adw.git import run_git
 from adw.gui.registry import register_repo
-from adw.mock import MockAgentRunner, MockCodexRunner
 from adw.phases import (
     AwaitingApproval,
     EscalationError,
@@ -49,6 +45,8 @@ EXIT_AWAITING_APPROVAL = 2
 # Modul-Attribute statt Direkt-Import: Tests ersetzen die CLI-Aufrufe hier.
 _run_glab = ci.run_glab
 _run_gh = github.run_gh
+# Injection seam like the two above: tests swap the dry-run mock runners here.
+_dry_run_runners = dry.runners
 
 
 def _fail(message: str) -> typer.Exit:
@@ -111,169 +109,12 @@ def _resolve_gate_mode(
     return mode, skip, spec
 
 
-# Genau die sechs ADW-eigenen Authoring-Artefakte (Konvention, nicht
-# konfigurierbar, kein Glob — E2/B3): nur wenn AUSSCHLIESSLICH diese im
-# Haupt-Checkout dirty sind, heilt der Vorflug sie selbst.
-SELF_HEAL_ARTIFACTS = (
-    ".adw/issue.md",
-    ".adw/spec.md",
-    ".adw/plan.md",
-    ".adw/contract.yaml",
-    ".adw/spec-summary.md",
-    ".adw/plan-summary.md",
-)
-
-
-def _git_plain(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    """Git in the main checkout WITHOUT the escalating orchestrator wrapper — the
-    worktree preflight must NEVER escalate a run (B1), only refuse or self-heal."""
-    return run_git(repo, *args, timeout=120)
-
-
-def _worktree_dirty_paths(repo: Path) -> list[str]:
-    """Full set of uncommitted paths in the main checkout (tracked + untracked).
-
-    Determined up front from ``git status --porcelain -z`` so a decision is made
-    over the COMPLETE set before anything is mutated. A failing ``git status``
-    (nonzero exit, timeout, or launch failure) is NEVER treated as a clean tree —
-    the preflight cannot then establish cleanliness, so it REFUSES (non-escalating)
-    rather than silently proceeding to mutate state."""
+def _preflight(repo: Path, config: AdwConfig, dry_run: bool) -> None:
+    """Forge → working tree → models (adw/preflight.py); a refusal is exit 1."""
     try:
-        result = _git_plain(repo, "status", "--porcelain", "-z")
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise _fail(
-            "Arbeitsbaum-Prüfung fehlgeschlagen: `git status` im Haupt-Checkout "
-            f"nicht ausführbar — {exc}"
-        ) from exc
-    if result.returncode != 0:
-        raise _fail(
-            "Arbeitsbaum-Prüfung fehlgeschlagen: `git status` im Haupt-Checkout "
-            f"endete mit Exit {result.returncode} — {result.stderr.strip()[:500]}"
-        )
-    tokens = result.stdout.split("\0")
-    paths: list[str] = []
-    i = 0
-    while i < len(tokens):
-        entry = tokens[i]
-        if not entry:
-            i += 1
-            continue
-        status, path = entry[:2], entry[3:]
-        paths.append(path)
-        # Rename/Copy: "XY <neu>\0<orig>" — der Ursprungspfad ist ein eigenes Token.
-        if "R" in status or "C" in status:
-            i += 1
-            if i < len(tokens) and tokens[i]:
-                paths.append(tokens[i])
-        i += 1
-    return paths
-
-
-def _heal_adw_artifact(repo: Path, relpath: str) -> None:
-    """Reset ONE ADW-owned artifact: tracked → git checkout, untracked → delete.
-
-    A failing heal REFUSES (non-escalating) instead of running on with a
-    half-healed tree — the caller must not proceed to mutate state."""
-    # Maßgeblich ist HEAD, NICHT der Index: `git checkout -- <pfad>` restauriert aus
-    # dem Index und ließe eine GESTAGETE Änderung/Löschung/Umbenennung eines
-    # Artefakts stehen — die folgende Statusprüfung sähe den Baum weiter dirty und
-    # verweigerte, statt zu heilen (Follow-up Lauf 72a042ad).
-    try:
-        in_head = _git_plain(repo, "ls-tree", "--name-only", "HEAD", "--", relpath)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise _fail(f"Selbstheilung von {relpath} fehlgeschlagen: git ls-tree — {exc}") from exc
-    if in_head.returncode != 0:
-        raise _fail(
-            f"Selbstheilung von {relpath} fehlgeschlagen: git ls-tree Exit "
-            f"{in_head.returncode} — {in_head.stderr.strip()[:300]}"
-        )
-    if in_head.stdout.strip():
-        # `checkout HEAD -- <pfad>` setzt Index UND Arbeitsbaum auf den Stand aus
-        # HEAD zurück — pfadbezogen, fremde Dateien sind unerreichbar.
-        try:
-            result = _git_plain(repo, "checkout", "HEAD", "--", relpath)
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise _fail(
-                f"Selbstheilung von {relpath} fehlgeschlagen: git checkout — {exc}"
-            ) from exc
-        if result.returncode != 0:
-            raise _fail(
-                f"Selbstheilung von {relpath} fehlgeschlagen: git checkout Exit "
-                f"{result.returncode} — {result.stderr.strip()[:300]}"
-            )
-    else:
-        # Nicht in HEAD: ein etwaiger Index-Eintrag (frisch gestagetes Artefakt)
-        # muss mit weg, sonst bliebe der Baum nach dem Löschen dirty.
-        try:
-            staged = _git_plain(
-                repo, "rm", "--cached", "--force", "--quiet", "--ignore-unmatch",
-                "--", relpath,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            raise _fail(f"Selbstheilung von {relpath} fehlgeschlagen: git rm — {exc}") from exc
-        if staged.returncode != 0:
-            raise _fail(
-                f"Selbstheilung von {relpath} fehlgeschlagen: git rm Exit "
-                f"{staged.returncode} — {staged.stderr.strip()[:300]}"
-            )
-        try:
-            (repo / relpath).unlink(missing_ok=True)
-        except OSError as exc:
-            raise _fail(f"Selbstheilung von {relpath} fehlgeschlagen: {exc}") from exc
-
-
-def _preflight_worktree(repo: Path) -> None:
-    """Guard the main checkout before run/resume/approve (B1–B4). It NEVER
-    escalates: a clean tree proceeds; a dirty set consisting EXCLUSIVELY of the
-    six ADW-owned authoring artifacts self-heals and proceeds; anything else
-    (foreign or mixed) refuses with a clear message, discarding nothing. A git
-    failure (status/heal) is also a refusal, never a silent proceed."""
-    dirty = _worktree_dirty_paths(repo)
-    if not dirty:
-        return
-    if all(path in SELF_HEAL_ARTIFACTS for path in dirty):
-        for path in dirty:
-            _heal_adw_artifact(repo, path)
-        # Re-Check: die Heilung MUSS den Checkout sauber hinterlassen haben —
-        # sonst liefe der Lauf mit einem halb geheilten Baum weiter.
-        remaining = _worktree_dirty_paths(repo)
-        if remaining:
-            raise _fail(
-                "Selbstheilung ließ den Haupt-Checkout nicht sauber:\n  "
-                + "\n  ".join(sorted(remaining))
-            )
-        return
-    listing = "\n  ".join(sorted(dirty))
-    raise _fail(
-        "Der Haupt-Checkout hat uncommittete Änderungen außerhalb der ADW-eigenen "
-        f"Authoring-Artefakte:\n  {listing}\n"
-        "Bitte committen oder stashen, dann den Lauf erneut starten bzw. fortsetzen "
-        "(der ADW verwirft fremde Änderungen nie)."
-    )
-
-
-def _preflight_forge(repo: Path, config: AdwConfig, dry_run: bool) -> None:
-    """Refuse a real run whose forge cannot be determined BEFORE any agent runs —
-    otherwise phase 7 would only escalate after the whole build. Never escalates,
-    mutates nothing. Dry-run keeps its GitLab fallback (CI is mocked there)."""
-    if dry_run:
-        return
-    try:
-        detect_forge(repo, config.ci.provider)
-    except ForgeError as exc:
+        preflight.run_all(repo, config, dry_run)
+    except preflight.PreflightRefused as exc:
         raise _fail(str(exc)) from exc
-
-
-def _preflight_models(dry_run: bool) -> None:
-    """Refuse a real run while ADW pins older models than the newest (checked at
-    most once per 24 h). A probe that cannot run only warns. Dry run: 0 tokens."""
-    if dry_run:
-        return
-    outdated, warnings = models.check()
-    for warning in warnings:
-        typer.echo(f"Warnung: {warning}", err=True)
-    if outdated:
-        raise _fail(models.outdated_message(outdated))
 
 
 def _adw_version() -> str:
@@ -405,12 +246,9 @@ def run(
     # Config ZUERST validieren (fail fast) — kein Forge-Netzaufruf für ein
     # Repo, das ohnehin keine gültige .adw/config.yaml hat.
     config = _load_config(repo, base_branch)
-    _preflight_forge(repo, config, dry_run)
-    # Arbeitsbaum-Vorflug VOR jeder State-Mutation: eine Verweigerung legt keinen
-    # Run an und macht keinen Netzaufruf (B1/B4). Nie Eskalation.
-    _preflight_worktree(repo)
-    # Erst NACH dem Arbeitsbaum-Vorflug: eine Verweigerung kostet keine Probe-Tokens.
-    _preflight_models(dry_run)
+    # Vorflug VOR jeder State-Mutation: eine Verweigerung legt keinen Run an und
+    # macht keinen Netzaufruf (B1/B4). Nie Eskalation.
+    _preflight(repo, config, dry_run)
     if issue is not None:
         issue_text = issue
     elif gitlab_issue is not None:
@@ -452,10 +290,7 @@ def run(
     with _run_execution_lock(repo, state.run_id):
         with _run_span(emitter, state, config, repo, run_totals) as run_handle:
             state.save(repo, emitter=emitter, span_id=run_handle.id)
-            ctx = _build_context(
-                repo, config, state, skip_approval=skip_approval, spec_approval=spec_approval,
-                emitter=emitter, run_totals=run_totals,
-            )
+            ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
             typer.echo(f"Run {state.run_id} gestartet (Phase: {state.phase}, Gates: {gate_mode})")
             _execute(ctx)
     # Nach erfolgreichem Abschluss (done): automatisches Pruning (D3). Eine
@@ -484,12 +319,9 @@ def resume(
                 f"lesen und einen neuen Run starten"
             )
         config, rebased = _config_for_continuation(repo, state, base_branch)
-        _preflight_forge(repo, config, state.dry_run)
-        # Arbeitsbaum-Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save):
-        # eine Verweigerung lässt den Run-State unverändert und resumierbar (B1).
-        _preflight_worktree(repo)
-        # Erst NACH dem Arbeitsbaum-Vorflug: eine Verweigerung kostet keine Probe-Tokens.
-        _preflight_models(state.dry_run)
+        # Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save): eine
+        # Verweigerung lässt den Run-State unverändert und resumierbar (B1).
+        _preflight(repo, config, state.dry_run)
         emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
         run_totals = RunTotals()
         with _run_span(emitter, state, config, repo, run_totals) as run_handle:
@@ -530,12 +362,9 @@ def approve(
         # A re-pinned base branch is only mutated in memory here; approve's own save
         # below (inside the run span) persists it together with the approval grant.
         config, _rebased = _config_for_continuation(repo, state, base_branch)
-        _preflight_forge(repo, config, state.dry_run)
-        # Arbeitsbaum-Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung
-        # lässt die Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
-        _preflight_worktree(repo)
-        # Erst NACH dem Arbeitsbaum-Vorflug: eine Verweigerung kostet keine Probe-Tokens.
-        _preflight_models(state.dry_run)
+        # Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung lässt die
+        # Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
+        _preflight(repo, config, state.dry_run)
         if state.pending_breakpoint is not None:
             gate = state.pending_breakpoint
         else:
@@ -679,7 +508,7 @@ def _require_repo(repo: Path) -> Path:
     if not repo.is_dir():
         raise _fail(f"--repo {repo} existiert nicht oder ist kein verwendbares Verzeichnis")
     try:
-        result = _git_plain(repo, "rev-parse", "--show-toplevel")
+        result = preflight.git_plain(repo, "rev-parse", "--show-toplevel")
     except (OSError, subprocess.SubprocessError) as exc:
         raise _fail(f"--repo {repo}: git nicht ausführbar — {exc}") from exc
     # Require --repo to be the ROOT of a git work tree: a non-git directory fails,
@@ -1072,8 +901,6 @@ def _build_context(
     repo: Path,
     config: AdwConfig,
     state: RunState,
-    skip_approval: bool = False,
-    spec_approval: bool = False,
     emitter=None,
     run_totals: RunTotals | None = None,
 ) -> RunContext:
@@ -1082,7 +909,7 @@ def _build_context(
 
         emitter = NoOpEmitter()
     if state.dry_run:
-        config = _dry_run_config(config)
+        config = dry.config(config)
         agents, codex = _dry_run_runners()
         return RunContext(
             repo=repo,
@@ -1090,13 +917,10 @@ def _build_context(
             state=state,
             agents=agents,
             codex=codex,
-            run_glab=_dry_run_glab(config),
-            run_gh=_dry_run_gh(config),
+            run_glab=dry.glab(config),
+            run_gh=dry.gh(config),
             sleep=lambda seconds: None,
             emitter=emitter,
-            skip_approval=skip_approval,
-            spec_approval=spec_approval,
-            dry_run=True,
         )
     return RunContext(
         repo=repo,
@@ -1105,157 +929,7 @@ def _build_context(
         agents=SdkAgentRunner(emitter=emitter, totals=run_totals),
         codex=CodexRunner(emitter=emitter, timeout=config.codex.timeout, totals=run_totals),
         emitter=emitter,
-        skip_approval=skip_approval,
-        spec_approval=spec_approval,
     )
-
-
-# --- Dry-Run: kanonische Fixtures (0 Tokens, kein Netz) -----------------------
-
-_DRY_SPEC = "# Spec (Dry-Run)\n\nZiel: Demo-Durchlauf durch alle sieben Phasen.\n"
-_DRY_PLAN = "# Plan (Dry-Run)\n\n- Workstream backend\n- Workstream frontend (optional)\n"
-_DRY_CONTRACT = "openapi: 3.1.0\ninfo:\n  title: Dry-Run-Kontrakt\n  version: 0.0.1\n"
-# Je Autor eigene Entwurfstexte: identische Fixtures würden verdecken, wenn
-# beide Draft-Dateien aus derselben Quelle stammten — der Dry-Run soll die zwei
-# unabhängigen Entwürfe zeigen, aus denen die Synthese mergt.
-_DRY_SPEC_DRAFT = "# Spec-Entwurf Claude (Dry-Run)\n\nZiel: Demo-Durchlauf.\n"
-_DRY_PLAN_DRAFT = "# Plan-Entwurf Claude (Dry-Run)\n\n- Workstream backend\n"
-_DRY_SPEC_CODEX_DRAFT = "# Spec-Entwurf Codex (Dry-Run)\n\nZiel: Demo-Durchlauf, zweite Sicht.\n"
-_DRY_PLAN_CODEX_DRAFT = "# Plan-Entwurf Codex (Dry-Run)\n\n- Workstream backend (zweite Sicht)\n"
-_DRY_CONTRACT_CODEX = "openapi: 3.1.0\ninfo:\n  title: Dry-Run-Kontrakt (Codex)\n  version: 0.0.1\n"
-_DRY_SPEC_SUMMARY = "# Zusammenfassung der Spec (Dry-Run)\n\nBest-of beider Entwuerfe.\n"
-_DRY_PLAN_SUMMARY = "# Zusammenfassung des Plans (Dry-Run)\n\nBest-of beider Entwuerfe.\n"
-_OK = ReviewResult(verdict="ok", findings=[])
-
-
-def _dry_run_config(config: AdwConfig) -> AdwConfig:
-    """Canonical fixtures (PLAN task 11 / SPEC DoD 1): every Lane gets a
-    synthetic Gate that only the second build run turns green (simulated
-    Gate fail → fix task to the same session); the E2E Gate analogously turns
-    green only through a triaged Lane fix (E2E triage path)."""
-    data = config.model_dump()
-    for lane in data["lanes"].values():
-        lane["gates"] = list(lane["gates"]) + [
-            {"name": "adw-dry-run-gate", "cmd": "test -f .adw-dry-run-fixed", "timeout": 10}
-        ]
-    if data.get("e2e"):
-        data["e2e"]["cmd"] = "test -f .adw-dry-run-e2e-fixed"
-    return AdwConfig.model_validate(data)
-
-
-def _dry_run_runners() -> tuple[MockAgentRunner, MockCodexRunner]:
-    agents = MockAgentRunner()
-    # Entwurfs-Autoren der Draft-Stage …
-    agents.script_files("spec_agent", {".adw/spec.md": _DRY_SPEC_DRAFT})
-    agents.script_files(
-        "plan_agent", {".adw/plan.md": _DRY_PLAN_DRAFT, ".adw/contract.yaml": _DRY_CONTRACT}
-    )
-    # … und die Synthese, die daraus Best-of-Artefakt UND Summary baut.
-    agents.script_files(
-        "spec_synthesis", {".adw/spec.md": _DRY_SPEC, ".adw/spec-summary.md": _DRY_SPEC_SUMMARY}
-    )
-    agents.script_files(
-        "plan_synthesis",
-        {
-            ".adw/plan.md": _DRY_PLAN,
-            ".adw/contract.yaml": _DRY_CONTRACT,
-            ".adw/plan-summary.md": _DRY_PLAN_SUMMARY,
-        },
-    )
-
-    def build_writes(cwd: Path) -> dict[str, str]:
-        # Simulations-Stufe aus dem WORKTREE ableiten, nicht aus Prozess-
-        # lokalen Call-Zählern: ein Resume mit frischem Mock muss den
-        # checkpointeten Fix fortsetzen statt ihn zu wiederholen.
-        demo = cwd / f"adw_dry_run_{cwd.name}.md"
-        if not demo.exists():
-            stage = 1  # Erstlauf: Demo-Datei, das synthetische Gate bleibt rot
-        elif not (cwd / ".adw-dry-run-fixed").exists():
-            stage = 2  # Fix des simulierten Gate-Fails
-        else:
-            stage = 3  # Fix des simulierten E2E-Fails (nur --parallel)
-        files = {demo.name: f"Dry-Run-Artefakt der Lane {cwd.name} (Stufe {stage})\n"}
-        if stage >= 2:
-            files[".adw-dry-run-fixed"] = "ok\n"
-        if stage >= 3:
-            files[".adw-dry-run-e2e-fixed"] = "ok\n"
-        return files
-
-    agents.file_writes["build_agent"] = build_writes
-    # Großzügig scripten: Restantworten in den Queues sind unschädlich,
-    # eine LEERE Queue würde einen legitimen Folge-Aufruf abbrechen.
-    agents.script("spec_agent", *["Spec-Entwurf geschrieben"] * 3)
-    agents.script("plan_agent", *["Plan-Entwurf geschrieben"] * 3)
-    agents.script("spec_synthesis", *["Spec geschrieben"] * 3)
-    agents.script("plan_synthesis", *["Plan geschrieben"] * 3)
-    agents.script("build_agent", *["gebaut"] * 12)
-    triage = json.dumps(
-        ReviewResult(
-            verdict="needs_fixes",
-            findings=[
-                Finding(
-                    severity="P2",
-                    lane="backend",
-                    file="adw_dry_run_backend.md",
-                    issue="Simuliertes E2E-Finding",
-                    remediation_plan=["Demo-Fix"],
-                )
-            ],
-        ).model_dump()
-    )
-    agents.script("e2e_triage", *[triage] * 2)
-    agents.script("log_analyst", *[triage] * 2)
-    agents.script("final_reviewer", *[json.dumps(_OK.model_dump())] * 3)
-    codex = MockCodexRunner()
-    codex.script(*[_OK] * 8)  # Spec-, Plan-, Code-Reviews — alle grün
-    codex.script_artifacts("spec", *[{"spec.md": _DRY_SPEC_CODEX_DRAFT} for _ in range(3)])
-    codex.script_artifacts(
-        "plan",
-        *[
-            {"plan.md": _DRY_PLAN_CODEX_DRAFT, "contract.yaml": _DRY_CONTRACT_CODEX}
-            for _ in range(3)
-        ],
-    )
-    return agents, codex
-
-
-def _dry_run_gh(config: AdwConfig) -> github.RunGh:
-    """Simulated green GitHub Actions incl. staging job — no network."""
-    staging = config.ci.staging_job or "deploy-staging"
-
-    def fake(argv: list[str], cwd: Path) -> str:
-        if argv[0] == "api" and "/actions/runs?" in argv[1]:
-            return json.dumps(
-                {
-                    "total_count": 1,
-                    "workflow_runs": [{"id": 1, "status": "completed", "conclusion": "success"}],
-                }
-            )
-        if argv[0] == "api" and "/jobs" in argv[1]:
-            return json.dumps({"jobs": [{"id": 2, "name": staging, "conclusion": "success"}]})
-        if argv[:2] == ["run", "view"]:
-            return ""
-        raise ci.CiError(f"Dry-Run: unerwarteter gh-Aufruf {argv}")
-
-    return fake
-
-
-def _dry_run_glab(config: AdwConfig) -> ci.RunGlab:
-    """Simulated green pipeline incl. staging job — no network."""
-    staging = config.ci.staging_job or "deploy-staging"
-
-    def fake(argv: list[str], cwd: Path) -> str:
-        if argv[0] == "api" and "/pipelines?" in argv[1]:
-            match = re.search(r"sha=([0-9a-f]+)", argv[1])
-            sha = match.group(1) if match else ""
-            return json.dumps([{"id": 1, "status": "success", "sha": sha}])
-        if argv[0] == "api":  # Jobs der Pipeline
-            return json.dumps([{"id": 2, "name": staging, "status": "success"}])
-        if argv[:2] == ["ci", "trace"]:
-            return ""
-        raise ci.CiError(f"Dry-Run: unerwarteter glab-Aufruf {argv}")
-
-    return fake
 
 
 if __name__ == "__main__":

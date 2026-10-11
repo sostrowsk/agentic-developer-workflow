@@ -175,9 +175,9 @@ def test_codex_review_start_argv_matches_the_executed_argv(target_repo, monkeypa
         state=state,
         agents=agents,
         codex=codex,
-        skip_approval=True,
         emitter=emitter,
     )
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     run_build_phase(ctx)
     assert ctx.state.phase == "codex_review"

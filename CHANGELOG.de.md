@@ -13,6 +13,21 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.30.3] — 2026-10-11
+
+### Geändert
+Reine Struktur, keine Verhaltensänderung (Pakete 5 und 6 des Verbesserungs-Reviews). Dieselben 1349 Tests, inhaltlich unverändert:
+- **Der Orchestrator ist nach Phasen aufgeteilt.** `adw/phases.py` (etwa 2.560 Zeilen) enthält jetzt die Phasen 4–7 und ist die Fassade, aus der die CLI alle sieben Einstiegspunkte importiert. Die Phasen 1–2 (Entwürfe, Synthese, reviewter Authoring-Loop) liegen in `adw/authoring.py`, Phase 3 und der Fix-Dispatch in `adw/lanes.py`, die Review-Loop-Policy in `adw/review_policy.py`, der gemeinsame Kern (`RunContext`, `escalate`, Spans, eskalierender git-Wrapper) in `adw/context.py`.
+- **Die GUI ist entlang ihrer Abschnitte aufgeteilt.** `adw/gui/app.py` (etwa 3.050 Zeilen) behält die Routen. Die Projektionen dahinter liegen in `trace.py`, `fmt.py`, `runs.py`, `serialize.py`, `timeline.py`, `artifacts.py`, `diffs.py` und `projections.py`.
+- **Die CLI ist schlanker.** Die Prüfungen vor `run`, `resume` und `approve` liegen in `adw/preflight.py`: Forge, dann Arbeitsbaum mit Selbstheilung, dann Modelle, in einer festen Reihenfolge. Die Dry-Run-Fixtures und die Mock-Verdrahtung liegen in `adw/dry_run.py`.
+- **Gate-Modus und `dry_run` stehen nur noch im Run-State.** `RunContext` führt keine eigenen Kopien dieser Flags mehr, und Phase 1 pinnt sie nicht erneut; `adw run` pinnt sie wie bisher vor dem ersten Save.
+- **Weniger Dopplung im Authoring-Loop.**
+  - Ein Helfer übernimmt den Agent-Schritt, den Session-Checkpoint und das Wiederherstellen der geschützten Dateien.
+  - Ein einziger Ausgang akzeptiert ein Artefakt mit Known Findings.
+  - Entwurfsstufe und Loop teilen sich die Prüfungen auf fehlende Artefakte und Altbestand.
+- **Die Phasenfunktionen wiederholen ihren Guard nicht mehr.** `@_phase_span` kehrt bei einer übersprungenen Phase früh zurück.
+- **Doku:** Die Modultabellen und Erweiterungspunkte in der Spec sowie die Architektur-Liste im README sind aktualisiert, und das Diagramm der Modul-Schichten ist aus den tatsächlichen Imports neu erzeugt.
+
 ## [0.30.2] — 2026-10-11
 
 ### Geändert
@@ -1106,6 +1121,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.30.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.2...v0.30.3
 [0.30.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.2...v0.30.0

@@ -102,8 +102,15 @@ Erlaubte Lane-Namen sind `backend` und `frontend`; `--parallel` verlangt beide.
 
 ```
 adw/
-  cli.py        typer-Eingang: run/resume/approve/status/gui/runs, Dry-Run-Verdrahtung
-  phases.py     die 7 Phasen über einem RunContext — Loops, Limits, Dispatch
+  cli.py        typer-Eingang: run/resume/approve/status/gui/runs
+  preflight.py  Prüfungen vor run/resume/approve: Forge, sauberer Checkout, Modelle
+  dry_run.py    Dry-Run-Fixtures und Mock-Verdrahtung (0 Tokens, kein Netz)
+  phases.py     Phasen 4–7 + Fassade für alle sieben Phasen-Einstiege
+  context.py    RunContext, Eskalation, Spans, eskalierender git-Wrapper
+  authoring.py  Phasen 1–2: zwei Entwürfe, Synthese, reviewter Authoring-Loop
+  lanes.py      Phase 3 + Fix-Dispatch: Lane-Worktrees, RED-Stufe, Gate-Loop
+  review_policy.py  Severity-Schwelle, Findings-Gedächtnis, Follow-ups
+  git.py        der eine gehärtete git-Aufruf
   agents.py     Agent-Registry (Fable 5.1 / Opus 5.5 / Sonnet 5.5) + SDK-Runner
   codex.py      Codex-CLI (gpt-6-astra) als read-only-Subprocess, striktes Findings-Parsing
   findings.py   Findings-Schema (pydantic) + strikter Parser-Kontrakt
@@ -121,7 +128,8 @@ adw/
   events.py     Append-only-Event-Log (events.jsonl) je Run
   snapshots.py  Artefakt-Snapshots je Phase für den Run-Inspector
   retention.py  `adw runs list|prune`, automatisches Pruning
-  gui/          read-only Run-Inspector (FastAPI, optionales Extra `gui`)
+  gui/          read-only Run-Inspector (FastAPI, optionales Extra `gui`): app.py Routen +
+                trace, fmt, runs, serialize, timeline, artifacts, diffs, projections
 ```
 
 - **Lanes:** je Workstream ein eigener Git-Worktree (`.adw/runs/<id>/trees/<lane>`),

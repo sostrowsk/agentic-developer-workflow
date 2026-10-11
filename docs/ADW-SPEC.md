@@ -45,7 +45,7 @@ and cannot be tested. The same work in Python costs nothing, behaves identically
 and is covered by tests. An agent that is told "repeat until the tests pass" can
 stop early, loop forever or redefine "pass"; a `while` loop with a counter cannot.
 
-**Enforced by.** `adw/phases.py` owns every loop; agents receive a single task
+**Enforced by.** The phase modules (`adw/authoring.py`, `lanes.py`, `phases.py`) own every loop; agents receive a single task
 string and return text. No agent is ever told "now call the next phase".
 
 ## P2 — Reviewers never fix
@@ -103,7 +103,7 @@ broken invariant ends the run in a controlled way: `escalation.md` +
 **Why.** An orchestrator that "somehow keeps going" produces expensive garbage. A
 human gets the state reached and the concrete reason and decides.
 
-**Enforced by.** `escalate()` in `phases.py`; `adw resume` refuses escalated runs.
+**Enforced by.** `escalate()` in `context.py`; `adw resume` refuses escalated runs.
 
 ## P6 — Fail fast, never guess
 
@@ -133,7 +133,7 @@ content that was checked. The same reasoning rejects per-task self-reporting in
 the trace (`docs/SPEC.md` §6).
 
 **Enforced by.** `_worktree_tree_hash`, `_require_no_agent_commit`,
-`_require_lane_branch`, `_require_expected_head`, `_commit_lane` in `phases.py`.
+`_require_lane_branch`, `_require_expected_head`, `_commit_lane` in `lanes.py`.
 
 ## P8 — Least privilege for agents
 
@@ -193,7 +193,7 @@ lets a user accept a config and the whole flow at 0 tokens, and gives the
 acceptance tests something real to test.
 
 **Enforced by.** `RunContext` as the dependency-injection root (all contact with
-the outside world goes through it); `cli._dry_run_runners/_dry_run_glab/_dry_run_gh`.
+the outside world goes through it); `adw/dry_run.py` (`runners`, `glab`, `gh`).
 
 ## P12 — Tests are mocks-only, git is real
 
@@ -233,8 +233,8 @@ The same policy is the contributor's own per-commit review rule — ADW and its
 developers deliberately run the same loop.
 
 **Enforced by.** `_actionable_severities`, `_split_by_severity`,
-`_severity_context`, `AUTHORING_MAX_ROUNDS = 5`, `MAX_REVIEW_ROUNDS = 5` in
-`phases.py`; dispositions persisted in `authoring_prior_context` /
+`_severity_context` in `review_policy.py`, `AUTHORING_MAX_ROUNDS = 5` in
+`authoring.py`, `MAX_REVIEW_ROUNDS = 5` in `phases.py`; dispositions persisted in `authoring_prior_context` /
 `review_prior_context`.
 
 ## P14 — Proportionality: build what the issue asks for
@@ -273,8 +273,14 @@ introduced this?" answerable.
 
 | Module | Lines | Responsibility |
 | --- | ---: | --- |
-| `adw/cli.py` | 1235 | typer entry point: `run`, `resume`, `approve`, `status`, `gui`, `runs list`, `runs prune`. Gate-mode resolution (`--gates` vs. legacy flags), issue intake (text, `glab`, `gh`), forge preflight, working-tree preflight with self-heal, per-run execution lock, run span, dry-run wiring, auto-prune. |
-| `adw/phases.py` | 2674 | The seven phases over a `RunContext`: draft stage, synthesis, authoring loop, approval and breakpoint gates, lane gate loop incl. RED stage, integration + E2E, Codex review, final review + triage, push + CI. All limits, dispatch and escalation. |
+| `adw/cli.py` | 936 | typer entry point: `run`, `resume`, `approve`, `status`, `gui`, `runs list`, `runs prune`. Gate-mode resolution (`--gates` vs. legacy flags), issue intake (text, `glab`, `gh`), `_preflight` (refusal → exit 1), per-run execution lock, run span, `_build_context`, auto-prune. |
+| `adw/preflight.py` | 199 | Checks before run/resume/approve, in fixed order (`run_all`): forge known → main checkout clean (self-heal of ADW's six authoring artifacts) → model freshness. Never escalates, mutates nothing but the self-heal; refuses with `PreflightRefused`. |
+| `adw/dry_run.py` | 161 | Dry-run wiring: canonical fixtures, scripted mock agent/Codex runners, synthetic gates, simulated green GitLab/GitHub CI. |
+| `adw/phases.py` | 645 | Phases 4–7 (integration + E2E, Codex review, final review + triage, push + CI) and the facade the CLI imports all seven entry points from. |
+| `adw/context.py` | 370 | Shared core: `RunContext`, `escalate`, exceptions, phase/lane spans, `_breakpoint_gate`, the escalating `_git`, agent/Codex call sites with spans, checkpoint helpers. |
+| `adw/authoring.py` | 851 | Phases 1–2: dual-author draft stage, synthesis, reviewed authoring loop (round cap, accept with known findings), spec/plan gates, artifact archival. |
+| `adw/lanes.py` | 710 | Phase 3 and every fix cycle: lane worktrees, TDD RED stage, gate loop with circuit breaker, orchestrator commits, `_dispatch_lane_fixes`. |
+| `adw/review_policy.py` | 151 | Review-loop policy: severity floor per round, findings memory with dispositions, circuit-breaker keys, follow-up report. |
 | `adw/agents.py` | 595 | Agent registry (`REGISTRY`, `AgentSpec`), shared content rules, deny rules, `SdkAgentRunner` (stored-login enforcement, env sanitizing, sandbox, stream mirroring into the event log), `RunTotals`. |
 | `adw/codex.py` | 473 | `CodexRunner`: `review()` and `author()` via `codex exec -m gpt-6-astra --sandbox read-only`, isolated `CODEX_HOME`, marker-block protocol with per-call nonce, process-group kill, token back-sync. |
 | `adw/findings.py` | 223 | `Finding`, `ReviewResult`, `SCHEMA_INSTRUCTION` (one shared constant), strict parser `extract_review_result`. |
@@ -296,7 +302,8 @@ introduced this?" answerable.
 | `adw/gui/reader.py` | 131 | Incremental, fault-tolerant event-log reader (also `.jsonl.gz`), reports `seq_gap`/`bad_line`. |
 | `adw/gui/model.py` | 224 | Span tree from event records; orphans from worker threads re-homed by time containment. |
 | `adw/gui/registry.py` | 203 | `~/.adw/repos.json`: canonical repo path → stable slug; `adw run` registers automatically (fail-open). |
-| `adw/gui/app.py` | 3073 | Read-only FastAPI app: run list, run detail (Trace/Timeline/Artifacts/Raw), JSON API, SSE live tail, diff endpoint with ref allowlist. |
+| `adw/gui/app.py` | 464 | Read-only FastAPI app: routes for run list, run detail (Trace/Timeline/Artifacts/Raw), JSON API, SSE live tail, diff endpoint with ref allowlist; template filters. |
+| `adw/gui/trace.py`, `fmt.py`, `runs.py`, `serialize.py`, `timeline.py`, `artifacts.py`, `diffs.py`, `projections.py` | 682 / 286 / 619 / 326 / 322 / 74 / 218 / 274 | The projections behind the routes: trace windowing + compaction + labels; formatting filters; run metadata, summary and run list; tree serialization + prompt diff + raw view; timeline + node-time context; artifacts listing; snapshot diffs + change scope; plan skeleton, recovery card, assembled run detail. |
 | `adw/gui/i18n.py` | 353 | Dictionary-based EN/DE chrome translation; content is never translated. |
 | `adw/gui/templates/`, `static/` | — | Jinja2 templates, `app.css` (token system, dark mode), `app.js` (no framework). |
 
@@ -304,13 +311,14 @@ introduced this?" answerable.
 
 ### 1.1 `RunContext` — the dependency-injection root
 
-`RunContext` (dataclass in `phases.py`) carries everything a phase needs: `repo`,
+`RunContext` (dataclass in `context.py`) carries everything a phase needs: `repo`,
 `config`, `state`, the two runner interfaces (`agents: AgentRunner`,
 `codex: CodexClient`), the seams `run_glab`, `run_gh`, `sleep`, the run's single
-`emitter`, the pinned flags `skip_approval`, `spec_approval`, `dry_run`, a
-`git_env`, and a `threading.RLock` (`state_lock`) that serializes state mutations
+`emitter`, a `git_env`, and a `threading.RLock` (`state_lock`) that serializes state mutations
 across parallel lane threads. `ctx.save()` persists the state and mirrors a
-`state.saved` event *after* the write succeeded.
+`state.saved` event *after* the write succeeded. The gate mode (`skip_approval`,
+`spec_approval`) and `dry_run` live only in the persisted `RunState`: `adw run` pins
+them before the first save, so resume and approve see exactly the started mode.
 
 Because every contact with the outside world goes through this object, the same
 production code runs against mocks in `--dry-run` and in the test suite.
@@ -639,7 +647,7 @@ directory.
 - **To add a forge:** implement a `poll_ci(repo, branch, cfg, run_x, sha, emitter)`
   returning `CiResult`, extend the `Forge` literal and `detect_forge`, add the
   provider value to `CiConfig.provider`, wire it in `run_ci_phase`, add a dry-run
-  fake in `cli.py`, and an issue fetcher if the forge has issues.
+  fake in `adw/dry_run.py`, and an issue fetcher if the forge has issues.
 
 ## 9. Resume, approval and concurrency semantics
 
@@ -781,7 +789,7 @@ Contributors must keep all of these true. Most have dedicated tests.
 
 | You want to … | Touch | Watch out for |
 | --- | --- | --- |
-| **Add an agent** | `REGISTRY` in `agents.py`; a call site in `phases.py` via `_agent_run`; a mock response in `cli._dry_run_runners` and tests | Smallest tool set; artifact-exact write rules; reviewers answer in `SCHEMA_INSTRUCTION`; reuse shared prompt constants instead of copying text. |
+| **Add an agent** | `REGISTRY` in `agents.py`; a call site in a phase module (`authoring.py`, `lanes.py`, `phases.py`) via `_agent_run`; a mock response in `dry_run.runners` and tests | Smallest tool set; artifact-exact write rules; reviewers answer in `SCHEMA_INSTRUCTION`; reuse shared prompt constants instead of copying text. |
 | **Add a phase** | `Phase` literal in `state.py`; a `run_<x>_phase(ctx)` guarded by `ctx.state.phase` and wrapped in `@_phase_span`; insert into `cli._execute`; transitions in neighbours | Persist every counter before work; add a limit + breaker; update the GUI phase band (`GUI-SPEC.md`) and the dry run; extend `tests/test_e2e_dry_run.py`. |
 | **Add a breakpoint** | `BreakpointName` literal in `config.py`; a `_breakpoint_gate(ctx, "<name>")` call; `_breakpoint_resume_phase` in `cli.py` | Reuse `awaiting_approval`; never add a phase value for a hold. |
 | **Add a gate type / gate option** | `Gate` model in `config.py`; `gates.py` | Keep fail-fast, real timeouts and `safe_env`. Gates are project knowledge — no defaults. |

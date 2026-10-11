@@ -135,8 +135,8 @@ lanes:
         state=RunState.new(issue="DoD2", parallel=False),
         agents=agents,
         codex=codex,
-        skip_approval=True,
     )
+    ctx.state.skip_approval = True
     run_spec_and_plan(ctx)
     run_build_phase(ctx)
     build_calls = [c for c in agents.calls if c.agent == "build_agent"]
