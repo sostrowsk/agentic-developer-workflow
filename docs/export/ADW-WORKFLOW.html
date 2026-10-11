@@ -818,7 +818,12 @@ contradiction between them fails immediately.</li>
 <li><strong>Config validated (fail fast):</strong>
 <code>.adw/config.yaml</code> in the target repo is parsed strictly —
 unknown keys, duplicate YAML keys, missing gates or non-positive
-timeouts abort with a clear message.</li>
+timeouts abort with a clear message. Right after it, the <strong>forge
+preflight</strong> (real runs only) checks that the forge is known —
+<code>ci.provider</code> or an origin host containing
+<code>gitlab</code>/<code>github</code>. Otherwise the command is
+refused before any agent runs (also before <code>resume</code> and
+<code>approve</code>); a dry run falls back to GitLab.</li>
 <li><strong>Working-tree preflight:</strong> the main checkout must be
 clean. If the <em>only</em> dirty files are ADW's own six authoring
 artifacts (<code>.adw/issue.md</code>, <code>spec.md</code>,
@@ -1465,7 +1470,7 @@ green E2E)</td>
 <g data-step="8"><path class="flow" d="M315 290 L315 251" fill="none" stroke="#475569" stroke-width="2"/><polygon points="315,240 320.5,251 309.5,251" fill="#475569"/></g>
 <g data-step="8"><path class="flow" d="M315 170 L315 121" fill="none" stroke="#475569" stroke-width="2"/><polygon points="315,110 320.5,121 309.5,121" fill="#475569"/></g>
 <g data-step="1" data-info="GitLab (glab) or GitHub (gh). The config key wins over the origin URL."><rect x="20" y="40" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="105" y="63.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">forge detection</tspan></text><text x="105" y="80.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="105" dy="0">ci.provider</tspan></text><text x="105" y="97.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="105" dy="0">or origin host</tspan></text></g>
-<g data-step="1" data-info="A real run escalates here; set ci.provider for self-hosted forges."><rect x="20" y="170" width="170" height="60" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="105" y="196.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">unknown host</tspan></text><text x="105" y="213.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">→ ESCALATE</tspan></text></g>
+<g data-step="1" data-info="Normally refused already in the CLI preflight. Here only if origin or config changed during the run: then it escalates. Set ci.provider for self-hosted forges."><rect x="20" y="170" width="170" height="60" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="105" y="196.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">unknown host</tspan></text><text x="105" y="213.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">→ ESCALATE</tspan></text></g>
 <g data-step="2" data-info="Only the orchestrator pushes; hooks are disabled."><rect x="230" y="40" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="315" y="63.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">push</tspan></text><text x="315" y="80.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">--force-with-lease</tspan></text><text x="315" y="97.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">(dry-run: no push)</tspan></text></g>
 <g data-step="3" data-info="0 tokens. A stale pipeline of an earlier push cannot decide the result."><rect x="440" y="40" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="525" y="63.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="525" dy="0">poll CI</tspan></text><text x="525" y="80.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="525" dy="0">bound to pushed SHA</tspan></text><text x="525" y="97.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="525" dy="0">every 60 s, ≤ 2700 s</tspan></text></g>
 <g data-step="4" data-info="All runs for the SHA green, plus ci.staging_job if configured."><rect x="820" y="40" width="160" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="900" y="71.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="900" dy="0">done</tspan></text><text x="900" y="88.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="900" dy="0">exit 0</tspan></text></g>
@@ -1482,8 +1487,9 @@ single CI re-entry</figcaption>
 <ol type="1">
 <li><strong>Forge detection:</strong> <code>ci.provider</code> in the
 config wins; otherwise the origin URL host must clearly say
-<code>gitlab</code> or <code>github</code> (otherwise the run escalates
-here — after the whole build; a dry run falls back to GitLab).</li>
+<code>gitlab</code> or <code>github</code> (already checked in the
+preflight; if origin or config changed during the run, it escalates
+here).</li>
 <li><strong>Push</strong> by the orchestrator:
 <code>git push --force-with-lease -u origin &lt;branch&gt;</code> (hooks
 disabled; the SSH agent socket is passed to the push only). In

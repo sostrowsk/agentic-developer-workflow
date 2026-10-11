@@ -159,7 +159,7 @@ Defaults wie in `adw/config.py`. Unbekannte Keys werden überall abgelehnt.
 | `…gates[].timeout` | ja | — | Sekunden, Ganzzahl > 0 (ein YAML-Boolean wird abgelehnt). |
 | `…gates[].tdd` | nein | `false` | Markiert ein RED-Beweis-Gate (strikter Boolean). Siehe §5.3. |
 | `e2e.cmd` / `e2e.timeout` | nein | — | E2E-Kommando + Sekunden. Beide Pflicht, wenn `e2e` gesetzt ist. Nur mit `--parallel` genutzt. |
-| `ci.provider` | nein | auto | `gitlab` oder `github`. Ungesetzt = Erkennung an der `origin`-URL; ein unbekannter Host (z. B. self-hosted mit eigener Domain) fällt erst in Phase 7 auf — ein echter Lauf eskaliert dann **nach** dem kompletten Build (ein Dry-Run fällt still auf GitLab zurück). Bei self-hosted Forges den Key daher immer setzen. |
+| `ci.provider` | nein | auto | `gitlab` oder `github`. Ungesetzt = Erkennung an der `origin`-URL; ein unbekannter Host (z. B. self-hosted mit eigener Domain) lässt ein echtes `run`/`resume`/`approve` schon im Vorflug scheitern, bevor ein Agent läuft (ein Dry-Run fällt auf GitLab zurück). Bei self-hosted Forges den Key daher immer setzen. |
 | `ci.poll_interval` | nein | `60` | Sekunden zwischen Pipeline-Abfragen. |
 | `ci.timeout` | nein | `2700` | Gesamtbudget fürs Warten auf CI (45 min). |
 | `ci.staging_job` | nein | — | Job, der zusätzlich grün sein muss (z. B. `deploy-staging`). |
@@ -384,7 +384,7 @@ adw runs prune [--repo PFAD] [--keep N] [--older-than TAGE] [--gzip]
 | `--base-branch NAME` | `base_branch` für diesen Lauf überschreiben (gepinnt). |
 
 Reihenfolge der Prüfungen: genau eine Issue-Quelle → Gate-Modus → Config →
-Arbeitsbaum-Vorflug → Issue holen → Lauf anlegen. Ein Fehler in einem dieser
+Forge-Vorflug (nur echte Läufe) → Arbeitsbaum-Vorflug → Issue holen → Lauf anlegen. Ein Fehler in einem dieser
 Schritte legt keinen Lauf an.
 
 ### `adw resume RUN_ID`

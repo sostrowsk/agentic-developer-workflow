@@ -1095,8 +1095,8 @@ und die read-only-GUI</figcaption>
 <code>approve</code>, <code>status</code>, <code>gui</code>,
 <code>runs list</code>, <code>runs prune</code>. Auflösung des
 Gate-Modus (<code>--gates</code> vs. Altflags), Issue-Übernahme (Text,
-<code>glab</code>, <code>gh</code>), Arbeitsbaum-Vorflug mit
-Selbstheilung, Run-Ausführungs-Lock, Run-Span, Dry-Run-Verdrahtung,
+<code>glab</code>, <code>gh</code>), Forge-Vorflug, Arbeitsbaum-Vorflug
+mit Selbstheilung, Run-Ausführungs-Lock, Run-Span, Dry-Run-Verdrahtung,
 Auto-Prune.</td>
 </tr>
 <tr class="even">
@@ -1185,9 +1185,10 @@ Abruf der Logs fehlgeschlagener Jobs.</td>
 <td><code>adw/forge.py</code></td>
 <td style="text-align: right;">82</td>
 <td>GitLab vs. GitHub: <code>ci.provider</code>-Override, sonst Hostname
-der <code>origin</code>-URL; unbekannter Host → <code>ForgeError</code>,
-den Phase 7 in eine Eskalation umsetzt (Dry-Run: Rückfall auf
-GitLab).</td>
+der <code>origin</code>-URL; unbekannter Host → <code>ForgeError</code>:
+der Forge-Vorflug der CLI verweigert das Kommando; Phase 7 eskaliert
+nur, wenn sich Origin/Config während des Laufs geändert hat (Dry-Run:
+Rückfall auf GitLab).</td>
 </tr>
 <tr class="even">
 <td><code>adw/env.py</code></td>
@@ -2020,9 +2021,12 @@ gelieferten Inhalt ins Entwurfsverzeichnis.</p>
 <li><code>forge.detect_forge(repo, override)</code> →
 <code>"gitlab"</code> | <code>"github"</code>: Der Key
 <code>ci.provider</code> gewinnt; sonst der Hostname der
-<code>origin</code>-URL; unbekannter Host → <code>ForgeError</code>, der
-in einem echten Lauf Phase 7 eskaliert (kein Polling gegen die falsche
-API). Der Dry-Run fällt auf GitLab zurück.</li>
+<code>origin</code>-URL; unbekannter Host → <code>ForgeError</code>.
+<code>cli._preflight_forge</code> ruft es für echte
+<code>run</code>/<code>resume</code>/<code>approve</code> auf und
+verweigert (Exit 1, keine State-Änderung), bevor ein Agent läuft; Phase
+7 ruft es als Sicherheitsnetz erneut auf und eskaliert (kein Polling
+gegen die falsche API). Der Dry-Run fällt auf GitLab zurück.</li>
 <li><strong>GitLab</strong> (<code>ci.py</code>):
 <code>glab api projects/:id/pipelines?ref=…&amp;sha=…</code> — die
 Pipeline wird serverseitig über den gepushten SHA abgefragt, sodass
@@ -2060,7 +2064,7 @@ lädt den State unter dem Ausführungs-Lock des Laufs neu, löst die Config
 über <code>_config_for_continuation</code> auf (gepinnter Base-Branch
 und gepinnte Breakpoints schlagen die aktuelle Datei;
 <code>--base-branch</code> ist nur vor Anlage der Lanes änderbar), fährt
-den Arbeitsbaum-Vorflug und dann <code>_execute</code>.</li>
+Forge- und Arbeitsbaum-Vorflug und dann <code>_execute</code>.</li>
 <li><strong><code>adw approve &lt;run_id&gt;</code></strong> gilt nur in
 <code>awaiting_approval</code> / <code>awaiting_spec_approval</code>.
 Unter demselben Lock lädt es neu und validiert erneut, sodass zwei
@@ -2080,6 +2084,11 @@ sechs ADW-Authoring-Artefakten, wird sie aus <code>HEAD</code> geheilt
 entfernt + Datei gelöscht, wenn nicht in HEAD) und erneut geprüft; jede
 fremde Änderung verweigert das Kommando und verwirft nichts. Der Vorflug
 eskaliert nie.</li>
+<li><strong>Forge-Vorflug</strong> (<code>run</code>,
+<code>resume</code>, <code>approve</code>; nur echte Läufe):
+<code>detect_forge</code> muss gelingen, sonst wird das Kommando mit dem
+<code>ci.provider</code>-Hinweis abgelehnt — kein Lauf angelegt, keine
+State-Änderung, nie eine Eskalation.</li>
 <li><strong>Abgebrochene Agent-Aufrufe</strong>
 (<code>AgentRunError</code>) lassen die Phase unverändert und geben
 einen Resume-Hinweis aus (P9).</li>

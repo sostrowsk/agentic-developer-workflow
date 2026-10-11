@@ -24,6 +24,7 @@ from adw.config import AdwConfig, BreakpointName, ConfigError
 from adw.env import safe_env
 from adw.events import EventEmitter
 from adw.findings import Finding, ReviewResult
+from adw.forge import ForgeError, detect_forge
 from adw.gui.registry import register_repo
 from adw.mock import MockAgentRunner, MockCodexRunner
 from adw.phases import (
@@ -258,6 +259,18 @@ def _preflight_worktree(repo: Path) -> None:
     )
 
 
+def _preflight_forge(repo: Path, config: AdwConfig, dry_run: bool) -> None:
+    """Refuse a real run whose forge cannot be determined BEFORE any agent runs —
+    otherwise phase 7 would only escalate after the whole build. Never escalates,
+    mutates nothing. Dry-run keeps its GitLab fallback (CI is mocked there)."""
+    if dry_run:
+        return
+    try:
+        detect_forge(repo, config.ci.provider)
+    except ForgeError as exc:
+        raise _fail(str(exc)) from exc
+
+
 def _adw_version() -> str:
     try:
         return version("adw")
@@ -387,6 +400,7 @@ def run(
     # Config ZUERST validieren (fail fast) — kein Forge-Netzaufruf für ein
     # Repo, das ohnehin keine gültige .adw/config.yaml hat.
     config = _load_config(repo, base_branch)
+    _preflight_forge(repo, config, dry_run)
     # Arbeitsbaum-Vorflug VOR jeder State-Mutation: eine Verweigerung legt keinen
     # Run an und macht keinen Netzaufruf (B1/B4). Nie Eskalation.
     _preflight_worktree(repo)
@@ -463,6 +477,7 @@ def resume(
                 f"lesen und einen neuen Run starten"
             )
         config, rebased = _config_for_continuation(repo, state, base_branch)
+        _preflight_forge(repo, config, state.dry_run)
         # Arbeitsbaum-Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save):
         # eine Verweigerung lässt den Run-State unverändert und resumierbar (B1).
         _preflight_worktree(repo)
@@ -506,6 +521,7 @@ def approve(
         # A re-pinned base branch is only mutated in memory here; approve's own save
         # below (inside the run span) persists it together with the approval grant.
         config, _rebased = _config_for_continuation(repo, state, base_branch)
+        _preflight_forge(repo, config, state.dry_run)
         # Arbeitsbaum-Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung
         # lässt die Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
         _preflight_worktree(repo)

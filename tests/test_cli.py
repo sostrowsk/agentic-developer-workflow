@@ -943,3 +943,78 @@ def test_resume_self_heals_a_staged_deletion(target_repo):
     assert res.exit_code == 2, res.output
     assert spec.read_text() == "# committete Spec\n"
     assert RunState.load(target_repo, state.run_id).phase == "awaiting_approval"
+
+
+# --- Forge-Erkennung im Vorflug -------------------------------------------------
+# Ein unerkennbarer Host darf nicht erst in Phase 7 auffallen — nach dem kompletten
+# Build. run/resume/approve verweigern VOR jeder Agent-Ausführung (Exit 1, keine
+# Eskalation); der Dry-Run behält seinen GitLab-Rückfall.
+
+
+def _drop_provider(target_repo) -> None:
+    from tests.conftest import DEFAULT_CONFIG
+
+    write_config(target_repo, DEFAULT_CONFIG.replace("  provider: gitlab\n", ""))
+    git(target_repo, "add", ".adw/config.yaml")
+    git(target_repo, "commit", "-m", "ohne provider")
+    git(target_repo, "remote", "add", "origin", "git@git.example.org:team/app.git")
+
+
+def _no_execution(monkeypatch) -> None:
+    """Sicherheitsnetz: ohne Vorflug-Check liefe sonst ein echter (Token-)Lauf an."""
+    import adw.cli as cli_mod
+
+    def boom(ctx):
+        raise AssertionError("_execute darf bei unerkennbarer Forge nicht laufen")
+
+    monkeypatch.setattr(cli_mod, "_execute", boom)
+
+
+def test_run_refuses_undetectable_forge_without_creating_a_run(target_repo, monkeypatch):
+    _drop_provider(target_repo)
+    _no_execution(monkeypatch)
+    res = runner.invoke(app, ["run", "--repo", str(target_repo), "--issue", "Demo"])
+    assert res.exit_code == 1, res.output
+    assert "ci.provider" in res.output
+    with pytest.raises(StateNotFoundError):
+        RunState.find_latest(target_repo)
+
+
+def test_dry_run_keeps_gitlab_fallback_for_undetectable_forge(target_repo):
+    _drop_provider(target_repo)
+    res = runner.invoke(
+        app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--no-approval"]
+    )
+    assert res.exit_code == 0, res.output
+    assert RunState.find_latest(target_repo).phase == "done"
+
+
+def _real_paused_run(target_repo) -> RunState:
+    """Am Plan-Gate pausierter Lauf, als echter (nicht Dry-)Lauf markiert."""
+    state = _paused_run(target_repo)
+    state.dry_run = False
+    state.save(target_repo)
+    _drop_provider(target_repo)
+    return state
+
+
+def test_resume_refuses_undetectable_forge_and_stays_resumable(target_repo, monkeypatch):
+    state = _real_paused_run(target_repo)
+    _no_execution(monkeypatch)
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 1, res.output
+    assert "ci.provider" in res.output
+    saved = RunState.load(target_repo, state.run_id)
+    assert saved.phase == "awaiting_approval"
+    assert not (saved.run_dir(target_repo) / "escalation.md").exists()
+
+
+def test_approve_refuses_undetectable_forge_without_granting(target_repo, monkeypatch):
+    state = _real_paused_run(target_repo)
+    _no_execution(monkeypatch)
+    res = runner.invoke(app, ["approve", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 1, res.output
+    assert "ci.provider" in res.output
+    saved = RunState.load(target_repo, state.run_id)
+    assert saved.phase == "awaiting_approval"
+    assert saved.approval_granted is False

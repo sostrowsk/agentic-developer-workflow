@@ -826,7 +826,12 @@ Widerspruch zwischen beiden scheitert sofort.</li>
 <li><strong>Config validieren (fail fast):</strong>
 <code>.adw/config.yaml</code> im Ziel-Repo wird strikt geparst —
 unbekannte Keys, doppelte YAML-Keys, fehlende Gates oder nicht-positive
-Timeouts brechen mit klarer Meldung ab.</li>
+Timeouts brechen mit klarer Meldung ab. Direkt danach prüft der
+<strong>Forge-Vorflug</strong> (nur echte Läufe), ob die Forge bekannt
+ist — <code>ci.provider</code> oder ein Origin-Host mit
+<code>gitlab</code>/<code>github</code>. Sonst wird das Kommando
+abgelehnt, bevor ein Agent läuft (auch vor <code>resume</code> und
+<code>approve</code>); ein Dry-Run fällt auf GitLab zurück.</li>
 <li><strong>Arbeitsbaum-Vorflug:</strong> Der Haupt-Checkout muss sauber
 sein. Sind <em>ausschließlich</em> ADWs sechs eigene Authoring-Artefakte
 dirty (<code>.adw/issue.md</code>, <code>spec.md</code>,
@@ -1482,7 +1487,7 @@ frisch grünem E2E)</td>
 <g data-step="8"><path class="flow" d="M315 290 L315 251" fill="none" stroke="#475569" stroke-width="2"/><polygon points="315,240 320.5,251 309.5,251" fill="#475569"/></g>
 <g data-step="8"><path class="flow" d="M315 170 L315 121" fill="none" stroke="#475569" stroke-width="2"/><polygon points="315,110 320.5,121 309.5,121" fill="#475569"/></g>
 <g data-step="1" data-info="GitLab (glab) oder GitHub (gh). Der Config-Key gewinnt vor der origin-URL."><rect x="20" y="40" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="105" y="63.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">Forge-Erkennung</tspan></text><text x="105" y="80.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="105" dy="0">ci.provider</tspan></text><text x="105" y="97.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="105" dy="0">oder origin-Host</tspan></text></g>
-<g data-step="1" data-info="Ein echter Lauf eskaliert hier; bei self-hosted Forges ci.provider setzen."><rect x="20" y="170" width="170" height="60" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="105" y="196.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">unbekannter Host</tspan></text><text x="105" y="213.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">→ ESKALATION</tspan></text></g>
+<g data-step="1" data-info="Normalerweise schon im Vorflug der CLI abgelehnt. Hier nur, wenn sich Origin oder Config während des Laufs geändert hat: dann Eskalation. Bei self-hosted Forges ci.provider setzen."><rect x="20" y="170" width="170" height="60" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="105" y="196.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">unbekannter Host</tspan></text><text x="105" y="213.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">→ ESKALATION</tspan></text></g>
 <g data-step="2" data-info="Nur der Orchestrator pusht; Hooks sind deaktiviert."><rect x="230" y="40" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="315" y="63.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">push</tspan></text><text x="315" y="80.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">--force-with-lease</tspan></text><text x="315" y="97.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">(Dry-Run: kein Push)</tspan></text></g>
 <g data-step="3" data-info="0 Tokens. Eine alte Pipeline eines früheren Pushs kann nicht entscheiden."><rect x="440" y="40" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="525" y="63.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="525" dy="0">CI pollen</tspan></text><text x="525" y="80.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="525" dy="0">an gepushten SHA</tspan></text><text x="525" y="97.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="525" dy="0">alle 60 s, ≤ 2700 s</tspan></text></g>
 <g data-step="4" data-info="Alle Läufe für den SHA grün, plus ci.staging_job, falls konfiguriert."><rect x="820" y="40" width="160" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="900" y="71.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="900" dy="0">done</tspan></text><text x="900" y="88.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="900" dy="0">Exit 0</tspan></text></g>
@@ -1499,9 +1504,9 @@ der eine CI-Re-Entry</figcaption>
 <ol type="1">
 <li><strong>Forge-Erkennung:</strong> <code>ci.provider</code> in der
 Config hat Vorrang; sonst muss der Host der Origin-URL eindeutig
-<code>gitlab</code> oder <code>github</code> enthalten (sonst eskaliert
-der Lauf hier — nach dem kompletten Build; ein Dry-Run fällt auf GitLab
-zurück).</li>
+<code>gitlab</code> oder <code>github</code> enthalten (schon im Vorflug
+geprüft; hat sich Origin oder Config während des Laufs geändert,
+eskaliert er hier).</li>
 <li><strong>Push</strong> durch den Orchestrator:
 <code>git push --force-with-lease -u origin &lt;branch&gt;</code> (Hooks
 abgeschaltet; der SSH-Agent-Socket wird nur dem Push durchgereicht). Im

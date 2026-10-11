@@ -277,7 +277,7 @@ nur in einer gibt, veraltet still in der anderen. Releases pro Push halten die F
 
 | Modul | Zeilen | Verantwortung |
 | --- | ---: | --- |
-| `adw/cli.py` | 1235 | typer-Einstieg: `run`, `resume`, `approve`, `status`, `gui`, `runs list`, `runs prune`. Auflösung des Gate-Modus (`--gates` vs. Altflags), Issue-Übernahme (Text, `glab`, `gh`), Arbeitsbaum-Vorflug mit Selbstheilung, Run-Ausführungs-Lock, Run-Span, Dry-Run-Verdrahtung, Auto-Prune. |
+| `adw/cli.py` | 1235 | typer-Einstieg: `run`, `resume`, `approve`, `status`, `gui`, `runs list`, `runs prune`. Auflösung des Gate-Modus (`--gates` vs. Altflags), Issue-Übernahme (Text, `glab`, `gh`), Forge-Vorflug, Arbeitsbaum-Vorflug mit Selbstheilung, Run-Ausführungs-Lock, Run-Span, Dry-Run-Verdrahtung, Auto-Prune. |
 | `adw/phases.py` | 2674 | Die sieben Phasen über einem `RunContext`: Entwurfsstufe, Synthese, Authoring-Loop, Freigabe- und Breakpoint-Gates, Lane-Gate-Schleife inkl. RED-Stufe, Integration + E2E, Codex-Review, Final-Review + Triage, Push + CI. Alle Limits, Dispatch und Eskalation. |
 | `adw/agents.py` | 595 | Agent-Registry (`REGISTRY`, `AgentSpec`), geteilte Inhaltsregeln, Deny-Regeln, `SdkAgentRunner` (Stored-Login-Pflicht, Env-Bereinigung, Sandbox, Spiegelung des Streams ins Event-Log), `RunTotals`. |
 | `adw/codex.py` | 473 | `CodexRunner`: `review()` und `author()` über `codex exec --sandbox read-only`, isoliertes `CODEX_HOME`, Marker-Block-Protokoll mit Nonce pro Aufruf, Prozessgruppen-Kill, Token-Rücksync. |
@@ -289,7 +289,7 @@ nur in einer gibt, veraltet still in der anderen. Releases pro Push halten die F
 | `adw/triage.py` | 95 | Reine Funktionen: Final-Review-Triage (`scope_gap` → Follow-up, Rest → Lane-Fixes), Limit-Prüfungen, Circuit-Breaker. |
 | `adw/ci.py` | 207 | GitLab: SHA-gebundenes Pipeline-Polling über `glab api`, Abruf der Logs fehlgeschlagener Jobs. |
 | `adw/github.py` | 172 | GitHub Actions: SHA-gebundenes Polling der Workflow-Runs über `gh api`, `--log-failed`-Auszüge. Gleiches `CiResult` und gleiche Fehlerklassen wie `ci.py`. |
-| `adw/forge.py` | 82 | GitLab vs. GitHub: `ci.provider`-Override, sonst Hostname der `origin`-URL; unbekannter Host → `ForgeError`, den Phase 7 in eine Eskalation umsetzt (Dry-Run: Rückfall auf GitLab). |
+| `adw/forge.py` | 82 | GitLab vs. GitHub: `ci.provider`-Override, sonst Hostname der `origin`-URL; unbekannter Host → `ForgeError`: der Forge-Vorflug der CLI verweigert das Kommando; Phase 7 eskaliert nur, wenn sich Origin/Config während des Laufs geändert hat (Dry-Run: Rückfall auf GitLab). |
 | `adw/env.py` | 39 | `safe_env()`: Umgebungs-Whitelist für jeden Subprozess. |
 | `adw/events.py` | 371 | `EventEmitter`/`NoOpEmitter`: append-only JSON-Lines-Event-Log mit Spans, Seq pro Run, `flock`, Dateimodus 0600, **fail-open**. |
 | `adw/snapshots.py` | 133 | Worktree-Snapshots pro Schritt als git-Refs `refs/adw/<run_id>/<seq>` (temporärer Index, `commit-tree`, `update-ref`), fail-open. |
@@ -620,8 +620,10 @@ Entwurfsverzeichnis.
 
 - `forge.detect_forge(repo, override)` → `"gitlab"` | `"github"`: Der Key
   `ci.provider` gewinnt; sonst der Hostname der `origin`-URL; unbekannter Host →
-  `ForgeError`, der in einem echten Lauf Phase 7 eskaliert (kein Polling gegen die
-  falsche API). Der Dry-Run fällt auf GitLab zurück.
+  `ForgeError`. `cli._preflight_forge` ruft es für echte `run`/`resume`/`approve` auf
+  und verweigert (Exit 1, keine State-Änderung), bevor ein Agent läuft; Phase 7 ruft
+  es als Sicherheitsnetz erneut auf und eskaliert (kein Polling gegen die falsche
+  API). Der Dry-Run fällt auf GitLab zurück.
 - **GitLab** (`ci.py`): `glab api projects/:id/pipelines?ref=…&sha=…` — die Pipeline
   wird serverseitig über den gepushten SHA abgefragt, sodass weder eine ältere
   terminale noch eine fremde neuere Pipeline mit der gesuchten verwechselt werden
@@ -646,7 +648,7 @@ Entwurfsverzeichnis.
   Läufe verweigert es. Es lädt den State unter dem Ausführungs-Lock des Laufs neu,
   löst die Config über `_config_for_continuation` auf (gepinnter Base-Branch und
   gepinnte Breakpoints schlagen die aktuelle Datei; `--base-branch` ist nur vor
-  Anlage der Lanes änderbar), fährt den Arbeitsbaum-Vorflug und dann `_execute`.
+  Anlage der Lanes änderbar), fährt Forge- und Arbeitsbaum-Vorflug und dann `_execute`.
 - **`adw approve <run_id>`** gilt nur in `awaiting_approval` /
   `awaiting_spec_approval`. Unter demselben Lock lädt es neu und validiert erneut,
   sodass zwei gleichzeitige Freigaben genau eine Freigabe und eine nachgelagerte
@@ -661,6 +663,9 @@ Entwurfsverzeichnis.
   bzw. Index-Eintrag entfernt + Datei gelöscht, wenn nicht in HEAD) und erneut
   geprüft; jede fremde Änderung verweigert das Kommando und verwirft nichts. Der
   Vorflug eskaliert nie.
+- **Forge-Vorflug** (`run`, `resume`, `approve`; nur echte Läufe): `detect_forge`
+  muss gelingen, sonst wird das Kommando mit dem `ci.provider`-Hinweis abgelehnt —
+  kein Lauf angelegt, keine State-Änderung, nie eine Eskalation.
 - **Abgebrochene Agent-Aufrufe** (`AgentRunError`) lassen die Phase unverändert und
   geben einen Resume-Hinweis aus (P9).
 - **Session-Resume:** Fix-Tasks gehen an dieselbe SDK-Session

@@ -273,7 +273,7 @@ introduced this?" answerable.
 
 | Module | Lines | Responsibility |
 | --- | ---: | --- |
-| `adw/cli.py` | 1235 | typer entry point: `run`, `resume`, `approve`, `status`, `gui`, `runs list`, `runs prune`. Gate-mode resolution (`--gates` vs. legacy flags), issue intake (text, `glab`, `gh`), working-tree preflight with self-heal, per-run execution lock, run span, dry-run wiring, auto-prune. |
+| `adw/cli.py` | 1235 | typer entry point: `run`, `resume`, `approve`, `status`, `gui`, `runs list`, `runs prune`. Gate-mode resolution (`--gates` vs. legacy flags), issue intake (text, `glab`, `gh`), forge preflight, working-tree preflight with self-heal, per-run execution lock, run span, dry-run wiring, auto-prune. |
 | `adw/phases.py` | 2674 | The seven phases over a `RunContext`: draft stage, synthesis, authoring loop, approval and breakpoint gates, lane gate loop incl. RED stage, integration + E2E, Codex review, final review + triage, push + CI. All limits, dispatch and escalation. |
 | `adw/agents.py` | 595 | Agent registry (`REGISTRY`, `AgentSpec`), shared content rules, deny rules, `SdkAgentRunner` (stored-login enforcement, env sanitizing, sandbox, stream mirroring into the event log), `RunTotals`. |
 | `adw/codex.py` | 473 | `CodexRunner`: `review()` and `author()` via `codex exec --sandbox read-only`, isolated `CODEX_HOME`, marker-block protocol with per-call nonce, process-group kill, token back-sync. |
@@ -285,7 +285,7 @@ introduced this?" answerable.
 | `adw/triage.py` | 95 | Pure functions: final-review triage (`scope_gap` → follow-up, rest → lane fixes), limit checks, circuit breaker. |
 | `adw/ci.py` | 207 | GitLab: SHA-bound pipeline polling via `glab api`, failed-job log retrieval. |
 | `adw/github.py` | 172 | GitHub Actions: SHA-bound workflow-run polling via `gh api`, `--log-failed` excerpts. Same `CiResult` and error classes as `ci.py`. |
-| `adw/forge.py` | 82 | GitLab vs. GitHub: `ci.provider` override, otherwise hostname of the `origin` URL; unknown host → `ForgeError`, which phase 7 turns into an escalation (dry run: falls back to GitLab). |
+| `adw/forge.py` | 82 | GitLab vs. GitHub: `ci.provider` override, otherwise hostname of the `origin` URL; unknown host → `ForgeError`: the CLI forge preflight refuses the command; phase 7 escalates only if origin/config changed mid-run (dry run: falls back to GitLab). |
 | `adw/env.py` | 39 | `safe_env()`: environment whitelist for every subprocess. |
 | `adw/events.py` | 371 | `EventEmitter`/`NoOpEmitter`: append-only JSON Lines event log with spans, per-run seq, `flock`, file mode 0600, **fail-open**. |
 | `adw/snapshots.py` | 133 | Per-step worktree snapshots as git refs `refs/adw/<run_id>/<seq>` (temporary index, `commit-tree`, `update-ref`), fail-open. |
@@ -604,8 +604,10 @@ directory.
 
 - `forge.detect_forge(repo, override)` → `"gitlab"` | `"github"`: the
   `ci.provider` key wins; otherwise the hostname of the `origin` URL; unknown host →
-  `ForgeError`, which escalates phase 7 in a real run (no poll against the wrong
-  API). The dry run falls back to GitLab.
+  `ForgeError`. `cli._preflight_forge` calls it for real `run`/`resume`/`approve`
+  and refuses (exit 1, no state change) before any agent runs; phase 7 calls it
+  again as a safety net and escalates (no poll against the wrong API). The dry run
+  falls back to GitLab.
 - **GitLab** (`ci.py`): `glab api projects/:id/pipelines?ref=…&sha=…` — the pipeline
   is queried server-side by the pushed SHA, so neither an older terminal pipeline nor
   a foreign newer one can be mistaken for the one being waited on. Terminal statuses:
@@ -629,7 +631,7 @@ directory.
   refuses escalated runs. It reloads the state under the per-run execution lock,
   resolves the config through `_config_for_continuation` (pinned base branch and
   pinned breakpoints beat the current file; `--base-branch` can only change before
-  lanes exist), runs the working-tree preflight, then `_execute`.
+  lanes exist), runs the forge and working-tree preflights, then `_execute`.
 - **`adw approve <run_id>`** is valid only in `awaiting_approval` /
   `awaiting_spec_approval`. Under the same lock it reloads and revalidates, so two
   concurrent approvals produce exactly one release and one downstream execution (a
@@ -642,6 +644,9 @@ directory.
   `HEAD` (`git checkout HEAD -- <path>`, or index entry dropped + file removed if absent
   from HEAD) and re-checked; any foreign change refuses the command, discarding
   nothing. The preflight never escalates.
+- **Forge preflight** (`run`, `resume`, `approve`; real runs only): `detect_forge`
+  must succeed, otherwise the command is refused with the `ci.provider` hint —
+  no run created, no state change, never an escalation.
 - **Interrupted agent calls** (`AgentRunError`) leave the phase unchanged and print a
   resume hint (P9).
 - **Session resume:** fix tasks go to the same SDK session (`resume=session_id`); the

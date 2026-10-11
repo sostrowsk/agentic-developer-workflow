@@ -12,6 +12,11 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.27.0] — 2026-10-11
+
+### Changed
+- **The forge check now runs in the preflight.** A real `adw run`, `adw resume` or `adw approve` refuses (exit 1, no run created, no state change, no escalation) when `ci.provider` is unset and the `origin` host is recognisable as neither GitLab nor GitHub. It used to escalate only in phase 7, after the whole build. Phase 7 still runs the check as a safety net, in case origin or config change during a run. Dry runs keep falling back to GitLab. Four new CLI tests cover this.
+
 ## [0.26.2] — 2026-10-11
 
 ### Added
@@ -937,6 +942,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.27.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.2...v0.27.0
 [0.26.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.1...v0.26.2
 [0.26.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.25.0...v0.26.0

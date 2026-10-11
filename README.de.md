@@ -89,7 +89,7 @@ Vollständiges Beispiel: [`examples/config.yaml`](examples/config.yaml).
 | `ci.poll_interval` | optional (60) | Sekunden zwischen Pipeline-Polls |
 | `ci.timeout` | optional (2700) | Gesamt-Budget fürs CI-Warten |
 | `ci.staging_job` | optional | Job-Name, der zusätzlich grün sein muss |
-| `ci.provider` | optional | `gitlab` oder `github`; ohne Angabe Auto-Erkennung aus der origin-URL (unbekannter Host: ein echter Run eskaliert erst in Phase 7, nach dem Build — bei self-hosted Forges den Key setzen) |
+| `ci.provider` | optional | `gitlab` oder `github`; ohne Angabe Auto-Erkennung aus der origin-URL (unbekannter Host: ein echter Run wird schon im Vorflug abgelehnt — bei self-hosted Forges den Key setzen) |
 | `codex.timeout` | optional (900) | Zeitlimit in Sekunden je `codex exec`-Aufruf |
 | `trace.enabled` | optional (true) | Event-Log `events.jsonl` schreiben (speist die GUI) |
 | `trace.keep_runs` | optional (20) | Auto-Pruning nach erfolgreichem Run behält die neuesten N Runs; `0` = nie |

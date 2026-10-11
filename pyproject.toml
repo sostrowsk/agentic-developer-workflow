@@ -1,6 +1,6 @@
 [project]
 name = "adw"
-version = "0.26.2"
+version = "0.27.0"
 description = "Agentic Developer Workflow — 7-Phasen-Orchestrator: Claude Agent SDK + Codex + deterministische Gates"
 license = "MIT"
 license-files = ["LICENSE"]

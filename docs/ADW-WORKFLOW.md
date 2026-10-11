@@ -130,6 +130,10 @@ state exists:
 3. **Config validated (fail fast):** `.adw/config.yaml` in the target repo is
    parsed strictly — unknown keys, duplicate YAML keys, missing gates or
    non-positive timeouts abort with a clear message.
+   Right after it, the **forge preflight** (real runs only) checks that the
+   forge is known — `ci.provider` or an origin host containing `gitlab`/`github`.
+   Otherwise the command is refused before any agent runs (also before `resume`
+   and `approve`); a dry run falls back to GitLab.
 4. **Working-tree preflight:** the main checkout must be clean. If the *only*
    dirty files are ADW's own six authoring artifacts (`.adw/issue.md`,
    `spec.md`, `plan.md`, `contract.yaml`, `spec-summary.md`,
@@ -427,7 +431,7 @@ Then: optional `before_push` breakpoint, then `ci`.
 ![Phase 7: push, SHA-bound polling and the single CI re-entry](diagrams/workflow/ci.svg)
 
 1. **Forge detection:** `ci.provider` in the config wins; otherwise the origin
-   URL host must clearly say `gitlab` or `github` (otherwise the run escalates here — after the whole build; a dry run falls back to GitLab).
+   URL host must clearly say `gitlab` or `github` (already checked in the preflight; if origin or config changed during the run, it escalates here).
 2. **Push** by the orchestrator: `git push --force-with-lease -u origin <branch>`
    (hooks disabled; the SSH agent socket is passed to the push only). In
    `--dry-run` there is no push.

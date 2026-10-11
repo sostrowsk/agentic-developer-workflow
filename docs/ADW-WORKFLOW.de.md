@@ -132,6 +132,10 @@ State existiert:
 3. **Config validieren (fail fast):** `.adw/config.yaml` im Ziel-Repo wird strikt
    geparst — unbekannte Keys, doppelte YAML-Keys, fehlende Gates oder
    nicht-positive Timeouts brechen mit klarer Meldung ab.
+   Direkt danach prüft der **Forge-Vorflug** (nur echte Läufe), ob die Forge
+   bekannt ist — `ci.provider` oder ein Origin-Host mit `gitlab`/`github`.
+   Sonst wird das Kommando abgelehnt, bevor ein Agent läuft (auch vor `resume`
+   und `approve`); ein Dry-Run fällt auf GitLab zurück.
 4. **Arbeitsbaum-Vorflug:** Der Haupt-Checkout muss sauber sein. Sind *ausschließlich*
    ADWs sechs eigene Authoring-Artefakte dirty (`.adw/issue.md`, `spec.md`,
    `plan.md`, `contract.yaml`, `spec-summary.md`, `plan-summary.md`), werden sie
@@ -433,7 +437,7 @@ Dann: optionaler Breakpoint `before_push`, danach `ci`.
 ![Phase 7: Push, SHA-gebundenes Polling und der eine CI-Re-Entry](diagrams/workflow/ci.de.svg)
 
 1. **Forge-Erkennung:** `ci.provider` in der Config hat Vorrang; sonst muss der
-   Host der Origin-URL eindeutig `gitlab` oder `github` enthalten (sonst eskaliert der Lauf hier — nach dem kompletten Build; ein Dry-Run fällt auf GitLab zurück).
+   Host der Origin-URL eindeutig `gitlab` oder `github` enthalten (schon im Vorflug geprüft; hat sich Origin oder Config während des Laufs geändert, eskaliert er hier).
 2. **Push** durch den Orchestrator: `git push --force-with-lease -u origin
    <branch>` (Hooks abgeschaltet; der SSH-Agent-Socket wird nur dem Push
    durchgereicht). Im `--dry-run` gibt es keinen Push.

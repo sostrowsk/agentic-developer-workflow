@@ -1079,9 +1079,9 @@ observability and the read-only GUI</figcaption>
 <code>approve</code>, <code>status</code>, <code>gui</code>,
 <code>runs list</code>, <code>runs prune</code>. Gate-mode resolution
 (<code>--gates</code> vs. legacy flags), issue intake (text,
-<code>glab</code>, <code>gh</code>), working-tree preflight with
-self-heal, per-run execution lock, run span, dry-run wiring,
-auto-prune.</td>
+<code>glab</code>, <code>gh</code>), forge preflight, working-tree
+preflight with self-heal, per-run execution lock, run span, dry-run
+wiring, auto-prune.</td>
 </tr>
 <tr class="even">
 <td><code>adw/phases.py</code></td>
@@ -1168,8 +1168,9 @@ failed-job log retrieval.</td>
 <td style="text-align: right;">82</td>
 <td>GitLab vs. GitHub: <code>ci.provider</code> override, otherwise
 hostname of the <code>origin</code> URL; unknown host →
-<code>ForgeError</code>, which phase 7 turns into an escalation (dry
-run: falls back to GitLab).</td>
+<code>ForgeError</code>: the CLI forge preflight refuses the command;
+phase 7 escalates only if origin/config changed mid-run (dry run: falls
+back to GitLab).</td>
 </tr>
 <tr class="even">
 <td><code>adw/env.py</code></td>
@@ -1987,8 +1988,11 @@ content to the drafts directory.</p>
 <li><code>forge.detect_forge(repo, override)</code> →
 <code>"gitlab"</code> | <code>"github"</code>: the
 <code>ci.provider</code> key wins; otherwise the hostname of the
-<code>origin</code> URL; unknown host → <code>ForgeError</code>, which
-escalates phase 7 in a real run (no poll against the wrong API). The dry
+<code>origin</code> URL; unknown host → <code>ForgeError</code>.
+<code>cli._preflight_forge</code> calls it for real
+<code>run</code>/<code>resume</code>/<code>approve</code> and refuses
+(exit 1, no state change) before any agent runs; phase 7 calls it again
+as a safety net and escalates (no poll against the wrong API). The dry
 run falls back to GitLab.</li>
 <li><strong>GitLab</strong> (<code>ci.py</code>):
 <code>glab api projects/:id/pipelines?ref=…&amp;sha=…</code> — the
@@ -2024,8 +2028,8 @@ exactly at the persisted checkpoint. It refuses escalated runs. It
 reloads the state under the per-run execution lock, resolves the config
 through <code>_config_for_continuation</code> (pinned base branch and
 pinned breakpoints beat the current file; <code>--base-branch</code> can
-only change before lanes exist), runs the working-tree preflight, then
-<code>_execute</code>.</li>
+only change before lanes exist), runs the forge and working-tree
+preflights, then <code>_execute</code>.</li>
 <li><strong><code>adw approve &lt;run_id&gt;</code></strong> is valid
 only in <code>awaiting_approval</code> /
 <code>awaiting_spec_approval</code>. Under the same lock it reloads and
@@ -2044,6 +2048,11 @@ artifacts is healed from <code>HEAD</code>
 + file removed if absent from HEAD) and re-checked; any foreign change
 refuses the command, discarding nothing. The preflight never
 escalates.</li>
+<li><strong>Forge preflight</strong> (<code>run</code>,
+<code>resume</code>, <code>approve</code>; real runs only):
+<code>detect_forge</code> must succeed, otherwise the command is refused
+with the <code>ci.provider</code> hint — no run created, no state
+change, never an escalation.</li>
 <li><strong>Interrupted agent calls</strong>
 (<code>AgentRunError</code>) leave the phase unchanged and print a
 resume hint (P9).</li>

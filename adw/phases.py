@@ -2572,7 +2572,10 @@ def _ci_forge(ctx: RunContext) -> Forge:
 
     In dry-run an unrecognizable host falls back to 'gitlab' — there the
     monitoring is mocked anyway and a throwaway repo often has no
-    origin at all. In a real run fail fast applies: no poll against the wrong API."""
+    origin at all. In a real run fail fast applies: no poll against the wrong API.
+    The CLI preflight (_preflight_forge) already refuses an undetectable forge
+    before any agent runs; this escalation is the safety net for an origin or
+    config that changed while the run was underway."""
     try:
         return detect_forge(ctx.repo, ctx.config.ci.provider)
     except ForgeError as exc:

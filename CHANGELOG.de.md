@@ -13,6 +13,11 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.27.0] — 2026-10-11
+
+### Geändert
+- **Die Forge-Prüfung läuft jetzt im Vorflug.** Ein echtes `adw run`, `adw resume` oder `adw approve` wird abgelehnt (Exit 1, kein Lauf angelegt, keine State-Änderung, keine Eskalation), wenn `ci.provider` fehlt und der `origin`-Host weder als GitLab noch als GitHub erkennbar ist. Bisher eskalierte der Lauf erst in Phase 7, nach dem kompletten Build. Phase 7 prüft weiterhin als Sicherheitsnetz, falls sich Origin oder Config während eines Laufs ändern. Dry-Runs fallen weiter auf GitLab zurück. Vier neue CLI-Tests decken das ab.
+
 ## [0.26.2] — 2026-10-11
 
 ### Hinzugefügt
@@ -1012,6 +1017,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.27.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.2...v0.27.0
 [0.26.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.1...v0.26.2
 [0.26.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.25.0...v0.26.0

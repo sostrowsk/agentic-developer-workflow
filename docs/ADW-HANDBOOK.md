@@ -156,7 +156,7 @@ Defaults are those in `adw/config.py`. Unknown keys are rejected everywhere.
 | `…gates[].timeout` | yes | — | Seconds, integer > 0 (a YAML boolean is rejected). |
 | `…gates[].tdd` | no | `false` | Marks a RED-proof gate (strict boolean). See §5.3. |
 | `e2e.cmd` / `e2e.timeout` | no | — | E2E command + seconds. Both required if `e2e` is set. Used only with `--parallel`. |
-| `ci.provider` | no | auto | `gitlab` or `github`. Unset = detected from the `origin` URL; an unknown host (e.g. self-hosted with a custom domain) is only detected in phase 7 — a real run then escalates **after** the whole build (a dry run silently falls back to GitLab). For self-hosted forges always set the key. |
+| `ci.provider` | no | auto | `gitlab` or `github`. Unset = detected from the `origin` URL; an unknown host (e.g. self-hosted with a custom domain) refuses a real `run`/`resume`/`approve` in the preflight, before any agent runs (a dry run falls back to GitLab). For self-hosted forges always set the key. |
 | `ci.poll_interval` | no | `60` | Seconds between pipeline polls. |
 | `ci.timeout` | no | `2700` | Total budget for waiting on CI (45 min). |
 | `ci.staging_job` | no | — | Job that must additionally be green (e.g. `deploy-staging`). |
@@ -376,8 +376,8 @@ adw runs prune [--repo PATH] [--keep N] [--older-than DAYS] [--gzip]
 | `--no-approval`, `--spec-approval` | Legacy flags, still valid (§6.1). |
 | `--base-branch NAME` | Override `base_branch` for this run (pinned). |
 
-Order of checks: exactly one issue source → gate mode → config → working-tree
-preflight → issue fetch → run creation. A failure at any step creates no run.
+Order of checks: exactly one issue source → gate mode → config → forge
+preflight (real runs only) → working-tree preflight → issue fetch → run creation. A failure at any step creates no run.
 
 ### `adw resume RUN_ID`
 
