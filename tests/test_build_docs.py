@@ -81,3 +81,17 @@ def test_doc_css_keeps_visited_links_on_theme_accent():
     # pandoc's default template sets a:visited to a dark grey, unreadable in dark mode.
     css = (_SCRIPT.parent.parent / "docs" / "assets" / "doc.css").read_text(encoding="utf-8")
     assert "a:visited" in css
+
+
+def test_docx_markdown_retargets_links_for_the_export_folder(tmp_path):
+    md = (
+        "[wf](ADW-WORKFLOW.de.md#s3) [spec](ADW-SPEC.md) [briefs](briefs/README.md) "
+        "[root](../README.md) [web](https://example.com/a.md) [toc](#top)"
+    )
+    out = build_docs.docx_markdown(md, tmp_path)
+    assert "](ADW-WORKFLOW.de.docx)" in out  # Word cannot jump to an anchor in another file
+    assert "](ADW-SPEC.docx)" in out
+    assert "](../briefs/README.md)" in out
+    assert "](../../README.md)" in out
+    assert "](https://example.com/a.md)" in out
+    assert "](#top)" in out

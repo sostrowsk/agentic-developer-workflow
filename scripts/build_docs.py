@@ -26,6 +26,8 @@ _DIAGRAM_RE = re.compile(r"!\[([^\]]*)\]\((diagrams/[^)\s]+?)\.svg\)")
 _IMG_RE = re.compile(r'<img src="diagrams/([^"]+?)\.svg"[^>]*?/?>')
 _HREF_RE = re.compile(r'href="([^"#:/][^":]*)"')
 _SIBLING_RE = re.compile(r"(ADW-[A-Z]+(?:\.de)?)\.md(#.*)?")
+# Relative Markdown links, not images (those carry a leading "!").
+_MD_LINK_RE = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s#:/][^)\s:]*)\)")
 _XML_PROLOG_RE = re.compile(r"<\?xml[^>]*\?>\s*")
 # Inkscape's EMF export drops these silently — arrowheads vanish, text disappears.
 _EMF_UNSAFE = {
@@ -41,11 +43,22 @@ def diagram_references(md: str) -> list[str]:
 
 
 def docx_markdown(md: str, emf_root: Path) -> str:
+    """Diagrams become EMF at page width; links are retargeted for docs/export/ —
+    sibling documents to their .docx (Word cannot follow an anchor into another
+    file), everything else relative one level up."""
+
+    def retarget(match: re.Match) -> str:
+        text, href = match.groups()
+        sibling = _SIBLING_RE.fullmatch(href)
+        if sibling and sibling.group(1).removesuffix(".de") in SOURCES:
+            return f"[{text}]({sibling.group(1)}.docx)"
+        return f"[{text}](../{href})"
+
     def to_emf(match: re.Match) -> str:
         caption, path = match.groups()
         return f"![{caption}]({emf_root / path}.emf){{width=16cm}}"
 
-    return _DIAGRAM_RE.sub(to_emf, md)
+    return _DIAGRAM_RE.sub(to_emf, _MD_LINK_RE.sub(retarget, md))
 
 
 def html_links(html: str) -> str:

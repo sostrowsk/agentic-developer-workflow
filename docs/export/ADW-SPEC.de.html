@@ -2109,17 +2109,22 @@ abgelehnter Checkout kostet so keine Probe-Tokens):
 <code>opus</code>/<code>fable</code>/<code>sonnet</code> mit je einem
 minimalen SDK-Aufruf auf (ohne Tools, ohne Settings);
 <code>models_cache.json</code> der codex-CLI liefert das neueste
-gelistete Modell der gepinnten Stufe oder ein angekündigtes Upgrade.
-Weicht ein gepinntes Modell ab, wird das Kommando mit der zu ändernden
-Konstante abgelehnt. 24 h gecacht in
-<code>~/.adw/model-check.json</code> (<code>ADW_MODEL_CHECK_PATH</code>
-überschreibt) samt den Pins, gegen die er lief — neue Pins machen ihn
-ungültig; nur ein vollständiges Ergebnis wird gecacht; ein
-fehlgeschlagener Probe (Fehler-Result,
-<code>&lt;synthetic&gt;</code>-Modell, Zeitlimit 120 s), ein fehlender,
-kaputter oder über 7 Tage alter codex-Katalog oder ein nicht
-schreibbarer Cache warnt und blockiert nie; eine unbrauchbare
-Cache-Datei (z. B. Zeitstempel ohne Zeitzone) gilt als Cache-Miss.</li>
+gelistete Modell der gepinnten Stufe oder ein angekündigtes Upgrade. Nur
+ein <strong>nachweislich neueres</strong> Modell lehnt das Kommando ab
+(mit der zu ändernden Konstante): bei Claude dieselbe Reihe mit höherer
+Version — ältere IDs, Datums-Snapshots, <code>[..]</code>-Suffixe,
+andere Reihen und unlesbare IDs blockieren nie. Jede Rolle wird einzeln
+in <code>~/.adw/model-check.json</code> gecacht
+(<code>ADW_MODEL_CHECK_PATH</code> überschreibt), gebunden an die
+aktuellen Pins: ein Erfolg 24 h, ein fehlgeschlagener Probe 1 h — nur
+abgelaufene Rollen werden neu geprüft. Ein fehlgeschlagener Probe
+(Fehler-Result, <code>&lt;synthetic&gt;</code>-Modell, Zeitlimit 120 s),
+ein fehlender, kaputter, undatierter oder über 7 Tage alter
+codex-Katalog oder ein nicht schreibbarer Cache warnt und blockiert nie;
+unbrauchbare Cache-Einträge gelten als Miss. Bekannter blinder Fleck:
+Die Aliase löst die im SDK gebündelte CLI auf — ein Modell, das nach dem
+installierten <code>claude-agent-sdk</code> erscheint, bleibt
+unsichtbar, bis das SDK aktualisiert ist.</li>
 <li><strong>Abgebrochene Agent-Aufrufe</strong>
 (<code>AgentRunError</code>) lassen die Phase unverändert und geben
 einen Resume-Hinweis aus (P9).</li>

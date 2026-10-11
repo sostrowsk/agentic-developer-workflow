@@ -655,13 +655,18 @@ directory.
   after the working-tree preflight, so a refused checkout costs no probe tokens):
   `agents.resolve_model_alias` resolves `opus`/`fable`/`sonnet` with one minimal
   SDK call each (no tools, no settings); the codex CLI's `models_cache.json` gives
-  the newest listed model of the pinned tier or an announced upgrade. Any pinned
-  model that differs refuses the command with the constant to change. Cached for
-  24 h in `~/.adw/model-check.json` (`ADW_MODEL_CHECK_PATH` overrides) together with
-  the pins it was taken against — new pins invalidate it; only a complete result is
-  cached; a failed probe (error result, `<synthetic>` model, 120 s timeout), a missing,
-  malformed or > 7 days old codex catalog or an unwritable cache warns and never blocks;
-  an unusable cache file (e.g. a timestamp without timezone) is a cache miss.
+  the newest listed model of the pinned tier or an announced upgrade. Only a
+  **proven newer** model refuses the command (with the constant to change): for
+  Claude the same line with a higher version — older ids, date snapshots, `[..]`
+  suffixes, other lines and unparsable ids never block. Each role is cached on its
+  own in `~/.adw/model-check.json` (`ADW_MODEL_CHECK_PATH` overrides), bound to the
+  current pins: a success for 24 h, a failed probe for 1 h, so only expired roles
+  are probed again. A failed probe (error result, `<synthetic>` model, 120 s
+  timeout), a missing, malformed, undated or > 7 days old codex catalog or an
+  unwritable cache warns and never blocks; unusable cache entries are misses.
+  Known blind spot: aliases resolve through the SDK's bundled CLI, so a model
+  released after the installed `claude-agent-sdk` stays invisible until the SDK is
+  upgraded.
 - **Interrupted agent calls** (`AgentRunError`) leave the phase unchanged and print a
   resume hint (P9).
 - **Session resume:** fix tasks go to the same SDK session (`resume=session_id`); the

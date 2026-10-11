@@ -18,7 +18,18 @@ def _catalog(*slugs, upgrade=None):
         for e in entries:
             if e["slug"] == upgrade[0]:
                 e["upgrade"] = {"model": upgrade[1]}
-    return {"models": entries}
+    return {"models": entries, "fetched_at": NOW.isoformat()}
+
+
+def _seed_cache(path, checked_at, roles, pinned=None):
+    """Per-role cache entries: {role: model id, or None for a failed probe}."""
+    path.write_text(json.dumps({
+        "pinned": pinned or models.pinned_models(),
+        "roles": {
+            role: {"model": model, "checked_at": checked_at, "error": None if model else "x"}
+            for role, model in roles.items()
+        },
+    }))
 
 
 def test_latest_codex_model_picks_newest_version_of_the_pinned_tier():
@@ -56,9 +67,8 @@ def test_find_outdated_skips_roles_that_could_not_be_checked():
 
 def test_fresh_cache_is_reused_without_probing(tmp_path):
     cache = tmp_path / "check.json"
-    cached = dict(PINNED_CLAUDE, opus="claude-opus-6")
-    cache.write_text(json.dumps({"checked_at": (NOW - timedelta(hours=23)).isoformat(),
-                                 "pinned": models.pinned_models(), "latest": cached}))
+    cached = dict(PINNED_CLAUDE, opus="claude-opus-6", codex=codex.CODEX_MODEL)
+    _seed_cache(cache, (NOW - timedelta(hours=23)).isoformat(), cached)
 
     def no_probe(alias):
         raise AssertionError("fresh cache must not probe")
@@ -70,16 +80,16 @@ def test_fresh_cache_is_reused_without_probing(tmp_path):
 
 def test_stale_cache_is_refreshed_and_written(tmp_path):
     cache = tmp_path / "check.json"
-    cache.write_text(json.dumps({"checked_at": (NOW - timedelta(hours=25)).isoformat(),
-                                 "latest": {"opus": "old"}}))
+    _seed_cache(cache, (NOW - timedelta(hours=25)).isoformat(), {"opus": "claude-opus-1"})
     catalog = _catalog(codex.CODEX_MODEL)
     latest, warnings = models.latest_models(cache, NOW, PINNED_CLAUDE.get, lambda: catalog)
     assert latest == dict(PINNED_CLAUDE, codex=codex.CODEX_MODEL)
     assert warnings == []
-    assert json.loads(cache.read_text())["latest"] == latest
+    roles = json.loads(cache.read_text())["roles"]
+    assert {role: entry["model"] for role, entry in roles.items()} == latest
 
 
-def test_probe_failure_warns_and_is_not_cached(tmp_path):
+def test_probe_failure_warns(tmp_path):
     cache = tmp_path / "check.json"
 
     def broken(alias):
@@ -89,7 +99,66 @@ def test_probe_failure_warns_and_is_not_cached(tmp_path):
     assert latest == {}
     assert any("plan limit" in w for w in warnings)
     assert any("Codex" in w for w in warnings)
-    assert not cache.exists()
+
+
+# --- Review findings 0.29.1 -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "resolved, outdated",
+    [
+        ("claude-opus-4-8", False),            # older than the pin: never "newer"
+        (f"{agents.OPUS}-20260915", False),    # dated snapshot of the same model
+        (f"{agents.OPUS}[1m]", False),         # suffixed variant of the same model
+        ("claude-opus-5-6", True),
+        ("claude-opus-6", True),
+        ("claude-sonnet-9", False),            # another line never replaces the pin
+        ("something-else", False),             # unparsable: not a proven newer model
+    ],
+)
+def test_find_outdated_only_flags_a_proven_newer_claude_model(resolved, outdated):
+    latest = dict(PINNED_CLAUDE, opus=resolved)
+    assert bool(models.find_outdated(latest)) is outdated
+
+
+def test_successful_roles_are_cached_even_when_another_probe_fails(tmp_path):
+    cache = tmp_path / "check.json"
+    calls = []
+
+    def flaky(alias):
+        calls.append(alias)
+        if alias == "fable":
+            raise RuntimeError("rate limited")
+        return PINNED_CLAUDE[alias]
+
+    catalog = _catalog(codex.CODEX_MODEL)
+    models.latest_models(cache, NOW, flaky, lambda: catalog)
+    assert calls == ["opus", "fable", "sonnet"]
+    # Within the failure back-off nothing is probed again — no paid calls per start.
+    calls.clear()
+    latest, warnings = models.latest_models(
+        cache, NOW + timedelta(minutes=30), flaky, lambda: catalog
+    )
+    assert calls == []
+    assert latest == {"opus": agents.OPUS, "sonnet": agents.SONNET, "codex": codex.CODEX_MODEL}
+    assert any("fable" in w for w in warnings)
+    # After the back-off only the failed role is retried.
+    models.latest_models(cache, NOW + timedelta(hours=2), flaky, lambda: catalog)
+    assert calls == ["fable"]
+
+
+@pytest.mark.parametrize("fetched_at", [None, "not a date", "2026-10-11T11:00:00"])
+def test_codex_catalog_without_usable_timestamp_is_unchecked(tmp_path, fetched_at):
+    catalog = _catalog("gpt-6-astra", "gpt-7-astra")
+    if fetched_at is None:
+        del catalog["fetched_at"]
+    else:
+        catalog["fetched_at"] = fetched_at
+    latest, warnings = models.latest_models(
+        tmp_path / "check.json", NOW, PINNED_CLAUDE.get, lambda: catalog
+    )
+    assert "codex" not in latest
+    assert any("Zeitstempel" in w for w in warnings)
 
 
 def test_outdated_message_points_to_where_adw_is_updated():
@@ -189,8 +258,7 @@ def test_cache_from_older_pins_is_not_reused(tmp_path):
     not report the old models as 'latest' and block the updated installation."""
     cache = tmp_path / "check.json"
     old_pins = dict(models.pinned_models(), opus="claude-opus-4-8")
-    cache.write_text(json.dumps({"checked_at": NOW.isoformat(), "pinned": old_pins,
-                                 "latest": old_pins}))
+    _seed_cache(cache, NOW.isoformat(), old_pins, pinned=old_pins)
     catalog = _catalog(codex.CODEX_MODEL)
     latest, _ = models.latest_models(cache, NOW, PINNED_CLAUDE.get, lambda: catalog)
     assert latest["opus"] == agents.OPUS
@@ -231,9 +299,7 @@ def test_malformed_codex_catalog_only_warns(tmp_path, catalog):
 
 def test_naive_cache_timestamp_is_a_cache_miss(tmp_path):
     cache = tmp_path / "check.json"
-    cache.write_text(json.dumps({"checked_at": "2026-10-11T11:00:00",
-                                 "pinned": models.pinned_models(),
-                                 "latest": dict(PINNED_CLAUDE, opus="claude-opus-6")}))
+    _seed_cache(cache, "2026-10-11T11:00:00", dict(PINNED_CLAUDE, opus="claude-opus-6"))
     probed = []
 
     def probe(alias):
@@ -283,3 +349,25 @@ def test_resume_rejects_dirty_checkout_before_probing_models(target_repo, monkey
         assert res.exit_code == 1, (command, res.output)
         assert "uncommittete" in res.output, command
     assert probed == []
+
+
+@pytest.mark.parametrize("entry", [
+    {"model": None},                                  # failure without error text
+    {"model": None, "error": 7},                      # error not a string
+    {"model": 5, "error": None},                      # model not a string
+])
+def test_malformed_cache_entry_is_a_miss_not_a_crash(tmp_path, entry):
+    cache = tmp_path / "check.json"
+    cache.write_text(json.dumps({
+        "pinned": models.pinned_models(),
+        "roles": {"opus": dict(entry, checked_at=NOW.isoformat())},
+    }))
+    probed = []
+
+    def probe(alias):
+        probed.append(alias)
+        return PINNED_CLAUDE[alias]
+
+    latest, _ = models.latest_models(cache, NOW, probe, lambda: None)
+    assert "opus" in probed
+    assert latest["opus"] == agents.OPUS

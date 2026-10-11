@@ -548,7 +548,9 @@ def test_bundled_claude_cli_supports_the_registry_models():
 
     cli = Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
     out = subprocess.run([str(cli), "--version"], capture_output=True, text=True, timeout=60)
-    version = tuple(int(p) for p in re.match(r"(\d+)\.(\d+)\.(\d+)", out.stdout).groups())
+    match = re.match(r"(\d+)\.(\d+)\.(\d+)", out.stdout)
+    assert match, f"bundled CLI did not report a version: {out.stdout!r} {out.stderr!r}"
+    version = tuple(int(p) for p in match.groups())
     assert version >= (2, 1, 280), out.stdout
 
 

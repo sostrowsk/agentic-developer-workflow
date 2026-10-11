@@ -2072,15 +2072,20 @@ tokens): <code>agents.resolve_model_alias</code> resolves
 <code>opus</code>/<code>fable</code>/<code>sonnet</code> with one
 minimal SDK call each (no tools, no settings); the codex CLI's
 <code>models_cache.json</code> gives the newest listed model of the
-pinned tier or an announced upgrade. Any pinned model that differs
-refuses the command with the constant to change. Cached for 24 h in
+pinned tier or an announced upgrade. Only a <strong>proven
+newer</strong> model refuses the command (with the constant to change):
+for Claude the same line with a higher version — older ids, date
+snapshots, <code>[..]</code> suffixes, other lines and unparsable ids
+never block. Each role is cached on its own in
 <code>~/.adw/model-check.json</code> (<code>ADW_MODEL_CHECK_PATH</code>
-overrides) together with the pins it was taken against — new pins
-invalidate it; only a complete result is cached; a failed probe (error
-result, <code>&lt;synthetic&gt;</code> model, 120 s timeout), a missing,
-malformed or &gt; 7 days old codex catalog or an unwritable cache warns
-and never blocks; an unusable cache file (e.g. a timestamp without
-timezone) is a cache miss.</li>
+overrides), bound to the current pins: a success for 24 h, a failed
+probe for 1 h, so only expired roles are probed again. A failed probe
+(error result, <code>&lt;synthetic&gt;</code> model, 120 s timeout), a
+missing, malformed, undated or &gt; 7 days old codex catalog or an
+unwritable cache warns and never blocks; unusable cache entries are
+misses. Known blind spot: aliases resolve through the SDK's bundled CLI,
+so a model released after the installed <code>claude-agent-sdk</code>
+stays invisible until the SDK is upgraded.</li>
 <li><strong>Interrupted agent calls</strong>
 (<code>AgentRunError</code>) leave the phase unchanged and print a
 resume hint (P9).</li>

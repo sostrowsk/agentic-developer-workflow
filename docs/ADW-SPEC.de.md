@@ -675,14 +675,18 @@ Entwurfsverzeichnis.
   `agents.resolve_model_alias` löst `opus`/`fable`/`sonnet` mit je einem minimalen
   SDK-Aufruf auf (ohne Tools, ohne Settings); `models_cache.json` der codex-CLI
   liefert das neueste gelistete Modell der gepinnten Stufe oder ein angekündigtes
-  Upgrade. Weicht ein gepinntes Modell ab, wird das Kommando mit der zu ändernden
-  Konstante abgelehnt. 24 h gecacht in `~/.adw/model-check.json`
-  (`ADW_MODEL_CHECK_PATH` überschreibt) samt den Pins, gegen die er lief — neue Pins
-  machen ihn ungültig; nur ein vollständiges Ergebnis wird gecacht; ein
-  fehlgeschlagener Probe (Fehler-Result, `<synthetic>`-Modell, Zeitlimit 120 s), ein
-  fehlender, kaputter oder über 7 Tage alter codex-Katalog oder ein nicht
-  schreibbarer Cache warnt und blockiert nie; eine unbrauchbare Cache-Datei (z. B.
-  Zeitstempel ohne Zeitzone) gilt als Cache-Miss.
+  Upgrade. Nur ein **nachweislich neueres** Modell lehnt das Kommando ab (mit der zu
+  ändernden Konstante): bei Claude dieselbe Reihe mit höherer Version — ältere IDs,
+  Datums-Snapshots, `[..]`-Suffixe, andere Reihen und unlesbare IDs blockieren nie.
+  Jede Rolle wird einzeln in `~/.adw/model-check.json` gecacht
+  (`ADW_MODEL_CHECK_PATH` überschreibt), gebunden an die aktuellen Pins: ein Erfolg
+  24 h, ein fehlgeschlagener Probe 1 h — nur abgelaufene Rollen werden neu geprüft.
+  Ein fehlgeschlagener Probe (Fehler-Result, `<synthetic>`-Modell, Zeitlimit 120 s),
+  ein fehlender, kaputter, undatierter oder über 7 Tage alter codex-Katalog oder ein
+  nicht schreibbarer Cache warnt und blockiert nie; unbrauchbare Cache-Einträge
+  gelten als Miss. Bekannter blinder Fleck: Die Aliase löst die im SDK gebündelte
+  CLI auf — ein Modell, das nach dem installierten `claude-agent-sdk` erscheint,
+  bleibt unsichtbar, bis das SDK aktualisiert ist.
 - **Abgebrochene Agent-Aufrufe** (`AgentRunError`) lassen die Phase unverändert und
   geben einen Resume-Hinweis aus (P9).
 - **Session-Resume:** Fix-Tasks gehen an dieselbe SDK-Session

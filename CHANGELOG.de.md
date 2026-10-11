@@ -13,6 +13,16 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.29.2] — 2026-10-11
+
+### Behoben
+Befunde aus einem parallelen Code-Review durch Opus 5.5, Fable 5.1 und Codex (`gpt-6-astra`) über 0.26.2–0.29.1:
+- **Der Modell-Check konnte Läufe blockieren, obwohl es kein neueres Modell gab.** Jede Abweichung galt als „neuer“, sodass ein CLI-Alias, der auf ein *älteres* Modell, einen Datums-Snapshot oder eine Variante mit Suffix des eingestellten Modells auflöste, jeden Lauf ablehnte. Jetzt blockiert nur ein nachweislich neueres Modell: bei Claude eine höhere Version derselben Reihe, bei Codex eine höhere Version der eingestellten Stufe oder ein vom Katalog angekündigtes Upgrade.
+- **„Höchstens einmal am Tag“ galt nach einem fehlgeschlagenen Probe nicht mehr.** Ein einziger Fehlschlag (zum Beispiel ein veralteter codex-Katalog oder ein Rate-Limit) verhinderte jedes Cachen, sodass jeder Start alle Abfragen wiederholte; ein hängendes Netz kostete bis zu 6 Minuten pro Start. Jetzt wird jede Rolle einzeln gecacht: ein Erfolg 24 h, ein Fehlschlag 1 h. Neu geprüft werden nur Rollen, deren Cache-Eintrag abgelaufen ist.
+- **Ein codex-Katalog ohne brauchbares `fetched_at`** (fehlend, ungültig oder ohne Zeitzone) galt als frisch und konnte Läufe blockieren. Er gilt jetzt als nicht prüfbar und erzeugt eine Warnung.
+- **Querverweise in den DOCX-Exporten** zeigten auf Markdown-Dateien, die neben den Exporten nicht existieren. Links auf die beiden anderen Dokumente zeigen jetzt auf deren `.docx`; alle übrigen relativen Links werden aufs Repository umgebogen.
+- **Versions-Test der gebündelten CLI:** Startet die CLI nicht, scheitert der Test jetzt mit verständlicher Meldung statt mit einem `AttributeError`.
+
 ## [0.29.1] — 2026-10-11
 
 ### Behoben
@@ -1047,6 +1057,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.29.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.1...v0.29.0
 [0.28.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.0...v0.28.1
