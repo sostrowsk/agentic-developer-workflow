@@ -1,6 +1,6 @@
 [project]
 name = "adw"
-version = "0.28.0"
+version = "0.28.1"
 description = "Agentic Developer Workflow — 7-Phasen-Orchestrator: Claude Agent SDK + Codex + deterministische Gates"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -9,8 +9,9 @@ dependencies = [
     "pydantic>=2",
     "typer>=0.12",
     "pyyaml>=6",
-    # >=0.2.118: braucht tools/setting_sources/strict_mcp_config/sandbox
-    "claude-agent-sdk>=0.2.118",
+    # >=0.2.165: gebündelte Claude-Code-CLI >= 2.1.280 — ältere lehnen Opus 5.5 /
+    # Fable 5.1 / Sonnet 5.5 ab (tests/test_agents.py prüft die gebündelte Version)
+    "claude-agent-sdk>=0.2.165",
     "anyio>=4",
 ]
 

@@ -12,6 +12,14 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.28.1] — 2026-10-11
+
+### Fixed
+- **Real runs failed immediately on the new models in 0.28.0.** The Agent SDK does not call the system `claude` CLI. It starts the Claude Code CLI bundled inside `claude-agent-sdk`, and 0.2.118 bundled version 2.1.209. That version rejects Opus 5.5, Fable 5.1 and Sonnet 5.5 ("version 2.1.280 or newer is required"), so every real run escalated on the very first agent. 0.28.0's live smoke tests went through the system CLI and missed this.
+  - **Fix:** `claude-agent-sdk>=0.2.165`, which bundles CLI 2.1.294.
+  - **Regression test:** checks that the bundled CLI is at least 2.1.280.
+  - **Checked:** a real SDK call with all three models.
+
 ## [0.28.0] — 2026-10-11
 
 ### Changed
@@ -949,6 +957,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.28.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.2...v0.27.0
 [0.26.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.1...v0.26.2

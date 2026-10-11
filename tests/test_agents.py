@@ -535,3 +535,18 @@ def test_mock_runner_keeps_stable_session_per_agent(tmp_path):
     second = mock.run(REGISTRY["build_agent"], "b", cwd=tmp_path, resume=first.session_id)
     assert isinstance(first, AgentResult)
     assert first.session_id == second.session_id
+
+
+def test_bundled_claude_cli_supports_the_registry_models():
+    # Regression 0.28.0: the Agent SDK spawns ITS bundled Claude Code CLI, not the
+    # system one. SDK 0.2.118 bundled CLI 2.1.209, which rejects Opus 5.5 / Fable 5.1 /
+    # Sonnet 5.5 with "version 2.1.280 or newer is required" — every real run escalated.
+    import re
+    import subprocess
+
+    import claude_agent_sdk
+
+    cli = Path(claude_agent_sdk.__file__).parent / "_bundled" / "claude"
+    out = subprocess.run([str(cli), "--version"], capture_output=True, text=True, timeout=60)
+    version = tuple(int(p) for p in re.match(r"(\d+)\.(\d+)\.(\d+)", out.stdout).groups())
+    assert version >= (2, 1, 280), out.stdout
