@@ -134,7 +134,8 @@ state exists:
    forge is known — `ci.provider` or an origin host containing `gitlab`/`github`.
    Otherwise the command is refused before any agent runs (also before `resume`
    and `approve`); a dry run falls back to GitLab.
-   Then the **model check** (real runs only) asks whether newer models exist than
+   After the working-tree preflight (step 4) — so a refused checkout costs no probe
+   tokens — the **model check** (real runs only) asks whether newer models exist than
    the ones ADW pins: the CLI aliases `opus`/`fable`/`sonnet` resolve to the newest
    Claude models, the codex CLI's catalog names the newest GPT model of the pinned
    tier. If one is newer, the command is refused — update ADW first. The result is

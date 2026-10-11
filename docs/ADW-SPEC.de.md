@@ -670,7 +670,8 @@ Entwurfsverzeichnis.
 - **Forge-Vorflug** (`run`, `resume`, `approve`; nur echte Läufe): `detect_forge`
   muss gelingen, sonst wird das Kommando mit dem `ci.provider`-Hinweis abgelehnt —
   kein Lauf angelegt, keine State-Änderung, nie eine Eskalation.
-- **Modell-Check** (`run`, `resume`, `approve`; nur echte Läufe; `adw/models.py`):
+- **Modell-Check** (`run`, `resume`, `approve`; nur echte Läufe; `adw/models.py`; läuft
+  nach dem Arbeitsbaum-Vorflug, ein abgelehnter Checkout kostet so keine Probe-Tokens):
   `agents.resolve_model_alias` löst `opus`/`fable`/`sonnet` mit je einem minimalen
   SDK-Aufruf auf (ohne Tools, ohne Settings); `models_cache.json` der codex-CLI
   liefert das neueste gelistete Modell der gepinnten Stufe oder ein angekündigtes
@@ -680,7 +681,8 @@ Entwurfsverzeichnis.
   machen ihn ungültig; nur ein vollständiges Ergebnis wird gecacht; ein
   fehlgeschlagener Probe (Fehler-Result, `<synthetic>`-Modell, Zeitlimit 120 s), ein
   fehlender, kaputter oder über 7 Tage alter codex-Katalog oder ein nicht
-  schreibbarer Cache warnt und blockiert nie.
+  schreibbarer Cache warnt und blockiert nie; eine unbrauchbare Cache-Datei (z. B.
+  Zeitstempel ohne Zeitzone) gilt als Cache-Miss.
 - **Abgebrochene Agent-Aufrufe** (`AgentRunError`) lassen die Phase unverändert und
   geben einen Resume-Hinweis aus (P9).
 - **Session-Resume:** Fix-Tasks gehen an dieselbe SDK-Session

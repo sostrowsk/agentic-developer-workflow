@@ -413,10 +413,11 @@ def run(
     # Repo, das ohnehin keine gültige .adw/config.yaml hat.
     config = _load_config(repo, base_branch)
     _preflight_forge(repo, config, dry_run)
-    _preflight_models(dry_run)
     # Arbeitsbaum-Vorflug VOR jeder State-Mutation: eine Verweigerung legt keinen
     # Run an und macht keinen Netzaufruf (B1/B4). Nie Eskalation.
     _preflight_worktree(repo)
+    # Erst NACH dem Arbeitsbaum-Vorflug: eine Verweigerung kostet keine Probe-Tokens.
+    _preflight_models(dry_run)
     if issue is not None:
         issue_text = issue
     elif gitlab_issue is not None:
@@ -491,10 +492,11 @@ def resume(
             )
         config, rebased = _config_for_continuation(repo, state, base_branch)
         _preflight_forge(repo, config, state.dry_run)
-        _preflight_models(state.dry_run)
         # Arbeitsbaum-Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save):
         # eine Verweigerung lässt den Run-State unverändert und resumierbar (B1).
         _preflight_worktree(repo)
+        # Erst NACH dem Arbeitsbaum-Vorflug: eine Verweigerung kostet keine Probe-Tokens.
+        _preflight_models(state.dry_run)
         emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
         run_totals = RunTotals()
         with _run_span(emitter, state, config, repo, run_totals) as run_handle:
@@ -536,10 +538,11 @@ def approve(
         # below (inside the run span) persists it together with the approval grant.
         config, _rebased = _config_for_continuation(repo, state, base_branch)
         _preflight_forge(repo, config, state.dry_run)
-        _preflight_models(state.dry_run)
         # Arbeitsbaum-Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung
         # lässt die Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
         _preflight_worktree(repo)
+        # Erst NACH dem Arbeitsbaum-Vorflug: eine Verweigerung kostet keine Probe-Tokens.
+        _preflight_models(state.dry_run)
         if state.pending_breakpoint is not None:
             gate = state.pending_breakpoint
         else:

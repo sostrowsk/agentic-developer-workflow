@@ -224,3 +224,62 @@ def test_malformed_codex_catalog_only_warns(tmp_path, catalog):
     )
     assert "codex" not in latest
     assert any("Katalog" in w for w in warnings)
+
+
+# --- Known limitations of 0.29.0 ------------------------------------------------------
+
+
+def test_naive_cache_timestamp_is_a_cache_miss(tmp_path):
+    cache = tmp_path / "check.json"
+    cache.write_text(json.dumps({"checked_at": "2026-10-11T11:00:00",
+                                 "pinned": models.pinned_models(),
+                                 "latest": dict(PINNED_CLAUDE, opus="claude-opus-6")}))
+    probed = []
+
+    def probe(alias):
+        probed.append(alias)
+        return PINNED_CLAUDE[alias]
+
+    latest, _ = models.latest_models(cache, NOW, probe, lambda: None)
+    assert probed == list(models.CLAUDE_ALIASES)
+    assert latest["opus"] == agents.OPUS
+
+
+def _probe_forbidden(monkeypatch) -> list[str]:
+    """Records probes — a raising fake would be swallowed by the warn-only path."""
+    probed: list[str] = []
+
+    def record(alias):
+        probed.append(alias)
+        return PINNED_CLAUDE[alias]
+
+    monkeypatch.setattr(models, "resolve_claude_alias", record)
+    return probed
+
+
+def test_run_rejects_dirty_checkout_before_probing_models(target_repo, monkeypatch):
+    probed = _probe_forbidden(monkeypatch)
+    (target_repo / "fremd.py").write_text("dirty\n")
+    runner, app = _cli()
+    res = runner.invoke(app, ["run", "--repo", str(target_repo), "--issue", "Demo"])
+    assert res.exit_code == 1, res.output
+    assert "uncommittete" in res.output
+    assert probed == []
+
+
+def test_resume_rejects_dirty_checkout_before_probing_models(target_repo, monkeypatch):
+    from adw.state import RunState
+
+    runner, app = _cli()
+    res = runner.invoke(app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run"])
+    assert res.exit_code == 2, res.output
+    state = RunState.find_latest(target_repo)
+    state.dry_run = False
+    state.save(target_repo)
+    probed = _probe_forbidden(monkeypatch)
+    (target_repo / "fremd.py").write_text("dirty\n")
+    for command in ("resume", "approve"):
+        res = runner.invoke(app, [command, state.run_id, "--repo", str(target_repo)])
+        assert res.exit_code == 1, (command, res.output)
+        assert "uncommittete" in res.output, command
+    assert probed == []

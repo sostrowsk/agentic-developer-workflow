@@ -824,9 +824,10 @@ preflight</strong> (real runs only) checks that the forge is known —
 <code>ci.provider</code> or an origin host containing
 <code>gitlab</code>/<code>github</code>. Otherwise the command is
 refused before any agent runs (also before <code>resume</code> and
-<code>approve</code>); a dry run falls back to GitLab. Then the
-<strong>model check</strong> (real runs only) asks whether newer models
-exist than the ones ADW pins: the CLI aliases
+<code>approve</code>); a dry run falls back to GitLab. After the
+working-tree preflight (step 4) — so a refused checkout costs no probe
+tokens — the <strong>model check</strong> (real runs only) asks whether
+newer models exist than the ones ADW pins: the CLI aliases
 <code>opus</code>/<code>fable</code>/<code>sonnet</code> resolve to the
 newest Claude models, the codex CLI's catalog names the newest GPT model
 of the pinned tier. If one is newer, the command is refused — update ADW

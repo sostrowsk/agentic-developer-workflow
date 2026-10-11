@@ -651,7 +651,8 @@ directory.
 - **Forge preflight** (`run`, `resume`, `approve`; real runs only): `detect_forge`
   must succeed, otherwise the command is refused with the `ci.provider` hint —
   no run created, no state change, never an escalation.
-- **Model check** (`run`, `resume`, `approve`; real runs only; `adw/models.py`):
+- **Model check** (`run`, `resume`, `approve`; real runs only; `adw/models.py`; runs
+  after the working-tree preflight, so a refused checkout costs no probe tokens):
   `agents.resolve_model_alias` resolves `opus`/`fable`/`sonnet` with one minimal
   SDK call each (no tools, no settings); the codex CLI's `models_cache.json` gives
   the newest listed model of the pinned tier or an announced upgrade. Any pinned
@@ -659,7 +660,8 @@ directory.
   24 h in `~/.adw/model-check.json` (`ADW_MODEL_CHECK_PATH` overrides) together with
   the pins it was taken against — new pins invalidate it; only a complete result is
   cached; a failed probe (error result, `<synthetic>` model, 120 s timeout), a missing,
-  malformed or > 7 days old codex catalog or an unwritable cache warns and never blocks.
+  malformed or > 7 days old codex catalog or an unwritable cache warns and never blocks;
+  an unusable cache file (e.g. a timestamp without timezone) is a cache miss.
 - **Interrupted agent calls** (`AgentRunError`) leave the phase unchanged and print a
   resume hint (P9).
 - **Session resume:** fix tasks go to the same SDK session (`resume=session_id`); the

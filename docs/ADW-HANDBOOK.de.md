@@ -384,7 +384,7 @@ adw runs prune [--repo PFAD] [--keep N] [--older-than TAGE] [--gzip]
 | `--base-branch NAME` | `base_branch` für diesen Lauf überschreiben (gepinnt). |
 
 Reihenfolge der Prüfungen: genau eine Issue-Quelle → Gate-Modus → Config →
-Forge-Vorflug → Modell-Check (beide nur echte Läufe) → Arbeitsbaum-Vorflug → Issue holen → Lauf anlegen. Ein Fehler in einem dieser
+Forge-Vorflug → Arbeitsbaum-Vorflug → Modell-Check (Forge + Modelle: nur echte Läufe) → Issue holen → Lauf anlegen. Ein Fehler in einem dieser
 Schritte legt keinen Lauf an.
 
 ### `adw resume RUN_ID`

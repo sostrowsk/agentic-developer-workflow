@@ -2103,9 +2103,11 @@ eskaliert nie.</li>
 State-Änderung, nie eine Eskalation.</li>
 <li><strong>Modell-Check</strong> (<code>run</code>,
 <code>resume</code>, <code>approve</code>; nur echte Läufe;
-<code>adw/models.py</code>): <code>agents.resolve_model_alias</code>
-löst <code>opus</code>/<code>fable</code>/<code>sonnet</code> mit je
-einem minimalen SDK-Aufruf auf (ohne Tools, ohne Settings);
+<code>adw/models.py</code>; läuft nach dem Arbeitsbaum-Vorflug, ein
+abgelehnter Checkout kostet so keine Probe-Tokens):
+<code>agents.resolve_model_alias</code> löst
+<code>opus</code>/<code>fable</code>/<code>sonnet</code> mit je einem
+minimalen SDK-Aufruf auf (ohne Tools, ohne Settings);
 <code>models_cache.json</code> der codex-CLI liefert das neueste
 gelistete Modell der gepinnten Stufe oder ein angekündigtes Upgrade.
 Weicht ein gepinntes Modell ab, wird das Kommando mit der zu ändernden
@@ -2116,7 +2118,8 @@ ungültig; nur ein vollständiges Ergebnis wird gecacht; ein
 fehlgeschlagener Probe (Fehler-Result,
 <code>&lt;synthetic&gt;</code>-Modell, Zeitlimit 120 s), ein fehlender,
 kaputter oder über 7 Tage alter codex-Katalog oder ein nicht
-schreibbarer Cache warnt und blockiert nie.</li>
+schreibbarer Cache warnt und blockiert nie; eine unbrauchbare
+Cache-Datei (z. B. Zeitstempel ohne Zeitzone) gilt als Cache-Miss.</li>
 <li><strong>Abgebrochene Agent-Aufrufe</strong>
 (<code>AgentRunError</code>) lassen die Phase unverändert und geben
 einen Resume-Hinweis aus (P9).</li>

@@ -2066,8 +2066,9 @@ escalates.</li>
 with the <code>ci.provider</code> hint — no run created, no state
 change, never an escalation.</li>
 <li><strong>Model check</strong> (<code>run</code>, <code>resume</code>,
-<code>approve</code>; real runs only; <code>adw/models.py</code>):
-<code>agents.resolve_model_alias</code> resolves
+<code>approve</code>; real runs only; <code>adw/models.py</code>; runs
+after the working-tree preflight, so a refused checkout costs no probe
+tokens): <code>agents.resolve_model_alias</code> resolves
 <code>opus</code>/<code>fable</code>/<code>sonnet</code> with one
 minimal SDK call each (no tools, no settings); the codex CLI's
 <code>models_cache.json</code> gives the newest listed model of the
@@ -2078,7 +2079,8 @@ overrides) together with the pins it was taken against — new pins
 invalidate it; only a complete result is cached; a failed probe (error
 result, <code>&lt;synthetic&gt;</code> model, 120 s timeout), a missing,
 malformed or &gt; 7 days old codex catalog or an unwritable cache warns
-and never blocks.</li>
+and never blocks; an unusable cache file (e.g. a timestamp without
+timezone) is a cache miss.</li>
 <li><strong>Interrupted agent calls</strong>
 (<code>AgentRunError</code>) leave the phase unchanged and print a
 resume hint (P9).</li>

@@ -13,6 +13,12 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.29.1] — 2026-10-11
+
+### Behoben
+- **Der Modell-Check läuft jetzt nach dem Arbeitsbaum-Vorflug.** Bisher kosteten bei einem Checkout mit uncommitteten Änderungen und abgelaufenem Cache die drei Modell-Abfragen Tokens, und erst danach wurde der Lauf abgelehnt. `run`, `resume` und `approve` prüfen jetzt zuerst den Arbeitsbaum; ein abgelehnter Checkout kostet keine Tokens.
+- **Ein Cache-Zeitstempel ohne Zeitzone bricht den Start nicht mehr ab.** Eine von Hand bearbeitete `~/.adw/model-check.json` mit so einem Zeitstempel ließ `run`, `resume` und `approve` mit einem `TypeError` abstürzen. Sie gilt jetzt als Cache-Miss, und die Modelle werden neu geprüft.
+
 ## [0.29.0] — 2026-10-11
 
 ### Hinzugefügt
@@ -1041,6 +1047,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.29.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.1...v0.29.0
 [0.28.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.27.0...v0.28.0

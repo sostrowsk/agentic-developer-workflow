@@ -12,6 +12,12 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.29.1] — 2026-10-11
+
+### Fixed
+- **The model check now runs after the working-tree preflight.** Before, a checkout with uncommitted changes and an expired cache paid for the three model probes, and only then was the run refused. `run`, `resume` and `approve` now check the working tree first, so a refused checkout costs no tokens.
+- **A cache timestamp without a timezone no longer aborts the start.** A hand-edited `~/.adw/model-check.json` with such a timestamp used to crash `run`, `resume` and `approve` with a `TypeError`. It now counts as a cache miss and the models are checked afresh.
+
 ## [0.29.0] — 2026-10-11
 
 ### Added
@@ -966,6 +972,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.29.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.1...v0.29.0
 [0.28.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.27.0...v0.28.0

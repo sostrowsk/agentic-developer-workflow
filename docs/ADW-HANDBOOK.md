@@ -377,7 +377,7 @@ adw runs prune [--repo PATH] [--keep N] [--older-than DAYS] [--gzip]
 | `--base-branch NAME` | Override `base_branch` for this run (pinned). |
 
 Order of checks: exactly one issue source → gate mode → config → forge
-preflight → model check (both real runs only) → working-tree preflight → issue fetch → run creation. A failure at any step creates no run.
+preflight → working-tree preflight → model check (forge + models: real runs only) → issue fetch → run creation. A failure at any step creates no run.
 
 ### `adw resume RUN_ID`
 

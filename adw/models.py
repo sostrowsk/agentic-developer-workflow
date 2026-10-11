@@ -121,6 +121,8 @@ def _read_cache(path: Path, now: datetime) -> dict[str, str] | None:
         latest, pinned = data["latest"], data["pinned"]
     except (OSError, ValueError, KeyError, TypeError):
         return None
+    if checked_at.tzinfo is None:  # a hand-edited naive timestamp is unusable, not fatal
+        return None
     if now - checked_at > CHECK_TTL or pinned != pinned_models() or not isinstance(latest, dict):
         return None
     return latest

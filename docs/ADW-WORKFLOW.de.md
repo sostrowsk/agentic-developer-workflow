@@ -136,7 +136,8 @@ State existiert:
    bekannt ist — `ci.provider` oder ein Origin-Host mit `gitlab`/`github`.
    Sonst wird das Kommando abgelehnt, bevor ein Agent läuft (auch vor `resume`
    und `approve`); ein Dry-Run fällt auf GitLab zurück.
-   Danach fragt der **Modell-Check** (nur echte Läufe), ob es neuere Modelle gibt
+   Nach dem Arbeitsbaum-Vorflug (Schritt 4) — ein abgelehnter Checkout kostet so
+   keine Probe-Tokens — fragt der **Modell-Check** (nur echte Läufe), ob es neuere Modelle gibt
    als die in ADW gepinnten: Die CLI-Aliase `opus`/`fable`/`sonnet` zeigen auf die
    neuesten Claude-Modelle, der Katalog der codex-CLI nennt das neueste GPT-Modell
    der gepinnten Stufe. Ist eines neuer, wird das Kommando abgelehnt — erst ADW
