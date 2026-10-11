@@ -197,14 +197,14 @@ def run(
         bool,
         typer.Option(
             "--no-approval",
-            help="Altflag, weiterhin gültig: kein Gate, läuft autonom bis done (== --gates none)",
+            help="Veraltet — bitte --gates none verwenden (kein Gate, läuft autonom bis done)",
         ),
     ] = False,
     spec_approval: Annotated[
         bool,
         typer.Option(
             "--spec-approval",
-            help="Altflag, weiterhin gültig: zusätzlicher Stopp NACH der Spec (== --gates both)",
+            help="Veraltet — bitte --gates both verwenden (zusätzlicher Stopp NACH der Spec)",
         ),
     ] = False,
     gates: Annotated[
@@ -234,7 +234,14 @@ def run(
     # --gates VOR jeder State-/Netz-Mutation auflösen: ein ungültiger Wert (AC6)
     # oder ein Widerspruch zu den Altflags (AC5) wird hier abgelehnt, bevor ein
     # Run angelegt oder ein Forge-Aufruf gemacht wird.
+    legacy_flags_used = no_approval or spec_approval  # before resolution overwrites them
     gate_mode, skip_approval, spec_approval = _resolve_gate_mode(gates, no_approval, spec_approval)
+    if legacy_flags_used:
+        typer.echo(
+            f"Hinweis: --no-approval/--spec-approval sind veraltet — bitte "
+            f"--gates {gate_mode} verwenden (gleiches Verhalten).",
+            err=True,
+        )
     repo = repo.resolve()
     # Register the resolved target repo for the later GUI (GUI-SPEC §7.4).
     # Fail-open: the registry only feeds a display, so a registry error (e.g. a
@@ -546,7 +553,7 @@ def runs_list(
 @runs_app.command("prune")
 def runs_prune(
     repo: Annotated[Path, typer.Option("--repo", help="Pfad zum Ziel-Repo")] = Path("."),
-    keep: Annotated[int, typer.Option("--keep", help="Neueste N Läufe schützen")] = 20,
+    keep: Annotated[int, typer.Option("--keep", help="Neueste N Läufe schützen (N ≥ 1)")] = 20,
     older_than: Annotated[
         int | None, typer.Option("--older-than", help="Nur Läufe ab DAYS Tagen bearbeiten")
     ] = None,
@@ -558,7 +565,12 @@ def runs_prune(
     """Delete old runs (dir + refs + worktrees) or, with --gzip, compress their
     event logs while keeping the run whole (§4.5, C1–C8)."""
     # Invalid N/DAYS: the usual CLI error (exit 2), BEFORE any run data changes.
-    if keep < 0 or (older_than is not None and older_than < 0):
+    if keep < 1:
+        # `trace.keep_runs: 0` means "never prune" — a manual --keep 0 that wiped
+        # every run would invert it. The newest run always stays.
+        typer.echo("Fehler: --keep muss mindestens 1 sein (der neueste Lauf bleibt).", err=True)
+        raise typer.Exit(2)
+    if older_than is not None and older_than < 0:
         raise typer.Exit(2)
     repo = _require_repo(repo)
 

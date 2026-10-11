@@ -45,8 +45,8 @@ mkdir -p /path/to/repo/.adw
 cp examples/config.yaml /path/to/repo/.adw/config.yaml   # and adjust
 
 # Dry run: complete control flow with mocks — 0 tokens, no network
-uv run adw run --repo /path/to/repo --issue "Demo feature" --dry-run --no-approval
-uv run adw run --repo /path/to/repo --issue "Demo feature" --dry-run --parallel --no-approval
+uv run adw run --repo /path/to/repo --issue "Demo feature" --dry-run --gates none
+uv run adw run --repo /path/to/repo --issue "Demo feature" --dry-run --parallel --gates none
 
 # Real run (tokens!): issue text directly, GitLab issue (glab) or GitHub issue (gh)
 uv run adw run --repo /path/to/repo --issue "Bug: login aborts when ..."
@@ -59,7 +59,7 @@ uv run adw run --repo /path/to/repo --github-issue 42 --parallel
 ```
 adw run     --repo PATH (--issue TEXT | --gitlab-issue ID | --github-issue NR)
             [--parallel] [--dry-run] [--gates none|spec|plan|both]
-            [--no-approval] [--spec-approval] [--base-branch NAME]
+            [--base-branch NAME]   # --no-approval/--spec-approval: deprecated
 adw resume  RUN_ID [--repo PATH] [--base-branch NAME]   # after a crash / plan limit
 adw approve RUN_ID [--repo PATH] [--base-branch NAME]   # grant a pending approval + continue
 adw status  [RUN_ID] [--repo PATH]                      # show runs + phase
@@ -73,8 +73,8 @@ Exit codes: `0` done · `2` paused at an approval gate or breakpoint · `1` esca
 **Approval gates:** `--gates` picks where the run pauses (exit 2): `plan`
 (default, after plan + contract), `spec`, `both` or `none`. Read the summary
 under `.adw/runs/<run_id>/` (`plan-summary.md`, `plan.md`, `contract.yaml`),
-then `adw approve <run_id>`. `--no-approval`/`--spec-approval` remain as legacy
-flags. Full reference: [`docs/ADW-HANDBOOK.md`](docs/ADW-HANDBOOK.md).
+then `adw approve <run_id>`. `--no-approval`/`--spec-approval` are deprecated: they
+still work but print a hint to use `--gates`. Full reference: [`docs/ADW-HANDBOOK.md`](docs/ADW-HANDBOOK.md).
 
 ## Config reference (`.adw/config.yaml` in the target repo)
 

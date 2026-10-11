@@ -12,6 +12,15 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.31.0] — 2026-10-11
+
+### Changed
+- **`--no-approval` and `--spec-approval` are deprecated.** They keep working exactly as before, but `adw run` now prints a hint naming the matching `--gates` mode (`none`, `both` or `spec`). The README quickstart and the docs use `--gates`. The flags will be removed in a later release.
+- **`adw runs prune --keep 0` is rejected** (exit 2 with a message). In the config, `trace.keep_runs: 0` means "never prune automatically", and a manual `--keep 0` that wiped every run inverted that meaning. A manual prune now always keeps at least the newest run.
+
+### Removed
+- `start-adw-gui.sh`: it was referenced nowhere and only wrapped `adw gui`. Use `uv run adw gui --repo …`.
+
 ## [0.30.3] — 2026-10-11
 
 ### Changed
@@ -1046,6 +1055,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.31.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.3...v0.31.0
 [0.30.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.2...v0.30.3
 [0.30.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.0...v0.30.1

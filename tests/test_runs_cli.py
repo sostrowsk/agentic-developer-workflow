@@ -122,3 +122,15 @@ def test_prune_rejects_negative_keep_with_exit_two(home, tmp_path):
     assert result.exit_code == 2, result.output
     # No run data was touched by a rejected invocation.
     assert (repo / ".adw" / "runs" / "aaaa1111").is_dir()
+
+
+def test_prune_rejects_keep_zero_with_exit_two(home, tmp_path):
+    """`trace.keep_runs: 0` means "never prune" — a manual `--keep 0` that wiped every
+    run would invert that meaning, so it is rejected; at least one run stays."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    write_run(repo, "aaaa1111", _done_lines(), phase="done")
+    result = cli.invoke(app, ["runs", "prune", "--repo", str(repo), "--keep", "0"])
+    assert result.exit_code == 2, result.output
+    assert "--keep" in result.output
+    assert (repo / ".adw" / "runs" / "aaaa1111").is_dir()

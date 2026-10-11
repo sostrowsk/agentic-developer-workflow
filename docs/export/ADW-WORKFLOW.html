@@ -813,9 +813,9 @@ sequence of checks <strong>before</strong> any state exists:</p>
 <code>gh</code>).</li>
 <li><strong>Gate mode resolved:</strong>
 <code>--gates none|spec|plan|both</code> (default <code>plan</code>);
-the legacy flags <code>--no-approval</code> (= <code>none</code>) and
-<code>--spec-approval</code> (= <code>both</code>) are still accepted; a
-contradiction between them fails immediately.</li>
+the deprecated flags <code>--no-approval</code> (= <code>none</code>)
+and <code>--spec-approval</code> (= <code>both</code>) still work but
+print a hint; a contradiction between them fails immediately.</li>
 <li><strong>Config validated (fail fast):</strong>
 <code>.adw/config.yaml</code> in the target repo is parsed strictly —
 unknown keys, duplicate YAML keys, missing gates or non-positive

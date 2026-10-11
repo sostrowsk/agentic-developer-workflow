@@ -230,7 +230,7 @@ Der Dry-Run-Modus steht im Run-State: ein `resume`/`approve` eines Dry Runs
 bleibt tokenfrei. Die Mock-Build-Agents hinterlassen `adw_dry_run_<lane>.md`-Dateien
 auf lokalen Dry-Run-Branches; diese Branches kannst du jederzeit löschen.
 
-`--gates none` (oder das Altflag `--no-approval`) lässt den Dry Run ohne Pause
+`--gates none` (das veraltete `--no-approval` geht weiterhin) lässt den Dry Run ohne Pause
 durchlaufen. Ohne das Flag hält auch der Dry Run am Plan-Gate wie ein echter Lauf.
 
 ---
@@ -359,7 +359,7 @@ Altflags) überspringen sie.
 ```text
 adw run     --repo PFAD (--issue TEXT | --gitlab-issue ID | --github-issue NR)
             [--parallel] [--dry-run] [--gates none|spec|plan|both]
-            [--no-approval] [--spec-approval] [--base-branch NAME]
+            [--no-approval] [--spec-approval]   (veraltet)  [--base-branch NAME]
 adw resume  RUN_ID [--repo PFAD] [--base-branch NAME]
 adw approve RUN_ID [--repo PFAD] [--base-branch NAME]
 adw status  [RUN_ID] [--repo PFAD]
@@ -380,7 +380,7 @@ adw runs prune [--repo PFAD] [--keep N] [--older-than TAGE] [--gzip]
 | `--parallel` | Baut `backend` und `frontend` in parallelen Lanes; aktiviert Integration + E2E. |
 | `--dry-run` | Mock-Agents, Fake-CI, kein Push, 0 Tokens. Steht im State. |
 | `--gates MODUS` | Freigabe-Gates, siehe §6.1. Default `plan`. |
-| `--no-approval`, `--spec-approval` | Altflags, weiterhin gültig (§6.1). |
+| `--no-approval`, `--spec-approval` | Veraltet: funktionieren weiter, geben aber einen Hinweis auf `--gates` aus (§6.1). |
 | `--base-branch NAME` | `base_branch` für diesen Lauf überschreiben (gepinnt). |
 
 Reihenfolge der Prüfungen: genau eine Issue-Quelle → Gate-Modus → Config →
@@ -421,7 +421,7 @@ Siehe §11. `--repo` muss die **Wurzel** eines Git-Arbeitsbaums sein.
 | Code | Bedeutung | Nächster Schritt |
 |---|---|---|
 | `0` | Fertig — Branch gepusht, Pipeline (+ Staging-Job) grün. Oder: ein `runs`-/`status`-Kommando war erfolgreich. | MR/PR öffnen. |
-| `2` | Pausiert an einem Freigabe-Gate oder Haltepunkt. (`runs prune` nutzt 2 auch für negatives `--keep`/`--older-than`.) | Zusammenfassung lesen, `adw approve <id>`. |
+| `2` | Pausiert an einem Freigabe-Gate oder Haltepunkt. (`runs prune` nutzt 2 auch für `--keep` unter 1 oder negatives `--older-than`.) | Zusammenfassung lesen, `adw approve <id>`. |
 | `1` | Eskalation, verweigerter Vorflug, Agent-/Plan-Limit-Abbruch oder sonstiger Fehler. | stderr lesen; bei Eskalation `escalation.md`. |
 
 ---
@@ -600,7 +600,8 @@ uv run adw runs prune --repo ~/code/shop --gzip              # events.jsonl komp
 - Löschen entfernt das Lauf-Verzeichnis, seine Worktrees (mit sauberer
   `git worktree`-Abmeldung) und seine Snapshot-Refs `refs/adw/<id>/*`. Ein
   Worktree mit uncommitteten Änderungen wird übersprungen, nie verworfen.
-- `--keep N` schützt die neuesten N Läufe; `--older-than TAGE` beschränkt das
+- `--keep N` schützt die neuesten N Läufe (N ≥ 1 — anders als `trace.keep_runs: 0`,
+  das das Auto-Pruning abschaltet, behält ein manuelles Prune immer den neuesten Lauf); `--older-than TAGE` beschränkt das
   Pruning auf Läufe, die mindestens so alt sind. `--gzip` komprimiert das Log zu
   `events.jsonl.gz`; die GUI liest beides.
 - Lane-**Branches** werden nicht gelöscht; gepushte/gemergte Branches wie gewohnt

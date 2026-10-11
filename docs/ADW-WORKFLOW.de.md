@@ -127,8 +127,8 @@ State existiert:
 1. **Genau eine Issue-Quelle:** `--issue "Text"`, `--gitlab-issue <id>` (via
    `glab`) oder `--github-issue <nr>` (via `gh`).
 2. **Gate-Modus auflösen:** `--gates none|spec|plan|both` (Default `plan`); die
-   Altflags `--no-approval` (= `none`) und `--spec-approval` (= `both`) gelten
-   weiter; ein Widerspruch zwischen beiden scheitert sofort.
+   veralteten Flags `--no-approval` (= `none`) und `--spec-approval` (= `both`)
+   funktionieren weiter, geben aber einen Hinweis aus; ein Widerspruch zwischen beiden scheitert sofort.
 3. **Config validieren (fail fast):** `.adw/config.yaml` im Ziel-Repo wird strikt
    geparst — unbekannte Keys, doppelte YAML-Keys, fehlende Gates oder
    nicht-positive Timeouts brechen mit klarer Meldung ab.

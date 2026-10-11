@@ -87,6 +87,16 @@ def prune(repo, *extra):
     return cli.invoke(app, ["runs", "prune", "--repo", str(repo), *extra])
 
 
+GUARD_RUN = "ffff9999"
+
+
+def prune_all(repo, *extra):
+    """Prune every run under test. `--keep` must be >= 1, so a terminal guard run
+    newer than all others takes the single protected slot."""
+    make_run(repo, GUARD_RUN, _iso(datetime(2099, 1, 1)))
+    return prune(repo, "--keep", "1", *extra)
+
+
 # --- C8/C3: exact retention + snapshot refs ------------------------------------
 
 
@@ -123,7 +133,7 @@ def test_prune_removes_registered_worktree_without_orphan(target_repo):
     create_lane_worktree(target_repo, rid, "backend", "staging")
     assert rid in worktree_list(target_repo)
 
-    result = prune(target_repo, "--keep", "0")
+    result = prune_all(target_repo)
     assert result.exit_code == 0, result.output
 
     assert not run_dir(target_repo, rid).is_dir()
@@ -143,7 +153,7 @@ def test_prune_skips_non_terminal_run_and_names_it(target_repo):
     make_run(target_repo, rid, _iso(datetime(2026, 8, 1)), phase="build", status="running")
     add_ref(target_repo, rid, 1)
 
-    result = prune(target_repo, "--keep", "0")
+    result = prune_all(target_repo)
     assert result.exit_code == 0, result.output  # a safety skip is not an error
 
     assert run_dir(target_repo, rid).is_dir()  # fully preserved
@@ -168,7 +178,7 @@ def test_prune_skips_entire_run_when_a_worktree_is_dirty(target_repo):
     create_lane_worktree(target_repo, rid, "frontend", "staging")
     (lane_worktree_path(target_repo, rid, "frontend") / "dirty.txt").write_text("x\n")
 
-    result = prune(target_repo, "--keep", "0")
+    result = prune_all(target_repo)
     assert result.exit_code == 0, result.output
 
     assert rid in result.output
@@ -210,7 +220,7 @@ def test_prune_reports_partial_failure_when_a_later_worktree_removal_refuses(
 
     monkeypatch.setattr(retention, "remove_registered_worktree", flaky)
 
-    result = prune(target_repo, "--keep", "0")
+    result = prune_all(target_repo)
 
     assert len(calls) == 2, "expected a second removal attempt"
     assert result.exit_code != 0, (
@@ -252,7 +262,7 @@ def test_partial_failure_does_not_stop_the_remaining_candidates(target_repo, mon
 
     monkeypatch.setattr(retention, "remove_registered_worktree", flaky)
 
-    result = prune(target_repo, "--keep", "0")
+    result = prune_all(target_repo)
 
     assert result.exit_code != 0, result.output
     # The failing run is reported ...
@@ -274,7 +284,7 @@ def test_prune_removes_all_clean_worktrees_orphan_free(target_repo):
     create_lane_worktree(target_repo, rid, "backend", "staging")
     create_lane_worktree(target_repo, rid, "frontend", "staging")
 
-    result = prune(target_repo, "--keep", "0")
+    result = prune_all(target_repo)
     assert result.exit_code == 0, result.output
 
     assert not run_dir(target_repo, rid).is_dir()
@@ -301,7 +311,7 @@ def test_prune_older_than_prunes_old_keeps_young_across_offsets(target_repo):
     instant = (now - timedelta(days=8)).astimezone(timezone(timedelta(hours=5)))
     make_run(target_repo, offset_old, _iso(instant))
 
-    result = prune(target_repo, "--keep", "0", "--older-than", "7")
+    result = prune_all(target_repo, "--older-than", "7")
     assert result.exit_code == 0, result.output
 
     assert not run_dir(target_repo, old).is_dir()
@@ -335,7 +345,7 @@ def test_prune_handles_legacy_run_without_start_event(target_repo):
     mtime fallback) and is prunable."""
     rid = "aaaa8888"
     write_state_only_run(target_repo, rid, phase="done")  # no events.jsonl
-    result = prune(target_repo, "--keep", "0")
+    result = prune_all(target_repo)
     assert result.exit_code == 0, result.output
     assert not run_dir(target_repo, rid).is_dir()
 
@@ -353,7 +363,7 @@ def test_prune_resumes_after_partial_deletion(target_repo):
     # Simulate an interrupted earlier prune: one ref already gone.
     git(target_repo, "update-ref", "-d", f"refs/adw/{rid}/1")
 
-    result = prune(target_repo, "--keep", "0")
+    result = prune_all(target_repo)
     assert result.exit_code == 0, result.output
     assert not run_dir(target_repo, rid).is_dir()
     assert refs_of(target_repo, rid) == []
@@ -371,7 +381,7 @@ def test_gzip_preserves_run_refs_worktree_and_roundtrips(target_repo):
     create_lane_worktree(target_repo, rid, "backend", "staging")
     original = (rd / "events.jsonl").read_bytes()
 
-    result = prune(target_repo, "--keep", "0", "--gzip")
+    result = prune_all(target_repo, "--gzip")
     assert result.exit_code == 0, result.output
     assert rid in result.output
 
@@ -398,7 +408,7 @@ def test_gzip_already_compressed_and_recompresses_interrupted(target_repo):
         fh.write(data1)
     (rd1 / "events.jsonl").unlink()
 
-    result = prune(target_repo, "--keep", "0", "--gzip")
+    result = prune_all(target_repo, "--gzip")
     assert result.exit_code == 0, result.output
     assert (rd1 / "events.jsonl.gz").is_file() and not (rd1 / "events.jsonl").exists()
     assert gzip.decompress((rd1 / "events.jsonl.gz").read_bytes()) == data1
@@ -410,7 +420,7 @@ def test_gzip_already_compressed_and_recompresses_interrupted(target_repo):
     with gzip.open(rd2 / "events.jsonl.gz", "wb") as fh:
         fh.write(b"stale bytes\n")
 
-    result = prune(target_repo, "--keep", "0", "--gzip")
+    result = prune_all(target_repo, "--gzip")
     assert result.exit_code == 0, result.output
     assert not (rd2 / "events.jsonl").exists()
     assert gzip.decompress((rd2 / "events.jsonl.gz").read_bytes()) == authoritative
@@ -421,7 +431,7 @@ def test_gzip_run_without_any_log_is_skipped(target_repo):
     (named), never falsely reported as already compressed, and fully preserved."""
     rid = "aaaacccc"
     write_state_only_run(target_repo, rid, phase="done")
-    result = prune(target_repo, "--keep", "0", "--gzip")
+    result = prune_all(target_repo, "--gzip")
     assert result.exit_code == 0, result.output
     assert rid in result.output and "skipped" in result.output
     assert (run_dir(target_repo, rid) / "state.json").is_file()
@@ -438,7 +448,7 @@ def test_gzip_compression_failure_exits_one_and_keeps_plain(target_repo):
     gzdir.mkdir()
     (gzdir / "keep").write_text("x\n")
 
-    result = prune(target_repo, "--keep", "0", "--gzip")
+    result = prune_all(target_repo, "--gzip")
     assert result.exit_code == 1, result.output
     assert (rd / "events.jsonl").read_bytes() == original  # authoritative log kept
 
@@ -459,12 +469,12 @@ def test_prune_ignores_symlinked_run_directory_outside_repo(target_repo, tmp_pat
     runs.mkdir(parents=True, exist_ok=True)
     os.symlink(outside, runs / "aaaa1111")
 
-    gz_result = prune(target_repo, "--keep", "0", "--gzip")
+    gz_result = prune_all(target_repo, "--gzip")
     assert gz_result.exit_code == 0, gz_result.output
     assert log.read_bytes() == original  # not compressed/replaced
     assert not (outside / "events.jsonl.gz").exists()
 
-    del_result = prune(target_repo, "--keep", "0")
+    del_result = prune_all(target_repo)
     assert del_result.exit_code == 0, del_result.output
     assert outside.is_dir() and log.exists()  # outside dir never removed
 
@@ -484,7 +494,7 @@ def test_prune_continues_with_stale_worktree_registration(target_repo):
     wt = create_lane_worktree(target_repo, rid, "backend", "staging")
     shutil.rmtree(wt)  # the worktree dir is gone; its registration remains
 
-    result = prune(target_repo, "--keep", "0")
+    result = prune_all(target_repo)
     assert result.exit_code == 0, result.output
     assert not run_dir(target_repo, rid).is_dir()
     assert prune_dry(target_repo).strip() == ""  # no orphaned registration
@@ -509,11 +519,11 @@ def test_prune_rejects_runs_root_symlinked_outside_repo(target_repo, tmp_path):
     adw.mkdir(exist_ok=True)
     os.symlink(external, adw / "runs")
 
-    gz = prune(target_repo, "--keep", "0", "--gzip")
+    gz = prune_all(target_repo, "--gzip")
     assert gz.exit_code == 1, gz.output
     assert log.read_bytes() == original and not (ext_run / "events.jsonl.gz").exists()
 
-    deletion = prune(target_repo, "--keep", "0")
+    deletion = prune_all(target_repo)
     assert deletion.exit_code == 1, deletion.output
     assert ext_run.is_dir() and log.exists()  # external files untouched
 
@@ -536,7 +546,7 @@ def test_prune_never_force_removes_worktree_dirtied_after_inventory(target_repo,
     # The inventory sees clean; the worktree is really dirty at removal time.
     monkeypatch.setattr(retention_mod, "_worktree_dirty", lambda p: False)
 
-    result = prune(target_repo, "--keep", "0")
+    result = prune_all(target_repo)
     assert result.exit_code == 0, result.output  # a safety skip, not a crash
     assert rid in result.output
     assert (wt / "late_change.txt").exists()  # never force-discarded
@@ -560,7 +570,7 @@ def test_prune_reports_completed_and_failed_on_partial_failure(target_repo):
     gzdir.mkdir()
     (gzdir / "x").write_text("x\n")
 
-    result = prune(target_repo, "--keep", "0", "--gzip")
+    result = prune_all(target_repo, "--gzip")
     assert result.exit_code == 1, result.output
     assert ok in result.output  # the completed candidate is reported
     assert bad in result.output  # the failing run's achieved state is reported
@@ -585,7 +595,7 @@ def test_gzip_temp_file_symlink_cannot_touch_external_target(target_repo, tmp_pa
     planted = rd / f".events.jsonl.{os.getpid()}.gz.tmp"
     os.symlink(external, planted)
 
-    result = prune(target_repo, "--keep", "0", "--gzip")
+    result = prune_all(target_repo, "--gzip")
     assert result.exit_code == 0, result.output
     assert external.read_bytes() == victim_original  # never opened for writing
     gz = rd / "events.jsonl.gz"

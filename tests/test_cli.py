@@ -1011,3 +1011,26 @@ def test_continuation_refuses_undetectable_forge_and_stays_at_the_gate(
     assert saved.phase == "awaiting_approval"
     assert saved.approval_granted is False
     assert not (saved.run_dir(target_repo) / "escalation.md").exists()
+
+
+@pytest.mark.parametrize(
+    "flags, mode",
+    [(["--no-approval"], "none"), (["--spec-approval"], "both"),
+     (["--no-approval", "--spec-approval"], "spec")],
+)
+def test_legacy_approval_flags_still_work_but_point_to_gates(target_repo, flags, mode):
+    res = runner.invoke(
+        app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", *flags]
+    )
+    assert res.exit_code in (0, 2), res.output
+    assert "veraltet" in res.output
+    assert f"--gates {mode}" in res.output
+
+
+@pytest.mark.parametrize("mode", ["none", "spec", "plan", "both"])
+def test_gates_flag_prints_no_deprecation_notice(target_repo, mode):
+    res = runner.invoke(
+        app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--gates", mode]
+    )
+    assert res.exit_code in (0, 2), res.output
+    assert "veraltet" not in res.output

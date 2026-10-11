@@ -125,8 +125,8 @@ state exists:
 1. **Exactly one issue source:** `--issue "text"`, `--gitlab-issue <id>` (via
    `glab`) or `--github-issue <nr>` (via `gh`).
 2. **Gate mode resolved:** `--gates none|spec|plan|both` (default `plan`); the
-   legacy flags `--no-approval` (= `none`) and `--spec-approval` (= `both`) are
-   still accepted; a contradiction between them fails immediately.
+   deprecated flags `--no-approval` (= `none`) and `--spec-approval` (= `both`)
+   still work but print a hint; a contradiction between them fails immediately.
 3. **Config validated (fail fast):** `.adw/config.yaml` in the target repo is
    parsed strictly — unknown keys, duplicate YAML keys, missing gates or
    non-positive timeouts abort with a clear message.

@@ -45,8 +45,8 @@ mkdir -p /pfad/zum/repo/.adw
 cp examples/config.yaml /pfad/zum/repo/.adw/config.yaml   # und anpassen
 
 # Trockenlauf: kompletter Kontrollfluss mit Mocks — 0 Tokens, kein Netz
-uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --no-approval
-uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --parallel --no-approval
+uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --gates none
+uv run adw run --repo /pfad/zum/repo --issue "Demo-Feature" --dry-run --parallel --gates none
 
 # Echter Lauf (Tokens!): Issue-Text direkt, GitLab-Issue (glab) oder GitHub-Issue (gh)
 uv run adw run --repo /pfad/zum/repo --issue "Bug: Login bricht ab, wenn ..."
@@ -59,7 +59,7 @@ uv run adw run --repo /pfad/zum/repo --github-issue 42 --parallel
 ```
 adw run     --repo PFAD (--issue TEXT | --gitlab-issue ID | --github-issue NR)
             [--parallel] [--dry-run] [--gates none|spec|plan|both]
-            [--no-approval] [--spec-approval] [--base-branch NAME]
+            [--base-branch NAME]   # --no-approval/--spec-approval: veraltet
 adw resume  RUN_ID [--repo PFAD] [--base-branch NAME]   # nach Crash / Plan-Limit
 adw approve RUN_ID [--repo PFAD] [--base-branch NAME]   # offenes Approval erteilen + fortsetzen
 adw status  [RUN_ID] [--repo PFAD]                      # Runs + Phase anzeigen
@@ -73,8 +73,8 @@ Exit-Codes: `0` done · `2` Pause an Approval-Gate oder Breakpoint · `1` Eskala
 **Approval-Gates:** `--gates` legt fest, wo der Run pausiert (Exit 2): `plan`
 (Default, nach Plan + Kontrakt), `spec`, `both` oder `none`. Zusammenfassung
 unter `.adw/runs/<run_id>/` lesen (`plan-summary.md`, `plan.md`, `contract.yaml`),
-dann `adw approve <run_id>`. `--no-approval`/`--spec-approval` bleiben als
-Legacy-Flags gültig. Vollständige Referenz: [`docs/ADW-HANDBOOK.de.md`](docs/ADW-HANDBOOK.de.md).
+dann `adw approve <run_id>`. `--no-approval`/`--spec-approval` sind veraltet:
+Sie funktionieren weiter, geben aber einen Hinweis auf `--gates` aus. Vollständige Referenz: [`docs/ADW-HANDBOOK.de.md`](docs/ADW-HANDBOOK.de.md).
 
 ## Config-Referenz (`.adw/config.yaml` im Ziel-Repo)
 

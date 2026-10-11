@@ -821,9 +821,10 @@ Reihenfolge, <strong>bevor</strong> überhaupt ein State existiert:</p>
 <code>gh</code>).</li>
 <li><strong>Gate-Modus auflösen:</strong>
 <code>--gates none|spec|plan|both</code> (Default <code>plan</code>);
-die Altflags <code>--no-approval</code> (= <code>none</code>) und
-<code>--spec-approval</code> (= <code>both</code>) gelten weiter; ein
-Widerspruch zwischen beiden scheitert sofort.</li>
+die veralteten Flags <code>--no-approval</code> (= <code>none</code>)
+und <code>--spec-approval</code> (= <code>both</code>) funktionieren
+weiter, geben aber einen Hinweis aus; ein Widerspruch zwischen beiden
+scheitert sofort.</li>
 <li><strong>Config validieren (fail fast):</strong>
 <code>.adw/config.yaml</code> im Ziel-Repo wird strikt geparst —
 unbekannte Keys, doppelte YAML-Keys, fehlende Gates oder nicht-positive

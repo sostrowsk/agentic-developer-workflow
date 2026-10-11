@@ -1052,9 +1052,9 @@ pushed.</li>
 <code>resume</code>/<code>approve</code> of a dry run stays token-free.
 Mock build agents leave <code>adw_dry_run_&lt;lane&gt;.md</code> files
 on local dry-run branches; delete those branches whenever you like.</p>
-<p><code>--gates none</code> (or the legacy <code>--no-approval</code>)
-lets the dry run go through without pausing. Without it, the dry run
-pauses at the plan gate like a real run.</p>
+<p><code>--gates none</code> (the deprecated <code>--no-approval</code>
+still works) lets the dry run go through without pausing. Without it,
+the dry run pauses at the plan gate like a real run.</p>
 <hr />
 <h2 id="5-real-runs">5. Real runs</h2>
 <h3 id="51-choosing-the-issue-source">5.1 Choosing the issue source</h3>
@@ -1230,7 +1230,7 @@ legacy flags) skip them.</p>
 <h2 id="7-cli-reference">7. CLI reference</h2>
 <pre class="text"><code>adw run     --repo PATH (--issue TEXT | --gitlab-issue ID | --github-issue NR)
             [--parallel] [--dry-run] [--gates none|spec|plan|both]
-            [--no-approval] [--spec-approval] [--base-branch NAME]
+            [--no-approval] [--spec-approval]   (deprecated)  [--base-branch NAME]
 adw resume  RUN_ID [--repo PATH] [--base-branch NAME]
 adw approve RUN_ID [--repo PATH] [--base-branch NAME]
 adw status  [RUN_ID] [--repo PATH]
@@ -1276,7 +1276,8 @@ lanes; enables integration + E2E.</td>
 </tr>
 <tr class="odd">
 <td><code>--no-approval</code>, <code>--spec-approval</code></td>
-<td>Legacy flags, still valid (§6.1).</td>
+<td>Deprecated: still work, but print a hint to use <code>--gates</code>
+(§6.1).</td>
 </tr>
 <tr class="even">
 <td><code>--base-branch NAME</code></td>
@@ -1331,8 +1332,8 @@ git work tree.</p>
 <tr class="even">
 <td><code>2</code></td>
 <td>Paused at an approval gate or breakpoint. (<code>runs prune</code>
-also uses 2 for a negative
-<code>--keep</code>/<code>--older-than</code>.)</td>
+also uses 2 for <code>--keep</code> below 1 or a negative
+<code>--older-than</code>.)</td>
 <td>Read the summary, <code>adw approve &lt;id&gt;</code>.</td>
 </tr>
 <tr class="odd">
@@ -1627,10 +1628,11 @@ touched.</li>
 <code>git worktree</code> deregistration) and its snapshot refs
 <code>refs/adw/&lt;id&gt;/*</code>. A worktree with uncommitted changes
 is skipped, never discarded.</li>
-<li><code>--keep N</code> protects the newest N runs;
-<code>--older-than DAYS</code> limits pruning to runs at least that old.
-<code>--gzip</code> compresses the log to <code>events.jsonl.gz</code>;
-the GUI reads both.</li>
+<li><code>--keep N</code> protects the newest N runs (N ≥ 1 — unlike
+<code>trace.keep_runs: 0</code>, which turns auto-pruning off, a manual
+prune always keeps the newest run); <code>--older-than DAYS</code>
+limits pruning to runs at least that old. <code>--gzip</code> compresses
+the log to <code>events.jsonl.gz</code>; the GUI reads both.</li>
 <li>Lane <strong>branches</strong> are not deleted; remove pushed/merged
 branches with git as usual.</li>
 <li><strong>Automatic pruning:</strong> after every run that ends
