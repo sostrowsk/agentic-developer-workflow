@@ -12,6 +12,21 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.26.2] — Unreleased
+
+### Added
+- **Three documents at 0.26.1, each in English and German, with HTML and DOCX exports in `docs/export/`.** All three were checked against the code:
+  - [`docs/ADW-HANDBOOK.md`](docs/ADW-HANDBOOK.md) — the handbook for developers who run ADW: setup, every config key, the full CLI, the GUI, run artifacts, retention, briefs, and troubleshooting.
+  - [`docs/ADW-WORKFLOW.md`](docs/ADW-WORKFLOW.md) — a detailed walk through the seven phases for users and contributors. It covers the loops, limits, the review-loop policy, how a run can end, and resume, and closes with a worked example run.
+  - [`docs/ADW-SPEC.md`](docs/ADW-SPEC.md) — the spec for contributors. It opens with ADW's philosophy, then covers the architecture, data model, invariants, extension points, testing, and the release process.
+
+### Changed
+- **README:** added a table of the documents, and brought the CLI section up to date (`--gates`, `adw gui`, `adw runs`), along with the config table (`codex.*`, `trace.*`, `breakpoints`), the architecture list, the limits (at most 5 Codex review rounds, not 10), and the test count.
+- **`pyproject.toml`** now declares the license (`license = "MIT"`, `license-files`), so built wheels carry `License-Expression: MIT`. A regression test checks this.
+
+### Removed
+- `docs/handbuch/` and `docs/spec/` (the old control-flow doc, user handbook and technical spec dated July/August, plus their HTML and DOCX exports). The three documents above replace them.
+
 ## [0.26.1] — 2026-09-17
 
 ### Added

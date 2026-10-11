@@ -18,8 +18,14 @@ against the Claude plan, never token-by-token against the API (API key env varia
 are actively blanked). An exhausted plan limit stops the run at the checkpoint;
 `adw resume` continues after the reset.
 
-References: [`docs/SPEC.md`](docs/SPEC.md) (target behavior, interfaces, DoD)
-and [`docs/PLAN.md`](docs/PLAN.md) (implementation plan).
+## Documentation
+
+| Document | For | Content |
+| --- | --- | --- |
+| [`docs/ADW-HANDBOOK.md`](docs/ADW-HANDBOOK.md) | Users (developers) | Setup, config, CLI, GUI, run artifacts, troubleshooting |
+| [`docs/ADW-WORKFLOW.md`](docs/ADW-WORKFLOW.md) | Users + contributors | Deep dive: the seven phases, loops, limits, resume |
+| [`docs/ADW-SPEC.md`](docs/ADW-SPEC.md) | Contributors | Philosophy, architecture, invariants, extension points |
+| [`docs/SPEC.md`](docs/SPEC.md) / [`docs/PLAN.md`](docs/PLAN.md) | Contributors | Original target spec (DoD) and implementation plan |
 
 **Claude skill:** [agentic-developer-workflow-skill](https://github.com/sostrowsk/agentic-developer-workflow-skill)
 — packages the operation of this orchestrator as an installable Claude skill
@@ -48,18 +54,24 @@ uv run adw run --repo /path/to/repo --github-issue 42 --parallel
 ### CLI
 
 ```
-adw run --repo <path> (--issue "Text" | --gitlab-issue <id> | --github-issue <nr>)
-        [--parallel] [--dry-run] [--no-approval] [--base-branch <name>]
-adw resume <run_id> [--repo <path>]      # after a crash; on approval pause → approve
-adw approve <run_id> [--repo <path>]     # grant plan approval + continue
-adw status [<run_id>] [--repo <path>]    # show runs + phase
+adw run     --repo PATH (--issue TEXT | --gitlab-issue ID | --github-issue NR)
+            [--parallel] [--dry-run] [--gates none|spec|plan|both]
+            [--no-approval] [--spec-approval] [--base-branch NAME]
+adw resume  RUN_ID [--repo PATH] [--base-branch NAME]   # after a crash / plan limit
+adw approve RUN_ID [--repo PATH] [--base-branch NAME]   # grant a pending approval + continue
+adw status  [RUN_ID] [--repo PATH]                      # show runs + phase
+adw gui     [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open]   # read-only Run Inspector
+adw runs list  [--repo PATH]
+adw runs prune [--repo PATH] [--keep N] [--older-than DAYS] [--gzip]
 ```
 
-Exit codes: `0` done · `2` awaiting_approval (plan approval pause) · `1` escalation/error.
+Exit codes: `0` done · `2` paused at an approval gate or breakpoint · `1` escalation/error.
 
-**Plan approval gate:** After phase 2 the run pauses (exit 2). Plan and
-contract are located at `.adw/runs/<run_id>/plan.md` and `contract.yaml` —
-read them, then `adw approve <run_id>`. With `--no-approval` the pause is skipped.
+**Approval gates:** `--gates` picks where the run pauses (exit 2): `plan`
+(default, after plan + contract), `spec`, `both` or `none`. Read the summary
+under `.adw/runs/<run_id>/` (`plan-summary.md`, `plan.md`, `contract.yaml`),
+then `adw approve <run_id>`. `--no-approval`/`--spec-approval` remain as legacy
+flags. Full reference: [`docs/ADW-HANDBOOK.md`](docs/ADW-HANDBOOK.md).
 
 ## Config reference (`.adw/config.yaml` in the target repo)
 
@@ -74,16 +86,20 @@ Complete example: [`examples/config.yaml`](examples/config.yaml).
 | `ci.poll_interval` | optional (60) | Seconds between pipeline polls |
 | `ci.timeout` | optional (2700) | Total budget for waiting on CI |
 | `ci.staging_job` | optional | Job name that must additionally be green |
-| `ci.provider` | optional | `gitlab` or `github`; if unset, auto-detection from the origin URL (fail fast on unknown host) |
+| `ci.provider` | optional | `gitlab` or `github`; if unset, auto-detection from the origin URL (unknown host: a real run escalates at phase 7, after the build — set the key for self-hosted forges) |
+| `codex.timeout` | optional (900) | Time limit in seconds per `codex exec` call |
+| `trace.enabled` | optional (true) | Write the event log `events.jsonl` (feeds the GUI) |
+| `trace.keep_runs` | optional (20) | Auto-prune after a successful run keeps the newest N runs; `0` = never |
+| `breakpoints[]` | optional | Extra holds: `before_integration`, `before_push` |
 
 A missing or broken config aborts immediately with a clear message (fail fast).
-`--parallel` requires a `backend` **and** a `frontend` Lane.
+Allowed Lane names are `backend` and `frontend`; `--parallel` requires both.
 
 ## Architecture in 60 seconds
 
 ```
 adw/
-  cli.py        typer entry point: run/resume/approve/status, dry-run wiring
+  cli.py        typer entry point: run/resume/approve/status/gui/runs, dry-run wiring
   phases.py     the 7 phases over a RunContext — loops, limits, dispatch
   agents.py     agent registry (Fable 5 / Opus 4.8 / Sonnet 5) + SDK runner
   codex.py      Codex CLI as a read-only subprocess, strict findings parsing
@@ -97,11 +113,16 @@ adw/
   github.py     GitHub Actions polling (gh) — same interface as ci.py
   forge.py      GitLab-or-GitHub detection (origin URL, ci.provider override)
   mock.py       scriptable mock runners for --dry-run and tests
+  env.py        env whitelist for agents, gates and subprocesses
+  events.py     append-only event log (events.jsonl) per run
+  snapshots.py  artifact snapshots per phase for the Run Inspector
+  retention.py  `adw runs list|prune`, automatic pruning
+  gui/          read-only Run Inspector (FastAPI, optional extra `gui`)
 ```
 
 - **Lanes:** one dedicated git worktree per workstream (`.adw/runs/<id>/trees/<lane>`),
   its own SDK session, its own ports. Commits are made exclusively by the orchestrator.
-- **Limits:** 10 Gate iterations per task, 10 E2E/review rounds, 3 fix cycles,
+- **Limits:** 10 Gate iterations per task, 10 E2E rounds, 5 Codex review rounds, 3 fix cycles,
   1 CI re-entry — plus circuit breaker (identical errors twice → immediate stop).
 - **Resume:** every transition and every open feedback is checkpointed in
   `.adw/runs/<run_id>/state.json`; `adw resume` continues exactly there.
@@ -116,7 +137,7 @@ adw/
   merge conflict, limit, circuit breaker). After manual clarification, start a new
   run; escalated runs are deliberately not resumable.
 - **Run stuck in `awaiting_approval`:** `adw status`, then
-  `adw approve <run_id>` — or in the future `--no-approval`.
+  `adw approve <run_id>` — or start future runs with `--gates none`.
 - **`scope_gap` Findings:** end up in `.adw/runs/<run_id>/followups.md` as
   follow-up issues (no auto-restart) — the run continues normally.
 - **CI red despite fix:** exactly one automatic log-analyst re-entry is
@@ -128,9 +149,8 @@ adw/
 ## Development
 
 ```bash
-uv run pytest          # complete suite (~330 tests, mocks-only, real git)
+uv run pytest          # complete suite (~1,280 tests, mocks-only, real git)
 uv run ruff check .    # lint
-uv run ruff format .   # formatting
 ```
 
 ## License

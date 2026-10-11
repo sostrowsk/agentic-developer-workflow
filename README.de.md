@@ -18,8 +18,14 @@ und erneut durch alle Gates.
 werden aktiv geblankt). Erschöpftes Plan-Limit stoppt den Run am Checkpoint;
 `adw resume` setzt nach dem Reset fort.
 
-Referenzen: [`docs/SPEC.de.md`](docs/SPEC.de.md) (Soll-Verhalten, Schnittstellen, DoD)
-und [`docs/PLAN.de.md`](docs/PLAN.de.md) (Implementierungsplan).
+## Dokumentation
+
+| Dokument | Für | Inhalt |
+| --- | --- | --- |
+| [`docs/ADW-HANDBOOK.de.md`](docs/ADW-HANDBOOK.de.md) | Nutzer (Entwickler) | Setup, Config, CLI, GUI, Run-Artefakte, Troubleshooting |
+| [`docs/ADW-WORKFLOW.de.md`](docs/ADW-WORKFLOW.de.md) | Nutzer + Contributors | Vertiefung: die sieben Phasen, Loops, Limits, Resume |
+| [`docs/ADW-SPEC.de.md`](docs/ADW-SPEC.de.md) | Contributors | Philosophie, Architektur, Invarianten, Erweiterungspunkte |
+| [`docs/SPEC.de.md`](docs/SPEC.de.md) / [`docs/PLAN.de.md`](docs/PLAN.de.md) | Contributors | Ursprüngliche Soll-Spec (DoD) und Implementierungsplan |
 
 **Claude-Skill:** [agentic-developer-workflow-skill](https://github.com/sostrowsk/agentic-developer-workflow-skill)
 — verpackt die Bedienung dieses Orchestrators als installierbaren Claude-Skill
@@ -48,18 +54,24 @@ uv run adw run --repo /pfad/zum/repo --github-issue 42 --parallel
 ### CLI
 
 ```
-adw run --repo <pfad> (--issue "Text" | --gitlab-issue <id> | --github-issue <nr>)
-        [--parallel] [--dry-run] [--no-approval] [--base-branch <name>]
-adw resume <run_id> [--repo <pfad>]      # nach Crash; bei Approval-Pause → approve
-adw approve <run_id> [--repo <pfad>]     # Plan-Approval erteilen + fortsetzen
-adw status [<run_id>] [--repo <pfad>]    # Runs + Phase anzeigen
+adw run     --repo PFAD (--issue TEXT | --gitlab-issue ID | --github-issue NR)
+            [--parallel] [--dry-run] [--gates none|spec|plan|both]
+            [--no-approval] [--spec-approval] [--base-branch NAME]
+adw resume  RUN_ID [--repo PFAD] [--base-branch NAME]   # nach Crash / Plan-Limit
+adw approve RUN_ID [--repo PFAD] [--base-branch NAME]   # offenes Approval erteilen + fortsetzen
+adw status  [RUN_ID] [--repo PFAD]                      # Runs + Phase anzeigen
+adw gui     [--repo PFAD]... [--host 127.0.0.1] [--port 8765] [--open]   # read-only Run-Inspector
+adw runs list  [--repo PFAD]
+adw runs prune [--repo PFAD] [--keep N] [--older-than TAGE] [--gzip]
 ```
 
-Exit-Codes: `0` done · `2` awaiting_approval (Plan-Approval-Pause) · `1` Eskalation/Fehler.
+Exit-Codes: `0` done · `2` Pause an Approval-Gate oder Breakpoint · `1` Eskalation/Fehler.
 
-**Plan-Approval-Gate:** Nach Phase 2 pausiert der Run (Exit 2). Plan und
-Kontrakt liegen unter `.adw/runs/<run_id>/plan.md` bzw. `contract.yaml` —
-lesen, dann `adw approve <run_id>`. Mit `--no-approval` entfällt die Pause.
+**Approval-Gates:** `--gates` legt fest, wo der Run pausiert (Exit 2): `plan`
+(Default, nach Plan + Kontrakt), `spec`, `both` oder `none`. Zusammenfassung
+unter `.adw/runs/<run_id>/` lesen (`plan-summary.md`, `plan.md`, `contract.yaml`),
+dann `adw approve <run_id>`. `--no-approval`/`--spec-approval` bleiben als
+Legacy-Flags gültig. Vollständige Referenz: [`docs/ADW-HANDBOOK.de.md`](docs/ADW-HANDBOOK.de.md).
 
 ## Config-Referenz (`.adw/config.yaml` im Ziel-Repo)
 
@@ -74,16 +86,20 @@ Vollständiges Beispiel: [`examples/config.yaml`](examples/config.yaml).
 | `ci.poll_interval` | optional (60) | Sekunden zwischen Pipeline-Polls |
 | `ci.timeout` | optional (2700) | Gesamt-Budget fürs CI-Warten |
 | `ci.staging_job` | optional | Job-Name, der zusätzlich grün sein muss |
-| `ci.provider` | optional | `gitlab` oder `github`; ohne Angabe Auto-Erkennung aus der origin-URL (fail fast bei unbekanntem Host) |
+| `ci.provider` | optional | `gitlab` oder `github`; ohne Angabe Auto-Erkennung aus der origin-URL (unbekannter Host: ein echter Run eskaliert erst in Phase 7, nach dem Build — bei self-hosted Forges den Key setzen) |
+| `codex.timeout` | optional (900) | Zeitlimit in Sekunden je `codex exec`-Aufruf |
+| `trace.enabled` | optional (true) | Event-Log `events.jsonl` schreiben (speist die GUI) |
+| `trace.keep_runs` | optional (20) | Auto-Pruning nach erfolgreichem Run behält die neuesten N Runs; `0` = nie |
+| `breakpoints[]` | optional | Zusätzliche Halte: `before_integration`, `before_push` |
 
 Fehlende oder kaputte Config bricht sofort mit klarer Meldung ab (fail fast).
-`--parallel` verlangt eine `backend`- **und** `frontend`-Lane.
+Erlaubte Lane-Namen sind `backend` und `frontend`; `--parallel` verlangt beide.
 
 ## Architektur in 60 Sekunden
 
 ```
 adw/
-  cli.py        typer-Eingang: run/resume/approve/status, Dry-Run-Verdrahtung
+  cli.py        typer-Eingang: run/resume/approve/status/gui/runs, Dry-Run-Verdrahtung
   phases.py     die 7 Phasen über einem RunContext — Loops, Limits, Dispatch
   agents.py     Agent-Registry (Fable 5 / Opus 4.8 / Sonnet 5) + SDK-Runner
   codex.py      Codex-CLI als read-only-Subprocess, striktes Findings-Parsing
@@ -97,11 +113,16 @@ adw/
   github.py     GitHub-Actions-Polling (gh) — gleiches Interface wie ci.py
   forge.py      GitLab-oder-GitHub-Erkennung (origin-URL, ci.provider-Override)
   mock.py       skriptbare Mock-Runner für --dry-run und Tests
+  env.py        Env-Whitelist für Agents, Gates und Subprozesse
+  events.py     Append-only-Event-Log (events.jsonl) je Run
+  snapshots.py  Artefakt-Snapshots je Phase für den Run-Inspector
+  retention.py  `adw runs list|prune`, automatisches Pruning
+  gui/          read-only Run-Inspector (FastAPI, optionales Extra `gui`)
 ```
 
 - **Lanes:** je Workstream ein eigener Git-Worktree (`.adw/runs/<id>/trees/<lane>`),
   eigene SDK-Session, eigene Ports. Commits macht ausschließlich der Orchestrator.
-- **Limits:** 10 Gate-Iterationen je Task, 10 E2E-/Review-Runden, 3 Fix-Zyklen,
+- **Limits:** 10 Gate-Iterationen je Task, 10 E2E-Runden, 5 Codex-Review-Runden, 3 Fix-Zyklen,
   1 CI-Re-Entry — plus Circuit-Breaker (identische Fehler zweimal → sofort Schluss).
 - **Resume:** jeder Übergang und jedes offene Feedback ist in
   `.adw/runs/<run_id>/state.json` checkpointed; `adw resume` setzt exakt dort fort.
@@ -116,7 +137,7 @@ adw/
   Merge-Konflikt, Limit, Circuit-Breaker). Nach manueller Klärung neuen Run
   starten; eskalierte Runs sind bewusst nicht fortsetzbar.
 - **Run hängt in `awaiting_approval`:** `adw status`, dann
-  `adw approve <run_id>` — oder künftig `--no-approval`.
+  `adw approve <run_id>` — oder künftig mit `--gates none` starten.
 - **`scope_gap`-Findings:** landen in `.adw/runs/<run_id>/followups.md` als
   Follow-up-Issues (kein Auto-Restart) — der Run läuft regulär weiter.
 - **CI rot trotz Fix:** genau ein automatischer Log-Analyst-Re-Entry ist
@@ -128,9 +149,8 @@ adw/
 ## Entwicklung
 
 ```bash
-uv run pytest          # komplette Suite (~330 Tests, mocks-only, echtes git)
+uv run pytest          # komplette Suite (~1.280 Tests, mocks-only, echtes git)
 uv run ruff check .    # Lint
-uv run ruff format .   # Formatierung
 ```
 
 ## Lizenz

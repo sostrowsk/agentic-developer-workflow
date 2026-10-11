@@ -2,6 +2,8 @@
 name = "adw"
 version = "0.26.1"
 description = "Agentic Developer Workflow — 7-Phasen-Orchestrator: Claude Agent SDK + Codex + deterministische Gates"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2",

@@ -16,6 +16,14 @@ def test_version_matches_pyproject():
     assert adw.__version__ == expected
 
 
+def test_license_declared_in_package_metadata():
+    root = Path(__file__).parent.parent
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["license"] == "MIT"
+    assert project["license-files"] == ["LICENSE"]
+    assert (root / "LICENSE").read_text(encoding="utf-8").startswith("MIT License")
+
+
 def test_target_repo_fixture_is_valid_git_repo(target_repo):
     assert (target_repo / ".git").is_dir()
     assert (target_repo / ".adw" / "config.yaml").is_file()
