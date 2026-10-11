@@ -1,206 +1,587 @@
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" lang xml:lang>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="de" xml:lang="de">
 <head>
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ADW-HANDBOOK.de</title>
+  <title>ADW-Handbuch — den Agentic Developer Workflow betreiben</title>
   <style>
-code{white-space: pre-wrap;}
-span.smallcaps{font-variant: small-caps;}
-div.columns{display: flex; gap: min(4vw, 1.5em);}
-div.column{flex: auto; overflow-x: auto;}
-div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+    /* CSS for syntax highlighting */
+    pre > code.sourceCode { white-space: pre; position: relative; }
+    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span:empty { height: 1.2em; }
+    .sourceCode { overflow: visible; }
+    code.sourceCode > span { color: inherit; text-decoration: inherit; }
+    div.sourceCode { margin: 1em 0; }
+    pre.sourceCode { margin: 0; }
+    @media screen {
+    div.sourceCode { overflow: auto; }
+    }
+    @media print {
+    pre > code.sourceCode { white-space: pre-wrap; }
+    pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
+    }
+    pre.numberSource code
+      { counter-reset: source-line 0; }
+    pre.numberSource code > span
+      { position: relative; left: -4em; counter-increment: source-line; }
+    pre.numberSource code > span > a:first-child::before
+      { content: counter(source-line);
+        position: relative; left: -1em; text-align: right; vertical-align: baseline;
+        border: none; display: inline-block;
+        -webkit-touch-callout: none; -webkit-user-select: none;
+        -khtml-user-select: none; -moz-user-select: none;
+        -ms-user-select: none; user-select: none;
+        padding: 0 4px; width: 4em;
+        color: #aaaaaa;
+      }
+    pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa;  padding-left: 4px; }
+    div.sourceCode
+      {   }
+    @media screen {
+    pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
+    }
+    code span.al { color: #ff0000; font-weight: bold; } /* Alert */
+    code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } /* Annotation */
+    code span.at { color: #7d9029; } /* Attribute */
+    code span.bn { color: #40a070; } /* BaseN */
+    code span.bu { color: #008000; } /* BuiltIn */
+    code span.cf { color: #007020; font-weight: bold; } /* ControlFlow */
+    code span.ch { color: #4070a0; } /* Char */
+    code span.cn { color: #880000; } /* Constant */
+    code span.co { color: #60a0b0; font-style: italic; } /* Comment */
+    code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } /* CommentVar */
+    code span.do { color: #ba2121; font-style: italic; } /* Documentation */
+    code span.dt { color: #902000; } /* DataType */
+    code span.dv { color: #40a070; } /* DecVal */
+    code span.er { color: #ff0000; font-weight: bold; } /* Error */
+    code span.ex { } /* Extension */
+    code span.fl { color: #40a070; } /* Float */
+    code span.fu { color: #06287e; } /* Function */
+    code span.im { color: #008000; font-weight: bold; } /* Import */
+    code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } /* Information */
+    code span.kw { color: #007020; font-weight: bold; } /* Keyword */
+    code span.op { color: #666666; } /* Operator */
+    code span.ot { color: #007020; } /* Other */
+    code span.pp { color: #bc7a00; } /* Preprocessor */
+    code span.sc { color: #4070a0; } /* SpecialChar */
+    code span.ss { color: #bb6688; } /* SpecialString */
+    code span.st { color: #4070a0; } /* String */
+    code span.va { color: #19177c; } /* Variable */
+    code span.vs { color: #4070a0; } /* VerbatimString */
+    code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warning */
+  </style>
+  <style>
+  /* ADW doc exports — local only, no webfonts, no CDN. Inlined by scripts/build_docs.py. */
 
-ul.task-list[class]{list-style: none;}
-ul.task-list li input[type="checkbox"] {
-font-size: inherit;
-width: 0.8em;
-margin: 0 0.8em 0.2em -1.6em;
-vertical-align: middle;
-}
-.display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  :root {
+    --fg: #1a1a1a;
+    --bg: #ffffff;
+    --muted: #555555;
+    --border: #d0d0d0;
+    --code-bg: #f4f4f4;
+    --accent: #0b5cad;
+  }
 
-pre > code.sourceCode { white-space: pre; position: relative; }
-pre > code.sourceCode > span { line-height: 1.25; }
-pre > code.sourceCode > span:empty { height: 1.2em; }
-.sourceCode { overflow: visible; }
-code.sourceCode > span { color: inherit; text-decoration: inherit; }
-div.sourceCode { margin: 1em 0; }
-pre.sourceCode { margin: 0; }
-@media screen {
-div.sourceCode { overflow: auto; }
-}
-@media print {
-pre > code.sourceCode { white-space: pre-wrap; }
-pre > code.sourceCode > span { display: inline-block; text-indent: -5em; padding-left: 5em; }
-}
-pre.numberSource code
-{ counter-reset: source-line 0; }
-pre.numberSource code > span
-{ position: relative; left: -4em; counter-increment: source-line; }
-pre.numberSource code > span > a:first-child::before
-{ content: counter(source-line);
-position: relative; left: -1em; text-align: right; vertical-align: baseline;
-border: none; display: inline-block;
--webkit-touch-callout: none; -webkit-user-select: none;
--khtml-user-select: none; -moz-user-select: none;
--ms-user-select: none; user-select: none;
-padding: 0 4px; width: 4em;
-color: #aaaaaa;
-}
-pre.numberSource { margin-left: 3em; border-left: 1px solid #aaaaaa; padding-left: 4px; }
-div.sourceCode
-{ }
-@media screen {
-pre > code.sourceCode > span > a:first-child::before { text-decoration: underline; }
-}
-code span.al { color: #ff0000; font-weight: bold; } 
-code span.an { color: #60a0b0; font-weight: bold; font-style: italic; } 
-code span.at { color: #7d9029; } 
-code span.bn { color: #40a070; } 
-code span.bu { color: #008000; } 
-code span.cf { color: #007020; font-weight: bold; } 
-code span.ch { color: #4070a0; } 
-code span.cn { color: #880000; } 
-code span.co { color: #60a0b0; font-style: italic; } 
-code span.cv { color: #60a0b0; font-weight: bold; font-style: italic; } 
-code span.do { color: #ba2121; font-style: italic; } 
-code span.dt { color: #902000; } 
-code span.dv { color: #40a070; } 
-code span.er { color: #ff0000; font-weight: bold; } 
-code span.ex { } 
-code span.fl { color: #40a070; } 
-code span.fu { color: #06287e; } 
-code span.im { color: #008000; font-weight: bold; } 
-code span.in { color: #60a0b0; font-weight: bold; font-style: italic; } 
-code span.kw { color: #007020; font-weight: bold; } 
-code span.op { color: #666666; } 
-code span.ot { color: #007020; } 
-code span.pp { color: #bc7a00; } 
-code span.sc { color: #4070a0; } 
-code span.ss { color: #bb6688; } 
-code span.st { color: #4070a0; } 
-code span.va { color: #19177c; } 
-code span.vs { color: #4070a0; } 
-code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } 
-</style>
-  <style type="text/css">
-:root {
---fg: #1a1a1a;
---bg: #ffffff;
---muted: #555555;
---border: #d0d0d0;
---code-bg: #f4f4f4;
---accent: #0b5cad;
-}
-html {
-font-size: 100%;
-}
-body {
-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-line-height: 1.6;
-color: var(--fg);
-background: var(--bg);
-max-width: 46rem;
-margin: 2.5rem auto;
-padding: 0 1.25rem;
-overflow-wrap: break-word;
-}
-h1, h2, h3, h4, h5, h6 {
-line-height: 1.25;
-margin: 2rem 0 0.75rem;
-font-weight: 600;
-}
-h1 { font-size: 1.9rem; }
-h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
-h3 { font-size: 1.25rem; }
-p, ul, ol, blockquote, table, pre {
-margin: 0 0 1rem;
-}
-a {
-color: var(--accent);
-text-decoration: underline;
-}
-blockquote {
-margin-left: 0;
-padding: 0.2rem 1rem;
-border-left: 4px solid var(--border);
-color: var(--muted);
-}
-img {
-max-width: 100%;
-height: auto;
-}
-table {
-border-collapse: collapse;
-width: 100%;
-display: block;
-overflow-x: auto;
-}
-th, td {
-border: 1px solid var(--border);
-padding: 0.4rem 0.6rem;
-text-align: left;
-}
-th {
-background: var(--code-bg);
-font-weight: 600;
-}
-code {
-font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
-"Liberation Mono", monospace;
-font-size: 0.9em;
-background: var(--code-bg);
-padding: 0.15em 0.35em;
-border-radius: 3px;
-}
-pre {
-background: var(--code-bg);
-padding: 0.9rem 1rem;
-border-radius: 5px;
-overflow-x: auto;
-}
-pre code {
-background: none;
-padding: 0;
-font-size: 0.85rem;
-}
+  html {
+    font-size: 100%;
+  }
 
-nav#TOC {
-border: 1px solid var(--border);
-border-radius: 5px;
-padding: 0.75rem 1rem;
-margin-bottom: 2rem;
-background: #fafafa;
-}
-nav#TOC ul {
-margin: 0;
-padding-left: 1.2rem;
-}
-@media (prefers-color-scheme: dark) {
-:root {
---fg: #e6e6e6;
---bg: #1b1b1b;
---muted: #a0a0a0;
---border: #444444;
---code-bg: #2a2a2a;
---accent: #6cb2ff;
-}
-th { background: var(--code-bg); }
-nav#TOC { background: #232323; }
-}
-</style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    line-height: 1.6;
+    color: var(--fg);
+    background: var(--bg);
+    max-width: 52rem;
+    margin: 2.5rem auto;
+    padding: 0 1.25rem;
+    overflow-wrap: break-word;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    line-height: 1.25;
+    margin: 2rem 0 0.75rem;
+    font-weight: 600;
+  }
+
+  h1 { font-size: 1.9rem; }
+  h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.25rem; }
+
+  p, ul, ol, blockquote, table, pre {
+    margin: 0 0 1rem;
+  }
+
+  a, a:visited {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  blockquote {
+    margin-left: 0;
+    padding: 0.2rem 1rem;
+    border-left: 4px solid var(--border);
+    color: var(--muted);
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    display: block;
+    overflow-x: auto;
+  }
+
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.4rem 0.6rem;
+    text-align: left;
+  }
+
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+  }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
+      "Liberation Mono", monospace;
+    font-size: 0.9em;
+    background: var(--code-bg);
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+  }
+
+  pre {
+    background: var(--code-bg);
+    padding: 0.9rem 1rem;
+    border-radius: 5px;
+    overflow-x: auto;
+  }
+
+  pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.85rem;
+  }
+
+  /* Pandoc-Inhaltsverzeichnis (--toc) */
+  nav#TOC {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 2rem;
+    background: #fafafa;
+  }
+
+  nav#TOC ul {
+    margin: 0;
+    padding-left: 1.2rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e6e6e6;
+      --bg: #1b1b1b;
+      --muted: #a0a0a0;
+      --border: #444444;
+      --code-bg: #2a2a2a;
+      --accent: #6cb2ff;
+    }
+    th { background: var(--code-bg); }
+    nav#TOC { background: #232323; }
+  }
+
+  /* Interactive diagrams (docs/assets/diagram.js). The SVG keeps its own light
+     palette — it is also the EMF source for the DOCX — so it sits on a card. */
+  figure { margin: 1.5rem 0; }
+  figcaption { color: var(--muted); font-size: 0.9rem; margin-top: 0.4rem; }
+  .dia {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem;
+    overflow-x: auto;
+  }
+  .dia svg { display: block; width: 100%; height: auto; min-width: 36rem; }
+  .dia [data-info] { cursor: pointer; outline: none; }
+  .dia [data-step], .dia [data-info] { transition: opacity 0.35s ease; }
+  .dia .dim { opacity: 0.15; }
+  .dia .cur rect, .dia .cur circle, .dia .cur ellipse, .dia .cur polygon,
+  .dia [data-info]:hover rect, .dia [data-info]:focus rect, .dia .sel rect {
+    stroke: #d97706 !important;
+    stroke-width: 3px !important;
+  }
+  .dia .flow { stroke-dasharray: 7 5; animation: dia-flow 1.1s linear infinite; }
+  @keyframes dia-flow { to { stroke-dashoffset: -24; } }
+  .dia-bar {
+    display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+    margin-top: 0.5rem; font-size: 0.85rem;
+  }
+  .dia-bar button {
+    font: inherit; padding: 0.2rem 0.6rem; border-radius: 4px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--code-bg); color: var(--fg);
+  }
+  .dia-bar button:focus-visible { outline: 2px solid var(--accent); }
+  .dia-bar .dia-pos { color: var(--muted); min-width: 5rem; }
+  .dia-info {
+    margin-top: 0.4rem; padding: 0.5rem 0.75rem; min-height: 1.6rem;
+    border-left: 4px solid #d97706; background: var(--code-bg); font-size: 0.92rem;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dia .flow { animation: none; }
+    .dia [data-step], .dia [data-info] { transition: none; }
+  }
+  @media print {
+    .dia-bar, .dia-info { display: none; }
+    .dia .dim { opacity: 1; }
+  }
+
+  </style>
+  <script>
+  // Interactive diagrams for the ADW doc exports — inlined by scripts/build_docs.py.
+  // Contract (see docs/diagrams/README.md): elements with data-step="N" form the
+  // step-through sequence, data-info="…" is the explanation shown on hover/focus/click,
+  // class="flow" marks edges whose dashes move.
+  (function () {
+    "use strict";
+    var DELAY_MS = 1800;
+    var de = (document.documentElement.lang || "").indexOf("de") === 0;
+    var T = de
+      ? { play: "▶ Abspielen", pause: "⏸ Pause", prev: "◀", next: "▶", all: "Alles zeigen",
+          step: "Schritt", hint: "Element anklicken oder überfahren für Details." }
+      : { play: "▶ Play", pause: "⏸ Pause", prev: "◀", next: "▶", all: "Show all",
+          step: "Step", hint: "Hover or click an element for details." };
+
+    function button(label, title, onClick) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      if (title) b.setAttribute("aria-label", title);
+      b.addEventListener("click", onClick);
+      return b;
+    }
+
+    function setup(box) {
+      var stepped = Array.prototype.slice.call(box.querySelectorAll("[data-step]"));
+      var informed = Array.prototype.slice.call(box.querySelectorAll("[data-info]"));
+      var info = document.createElement("div");
+      info.className = "dia-info";
+      info.setAttribute("aria-live", "polite");
+      info.textContent = T.hint;
+
+      function show(el) {
+        informed.forEach(function (e) { e.classList.remove("sel"); });
+        if (!el) { info.textContent = T.hint; return; }
+        el.classList.add("sel");
+        info.textContent = el.getAttribute("data-info");
+      }
+
+      informed.forEach(function (el) {
+        el.setAttribute("tabindex", "0");
+        el.setAttribute("role", "button");
+        el.addEventListener("mouseenter", function () { show(el); });
+        el.addEventListener("focus", function () { show(el); });
+        el.addEventListener("click", function () { show(el); });
+      });
+
+      box.parentNode.insertBefore(info, box.nextSibling);
+      if (!stepped.length) return;
+
+      var steps = [];
+      stepped.forEach(function (el) {
+        var n = parseInt(el.getAttribute("data-step"), 10);
+        if (steps.indexOf(n) < 0) steps.push(n);
+      });
+      steps.sort(function (a, b) { return a - b; });
+
+      var pos = -1;  // -1 = everything visible
+      var timer = null;
+      var bar = document.createElement("div");
+      bar.className = "dia-bar";
+      var label = document.createElement("span");
+      label.className = "dia-pos";
+
+      function render() {
+        var current = pos < 0 ? null : steps[pos];
+        stepped.forEach(function (el) {
+          var n = parseInt(el.getAttribute("data-step"), 10);
+          el.classList.toggle("dim", current !== null && n > current);
+          el.classList.toggle("cur", current !== null && n === current);
+        });
+        label.textContent = pos < 0 ? "" : T.step + " " + (pos + 1) + " / " + steps.length;
+        if (current === null) { show(null); return; }
+        var lead = stepped.filter(function (el) {
+          return parseInt(el.getAttribute("data-step"), 10) === current && el.hasAttribute("data-info");
+        })[0];
+        show(lead || null);
+      }
+
+      function stop() {
+        if (timer) { clearInterval(timer); timer = null; }
+        playBtn.textContent = T.play;
+      }
+
+      function go(delta) {
+        stop();
+        pos = Math.max(0, Math.min(steps.length - 1, pos + delta));
+        render();
+      }
+
+      var playBtn = button(T.play, null, function () {
+        if (timer) { stop(); return; }
+        if (pos >= steps.length - 1 || pos < 0) pos = -1;
+        playBtn.textContent = T.pause;
+        pos += 1;
+        render();
+        timer = setInterval(function () {
+          if (pos >= steps.length - 1) { stop(); return; }
+          pos += 1;
+          render();
+        }, DELAY_MS);
+      });
+
+      bar.appendChild(playBtn);
+      bar.appendChild(button(T.prev, T.step + " −1", function () { go(-1); }));
+      bar.appendChild(button(T.next, T.step + " +1", function () { go(1); }));
+      bar.appendChild(button(T.all, null, function () { stop(); pos = -1; render(); }));
+      bar.appendChild(label);
+      box.parentNode.insertBefore(bar, info);
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      Array.prototype.forEach.call(document.querySelectorAll(".dia"), setup);
+    });
+  })();
+
+  </script>
 </head>
 <body>
-<h1 id="adw-handbuch--den-agentic-developer-workflow-betreiben">ADW-Handbuch
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#adw-handbuch--den-agentic-developer-workflow-betreiben"
+id="toc-adw-handbuch--den-agentic-developer-workflow-betreiben">ADW-Handbuch
+— den Agentic Developer Workflow betreiben</a>
+<ul>
+<li><a href="#auf-einen-blick" id="toc-auf-einen-blick">Auf einen
+Blick</a></li>
+<li><a href="#inhalt" id="toc-inhalt">Inhalt</a></li>
+<li><a href="#1-was-adw-ist" id="toc-1-was-adw-ist">1. Was ADW
+ist</a></li>
+<li><a href="#2-voraussetzungen-und-installation"
+id="toc-2-voraussetzungen-und-installation">2. Voraussetzungen und
+Installation</a></li>
+<li><a href="#3-ziel-repo-vorbereiten"
+id="toc-3-ziel-repo-vorbereiten">3. Ziel-Repo vorbereiten</a></li>
+<li><a href="#4-der-erste-lauf-dry-run"
+id="toc-4-der-erste-lauf-dry-run">4. Der erste Lauf: Dry Run</a></li>
+<li><a href="#5-echte-läufe" id="toc-5-echte-läufe">5. Echte
+Läufe</a></li>
+<li><a href="#6-freigabe-gates-und-haltepunkte"
+id="toc-6-freigabe-gates-und-haltepunkte">6. Freigabe-Gates und
+Haltepunkte</a></li>
+<li><a href="#7-cli-referenz" id="toc-7-cli-referenz">7.
+CLI-Referenz</a></li>
+<li><a href="#8-der-run-inspector-gui"
+id="toc-8-der-run-inspector-gui">8. Der Run Inspector (GUI)</a></li>
+<li><a href="#9-lauf-artefakte-und-wie-man-sie-liest"
+id="toc-9-lauf-artefakte-und-wie-man-sie-liest">9. Lauf-Artefakte und
+wie man sie liest</a></li>
+<li><a href="#10-absturz-pause-fortsetzen"
+id="toc-10-absturz-pause-fortsetzen">10. Absturz, Pause,
+Fortsetzen</a></li>
+<li><a href="#11-aufbewahrung-und-aufräumen"
+id="toc-11-aufbewahrung-und-aufräumen">11. Aufbewahrung und
+Aufräumen</a></li>
+<li><a href="#12-abrechnung-und-plan-limits"
+id="toc-12-abrechnung-und-plan-limits">12. Abrechnung und
+Plan-Limits</a></li>
+<li><a href="#13-gute-issues-schreiben-briefs"
+id="toc-13-gute-issues-schreiben-briefs">13. Gute Issues schreiben
+(Briefs)</a></li>
+<li><a href="#14-eskalationen" id="toc-14-eskalationen">14.
+Eskalationen</a></li>
+<li><a href="#15-fehlerbehebung-und-faq"
+id="toc-15-fehlerbehebung-und-faq">15. Fehlerbehebung und FAQ</a></li>
+<li><a href="#16-glossar" id="toc-16-glossar">16. Glossar</a></li>
+</ul></li>
+</ul>
+</nav>
+<h1
+id="adw-handbuch--den-agentic-developer-workflow-betreiben">ADW-Handbuch
 — den Agentic Developer Workflow betreiben</h1>
-<p><a href="ADW-HANDBOOK.md">English</a> | <strong>Deutsch</strong></p>
+<p><a href="ADW-HANDBOOK.html">English</a> | <strong>Deutsch</strong></p>
 <blockquote>
 <p>Zielgruppe: Entwickler, die ADW gegen ihre eigenen Repositories
-laufen lassen. Begleitdokumente: <a href="ADW-WORKFLOW.de.md">ADW-WORKFLOW.de.md</a> (Tiefenblick in die
-sieben Phasen und ihre Schleifen) · <a href="ADW-SPEC.de.md">ADW-SPEC.de.md</a> (Contributor-Spec und
+laufen lassen. Begleitdokumente: <a
+href="ADW-WORKFLOW.de.html">ADW-WORKFLOW.de.md</a> (Tiefenblick in die
+sieben Phasen und ihre Schleifen) · <a
+href="ADW-SPEC.de.html">ADW-SPEC.de.md</a> (Contributor-Spec und
 Philosophie).</p>
 </blockquote>
 <h2 id="auf-einen-blick">Auf einen Blick</h2>
@@ -211,7 +592,7 @@ Philosophie).</p>
 Kontrollfluss ist deterministisches Python.</li>
 <li><strong>Einstieg:</strong> <code>uv sync</code> →
 <code>.adw/config.yaml</code> im Ziel-Repo anlegen →
-<code>adw run --repo &lt;pfad&gt; --issue &quot;…&quot; --dry-run --gates none</code>.</li>
+<code>adw run --repo &lt;pfad&gt; --issue "…" --dry-run --gates none</code>.</li>
 <li><strong>Kontrolle behalten:</strong> Standardmäßig hält der Lauf
 nach dem Plan (Exit 2). <code>plan-summary.md</code> lesen, dann
 <code>adw approve &lt;run_id&gt;</code>.</li>
@@ -222,6 +603,27 @@ read-only Run Inspector auf <code>127.0.0.1:8765</code>.</li>
 oder erschöpftem Plan-Limit setzt <code>adw resume &lt;run_id&gt;</code>
 exakt dort fort, wo der Lauf stand.</li>
 </ul>
+<figure>
+<div class="dia" data-diagram="handbook/run-lifecycle"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 560" width="980" height="560" role="img">
+<title>Ein Lauf aus deiner Sicht</title>
+<desc>Von adw run bis zu den drei möglichen Enden, mit Exit-Codes und nächstem Schritt.</desc>
+<rect x="0" y="0" width="980" height="560" fill="#ffffff"/>
+<g data-step="1" data-info="Du startest einen Lauf mit genau einer Issue-Quelle. Zuerst werden die Flags geprüft; ein Fehler hier legt gar keinen Lauf an."><rect x="12" y="30" width="172" height="100" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="98.0" y="64.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="98.0" dy="0">adw run</tspan></text><text x="98.0" y="86.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="98.0" dy="0">genau eine Issue-Quelle</tspan><tspan x="98.0" dy="18">--gates, --parallel</tspan></text></g>
+<g data-step="2" data-info="ADW lädt .adw/config.yaml (fail fast) und prüft den Haupt-Checkout. Liegengebliebene ADW-Artefakte werden automatisch aus HEAD wiederhergestellt."><path class="flow" d="M184 80.0 L196.0 80.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="206,80.0 196.0,74.5 196.0,85.5" fill="#475569"/><rect x="206" y="30" width="172" height="100" rx="10" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="292.0" y="64.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="292.0" dy="0">Vorflug</tspan></text><text x="292.0" y="86.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="292.0" dy="0">Config gültig?</tspan><tspan x="292.0" dy="18">Haupt-Checkout sauber?</tspan></text></g>
+<g data-step="3" data-info="Zwei unabhängige Entwürfe (Claude + Codex) je Artefakt, von Fable 5 zu einer Spec, einem Plan und einem Schnittstellen-Kontrakt zusammengeführt."><path class="flow" d="M378 80.0 L390.0 80.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="400,80.0 390.0,74.5 390.0,85.5" fill="#475569"/><rect x="400" y="30" width="172" height="100" rx="10" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="486.0" y="64.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="486.0" dy="0">Phasen 1–2</tspan></text><text x="486.0" y="86.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="486.0" dy="0">Spec, Plan + Kontrakt</tspan><tspan x="486.0" dy="18">zwei Entwürfe → Synthese</tspan></text></g>
+<g data-step="4" data-info="Standard --gates plan: Der Lauf stoppt vor dem teuren Build. plan-summary.md, plan.md und contract.yaml lesen."><path class="flow" d="M572 80.0 L584.0 80.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="594,80.0 584.0,74.5 584.0,85.5" fill="#475569"/><rect x="594" y="30" width="172" height="100" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="680.0" y="64.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="680.0" dy="0">Plan-Gate</tspan></text><text x="680.0" y="86.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="680.0" dy="0">Exit 2 · pausiert</tspan><tspan x="680.0" dy="18">plan-summary.md lesen</tspan></text></g>
+<g data-step="5" data-info="Erteilt die ausstehende Freigabe und läuft sofort weiter. Ein Ablehnen gibt es nicht: Ist der Plan falsch, einen neuen Lauf mit schärferem Issue starten."><path class="flow" d="M766 80.0 L778.0 80.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="788,80.0 778.0,74.5 778.0,85.5" fill="#475569"/><rect x="788" y="30" width="172" height="100" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="874.0" y="64.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="874.0" dy="0">adw approve &lt;id&gt;</tspan></text><text x="874.0" y="86.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="874.0" dy="0">setzt im selben</tspan><tspan x="874.0" dy="18">Prozess fort</tspan></text></g>
+<g data-step="2" data-info="Der Vorflug verwirft nie deine Arbeit. Er listet die schmutzigen Pfade und stoppt; der Lauf bleibt unverändert und fortsetzbar."><path d="M292.0 130 L292.0 180.0" stroke="#b91c1c" stroke-width="2" fill="none"/><polygon points="292.0,190 297.5,180.0 286.5,180.0" fill="#b91c1c"/><rect x="206" y="190" width="172" height="110" rx="10" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="292.0" y="220.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="292.0" dy="0">Abgelehnt · Exit 1</tspan></text><text x="292.0" y="242.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="292.0" dy="0">fremde Änderungen im</tspan><tspan x="292.0" dy="18">Haupt-Checkout →</tspan><tspan x="292.0" dy="18">committen/stashen</tspan></text></g>
+<g data-step="6" data-info="Build-Agenten arbeiten in Lane-Worktrees, Gates entscheiden, Reviewer melden nur. Optionale Haltepunkte können erneut pausieren (Exit 2)."><path class="flow" d="M874.0 130 L874.0 180.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="874.0,190 879.5,180.0 868.5,180.0" fill="#475569"/><rect x="594" y="190" width="346" height="110" rx="10" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="767.0" y="229.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="767.0" dy="0">Phasen 3–7</tspan></text><text x="767.0" y="251.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="767.0" dy="0">Build (Lanes, RED-Stufe) · Integration/E2E</tspan><tspan x="767.0" dy="18">Codex-Review · finaler Review · Push + CI</tspan></text></g>
+<g data-step="7" data-info="Erfolg: Der Feature-Branch ist gepusht, die CI grün. followups.md listet Scope-Lücken und zurückgestellte Findings — daraus Tickets machen."><path class="flow" d="M767.0 300 L767.0 345 L332.0 345 L332.0 370.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="332.0,380 337.5,370.0 326.5,370.0" fill="#475569"/><rect x="214" y="380" width="236" height="150" rx="10" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="332.0" y="421.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="332.0" dy="0">Exit 0 · fertig</tspan></text><text x="332.0" y="443.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="332.0" dy="0">Branch gepusht,</tspan><tspan x="332.0" dy="18">Pipeline (+ Staging) grün</tspan><tspan x="332.0" dy="18">→ MR/PR öffnen,</tspan><tspan x="332.0" dy="18">followups.md lesen</tspan></text></g>
+<g data-step="8" data-info="Bewusst endgültig: Eskalierte Läufe sind nicht fortsetzbar. escalation.md nennt Phase und konkreten Grund (Gate-Output, Konflikt, Limit, Circuit Breaker)."><path class="flow" d="M767.0 300 L767.0 345 L580.0 345 L580.0 370.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="580.0,380 585.5,370.0 574.5,370.0" fill="#475569"/><rect x="462" y="380" width="236" height="150" rx="10" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="580.0" y="421.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="580.0" dy="0">Exit 1 · eskaliert</tspan></text><text x="580.0" y="443.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="580.0" dy="0">Limit oder harter Fehler</tspan><tspan x="580.0" dy="18">→ escalation.md lesen,</tspan><tspan x="580.0" dy="18">Ursache beheben,</tspan><tspan x="580.0" dy="18">NEUEN Lauf starten</tspan></text></g>
+<g data-step="9" data-info="Keine Eskalation: Der Lauf bleibt am letzten Checkpoint. Fertige Lanes werden nicht neu gebaut, Limits nicht zurückgesetzt."><path class="flow" d="M767.0 300 L767.0 345 L828.0 345 L828.0 370.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="828.0,380 833.5,370.0 822.5,370.0" fill="#475569"/><rect x="710" y="380" width="236" height="150" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="828.0" y="421.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="828.0" dy="0">Exit 1 · unterbrochen</tspan></text><text x="828.0" y="443.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="828.0" dy="0">Plan-Limit, Absturz, Ctrl-C</tspan><tspan x="828.0" dy="18">→ Zustand gesichert</tspan><tspan x="828.0" dy="18">→ adw resume &lt;id&gt;</tspan><tspan x="828.0" dy="18">nach dem Reset</tspan></text></g>
+<g data-step="9" data-info="adw resume setzt exakt dort fort, wo der Lauf stand — gleiche Phase, gleiche Agent-Session für einen offenen Fix."><path d="M946 455 L968 455 L968 245 L950.0 245.0" stroke="#b45309" stroke-width="2" fill="none"/><polygon points="940,245 950.0,250.5 950.0,239.5" fill="#b45309"/><text x="960" y="326" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" font-weight="bold" text-anchor="end" fill="#b45309"><tspan x="960" dy="0">adw resume</tspan></text></g>
+<text x="12" y="400" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="start" fill="#475569"><tspan x="12" dy="0">Exit-Codes</tspan><tspan x="12" dy="20">0 = fertig</tspan><tspan x="12" dy="20">2 = pausiert (Gate/Haltepunkt)</tspan><tspan x="12" dy="20">1 = Eskalation oder Fehler</tspan></text>
+</svg></div>
+<figcaption aria-hidden="true">Ein Lauf aus deiner Sicht: Exit-Codes und
+nächster Schritt</figcaption>
+</figure>
 <h2 id="inhalt">Inhalt</h2>
 <ol type="1">
 <li><a href="#1-was-adw-ist">Was ADW ist</a></li>
@@ -315,10 +717,26 @@ schreibt einen Eskalationsbericht; ein Mensch übernimmt.</li>
 </tbody>
 </table>
 <p>Wie die Phasen im Detail funktionieren — die Schleifen, die
-RED-Stufe, die Triage, die Review-Runden-Policy — beschreibt <a href="ADW-WORKFLOW.de.md">ADW-WORKFLOW.de.md</a>.</p>
+RED-Stufe, die Triage, die Review-Runden-Policy — beschreibt <a
+href="ADW-WORKFLOW.de.html">ADW-WORKFLOW.de.md</a>.</p>
 <hr />
 <h2 id="2-voraussetzungen-und-installation">2. Voraussetzungen und
 Installation</h2>
+<figure>
+<div class="dia" data-diagram="handbook/setup-path"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 330" width="980" height="330" role="img">
+<title>Weg zum ersten Lauf</title>
+<desc>Vier Schritte von einem frischen Rechner zum ersten echten ADW-Lauf.</desc>
+<rect x="0" y="0" width="980" height="330" fill="#ffffff"/>
+<g data-step="1" data-info="uv und git installieren, dann mit der Claude-Code-CLI und der Codex-CLI anmelden. glab oder gh holen Issues und pollen die CI. API-Keys werden ignoriert — der Verbrauch läuft über deinen Plan."><rect x="10" y="30" width="232" height="175" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="126.0" y="84.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="126.0" dy="0">1 · Voraussetzungen</tspan></text><text x="126.0" y="106.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="126.0" dy="0">uv + Python ≥ 3.12, git</tspan><tspan x="126.0" dy="18">Claude-Code-CLI, angemeldet</tspan><tspan x="126.0" dy="18">Codex-CLI, angemeldet</tspan><tspan x="126.0" dy="18">glab (GitLab) oder gh (GitHub)</tspan></text></g>
+<g data-step="2" data-info="Eine Datei enthält alle projektspezifischen Einstellungen. examples/config.yaml kopieren, Base-Branch und mindestens eine Lane mit Gates setzen. Unbekannte Keys werden abgelehnt."><path class="flow" d="M242 117.5 L242.0 117.5" stroke="#475569" stroke-width="2" fill="none"/><polygon points="252,117.5 242.0,112.0 242.0,123.0" fill="#475569"/><rect x="252" y="30" width="232" height="175" rx="10" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="368.0" y="84.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="368.0" dy="0">2 · Repo konfigurieren</tspan></text><text x="368.0" y="106.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="368.0" dy="0">&lt;ziel&gt;/.adw/config.yaml</tspan><tspan x="368.0" dy="18">base_branch + lanes</tspan><tspan x="368.0" dy="18">Gates je Lane (tdd: true)</tspan><tspan x="368.0" dy="18">Vorlage: examples/</tspan></text></g>
+<g data-step="3" data-info="Fährt den kompletten Kontrollfluss mit geskripteten Mocks, inklusive eines absichtlich roten Gates. Läuft er durch, sind Config und Gates korrekt verdrahtet."><path class="flow" d="M484 117.5 L484.0 117.5" stroke="#475569" stroke-width="2" fill="none"/><polygon points="494,117.5 484.0,112.0 484.0,123.0" fill="#475569"/><rect x="494" y="30" width="232" height="175" rx="10" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="610.0" y="84.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="610.0" dy="0">3 · Dry Run</tspan></text><text x="610.0" y="106.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="610.0" dy="0">--dry-run --gates none</tspan><tspan x="610.0" dy="18">Mock-Agenten, Fake-CI</tspan><tspan x="610.0" dy="18">0 Tokens, kein Push</tspan><tspan x="610.0" dy="18">beweist Config + Gates</tspan></text></g>
+<g data-step="4" data-info="Verbraucht Plan-Kontingent. Standardmäßig stoppt der Lauf nach Plan + Kontrakt; plan-summary.md lesen und freigeben. Exit 0 heißt: Branch gepusht, Pipeline grün."><path class="flow" d="M726 117.5 L726.0 117.5" stroke="#475569" stroke-width="2" fill="none"/><polygon points="736,117.5 726.0,112.0 726.0,123.0" fill="#475569"/><rect x="736" y="30" width="232" height="175" rx="10" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="852.0" y="84.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="852.0" dy="0">4 · Echter Lauf</tspan></text><text x="852.0" y="106.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="852.0" dy="0">adw run --issue "…"</tspan><tspan x="852.0" dy="18">pausiert nach dem Plan (Exit 2)</tspan><tspan x="852.0" dy="18">adw approve &lt;run_id&gt;</tspan><tspan x="852.0" dy="18">→ Branch gepusht, CI grün</tspan></text></g>
+<g data-step="5" data-info="Jederzeit optional: eine Read-only-Webansicht von Läufen, Traces, Kosten und Eskalationen. Braucht außerhalb dieses Repos das Extra gui."><path d="M731.0 240 L731.0 215.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="731.0,205 725.5,215.0 736.5,215.0" fill="#475569"/><rect x="494" y="240" width="474" height="70" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2" stroke-dasharray="6 4"/><text x="731.0" y="268.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="731.0" dy="0">adw gui — Run Inspector</tspan></text><text x="731.0" y="290.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="731.0" dy="0">Read-only-Sicht auf jeden Lauf · http://127.0.0.1:8765/</tspan></text></g>
+<text x="10" y="290" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="start" fill="#475569"><tspan x="10" dy="0">Jeder Schritt baut auf dem vorigen auf —</tspan><tspan x="10" dy="17">ein roter Dry Run kostet nichts.</tspan></text>
+</svg></div>
+<figcaption aria-hidden="true">Weg zum ersten Lauf: von den
+Voraussetzungen zum ersten echten Lauf</figcaption>
+</figure>
 <table>
 <thead>
 <tr class="header">
@@ -334,7 +752,8 @@ Installation</h2>
 <td>—</td>
 </tr>
 <tr class="even">
-<td>Python ≥ 3.12 + <a href="https://docs.astral.sh/uv/"><code>uv</code></a></td>
+<td>Python ≥ 3.12 + <a
+href="https://docs.astral.sh/uv/"><code>uv</code></a></td>
 <td>Laufzeit und Abhängigkeiten</td>
 <td><code>uv --version</code></td>
 </tr>
@@ -369,7 +788,8 @@ macOS-Schlüsselbund)</td>
 </tbody>
 </table>
 <p>Installation:</p>
-<div class="sourceCode" id="cb1"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="op">&lt;</span>dieses Repo<span class="op">&gt;</span> agentic-developer-workflow</span>
+<div class="sourceCode" id="cb1"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> clone <span class="op">&lt;</span>dieses Repo<span class="op">&gt;</span> agentic-developer-workflow</span>
 <span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> agentic-developer-workflow</span>
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> sync                     <span class="co"># Kern + dev-Gruppe (enthält den GUI-Stack für Tests)</span></span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw <span class="at">--help</span></span></code></pre></div>
@@ -378,7 +798,8 @@ macOS-Schlüsselbund)</td>
 <code>markdown-it-py</code>). <code>uv sync</code> in diesem Repo zieht
 diese bereits über die dev-Gruppe. Wird ADW anderswo als Paket
 installiert:</p>
-<div class="sourceCode" id="cb2"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> pip install <span class="st">&#39;adw[gui]&#39;</span>   <span class="co"># oder: pip install &#39;adw[gui]&#39;</span></span></code></pre></div>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> pip install <span class="st">&#39;adw[gui]&#39;</span>   <span class="co"># oder: pip install &#39;adw[gui]&#39;</span></span></code></pre></div>
 <p>Ohne das Extra endet <code>adw gui</code> mit Exit 1 und genau diesem
 Installationshinweis; alle anderen Kommandos funktionieren.</p>
 <p>Alle Beispiele unten nutzen <code>uv run adw …</code> aus dem
@@ -390,10 +811,12 @@ ADW-Checkout. Liegt <code>adw</code> im <code>PATH</code> (z. B. via
 <em>Ziel-Repo</em>). Die gesamte projektspezifische Konfiguration liegt
 in <strong>einer Datei</strong>:
 <code>&lt;ziel&gt;/.adw/config.yaml</code>.</p>
-<div class="sourceCode" id="cb3"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> /pfad/zum/repo/.adw</span>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="fu">mkdir</span> <span class="at">-p</span> /pfad/zum/repo/.adw</span>
 <span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="fu">cp</span> examples/config.yaml /pfad/zum/repo/.adw/config.yaml   <span class="co"># dann anpassen</span></span></code></pre></div>
 <p>Minimale Single-Lane-Config:</p>
-<div class="sourceCode" id="cb4"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">base_branch</span><span class="kw">:</span><span class="at"> main</span></span>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="fu">base_branch</span><span class="kw">:</span><span class="at"> main</span></span>
 <span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="fu">lanes</span><span class="kw">:</span></span>
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">backend</span><span class="kw">:</span></span>
 <span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">gates</span><span class="kw">:</span><span class="co">                      # Reihenfolge = Ausführungsreihenfolge, fail fast</span></span>
@@ -405,6 +828,44 @@ in <strong>einer Datei</strong>:
 Key)</h3>
 <p>Defaults wie in <code>adw/config.py</code>. Unbekannte Keys werden
 überall abgelehnt.</p>
+<figure>
+<div class="dia" data-diagram="handbook/config-anatomy"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 600" width="980" height="600" role="img">
+<title>Aufbau von .adw/config.yaml</title>
+<desc>Jeder Config-Abschnitt mit Pflicht/optional und Standardwert.</desc>
+<rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
+<rect x="16" y="16" width="420" height="534" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="1.5"/>
+<text x="30" y="36" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="start" fill="#475569"><tspan x="30" dy="0">.adw/config.yaml</tspan></text>
+<text x="30.0" y="62" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="30.0" dy="0">base_branch: main</tspan></text>
+<text x="30.0" y="88" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="30.0" dy="0">lanes:</tspan></text>
+<text x="45.6" y="114" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="45.6" dy="0">backend:</tspan></text>
+<text x="61.2" y="140" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="61.2" dy="0">gates:</tspan></text>
+<text x="76.8" y="166" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="76.8" dy="0">- name: lint</tspan></text>
+<text x="92.4" y="192" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="92.4" dy="0">cmd: "ruff check ."</tspan></text>
+<text x="92.4" y="218" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="92.4" dy="0">timeout: 300</tspan></text>
+<text x="76.8" y="244" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="76.8" dy="0">- name: pytest</tspan></text>
+<text x="92.4" y="270" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="92.4" dy="0">cmd: "pytest -x -q"</tspan></text>
+<text x="92.4" y="296" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="92.4" dy="0">timeout: 1800</tspan></text>
+<text x="92.4" y="322" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="92.4" dy="0">tdd: true</tspan></text>
+<text x="45.6" y="348" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="45.6" dy="0">frontend: { gates: [ … ] }</tspan></text>
+<text x="30.0" y="374" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="30.0" dy="0">e2e: { cmd: "npx playwright test",</tspan></text>
+<text x="84.6" y="400" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="84.6" dy="0">timeout: 1800 }</tspan></text>
+<text x="30.0" y="426" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="30.0" dy="0">ci: { provider: gitlab,</tspan></text>
+<text x="76.8" y="452" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="76.8" dy="0">staging_job: deploy-staging }</tspan></text>
+<text x="30.0" y="478" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="30.0" dy="0">codex: { timeout: 900 }</tspan></text>
+<text x="30.0" y="504" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="30.0" dy="0">trace: { enabled: true, keep_runs: 20 }</tspan></text>
+<text x="30.0" y="530" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#0f172a"><tspan x="30.0" dy="0">breakpoints: [ before_push ]</tspan></text>
+<g data-info="Pflicht, nicht leer. Pro Lauf mit --base-branch überschreibbar; der wirksame Wert wird beim Start im Lauf-Zustand gepinnt."><path d="M436 57 L466 57 L480 45.0 L500 45.0" stroke="#0369a1" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/><circle cx="436" cy="57" r="4" fill="#0369a1"/><rect x="500" y="16.0" width="464" height="58" rx="10" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="732.0" y="39.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">base_branch · Pflicht</tspan></text><text x="732.0" y="59.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">Lanes forken davon, Diffs laufen dagegen</tspan></text></g>
+<g data-info="Mindestens eine Lane mit mindestens einem Gate. Gates laufen der Reihe nach im Lane-Worktree; das erste rote Gate beendet den Durchgang. --parallel braucht beide Lanes."><path d="M436 109 L466 109 L480 117.85714285714286 L500 117.85714285714286" stroke="#0369a1" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/><circle cx="436" cy="109" r="4" fill="#0369a1"/><rect x="500" y="88.85714285714286" width="464" height="58" rx="10" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="732.0" y="104.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">lanes.&lt;lane&gt;.gates[] · Pflicht</tspan></text><text x="732.0" y="124.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">Lane-Namen: backend, frontend · Reihenfolge = fail fast</tspan><tspan x="732.0" dy="16">jedes Gate: name, cmd, timeout (Sekunden)</tspan></text></g>
+<g data-info="Markiert Gates für die RED-Stufe. Nach dem Nur-Test-Lauf muss mindestens ein markiertes Gate rot sein — sonst eskaliert der Lauf."><path d="M436 317 L466 317 L480 190.71428571428572 L500 190.71428571428572" stroke="#15803d" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/><circle cx="436" cy="317" r="4" fill="#15803d"/><rect x="500" y="161.71428571428572" width="464" height="58" rx="10" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="732.0" y="185.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">tdd: true · optional (false)</tspan></text><text x="732.0" y="205.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">RED-Beweis: nach dem Nur-Test-Lauf rot</tspan></text></g>
+<g data-info="Läuft auf dem Integrations-Branch, nachdem beide Lanes gemergt sind. In Single-Lane-Läufen ignoriert."><path d="M436 369 L466 369 L480 263.57142857142856 L500 263.57142857142856" stroke="#475569" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/><circle cx="436" cy="369" r="4" fill="#475569"/><rect x="500" y="234.57142857142858" width="464" height="58" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="732.0" y="258.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">e2e · optional</tspan></text><text x="732.0" y="278.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">cmd + timeout; nur mit --parallel</tspan></text></g>
+<g data-info="Bei self-hosted Forges provider setzen: Ein unbekannter Host fällt erst in Phase 7 auf, nach dem ganzen Build. staging_job muss zusätzlich grün sein."><path d="M436 421 L466 421 L480 336.42857142857144 L500 336.42857142857144" stroke="#475569" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/><circle cx="436" cy="421" r="4" fill="#475569"/><rect x="500" y="307.42857142857144" width="464" height="58" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="732.0" y="323.3" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">ci · optional</tspan></text><text x="732.0" y="343.3" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">provider: automatisch · poll_interval 60 s</tspan><tspan x="732.0" dy="16">timeout 2700 s · staging_job: keiner</tspan></text></g>
+<g data-info="Ein gemeinsames Zeitlimit für Codex-Entwürfe und Codex-Reviews."><path d="M436 473 L466 473 L480 409.28571428571433 L500 409.28571428571433" stroke="#475569" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/><circle cx="436" cy="473" r="4" fill="#475569"/><rect x="500" y="380.28571428571433" width="464" height="58" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="732.0" y="404.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">codex · optional</tspan></text><text x="732.0" y="424.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">timeout 900 s je codex-exec-Aufruf</tspan></text></g>
+<g data-info="enabled schreibt events.jsonl, das die GUI speist. keep_runs steuert das automatische Aufräumen nach einem erfolgreichen Lauf."><path d="M436 499 L466 499 L480 482.14285714285717 L500 482.14285714285717" stroke="#475569" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/><circle cx="436" cy="499" r="4" fill="#475569"/><rect x="500" y="453.14285714285717" width="464" height="58" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="732.0" y="477.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">trace · optional</tspan></text><text x="732.0" y="497.0" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">enabled: true · keep_runs: 20 (0 = nie aufräumen)</tspan></text></g>
+<g data-info="Zusatz-Halte vor teuren Schritten (Exit 2, weiter mit adw approve). Wirkungslos, wenn der Lauf mit --gates none oder spec läuft."><path d="M436 525 L466 525 L480 555.0 L500 555.0" stroke="#b45309" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/><circle cx="436" cy="525" r="4" fill="#b45309"/><rect x="500" y="526.0" width="464" height="58" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="732.0" y="549.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">breakpoints · optional ([])</tspan></text><text x="732.0" y="569.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="732.0" dy="0">before_integration · before_push</tspan></text></g>
+</svg></div>
+<figcaption aria-hidden="true">Aufbau von .adw/config.yaml: jeder
+Abschnitt, Pflicht oder optional, mit Defaults</figcaption>
+</figure>
 <table>
 <thead>
 <tr class="header">
@@ -549,7 +1010,7 @@ Tokens, <code>DATABASE_URL</code>, …) ist für ein Gate
 <strong>nicht</strong> sichtbar. Zusätzlich werden die Lane-Ports
 injiziert (<code>BACKEND_PORT</code> / <code>FRONTEND_PORT</code>).
 Braucht deine Testsuite weitere Variablen, setze sie im Gate-Kommando
-(<code>cmd: &quot;DJANGO_SETTINGS_MODULE=app.settings.test pytest -q&quot;</code>)
+(<code>cmd: "DJANGO_SETTINGS_MODULE=app.settings.test pytest -q"</code>)
 oder in einem Wrapper-Skript im Repo.</p>
 <p><strong>Parallelmodus</strong> (<code>--parallel</code>) braucht
 beide Lanes, <code>backend</code> <strong>und</strong>
@@ -578,7 +1039,8 @@ GUI es findet.</li>
 <p>Bevor ein Token fließt, den <strong>kompletten Kontrollfluss</strong>
 mit geskripteten Mock-Agents durchspielen — 0 Tokens, kein Netz, kein
 Push:</p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw run <span class="at">--repo</span> /pfad/zum/repo <span class="at">--issue</span> <span class="st">&quot;Demo-Feature&quot;</span> <span class="at">--dry-run</span> <span class="at">--gates</span> none</span>
+<div class="sourceCode" id="cb5"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw run <span class="at">--repo</span> /pfad/zum/repo <span class="at">--issue</span> <span class="st">&quot;Demo-Feature&quot;</span> <span class="at">--dry-run</span> <span class="at">--gates</span> none</span>
 <span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw run <span class="at">--repo</span> /pfad/zum/repo <span class="at">--issue</span> <span class="st">&quot;Demo-Feature&quot;</span> <span class="at">--dry-run</span> <span class="at">--gates</span> none <span class="at">--parallel</span></span></code></pre></div>
 <p>Was der Dry Run beweist:</p>
 <ul>
@@ -605,7 +1067,8 @@ Lauf.</p>
 <h2 id="5-echte-läufe">5. Echte Läufe</h2>
 <h3 id="51-issue-quelle-wählen">5.1 Issue-Quelle wählen</h3>
 <p>Genau <strong>eine</strong> Quelle pro Lauf:</p>
-<div class="sourceCode" id="cb6"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Freitext</span></span>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Freitext</span></span>
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw run <span class="at">--repo</span> ~/code/shop <span class="at">--issue</span> <span class="st">&quot;Bug: Login bricht ab, wenn das Passwort einen Doppelpunkt enthält&quot;</span></span>
 <span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="co"># mehrzeiliger Brief aus einer Datei</span></span>
@@ -717,6 +1180,30 @@ Haltepunkte</h2>
 <p><code>--gates</code> und die Altflags dürfen nur kombiniert werden,
 wenn sie übereinstimmen; ein Widerspruch oder ein unbekannter Wert wird
 abgelehnt, bevor ein Lauf angelegt wird.</p>
+<figure>
+<div class="dia" data-diagram="handbook/gates-modes"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 985 470" width="985" height="470" role="img">
+<title>Wo jeder --gates-Modus pausiert</title>
+<desc>Die vier Freigabe-Modi und die zwei optionalen Haltepunkte entlang der sieben Phasen.</desc>
+<rect x="0" y="0" width="985" height="470" fill="#ffffff"/>
+<rect x="160" y="20" width="108" height="56" rx="10" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="214.0" y="50.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="214.0" dy="0">Spec</tspan></text>
+<rect x="278" y="20" width="108" height="56" rx="10" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="332.0" y="41.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="332.0" dy="0">Plan +</tspan></text><text x="332.0" y="60.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="332.0" dy="0">Kontrakt</tspan></text>
+<rect x="396" y="20" width="108" height="56" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="450.0" y="50.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="450.0" dy="0">Build</tspan></text>
+<rect x="514" y="20" width="108" height="56" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="568.0" y="41.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="568.0" dy="0">Integration</tspan></text><text x="568.0" y="60.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="568.0" dy="0">/ E2E</tspan></text>
+<rect x="632" y="20" width="108" height="56" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="686.0" y="41.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="686.0" dy="0">Codex-</tspan></text><text x="686.0" y="60.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="686.0" dy="0">Review</tspan></text>
+<rect x="750" y="20" width="108" height="56" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="804.0" y="41.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="804.0" dy="0">Finaler</tspan></text><text x="804.0" y="60.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="804.0" dy="0">Review</tspan></text>
+<rect x="868" y="20" width="108" height="56" rx="10" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="922.0" y="50.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="922.0" dy="0">Push / CI</tspan></text>
+<text x="12" y="52" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start" fill="#0f172a"><tspan x="12" dy="0">Modus</tspan></text>
+<g data-step="1" data-info="Standard. Pausiert nach Plan + Kontrakt, vor dem Build — der billigste Punkt, um die Richtung zu korrigieren. Altflag: keins."><text x="12" y="116" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start" fill="#0f172a"><tspan x="12" dy="0">plan</tspan></text><text x="12" y="134" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" fill="#475569"><tspan x="12" dy="0">(Standard)</tspan></text><path class="flow" d="M160 120 L966.0 120.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="976,120 966.0,114.5 966.0,125.5" fill="#475569"/><rect x="378.0" y="107.0" width="26" height="26" rx="6" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><rect x="384.8" y="113.5" width="4.4" height="13.0" fill="#b45309"/><rect x="392.8" y="113.5" width="4.4" height="13.0" fill="#b45309"/></g>
+<g data-step="2" data-info="Pausiert nach der Spec, vor dem Plan. Altflags: --no-approval --spec-approval. Haltepunkte greifen in diesem Modus nicht."><text x="12" y="178" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start" fill="#0f172a"><tspan x="12" dy="0">spec</tspan></text><text x="12" y="196" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" fill="#475569"><tspan x="12" dy="0">--no-approval</tspan><tspan x="12" dy="16">--spec-approval</tspan></text><path class="flow" d="M160 182 L966.0 182.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="976,182 966.0,176.5 966.0,187.5" fill="#475569"/><rect x="260.0" y="169.0" width="26" height="26" rx="6" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><rect x="266.8" y="175.5" width="4.4" height="13.0" fill="#b45309"/><rect x="274.8" y="175.5" width="4.4" height="13.0" fill="#b45309"/></g>
+<g data-step="3" data-info="Pausiert nach der Spec und erneut nach dem Plan. Altflag: --spec-approval."><text x="12" y="240" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start" fill="#0f172a"><tspan x="12" dy="0">both</tspan></text><text x="12" y="258" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" fill="#475569"><tspan x="12" dy="0">--spec-approval</tspan></text><path class="flow" d="M160 244 L966.0 244.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="976,244 966.0,238.5 966.0,249.5" fill="#475569"/><rect x="260.0" y="231.0" width="26" height="26" rx="6" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><rect x="266.8" y="237.5" width="4.4" height="13.0" fill="#b45309"/><rect x="274.8" y="237.5" width="4.4" height="13.0" fill="#b45309"/><rect x="378.0" y="231.0" width="26" height="26" rx="6" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><rect x="384.8" y="237.5" width="4.4" height="13.0" fill="#b45309"/><rect x="392.8" y="237.5" width="4.4" height="13.0" fill="#b45309"/></g>
+<g data-step="4" data-info="Pausiert nie; nur eine Eskalation stoppt den Lauf. Altflag: --no-approval. Haltepunkte entfallen ebenfalls."><text x="12" y="302" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start" fill="#0f172a"><tspan x="12" dy="0">none</tspan></text><text x="12" y="320" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" fill="#475569"><tspan x="12" dy="0">--no-approval</tspan></text><path class="flow" d="M160 306 L966.0 306.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="976,306 966.0,300.5 966.0,311.5" fill="#475569"/><text x="568.0" y="296" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#475569"><tspan x="568.0" dy="0">kein Stopp — nur eine Eskalation beendet den Lauf vorzeitig</tspan></text></g>
+<g data-step="5" data-info="Optionale Zusatz-Halte aus .adw/config.yaml. before_integration: alle Lanes grün, vor der Integration (parallel) bzw. dem Codex-Review (Single-Lane). before_push: nach dem finalen Review. Sie greifen nur in den Modi plan und both."><text x="12" y="378" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="start" fill="#0f172a"><tspan x="12" dy="0">breakpoints</tspan></text><text x="12" y="396" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="start" fill="#475569"><tspan x="12" dy="0">Config · nur plan/both</tspan></text><path d="M160 382 L966.0 382.0" stroke="#94a3b8" stroke-width="2" fill="none"/><polygon points="976,382 966.0,376.5 966.0,387.5" fill="#94a3b8"/><rect x="496.0" y="369.0" width="26" height="26" rx="6" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><rect x="502.8" y="375.5" width="4.4" height="13.0" fill="#b45309"/><rect x="510.8" y="375.5" width="4.4" height="13.0" fill="#b45309"/><text x="509.0" y="416" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#b45309"><tspan x="509.0" dy="0">before_integration</tspan></text><rect x="850.0" y="369.0" width="26" height="26" rx="6" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><rect x="856.8" y="375.5" width="4.4" height="13.0" fill="#b45309"/><rect x="864.8" y="375.5" width="4.4" height="13.0" fill="#b45309"/><text x="863.0" y="416" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#b45309"><tspan x="863.0" dy="0">before_push</tspan></text></g>
+<rect x="13.0" y="425.0" width="22" height="22" rx="6" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><rect x="18.8" y="430.5" width="3.7" height="11.0" fill="#b45309"/><rect x="25.5" y="430.5" width="3.7" height="11.0" fill="#b45309"/>
+<text x="44" y="441" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="start" fill="#475569"><tspan x="44" dy="0">= Pause, Exit 2 · weiter mit adw approve &lt;run_id&gt;</tspan></text>
+</svg></div>
+<figcaption aria-hidden="true">Wo jeder --gates-Modus pausiert, und die
+zwei optionalen Haltepunkte</figcaption>
+</figure>
 <h3 id="62-wie-eine-pause-aussieht">6.2 Wie eine Pause aussieht</h3>
 <pre class="text"><code>$ uv run adw run --repo ~/code/shop --issue &quot;Warenkorb-Rabatte&quot;
 Run 3f9a12c4 gestartet (Phase: spec, Gates: plan)
@@ -724,14 +1211,15 @@ Plan-Approval ausstehend: .adw/runs/3f9a12c4/plan-summary.md und .adw/runs/3f9a1
 $ echo $?
 2</code></pre>
 <p>In dieser Reihenfolge prüfen:</p>
-<div class="sourceCode" id="cb8"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">less</span> ~/code/shop/.adw/runs/3f9a12c4/plan-summary.md   <span class="co"># Was/Warum, Entscheidungen, Zurückgestelltes, wo die Entwürfe abwichen</span></span>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">less</span> ~/code/shop/.adw/runs/3f9a12c4/plan-summary.md   <span class="co"># Was/Warum, Entscheidungen, Zurückgestelltes, wo die Entwürfe abwichen</span></span>
 <span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">less</span> ~/code/shop/.adw/runs/3f9a12c4/plan.md           <span class="co"># Workstreams / Tasks</span></span>
 <span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="fu">less</span> ~/code/shop/.adw/runs/3f9a12c4/contract.yaml     <span class="co"># Schnittstellen-Kontrakt</span></span>
 <span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw approve 3f9a12c4 <span class="at">--repo</span> ~/code/shop        <span class="co"># weiter mit Phase 3–7</span></span></code></pre></div>
 <p>Am Spec-Gate sind es <code>spec-summary.md</code> und
 <code>spec.md</code>; nach der Freigabe geht es mit dem Plan weiter, und
 im Modus <code>both</code> hält der Lauf erneut am Plan-Gate.</p>
-<p>Ein „Ablehnen&quot;-Kommando gibt es nicht. Ist der Plan falsch, lass den
+<p>Ein „Ablehnen"-Kommando gibt es nicht. Ist der Plan falsch, lass den
 Lauf liegen (pausiert lassen oder später prunen) und starte einen neuen
 Lauf mit einem schärferen Issue. Eine Richtungskorrektur auf Plan-Ebene
 ist billig; auf Code-Ebene kostet sie Build-, Review- und
@@ -739,15 +1227,17 @@ Fix-Zyklen.</p>
 <h3 id="63-haltepunkte-optional">6.3 Haltepunkte (optional)</h3>
 <p>Zwei zusätzliche Halte vor teuren, schwer umkehrbaren Schritten, in
 der Config:</p>
-<div class="sourceCode" id="cb9"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">breakpoints</span><span class="kw">:</span></span>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="fu">breakpoints</span><span class="kw">:</span></span>
 <span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> before_integration</span><span class="co">   # alle Build-Lanes grün; vor Integration (parallel) bzw. Codex-Review (Single-Lane)</span></span>
 <span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">-</span><span class="at"> before_push</span><span class="co">          # finales Review fertig; vor Push/CI</span></span></code></pre></div>
 <p>Ein Haltepunkt verhält sich wie ein Freigabe-Gate: Exit 2, die CLI
 nennt ihn, fortsetzen mit
 <code>adw approve &lt;run_id&gt; --repo &lt;pfad&gt;</code>. Ein
 freigegebener Haltepunkt hält nie wieder, auch nicht nach Absturz +
-Resume. <code>--gates none</code> / <code>--no-approval</code>
-überspringt auch die Haltepunkte.</p>
+Resume. Haltepunkte greifen nur in den Modi <code>plan</code> und
+<code>both</code>: <code>--gates none</code> und
+<code>--gates spec</code> (und ihre Altflags) überspringen sie.</p>
 <hr />
 <h2 id="7-cli-referenz">7. CLI-Referenz</h2>
 <pre class="text"><code>adw run     --repo PFAD (--issue TEXT | --gitlab-issue ID | --github-issue NR)
@@ -874,7 +1364,8 @@ ist, in welcher Reihenfolge, was es gekostet hat, wohin die Zeit ging
 und warum etwas eskaliert ist. Sie schreibt nie in ein Repo, eine
 State-Datei oder ein Log.</p>
 <h3 id="81-start">8.1 Start</h3>
-<div class="sourceCode" id="cb11"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw gui                                   <span class="co"># http://127.0.0.1:8765/</span></span>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw gui                                   <span class="co"># http://127.0.0.1:8765/</span></span>
 <span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw gui <span class="at">--port</span> 8790 <span class="at">--open</span>                <span class="co"># anderer Port, Browser öffnen</span></span>
 <span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw gui <span class="at">--repo</span> ~/code/shop <span class="at">--repo</span> ~/code/api</span></code></pre></div>
 <ul>
@@ -901,6 +1392,24 @@ tragen ein <code>Dry-Run</code>-Label. Die Liste aktualisiert sich nicht
 live — neu laden.</p>
 <h3 id="83-lauf-detail-runsreporun_id">8.3 Lauf-Detail
 (<code>/runs/&lt;repo&gt;/&lt;run_id&gt;</code>)</h3>
+<figure>
+<div class="dia" data-diagram="handbook/gui-layout"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 540" width="980" height="540" role="img">
+<title>Run Inspector: die Lauf-Detailseite</title>
+<desc>Schematisches Layout von /runs/&lt;repo&gt;/&lt;run_id&gt; in adw gui.</desc>
+<rect x="0" y="0" width="980" height="540" fill="#ffffff"/>
+<rect x="10" y="10" width="960" height="520" rx="12" fill="#f1f5f9" stroke="#475569" stroke-width="1.5"/>
+<text x="30" y="34" font-family="Liberation Mono, Courier New, monospace" font-size="13" text-anchor="start" fill="#475569"><tspan x="30" dy="0">http://127.0.0.1:8765/runs/&lt;repo&gt;/&lt;run_id&gt;</tspan></text>
+<g data-step="1" data-info="Wo der Lauf steht und wohin die Zeit ging. Ein Dry Run trägt ein fixes Dry-Run-Banner."><rect x="30" y="48" width="920" height="64" rx="10" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="490.0" y="74.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">Kopf</tspan></text><text x="490.0" y="94.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">Status · maßstäbliches Phasenband (Klick springt zur Phase) · Arbeitszeit · Kosten + Tokens</tspan></text></g>
+<g data-step="2" data-info="Nennt den einen nächsten Schritt für einen pausierten, unterbrochenen oder eskalierten Lauf, inklusive Eskalationsbericht."><rect x="30" y="122" width="920" height="48" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="490.0" y="140.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">Recovery-Karte</tspan></text><text x="490.0" y="160.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">nur wenn der Lauf dich braucht: der nächste Befehl, z. B. adw approve &lt;id&gt; --repo &lt;pfad&gt;</tspan></text></g>
+<g data-step="3" data-info="Trace ist Standard. Timeline zeigt Swimlanes, Artifacts Issue, Spec, Plan, Entwürfe und Berichte, Raw das filterbare Event-Log."><rect x="30" y="180" width="920" height="36" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="490.0" y="200.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">Tabs: Trace · Timeline · Artifacts · Raw</tspan></text></g>
+<g data-step="4" data-info="Der Span-Baum des Laufs; Tool-Rauschen ist gefaltet. Tastatur: Pfeile bewegen und falten, Enter oder Leertaste wählt aus."><rect x="30" y="226" width="270" height="220" rx="10" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="165.0" y="314.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="165.0" dy="0">Trace-Baum</tspan></text><text x="165.0" y="334.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="165.0" dy="0">Phasen, Lanes, Runden,</tspan><tspan x="165.0" dy="16">Agent-Läufe, Gates, Reviews</tspan><tspan x="165.0" dy="16">↑ ↓ ← → Enter · ein Tab-Stopp</tspan></text></g>
+<g data-step="5" data-info="Zeigt den gewählten Knoten. Diff ist der Schritt-Diff aus den Snapshot-Refs."><rect x="312" y="226" width="410" height="220" rx="10" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="517.0" y="314.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="517.0" dy="0">Detailbereich</tspan></text><text x="517.0" y="334.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="517.0" dy="0">Agent-Lauf: Prompt · Answer · Tools · Diff</tspan><tspan x="517.0" dy="16">Payloads als Feldliste,</tspan><tspan x="517.0" dy="16">Issue / Prompts / Antworten als Markdown</tspan></text></g>
+<g data-step="6" data-info="Zeitreise: der Lauf-Zustand zum gewählten Zeitpunkt, nicht nur am Ende."><rect x="734" y="226" width="216" height="220" rx="10" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="842.0" y="306.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="842.0" dy="0">Lauf-Kontext</tspan></text><text x="842.0" y="326.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="842.0" dy="0">am gewählten Knoten:</tspan><tspan x="842.0" dy="16">Phase, Runde n/Cap,</tspan><tspan x="842.0" dy="16">Limit-Treffer, Breaker,</tspan><tspan x="842.0" dy="16">Kosten, Follow-ups</tspan></text></g>
+<g data-step="7" data-info="Bei Bedarf aufklappen: Was noch geplant ist und was tatsächlich angefasst wurde."><rect x="30" y="456" width="920" height="60" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2" stroke-dasharray="6 4"/><text x="490.0" y="480.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">Plan-Skelett · Änderungsumfang (beide eingeklappt)</tspan></text><text x="490.0" y="500.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">Tasks aus plan.md je Lane · geänderte Dateien je Lane neben dem Kontrakt-Scope</tspan></text></g>
+</svg></div>
+<figcaption aria-hidden="true">Run Inspector: Aufbau der
+Lauf-Detailseite</figcaption>
+</figure>
 <ul>
 <li><strong>Header:</strong> Status, ein maßstäbliches
 <strong>Phasenband</strong> (fertig / aktiv / wartend / fehlgeschlagen,
@@ -923,8 +1432,8 @@ und Follow-ups <strong>zum Zeitpunkt des gewählten Knotens</strong>
 Karte den nächsten Schritt — z. B.
 <code>adw approve &lt;id&gt; --repo &lt;pfad&gt;</code> oder den
 Eskalationsbericht.</li>
-<li><strong>Plan-Skelett:</strong> die Tasks aus <code>plan.md</code>
-über dem Trace.</li>
+<li><strong>Plan-Skelett:</strong> die Tasks aus <code>plan.md</code> je
+Lane, eingeklappt unter dem Trace.</li>
 <li><strong>Änderungsumfang</strong> (eingeklappt): geänderte Dateien
 pro Lane mit <code>+/-</code>-Zählern, neben dem im Kontrakt
 deklarierten Umfang.</li>
@@ -979,6 +1488,27 @@ wie man sie liest</h2>
 <code>&lt;ziel&gt;/.adw/runs/&lt;run_id&gt;/</code> (8-stellige Hex-ID),
 gitignoriert und nur für dich lesbar (<code>0600</code> für State und
 Log).</p>
+<figure>
+<div class="dia" data-diagram="handbook/run-artifacts"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 445" width="980" height="445" role="img">
+<title>Welche Lauf-Datei wann lesen</title>
+<desc>Die Dateien unter .adw/runs/&lt;run_id&gt;/, gruppiert nach dem Moment, in dem du sie brauchst.</desc>
+<rect x="0" y="0" width="980" height="445" fill="#ffffff"/>
+<g data-info="Ein Verzeichnis pro Lauf, 8-stellige Hex-ID, gitignored. Nur für dich lesbar."><rect x="330" y="16" width="320" height="54" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="490.0" y="37.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">.adw/runs/&lt;run_id&gt;/</tspan></text><text x="490.0" y="59.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">gitignored · State + Log sind 0600</tspan></text></g>
+<g data-step="1" data-info="Wenn der Lauf am Spec- oder Plan-Gate pausiert: zuerst die Zusammenfassung, dann das Artefakt selbst."><path d="M490.0 70 L490.0 95 L166.0 95 L166.0 110.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="166.0,120 171.5,110.0 160.5,110.0" fill="#475569"/><rect x="16" y="120" width="300" height="38" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="166.0" y="145" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="166.0" dy="0">Am Gate (Exit 2)</tspan></text></g>
+<g data-step="1" data-info="Die Synthese-Zusammenfassung — das Erste, was man am Gate liest."><rect x="16" y="172" width="300" height="74" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="166.0" y="195.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="166.0" dy="0">spec-summary.md / plan-summary.md</tspan></text><text x="166.0" y="215.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="166.0" dy="0">Was + Warum, Entscheidungen, Zurück-</tspan><tspan x="166.0" dy="16">gestelltes, Dissens der Entwürfe</tspan></text></g>
+<g data-step="1" data-info="Die archivierte, reviewte Spec und der Plan. Der Plan listet Workstreams und Tasks."><rect x="16" y="256" width="300" height="57" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="166.0" y="279.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="166.0" dy="0">spec.md · plan.md</tspan></text><text x="166.0" y="299.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="166.0" dy="0">das reviewte Artefakt</tspan></text></g>
+<g data-step="1" data-info="Der vereinbarte Schnittstellen-Kontrakt. Im Parallel-Modus bauen beide Lanes dagegen."><rect x="16" y="323" width="300" height="57" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="166.0" y="346.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="166.0" dy="0">contract.yaml</tspan></text><text x="166.0" y="366.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="166.0" dy="0">Schnittstelle für beide Lanes</tspan></text></g>
+<g data-step="2" data-info="Wenn der Lauf zu Ende ist: Follow-ups nach Erfolg, der Bericht nach einer Eskalation."><path d="M490.0 70 L490.0 95 L490.0 95 L490.0 110.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="490.0,120 495.5,110.0 484.5,110.0" fill="#475569"/><rect x="340" y="120" width="300" height="38" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="490.0" y="145" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">Nach dem Lauf</tspan></text></g>
+<g data-step="2" data-info="Deduplizierte Follow-up-Issues. Kein automatischer Neustart; der Lauf geht normal weiter."><rect x="340" y="172" width="300" height="74" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="490.0" y="195.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">followups.md</tspan></text><text x="490.0" y="215.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">Scope-Lücken, Findings unter der</tspan><tspan x="490.0" dy="16">Review-Schwelle — Tickets machen</tspan></text></g>
+<g data-step="2" data-info="Der Übergabebericht: erreichte Phase, Gate-Output, Konflikt, Limit oder Circuit Breaker."><rect x="340" y="256" width="300" height="74" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="490.0" y="279.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">escalation.md</tspan></text><text x="490.0" y="299.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">nur nach Exit 1 (eskaliert):</tspan><tspan x="490.0" dy="16">Phase + konkreter Grund</tspan></text></g>
+<g data-step="3" data-info="Für Debugging und Nachvollziehbarkeit. Lesen, nie bearbeiten."><path d="M490.0 70 L490.0 95 L814.0 95 L814.0 110.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="814.0,120 819.5,110.0 808.5,110.0" fill="#475569"/><rect x="664" y="120" width="300" height="38" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="814.0" y="145" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="814.0" dy="0">Tiefer graben</tspan></text></g>
+<g data-step="3" data-info="Spans, Agent-Nachrichten, Tool-Aufrufe, Gate-Ausgaben, Findings. Roh und ungeschwärzt."><rect x="664" y="172" width="300" height="57" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="814.0" y="195.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="814.0" dy="0">events.jsonl(.gz)</tspan></text><text x="814.0" y="215.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="814.0" dy="0">volles Event-Log — via adw gui oder jq</tspan></text></g>
+<g data-step="3" data-info="Die zwei unabhängigen Entwürfe hinter jeder Synthese; .codex.FAILED, wenn Codex nicht liefern konnte."><rect x="664" y="239" width="300" height="57" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="814.0" y="262.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="814.0" dy="0">drafts/</tspan></text><text x="814.0" y="282.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="814.0" dy="0">Claude- + Codex-Entwurf je Artefakt</tspan></text></g>
+<g data-step="3" data-info="Phase, Lanes, Zähler, gepinnte Einstellungen. Grundlage für adw resume."><rect x="664" y="306" width="300" height="57" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="814.0" y="329.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="814.0" dy="0">state.json</tspan></text><text x="814.0" y="349.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="814.0" dy="0">gesicherter Lauf-Zustand — nie editieren</tspan></text></g>
+<g data-step="3" data-info="Das Issue genau so, wie der Lauf es bekam, und die Git-Worktrees der Lanes."><rect x="664" y="373" width="300" height="57" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="814.0" y="396.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="814.0" dy="0">issue.md · trees/&lt;lane&gt;</tspan></text><text x="814.0" y="416.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" text-anchor="middle" fill="#0f172a"><tspan x="814.0" dy="0">Eingabe wie erhalten · Lane-Worktrees</tspan></text></g>
+</svg></div>
+<figcaption aria-hidden="true">Welche Lauf-Datei wann lesen</figcaption>
+</figure>
 <table>
 <thead>
 <tr class="header">
@@ -1051,7 +1581,8 @@ geseedet und <strong>auf dem Feature-Branch mitcommittet</strong> — der
 MR/PR zeigt genau, was spezifiziert und geplant wurde. Der
 Haupt-Checkout bleibt sauber.</p>
 <p>Praktische Kommandos:</p>
-<div class="sourceCode" id="cb12"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw status <span class="at">--repo</span> ~/code/shop</span>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw status <span class="at">--repo</span> ~/code/shop</span>
 <span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span> ~/code/shop/.adw/runs/<span class="op">&lt;</span>id<span class="op">&gt;</span>/escalation.md</span>
 <span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a><span class="ex">jq</span> <span class="at">-r</span> <span class="st">&#39;select(.type==&quot;approval&quot;) | .payload&#39;</span> ~/code/shop/.adw/runs/<span class="op">&lt;</span>id<span class="op">&gt;</span>/events.jsonl</span>
 <span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a><span class="fu">git</span> <span class="at">-C</span> ~/code/shop log <span class="at">--oneline</span> adw/<span class="op">&lt;</span>id<span class="op">&gt;</span>/backend</span></code></pre></div>
@@ -1101,7 +1632,8 @@ Gates, Umgebung), neuen Lauf starten.</p>
 Aufräumen</h2>
 <p>Worktrees und Roh-Logs machen Lauf-Verzeichnisse groß. Zwei Kommandos
 halten sie im Zaum:</p>
-<div class="sourceCode" id="cb14"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw runs list <span class="at">--repo</span> ~/code/shop</span>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw runs list <span class="at">--repo</span> ~/code/shop</span>
 <span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="co"># 3f9a12c4  done                    2026-10-02 14:11:07  events=8421  log=31457280</span></span>
 <span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a><span class="ex">uv</span> run adw runs prune <span class="at">--repo</span> ~/code/shop                     <span class="co"># neueste 20 behalten, Rest löschen</span></span>
@@ -1143,7 +1675,7 @@ tokenweise API-Abrechnung.</li>
 Verfügbarkeitsrisiko.</li>
 <li><strong>Limit erschöpft ≠ Arbeit verloren.</strong> Ein
 fehlschlagender Agent-Aufruf stoppt den Lauf mit Exit 1 und der Meldung
-<em>„Agent-Lauf abgebrochen (z. B. Plan-Limit erschöpft)&quot;</em>. Der Lauf
+<em>„Agent-Lauf abgebrochen (z. B. Plan-Limit erschöpft)"</em>. Der Lauf
 ist <strong>nicht</strong> eskaliert, er steht an seinem Checkpoint.
 Nach dem Reset: <code>adw resume &lt;run_id&gt;</code>. Ein
 automatisches Warten gibt es bewusst nicht.</li>
@@ -1159,7 +1691,8 @@ Verbrauchsmesser, keine Rechnung.</li>
 <h2 id="13-gute-issues-schreiben-briefs">13. Gute Issues schreiben
 (Briefs)</h2>
 <p>Das Issue ist die einzige Eingabe. Ein guter Brief ist der billigste
-Hebel auf die Laufqualität. Die fünf Briefs unter <a href="briefs/README.md"><code>docs/briefs/</code></a> liefen jeweils
+Hebel auf die Laufqualität. Die fünf Briefs unter <a
+href="../briefs/README.md"><code>docs/briefs/</code></a> liefen jeweils
 autonom mit <code>--gates none</code>, keiner eskalierte; ihre Struktur
 ist die empfohlene Vorlage:</p>
 <ol type="1">
@@ -1168,9 +1701,9 @@ Beschreibungen. Jede Behauptung <strong>unmittelbar vor</strong> dem
 Start gegen Code (oder die laufende App) prüfen.</li>
 <li><strong>Nummerierte Vorentscheidungen (E1, E2, …)</strong>, jeweils
 mit „Diese Frage ist entschieden — kein Finding, auch nicht im
-Review-Loop.&quot; Review-Loops können ambivalente Fragen finden, aber nicht
+Review-Loop." Review-Loops können ambivalente Fragen finden, aber nicht
 entscheiden; offene Fragen oszillieren bis zum Rundendeckel.</li>
-<li><strong>„Bestand, der NICHT Gegenstand dieses Issues ist&quot;</strong> —
+<li><strong>„Bestand, der NICHT Gegenstand dieses Issues ist"</strong> —
 verhindert, dass ein Lauf vorhandene Dinge abbaut, die der Brief nicht
 erwähnt.</li>
 <li><strong>Eine Deferred-Liste, die ausdrücklich den Review-Loop
@@ -1236,7 +1769,7 @@ dokumentierte Limitations)</td>
 <tr class="even">
 <td>Codex-Code-Review</td>
 <td>5 Runden</td>
-<td>Ein Problem, das Reviews nicht „wegfixen&quot; können</td>
+<td>Ein Problem, das Reviews nicht „wegfixen" können</td>
 </tr>
 <tr class="odd">
 <td>Fix-Zyklen nach finalem Review</td>
@@ -1268,6 +1801,25 @@ committet</td>
 </table>
 <hr />
 <h2 id="15-fehlerbehebung-und-faq">15. Fehlerbehebung und FAQ</h2>
+<figure>
+<div class="dia" data-diagram="handbook/troubleshooting"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 560" width="980" height="560" role="img">
+<title>Fehlersuche nach Exit-Code</title>
+<desc>Entscheidungsbaum vom Exit-Code von adw run / resume / approve zur nächsten Aktion.</desc>
+<rect x="0" y="0" width="980" height="560" fill="#ffffff"/>
+<g data-step="1" data-info="run, resume und approve enden alle mit Exit 0, 2 oder 1. Der Code sagt, welcher Zweig dieses Baums gilt."><rect x="330" y="16" width="320" height="60" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="490.0" y="39.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">Das Kommando endete mit</tspan></text><text x="490.0" y="61.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="490.0" dy="0">echo $?</tspan></text></g>
+<g data-step="2" data-info="Der Branch ist gepusht, die Pipeline (plus Staging-Job) grün."><path class="flow" d="M490.0 76 L490.0 104 L131.0 104 L131.0 118.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="131.0,128 136.5,118.0 125.5,118.0" fill="#475569"/><rect x="16" y="128" width="230" height="80" rx="10" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="131.0" y="161.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="131.0" dy="0">Exit 0</tspan></text><text x="131.0" y="183.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="131.0" dy="0">fertig</tspan></text></g>
+<g data-step="3" data-info="Gewollte Pause. resume würde nur erneut pausieren — approve verwenden."><path class="flow" d="M490.0 76 L490.0 104 L381.0 104 L381.0 118.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="381.0,128 386.5,118.0 375.5,118.0" fill="#475569"/><rect x="266" y="128" width="230" height="80" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="381.0" y="161.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="381.0" dy="0">Exit 2</tspan></text><text x="381.0" y="183.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="381.0" dy="0">pausiert an Gate oder Haltepunkt</tspan></text></g>
+<g data-step="4" data-info="Exit 1 heißt entweder kontrollierte Eskalation oder Unterbrechung. adw status zeigt die Phase; escalation.md gibt es nur bei eskalierten Läufen."><path class="flow" d="M490.0 76 L490.0 104 L740.0 104 L740.0 118.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="740.0,128 745.5,118.0 734.5,118.0" fill="#475569"/><rect x="516" y="128" width="448" height="80" rx="10" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="740.0" y="152.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="740.0" dy="0">Exit 1</tspan></text><text x="740.0" y="174.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="740.0" dy="0">Ist der Lauf eskaliert?</tspan><tspan x="740.0" dy="18">(adw status → Phase escalated)</tspan></text></g>
+<g data-step="2" data-info="Wie gewohnt reviewen und mergen. Follow-ups werden bewusst nicht automatisch gebaut."><path class="flow" d="M131.0 208 L131.0 242.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="131.0,252 136.5,242.0 125.5,242.0" fill="#475569"/><rect x="16" y="252" width="230" height="100" rx="10" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="131.0" y="286.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="131.0" dy="0">MR/PR öffnen</tspan></text><text x="131.0" y="308.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="131.0" dy="0">followups.md in</tspan><tspan x="131.0" dy="18">Tickets verwandeln</tspan></text></g>
+<g data-step="3" data-info="Die CLI nennt die Dateien. Ablehnen gibt es nicht — bei falscher Richtung den Lauf liegen lassen und neu starten."><path class="flow" d="M381.0 208 L381.0 242.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="381.0,252 386.5,242.0 375.5,242.0" fill="#475569"/><rect x="266" y="252" width="230" height="100" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="381.0" y="286.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="381.0" dy="0">Zusammenfassung lesen</tspan></text><text x="381.0" y="308.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="381.0" dy="0">spec-/plan-summary.md,</tspan><tspan x="381.0" dy="18">dann adw approve &lt;id&gt;</tspan></text></g>
+<g data-step="5" data-info="Eskalierte Läufe sind bewusst nicht fortsetzbar. Typische Ursachen: vages Issue, widersprüchliche Gates, Merge-Konflikt, ein Limit oder der Circuit Breaker."><path class="flow" d="M623.0 208 L623.0 242.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="623.0,252 628.5,242.0 617.5,242.0" fill="#475569"/><text x="631.0" y="230" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" font-weight="bold" text-anchor="start" fill="#b91c1c"><tspan x="631.0" dy="0">ja</tspan></text><rect x="516" y="252" width="214" height="100" rx="10" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="623.0" y="277.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="623.0" dy="0">Eskaliert (final)</tspan></text><text x="623.0" y="299.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="623.0" dy="0">escalation.md lesen,</tspan><tspan x="623.0" dy="18">Ursache beheben,</tspan><tspan x="623.0" dy="18">NEUEN Lauf starten</tspan></text></g>
+<g data-step="6" data-info="Ohne Eskalation steht der Lauf unverändert am Checkpoint (oder wurde nie angelegt)."><path class="flow" d="M857.0 208 L857.0 242.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="857.0,252 862.5,242.0 851.5,242.0" fill="#475569"/><text x="865.0" y="230" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="12" font-weight="bold" text-anchor="start" fill="#475569"><tspan x="865.0" dy="0">nein</tspan></text><rect x="750" y="252" width="214" height="100" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="857.0" y="286.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="857.0" dy="0">stderr lesen</tspan></text><text x="857.0" y="308.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="857.0" dy="0">die Meldung nennt</tspan><tspan x="857.0" dy="18">die Ursache</tspan></text></g>
+<g data-step="7" data-info="Das Plan-Fenster ist erschöpft oder die Claude-CLI ist ausgefallen. Am Lauf ist nichts zu reparieren."><path class="flow" d="M857.0 352 L857.0 385 L389.0 385 L389.0 410.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="389.0,420 394.5,410.0 383.5,410.0" fill="#475569"/><rect x="282" y="420" width="214" height="120" rx="10" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="389.0" y="455.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="389.0" dy="0">Plan-Limit / Absturz</tspan></text><text x="389.0" y="477.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="389.0" dy="0">„Agent-Lauf abgebrochen“</tspan><tspan x="389.0" dy="18">→ Reset abwarten,</tspan><tspan x="389.0" dy="18">adw resume &lt;id&gt;</tspan></text></g>
+<g data-step="8" data-info="ADW verwirft nie deine Arbeit. Die gelisteten Pfade aufräumen, dann fortsetzen."><path class="flow" d="M857.0 352 L857.0 385 L623.0 385 L623.0 410.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="623.0,420 628.5,410.0 617.5,410.0" fill="#475569"/><rect x="516" y="420" width="214" height="120" rx="10" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="623.0" y="455.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="623.0" dy="0">Vorflug abgelehnt</tspan></text><text x="623.0" y="477.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="623.0" dy="0">fremde Änderungen im</tspan><tspan x="623.0" dy="18">Haupt-Checkout → committen</tspan><tspan x="623.0" dy="18">oder stashen, adw resume</tspan></text></g>
+<g data-step="9" data-info="Fehlende oder ungültige Config, zwei Issue-Quellen, widersprüchliche Gate-Flags: fail fast, bevor ein Lauf existiert."><path class="flow" d="M857.0 352 L857.0 385 L857.0 385 L857.0 410.0" stroke="#475569" stroke-width="2" fill="none"/><polygon points="857.0,420 862.5,410.0 851.5,410.0" fill="#475569"/><rect x="750" y="420" width="214" height="120" rx="10" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="857.0" y="455.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#0f172a"><tspan x="857.0" dy="0">Config-/Flag-Fehler</tspan></text><text x="857.0" y="477.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" text-anchor="middle" fill="#0f172a"><tspan x="857.0" dy="0">kein Lauf angelegt →</tspan><tspan x="857.0" dy="18">config.yaml oder Flags</tspan><tspan x="857.0" dy="18">korrigieren, adw run</tspan></text></g>
+</svg></div>
+<figcaption aria-hidden="true">Fehlersuche nach Exit-Code</figcaption>
+</figure>
 <p><strong><code>Fehler: …/.adw/config.yaml: config.yaml fehlt — das Ziel-Repo ist nicht ADW-fähig</code></strong>
 Keine Config im Ziel-Repo. <code>examples/config.yaml</code> kopieren
 (§3).</p>
@@ -1286,7 +1838,7 @@ stashen, dann neu starten bzw. <code>adw resume</code>.</p>
 Die Config definiert nur eine Lane. Die fehlende Lane (mit eigenen
 Gates) ergänzen oder ohne <code>--parallel</code> laufen. Es wurden
 keine Tokens verbraucht — die Prüfung läuft vor Phase 1.</p>
-<p><strong><code>resume</code> „tut nichts&quot; bei einem pausierten
+<p><strong><code>resume</code> „tut nichts" bei einem pausierten
 Lauf</strong> Er steht an einem Gate; <code>resume</code> pausiert
 erneut. <code>adw approve &lt;id&gt;</code> verwenden.</p>
 <p><strong><code>Run … wartet nicht auf Approval</code></strong>
@@ -1300,18 +1852,18 @@ nichts zu reparieren — Reset abwarten, dann
 Mit der Claude Code CLI anmelden (<code>claude</code>, dann
 <code>/login</code>). Ein API-Key hilft nicht — er wird absichtlich
 ignoriert.</p>
-<p><strong>Eskalation „RED nicht bestätigt&quot;</strong> Die Tests aus dem
+<p><strong>Eskalation „RED nicht bestätigt"</strong> Die Tests aus dem
 reinen Test-Lauf schlugen nicht fehl. Entweder verfehlen sie das
 geforderte Verhalten, oder es existiert schon. Issue schärfen, neuen
 Lauf starten.</p>
-<p><strong>Eskalation „HEAD bewegt&quot; / „Build-Agent hat selbst
-committet&quot;</strong> Nur der Orchestrator committet, und nur nach grünen
+<p><strong>Eskalation „HEAD bewegt" / „Build-Agent hat selbst
+committet"</strong> Nur der Orchestrator committet, und nur nach grünen
 Gates. Etwas anderes hat den Lane-Worktree angefasst. Prüfen, dann neuen
 Lauf starten.</p>
 <p><strong><code>--base-branch kann nach dem Anlegen der Lanes nicht mehr geändert werden</code></strong>
 Die Lanes sind bereits vom gepinnten Base-Branch abgezweigt. Für eine
 andere Basis einen neuen Lauf starten.</p>
-<p><strong><code>adw gui benötigt das optionale Extra &#39;gui&#39;</code></strong>
+<p><strong><code>adw gui benötigt das optionale Extra 'gui'</code></strong>
 <code>adw[gui]</code> installieren (§2).</p>
 <p><strong><code>--host … ist keine Loopback-Adresse</code></strong>
 Gewollt. SSH-Tunnel nutzen
@@ -1376,7 +1928,7 @@ Problem, Fix-Plan, optional Kategorie.</td>
 </tr>
 <tr class="odd">
 <td><strong><code>scope_gap</code></strong></td>
-<td>„Fehlt, war aber nie geplant&quot; — wird zum Follow-up, löst keine
+<td>„Fehlt, war aber nie geplant" — wird zum Follow-up, löst keine
 Nacharbeit aus.</td>
 </tr>
 <tr class="even">
@@ -1405,6 +1957,8 @@ Kontext.</td>
 </tbody>
 </table>
 <hr />
-<p>ADW-Handbuch · Quellstand 0.26.1 · 2026-10-11 · Tiefenblick: <a href="ADW-WORKFLOW.de.md">ADW-WORKFLOW.de.md</a> · Contributor-Spec: <a href="ADW-SPEC.de.md">ADW-SPEC.de.md</a></p>
+<p>ADW-Handbuch · Quellstand 0.26.1 · 2026-10-11 · Tiefenblick: <a
+href="ADW-WORKFLOW.de.html">ADW-WORKFLOW.de.md</a> · Contributor-Spec: <a
+href="ADW-SPEC.de.html">ADW-SPEC.de.md</a></p>
 </body>
 </html>

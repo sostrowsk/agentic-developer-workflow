@@ -32,6 +32,8 @@ Arbeit*. Jedes der folgenden Prinzipien schließt eine dieser Türen. Jedes steh
 Regel da, gefolgt vom Grund und der Stelle im Code, die es durchsetzt — ein Prinzip,
 das kein Code durchsetzt, ist nur ein Wunsch.
 
+![Die fünfzehn Prinzipien, gruppiert nach dem Fehlermodus, den sie schließen (HTML: Kachel überfahren für Regel und Grund)](diagrams/spec/philosophy-map.de.svg)
+
 ## P1 — Kontrollfluss ist Code, nicht Prompt
 
 **Regel.** Schleifen, Gates, Merges, Dispatch, Triage, Limits, Freigabepausen und
@@ -77,6 +79,8 @@ kostet eine rote Pipeline oder Schlimmeres.
 **Durchgesetzt durch.** `_dispatch_lane_fixes` ist die einzige Fix-Routing-Funktion;
 sie endet immer in `_run_lane` (der Gate-Schleife). Die Review-Phasen holen ihren
 Worktree über `_integration_loop`, ein Review-Fix läuft also erneut durch Merge + E2E.
+
+![P3 — jede Quelle von Findings endet im selben validierten Weg](diagrams/spec/fix-path.de.svg)
 
 ## P4 — Alles ist begrenzt, und Stillstand wird erkannt
 
@@ -269,40 +273,7 @@ nur in einer gibt, veraltet still in der anderen. Releases pro Push halten die F
 
 ## 1. Architektur und Modulkarte
 
-```
-                         adw run / resume / approve / status / gui / runs
-                                          │
-                         ┌────────────────▼─────────────────┐
-                         │ cli.py (typer)                    │
-                         │ Argumentprüfung · Gate-Modi ·     │
-                         │ Vorflug · Run-Lock · Dry-Run-     │
-                         │ Verdrahtung · Exit-Codes 0/2/1    │
-                         └────────────────┬─────────────────┘
-                                          │ RunContext
-                         ┌────────────────▼─────────────────┐
-                         │ phases.py — die 7 Phasen          │
-                         │ Schleifen · Limits · Dispatch ·   │
-                         │ Triage · Eskalation · Breakpoints │
-                         └──┬──────────┬───────────┬────────┘
-               Urteil       │          │           │      deterministischer Kern
-      ┌─────────────────────▼─┐  ┌─────▼──────┐  ┌─▼───────────────────────────┐
-      │ agents.py             │  │ codex.py   │  │ config  state  findings     │
-      │ SdkAgentRunner        │  │ CodexRunner│  │ gates   worktrees  triage   │
-      │ (Claude Agent SDK →   │  │ (codex exec│  │ ci  github  forge  env      │
-      │  Claude-Code-CLI)     │  │  read-only)│  │ mock (Dry-Run / Tests)      │
-      └───────────────────────┘  └────────────┘  └─────────────────────────────┘
-                   Beobachtbarkeit (fail-open, nie auf dem kritischen Pfad)
-      ┌──────────────────────────────────────────────────────────────────────────┐
-      │ events.py → .adw/runs/<id>/events.jsonl    snapshots.py → refs/adw/<id>/* │
-      │ retention.py (adw runs list/prune, Auto-Prune)                           │
-      └───────────────────────────────────┬──────────────────────────────────────┘
-                                          │ read-only
-                         ┌────────────────▼─────────────────┐
-                         │ gui/ (optionales Extra `adw[gui]`)│
-                         │ reader · model · registry ·       │
-                         │ app (FastAPI) · i18n · Templates  │
-                         └───────────────────────────────────┘
-```
+![Architektur des adw-Pakets: Einstieg, Phasen-Engine, Urteil, deterministischer Kern, fail-open-Beobachtbarkeit und die read-only-GUI](diagrams/spec/architecture.de.svg)
 
 | Modul | Zeilen | Verantwortung |
 | --- | ---: | --- |
@@ -318,7 +289,7 @@ nur in einer gibt, veraltet still in der anderen. Releases pro Push halten die F
 | `adw/triage.py` | 95 | Reine Funktionen: Final-Review-Triage (`scope_gap` → Follow-up, Rest → Lane-Fixes), Limit-Prüfungen, Circuit-Breaker. |
 | `adw/ci.py` | 207 | GitLab: SHA-gebundenes Pipeline-Polling über `glab api`, Abruf der Logs fehlgeschlagener Jobs. |
 | `adw/github.py` | 172 | GitHub Actions: SHA-gebundenes Polling der Workflow-Runs über `gh api`, `--log-failed`-Auszüge. Gleiches `CiResult` und gleiche Fehlerklassen wie `ci.py`. |
-| `adw/forge.py` | 82 | GitLab vs. GitHub: `ci.provider`-Override, sonst Hostname der `origin`-URL; unbekannter Host → Fail fast. |
+| `adw/forge.py` | 82 | GitLab vs. GitHub: `ci.provider`-Override, sonst Hostname der `origin`-URL; unbekannter Host → `ForgeError`, den Phase 7 in eine Eskalation umsetzt (Dry-Run: Rückfall auf GitLab). |
 | `adw/env.py` | 39 | `safe_env()`: Umgebungs-Whitelist für jeden Subprozess. |
 | `adw/events.py` | 371 | `EventEmitter`/`NoOpEmitter`: append-only JSON-Lines-Event-Log mit Spans, Seq pro Run, `flock`, Dateimodus 0600, **fail-open**. |
 | `adw/snapshots.py` | 133 | Worktree-Snapshots pro Schritt als git-Refs `refs/adw/<run_id>/<seq>` (temporärer Index, `commit-tree`, `update-ref`), fail-open. |
@@ -330,6 +301,8 @@ nur in einer gibt, veraltet still in der anderen. Releases pro Push halten die F
 | `adw/gui/app.py` | 3073 | Read-only-FastAPI-App: Lauf-Liste, Lauf-Detail (Trace/Timeline/Artefakte/Raw), JSON-API, SSE-Live-Tail, Diff-Endpoint mit Ref-Allowlist. |
 | `adw/gui/i18n.py` | 353 | Wörterbuchbasierte EN/DE-Übersetzung der Oberfläche; Inhalte werden nie übersetzt. |
 | `adw/gui/templates/`, `static/` | — | Jinja2-Templates, `app.css` (Token-System, Dark Mode), `app.js` (ohne Framework). |
+
+![Import-Schichten von adw/ — jeder Import zeigt auf eine tiefere Zeile (HTML: Modul überfahren für seine genauen Imports)](diagrams/spec/module-layers.de.svg)
 
 ### 1.1 `RunContext` — die Dependency-Injection-Wurzel
 
@@ -364,22 +337,7 @@ Session im State.
 
 ## 2. Zustandsautomat
 
-```
-             ┌──────────────┐  --gates spec|both   ┌────────────────────────┐
-  run ──────▶│     spec     │─────────────────────▶│ awaiting_spec_approval │──approve──┐
-             └──────┬───────┘                      └────────────────────────┘           │
-                    │ (kein Spec-Gate)                                                  ▼
-                    └────────────────────────────────────────────────────────────▶┌──────┐
-                                                                                  │ plan │
-             ┌──────────────────────────┐  --gates plan|both (Default: plan)      └──┬───┘
-             │    awaiting_approval     │◀───────────────────────────────────────────┘
-             │(Plan-Gate oder Breakpoint)│──approve──▶ build ─▶ [before_integration] ─▶
-             └──────────────────────────┘
-        integration ─▶ codex_review ─▶ final_review ─▶ [before_push] ─▶ ci ─▶ done
-
-  jede Phase ──(Limit / Konflikt / Parse-Fehler / Invariante)──▶ escalated   (endgültig)
-  jede Phase ──(AgentRunError, Crash, Kill)──▶ Phase unverändert, fortsetzbar mit `adw resume`
-```
+![Zustandsautomat des Laufs mit Freigabe-Halten, Breakpoints und Exit-Codes](diagrams/spec/state-machine.de.svg)
 
 - `Phase` ist ein geschlossenes `Literal` in `state.py`: `spec`,
   `awaiting_spec_approval`, `plan`, `awaiting_approval`, `build`, `integration`,
@@ -434,6 +392,8 @@ Geladen von `AdwConfig.load(repo)`. Strikt: doppelte YAML-Keys, unbekannte Keys
 ### 4.2 `RunState` und `LaneState`
 
 Persistiert als `.adw/runs/<run_id>/state.json`. `run_id` sind 8 Hex-Zeichen.
+
+![Feldgruppen von RunState und LaneState und der atomare Schreibweg](diagrams/spec/run-state.de.svg)
 
 | Feld | Ebene | Zweck |
 | --- | --- | --- |
@@ -571,6 +531,8 @@ Jeder Agent ist eine eingefrorene `AgentSpec(name, model, tools, allowed_tools,
 system_append, permission_mode="default", sandbox_bash=False)`. `tools`
 **beschränkt**, was dem Agent überhaupt angeboten wird; `allowed_tools` genehmigt
 (pfadbeschränkt). Beides ist nötig.
+
+![Schreibgrenzen: wer was schreiben darf und wer committet](diagrams/spec/write-boundaries.de.svg)
 
 | Agent | Modell | Tools | Schreibregeln | Auftrag |
 | --- | --- | --- | --- | --- |
@@ -751,6 +713,8 @@ brechen darf.
   Lauf scheitern lassen können.
 
 ## 12. Sicherheitsmodell
+
+![Die acht Sicherheitsschichten zwischen unsicheren Eingaben und den geschützten Gütern](diagrams/spec/security-layers.de.svg)
 
 | Schicht | Mechanismus |
 | --- | --- |

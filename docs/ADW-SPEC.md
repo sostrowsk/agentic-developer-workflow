@@ -31,6 +31,8 @@ agent *grades its own work*. Every principle below closes one of those doors. Ea
 one is stated as a rule, followed by the reason and the place in the code that
 enforces it — a principle that no code enforces is only a wish.
 
+![The fifteen principles, grouped by the failure mode they close (HTML: hover a tile for rule and reason)](diagrams/spec/philosophy-map.svg)
+
 ## P1 — Control flow is code, not prompt
 
 **Rule.** Loops, gates, merges, dispatch, triage, limits, approval pauses and CI
@@ -74,6 +76,8 @@ a red pipeline or worse.
 **Enforced by.** `_dispatch_lane_fixes` is the single fix-routing function; it
 always ends in `_run_lane` (the gate loop). The review phases obtain their worktree
 through `_integration_loop`, so a review fix re-enters merge + E2E.
+
+![P3 — every source of findings ends in the same validated path](diagrams/spec/fix-path.svg)
 
 ## P4 — Everything is bounded, and standstill is detected
 
@@ -265,40 +269,7 @@ introduced this?" answerable.
 
 ## 1. Architecture and module map
 
-```
-                         adw run / resume / approve / status / gui / runs
-                                          │
-                         ┌────────────────▼─────────────────┐
-                         │ cli.py (typer)                    │
-                         │ arg validation · gate modes ·     │
-                         │ preflight · run lock · dry-run    │
-                         │ wiring · exit codes 0/2/1         │
-                         └────────────────┬─────────────────┘
-                                          │ RunContext
-                         ┌────────────────▼─────────────────┐
-                         │ phases.py — the 7 phases          │
-                         │ loops · limits · dispatch ·       │
-                         │ triage · escalation · breakpoints │
-                         └──┬──────────┬───────────┬────────┘
-              judgment      │          │           │      deterministic core
-      ┌─────────────────────▼─┐  ┌─────▼──────┐  ┌─▼───────────────────────────┐
-      │ agents.py             │  │ codex.py   │  │ config  state  findings     │
-      │ SdkAgentRunner        │  │ CodexRunner│  │ gates   worktrees  triage   │
-      │ (Claude Agent SDK →   │  │ (codex exec│  │ ci  github  forge  env      │
-      │  Claude Code CLI)     │  │  read-only)│  │ mock (dry run / tests)      │
-      └───────────────────────┘  └────────────┘  └─────────────────────────────┘
-                     observability (fail-open, never on the critical path)
-      ┌──────────────────────────────────────────────────────────────────────────┐
-      │ events.py → .adw/runs/<id>/events.jsonl    snapshots.py → refs/adw/<id>/* │
-      │ retention.py (adw runs list/prune, auto-prune)                           │
-      └───────────────────────────────────┬──────────────────────────────────────┘
-                                          │ read-only
-                         ┌────────────────▼─────────────────┐
-                         │ gui/ (optional extra `adw[gui]`)  │
-                         │ reader · model · registry ·       │
-                         │ app (FastAPI) · i18n · templates  │
-                         └───────────────────────────────────┘
-```
+![Architecture of the adw package: entry point, phase engine, judgment, deterministic core, fail-open observability and the read-only GUI](diagrams/spec/architecture.svg)
 
 | Module | Lines | Responsibility |
 | --- | ---: | --- |
@@ -314,7 +285,7 @@ introduced this?" answerable.
 | `adw/triage.py` | 95 | Pure functions: final-review triage (`scope_gap` → follow-up, rest → lane fixes), limit checks, circuit breaker. |
 | `adw/ci.py` | 207 | GitLab: SHA-bound pipeline polling via `glab api`, failed-job log retrieval. |
 | `adw/github.py` | 172 | GitHub Actions: SHA-bound workflow-run polling via `gh api`, `--log-failed` excerpts. Same `CiResult` and error classes as `ci.py`. |
-| `adw/forge.py` | 82 | GitLab vs. GitHub: `ci.provider` override, otherwise hostname of the `origin` URL; unknown host → fail fast. |
+| `adw/forge.py` | 82 | GitLab vs. GitHub: `ci.provider` override, otherwise hostname of the `origin` URL; unknown host → `ForgeError`, which phase 7 turns into an escalation (dry run: falls back to GitLab). |
 | `adw/env.py` | 39 | `safe_env()`: environment whitelist for every subprocess. |
 | `adw/events.py` | 371 | `EventEmitter`/`NoOpEmitter`: append-only JSON Lines event log with spans, per-run seq, `flock`, file mode 0600, **fail-open**. |
 | `adw/snapshots.py` | 133 | Per-step worktree snapshots as git refs `refs/adw/<run_id>/<seq>` (temporary index, `commit-tree`, `update-ref`), fail-open. |
@@ -326,6 +297,8 @@ introduced this?" answerable.
 | `adw/gui/app.py` | 3073 | Read-only FastAPI app: run list, run detail (Trace/Timeline/Artifacts/Raw), JSON API, SSE live tail, diff endpoint with ref allowlist. |
 | `adw/gui/i18n.py` | 353 | Dictionary-based EN/DE chrome translation; content is never translated. |
 | `adw/gui/templates/`, `static/` | — | Jinja2 templates, `app.css` (token system, dark mode), `app.js` (no framework). |
+
+![Import layers of adw/ — every import points to a lower row (HTML: hover a module for its exact imports)](diagrams/spec/module-layers.svg)
 
 ### 1.1 `RunContext` — the dependency-injection root
 
@@ -359,22 +332,7 @@ the stream, so a crash mid-run still leaves a resumable session in the state.
 
 ## 2. State machine
 
-```
-             ┌──────────────┐  --gates spec|both   ┌────────────────────────┐
-  run ──────▶│     spec     │─────────────────────▶│ awaiting_spec_approval │──approve──┐
-             └──────┬───────┘                      └────────────────────────┘           │
-                    │ (no spec gate)                                                    ▼
-                    └────────────────────────────────────────────────────────────▶┌──────┐
-                                                                                  │ plan │
-             ┌──────────────────────────┐  --gates plan|both (default: plan)      └──┬───┘
-             │    awaiting_approval     │◀───────────────────────────────────────────┘
-             │ (plan gate or breakpoint)│──approve──▶ build ─▶ [before_integration] ─▶
-             └──────────────────────────┘
-        integration ─▶ codex_review ─▶ final_review ─▶ [before_push] ─▶ ci ─▶ done
-
-  any phase ──(limit / conflict / parse error / invariant)──▶ escalated   (final)
-  any phase ──(AgentRunError, crash, kill)──▶ unchanged phase, resumable with `adw resume`
-```
+![Run state machine with approval holds, breakpoints and exit codes](diagrams/spec/state-machine.svg)
 
 - `Phase` is a closed `Literal` in `state.py`: `spec`, `awaiting_spec_approval`,
   `plan`, `awaiting_approval`, `build`, `integration`, `codex_review`,
@@ -428,6 +386,8 @@ values are a `ConfigError` before anything runs.
 ### 4.2 `RunState` and `LaneState`
 
 Persisted as `.adw/runs/<run_id>/state.json`. `run_id` is 8 hex characters.
+
+![RunState and LaneState field groups and the atomic write path](diagrams/spec/run-state.svg)
 
 | Field | Level | Purpose |
 | --- | --- | --- |
@@ -559,6 +519,8 @@ no diff is ever written into the log. Fail-open like the emitter.
 Each agent is a frozen `AgentSpec(name, model, tools, allowed_tools, system_append,
 permission_mode="default", sandbox_bash=False)`. `tools` **restricts** what the
 agent is offered at all; `allowed_tools` approves (path-scoped). Both are needed.
+
+![Write boundaries: who may write what, and who commits](diagrams/spec/write-boundaries.svg)
 
 | Agent | Model | Tools | Write rules | Mission |
 | --- | --- | --- | --- | --- |
@@ -728,6 +690,8 @@ only fixes the architectural boundaries a core contributor must not break.
   nodes. Never make the emitter or snapshotter able to fail a run.
 
 ## 12. Security model
+
+![The eight security layers between untrusted input and the protected assets](diagrams/spec/security-layers.svg)
 
 | Layer | Mechanism |
 | --- | --- |

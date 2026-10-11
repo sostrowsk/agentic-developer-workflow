@@ -12,13 +12,17 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [0.26.2] — Unreleased
+## [0.26.2] — 2026-10-11
 
 ### Added
 - **Three documents at 0.26.1, each in English and German, with HTML and DOCX exports in `docs/export/`.** All three were checked against the code:
   - [`docs/ADW-HANDBOOK.md`](docs/ADW-HANDBOOK.md) — the handbook for developers who run ADW: setup, every config key, the full CLI, the GUI, run artifacts, retention, briefs, and troubleshooting.
   - [`docs/ADW-WORKFLOW.md`](docs/ADW-WORKFLOW.md) — a detailed walk through the seven phases for users and contributors. It covers the loops, limits, the review-loop policy, how a run can end, and resume, and closes with a worked example run.
   - [`docs/ADW-SPEC.md`](docs/ADW-SPEC.md) — the spec for contributors. It opens with ADW's philosophy, then covers the architecture, data model, invariants, extension points, testing, and the release process.
+- **Diagrams for all three documents, plus a script to build the exports.** Each diagram is an SVG under `docs/diagrams/` and appears in the Markdown as an ordinary image, so GitHub shows it too. `scripts/build_docs.py` (needs pandoc and Inkscape) writes the exports to `docs/export/`:
+  - **HTML:** each diagram is embedded and interactive. Readers can step through it, read explanations on hover, focus or click, and watch the edges animate. CSS and JS are embedded too, with no CDN.
+  - **DOCX:** each diagram is converted to EMF and placed at page width.
+  - **Checks:** the script stops with an error if a diagram uses a feature the EMF conversion would silently drop. The rules for diagram authors are in `docs/diagrams/README.md`.
 
 ### Changed
 - **README:** added a table of the documents, and brought the CLI section up to date (`--gates`, `adw gui`, `adw runs`), along with the config table (`codex.*`, `trace.*`, `breakpoints`), the architecture list, the limits (at most 5 Codex review rounds, not 10), and the test count.
@@ -933,6 +937,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.26.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.1...v0.26.2
 [0.26.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.24.0...v0.25.0

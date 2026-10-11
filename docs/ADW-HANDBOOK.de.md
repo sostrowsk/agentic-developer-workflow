@@ -22,6 +22,8 @@
   einem Absturz oder erschöpftem Plan-Limit setzt `adw resume <run_id>` exakt
   dort fort, wo der Lauf stand.
 
+![Ein Lauf aus deiner Sicht: Exit-Codes und nächster Schritt](diagrams/handbook/run-lifecycle.de.svg)
+
 ## Inhalt
 
 1. [Was ADW ist](#1-was-adw-ist)
@@ -79,6 +81,8 @@ Triage, die Review-Runden-Policy — beschreibt [ADW-WORKFLOW.de.md](ADW-WORKFLO
 ---
 
 ## 2. Voraussetzungen und Installation
+
+![Weg zum ersten Lauf: von den Voraussetzungen zum ersten echten Lauf](diagrams/handbook/setup-path.de.svg)
 
 | Voraussetzung | Wofür | Prüfen |
 |---|---|---|
@@ -142,6 +146,8 @@ lanes:
 ### 3.1 Config-Referenz (jeder Key)
 
 Defaults wie in `adw/config.py`. Unbekannte Keys werden überall abgelehnt.
+
+![Aufbau von .adw/config.yaml: jeder Abschnitt, Pflicht oder optional, mit Defaults](diagrams/handbook/config-anatomy.de.svg)
 
 | Key | Pflicht | Default | Bedeutung |
 |---|---|---|---|
@@ -301,6 +307,8 @@ verwirft nie deine Arbeit; stattdessen verweigert es.
 ein Widerspruch oder ein unbekannter Wert wird abgelehnt, bevor ein Lauf
 angelegt wird.
 
+![Wo jeder --gates-Modus pausiert, und die zwei optionalen Haltepunkte](diagrams/handbook/gates-modes.de.svg)
+
 ### 6.2 Wie eine Pause aussieht
 
 ```text
@@ -340,8 +348,9 @@ breakpoints:
 
 Ein Haltepunkt verhält sich wie ein Freigabe-Gate: Exit 2, die CLI nennt ihn,
 fortsetzen mit `adw approve <run_id> --repo <pfad>`. Ein freigegebener
-Haltepunkt hält nie wieder, auch nicht nach Absturz + Resume. `--gates none` /
-`--no-approval` überspringt auch die Haltepunkte.
+Haltepunkt hält nie wieder, auch nicht nach Absturz + Resume. Haltepunkte greifen
+nur in den Modi `plan` und `both`: `--gates none` und `--gates spec` (und ihre
+Altflags) überspringen sie.
 
 ---
 
@@ -452,6 +461,8 @@ nicht live — neu laden.
 
 ### 8.3 Lauf-Detail (`/runs/<repo>/<run_id>`)
 
+![Run Inspector: Aufbau der Lauf-Detailseite](diagrams/handbook/gui-layout.de.svg)
+
 - **Header:** Status, ein maßstäbliches **Phasenband** (fertig / aktiv / wartend
   / fehlgeschlagen, mit Dauern; Klick springt zur Phase), Arbeitszeit, Kosten und
   Tokens des ganzen Laufs. Ein Dry Run trägt ein mitlaufendes `Dry-Run`-Banner.
@@ -465,7 +476,7 @@ nicht live — neu laden.
   Knotens** (Zeitreise).
 - **Recovery-Karte:** Braucht der Lauf dich, nennt eine Karte den nächsten
   Schritt — z. B. `adw approve <id> --repo <pfad>` oder den Eskalationsbericht.
-- **Plan-Skelett:** die Tasks aus `plan.md` über dem Trace.
+- **Plan-Skelett:** die Tasks aus `plan.md` je Lane, eingeklappt unter dem Trace.
 - **Änderungsumfang** (eingeklappt): geänderte Dateien pro Lane mit
   `+/-`-Zählern, neben dem im Kontrakt deklarierten Umfang.
 - **Tabs auf Laufebene:** `Trace` (Default) · `Timeline` (Swimlanes: wohin geht
@@ -496,6 +507,8 @@ Enter/Leertaste aktiviert.
 
 Alles zu einem Lauf liegt unter `<ziel>/.adw/runs/<run_id>/` (8-stellige
 Hex-ID), gitignoriert und nur für dich lesbar (`0600` für State und Log).
+
+![Welche Lauf-Datei wann lesen](diagrams/handbook/run-artifacts.de.svg)
 
 | Pfad | Was es ist | Lesen, wenn |
 |---|---|---|
@@ -674,6 +687,8 @@ schreibt `escalation.md` und endet mit Exit 1.
 ---
 
 ## 15. Fehlerbehebung und FAQ
+
+![Fehlersuche nach Exit-Code](diagrams/handbook/troubleshooting.de.svg)
 
 **`Fehler: …/.adw/config.yaml: config.yaml fehlt — das Ziel-Repo ist nicht ADW-fähig`**
 Keine Config im Ziel-Repo. `examples/config.yaml` kopieren (§3).

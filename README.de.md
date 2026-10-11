@@ -27,6 +27,9 @@ werden aktiv geblankt). Erschöpftes Plan-Limit stoppt den Run am Checkpoint;
 | [`docs/ADW-SPEC.de.md`](docs/ADW-SPEC.de.md) | Contributors | Philosophie, Architektur, Invarianten, Erweiterungspunkte |
 | [`docs/SPEC.de.md`](docs/SPEC.de.md) / [`docs/PLAN.de.md`](docs/PLAN.de.md) | Contributors | Ursprüngliche Soll-Spec (DoD) und Implementierungsplan |
 
+Exporte mit interaktiven Diagrammen (HTML) und EMF-Diagrammen (DOCX): [`docs/export/`](docs/export/) —
+neu gebaut mit `python scripts/build_docs.py` (braucht pandoc + Inkscape).
+
 **Claude-Skill:** [agentic-developer-workflow-skill](https://github.com/sostrowsk/agentic-developer-workflow-skill)
 — verpackt die Bedienung dieses Orchestrators als installierbaren Claude-Skill
 (Preflight-Check, Workflow-Anleitung, Config-Template, Troubleshooting).

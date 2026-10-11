@@ -1,143 +1,529 @@
 <!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml" lang xml:lang>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="generator" content="pandoc" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>ADW-WORKFLOW</title>
+  <title>ADW Workflow — How a Run Flows, Phase by Phase</title>
   <style>
-code{white-space: pre-wrap;}
-span.smallcaps{font-variant: small-caps;}
-div.columns{display: flex; gap: min(4vw, 1.5em);}
-div.column{flex: auto; overflow-x: auto;}
-div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    html {
+      color: #1a1a1a;
+      background-color: #fdfdfd;
+    }
+    body {
+      margin: 0 auto;
+      max-width: 36em;
+      padding-left: 50px;
+      padding-right: 50px;
+      padding-top: 50px;
+      padding-bottom: 50px;
+      hyphens: auto;
+      overflow-wrap: break-word;
+      text-rendering: optimizeLegibility;
+      font-kerning: normal;
+    }
+    @media (max-width: 600px) {
+      body {
+        font-size: 0.9em;
+        padding: 12px;
+      }
+      h1 {
+        font-size: 1.8em;
+      }
+    }
+    @media print {
+      html {
+        background-color: white;
+      }
+      body {
+        background-color: transparent;
+        color: black;
+        font-size: 12pt;
+      }
+      p, h2, h3 {
+        orphans: 3;
+        widows: 3;
+      }
+      h2, h3, h4 {
+        page-break-after: avoid;
+      }
+    }
+    p {
+      margin: 1em 0;
+    }
+    a {
+      color: #1a1a1a;
+    }
+    a:visited {
+      color: #1a1a1a;
+    }
+    img {
+      max-width: 100%;
+    }
+    svg {
+      height: auto;
+      max-width: 100%;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      margin-top: 1.4em;
+    }
+    h5, h6 {
+      font-size: 1em;
+      font-style: italic;
+    }
+    h6 {
+      font-weight: normal;
+    }
+    ol, ul {
+      padding-left: 1.7em;
+      margin-top: 1em;
+    }
+    li > ol, li > ul {
+      margin-top: 0;
+    }
+    blockquote {
+      margin: 1em 0 1em 1.7em;
+      padding-left: 1em;
+      border-left: 2px solid #e6e6e6;
+      color: #606060;
+    }
+    code {
+      font-family: Menlo, Monaco, Consolas, 'Lucida Console', monospace;
+      font-size: 85%;
+      margin: 0;
+      hyphens: manual;
+    }
+    pre {
+      margin: 1em 0;
+      overflow: auto;
+    }
+    pre code {
+      padding: 0;
+      overflow: visible;
+      overflow-wrap: normal;
+    }
+    .sourceCode {
+     background-color: transparent;
+     overflow: visible;
+    }
+    hr {
+      background-color: #1a1a1a;
+      border: none;
+      height: 1px;
+      margin: 1em 0;
+    }
+    table {
+      margin: 1em 0;
+      border-collapse: collapse;
+      width: 100%;
+      overflow-x: auto;
+      display: block;
+      font-variant-numeric: lining-nums tabular-nums;
+    }
+    table caption {
+      margin-bottom: 0.75em;
+    }
+    tbody {
+      margin-top: 0.5em;
+      border-top: 1px solid #1a1a1a;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    th {
+      border-top: 1px solid #1a1a1a;
+      padding: 0.25em 0.5em 0.25em 0.5em;
+    }
+    td {
+      padding: 0.125em 0.5em 0.25em 0.5em;
+    }
+    header {
+      margin-bottom: 4em;
+      text-align: center;
+    }
+    #TOC li {
+      list-style: none;
+    }
+    #TOC ul {
+      padding-left: 1.3em;
+    }
+    #TOC > ul {
+      padding-left: 0;
+    }
+    #TOC a:not(:hover) {
+      text-decoration: none;
+    }
+    code{white-space: pre-wrap;}
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: min(4vw, 1.5em);}
+    div.column{flex: auto; overflow-x: auto;}
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
+  </style>
+  <style>
+  /* ADW doc exports — local only, no webfonts, no CDN. Inlined by scripts/build_docs.py. */
 
-ul.task-list[class]{list-style: none;}
-ul.task-list li input[type="checkbox"] {
-font-size: inherit;
-width: 0.8em;
-margin: 0 0.8em 0.2em -1.6em;
-vertical-align: middle;
-}
-.display.math{display: block; text-align: center; margin: 0.5rem auto;}
-</style>
-  <style type="text/css">
-:root {
---fg: #1a1a1a;
---bg: #ffffff;
---muted: #555555;
---border: #d0d0d0;
---code-bg: #f4f4f4;
---accent: #0b5cad;
-}
-html {
-font-size: 100%;
-}
-body {
-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
-line-height: 1.6;
-color: var(--fg);
-background: var(--bg);
-max-width: 46rem;
-margin: 2.5rem auto;
-padding: 0 1.25rem;
-overflow-wrap: break-word;
-}
-h1, h2, h3, h4, h5, h6 {
-line-height: 1.25;
-margin: 2rem 0 0.75rem;
-font-weight: 600;
-}
-h1 { font-size: 1.9rem; }
-h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
-h3 { font-size: 1.25rem; }
-p, ul, ol, blockquote, table, pre {
-margin: 0 0 1rem;
-}
-a {
-color: var(--accent);
-text-decoration: underline;
-}
-blockquote {
-margin-left: 0;
-padding: 0.2rem 1rem;
-border-left: 4px solid var(--border);
-color: var(--muted);
-}
-img {
-max-width: 100%;
-height: auto;
-}
-table {
-border-collapse: collapse;
-width: 100%;
-display: block;
-overflow-x: auto;
-}
-th, td {
-border: 1px solid var(--border);
-padding: 0.4rem 0.6rem;
-text-align: left;
-}
-th {
-background: var(--code-bg);
-font-weight: 600;
-}
-code {
-font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
-"Liberation Mono", monospace;
-font-size: 0.9em;
-background: var(--code-bg);
-padding: 0.15em 0.35em;
-border-radius: 3px;
-}
-pre {
-background: var(--code-bg);
-padding: 0.9rem 1rem;
-border-radius: 5px;
-overflow-x: auto;
-}
-pre code {
-background: none;
-padding: 0;
-font-size: 0.85rem;
-}
+  :root {
+    --fg: #1a1a1a;
+    --bg: #ffffff;
+    --muted: #555555;
+    --border: #d0d0d0;
+    --code-bg: #f4f4f4;
+    --accent: #0b5cad;
+  }
 
-nav#TOC {
-border: 1px solid var(--border);
-border-radius: 5px;
-padding: 0.75rem 1rem;
-margin-bottom: 2rem;
-background: #fafafa;
-}
-nav#TOC ul {
-margin: 0;
-padding-left: 1.2rem;
-}
-@media (prefers-color-scheme: dark) {
-:root {
---fg: #e6e6e6;
---bg: #1b1b1b;
---muted: #a0a0a0;
---border: #444444;
---code-bg: #2a2a2a;
---accent: #6cb2ff;
-}
-th { background: var(--code-bg); }
-nav#TOC { background: #232323; }
-}
-</style>
+  html {
+    font-size: 100%;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    line-height: 1.6;
+    color: var(--fg);
+    background: var(--bg);
+    max-width: 52rem;
+    margin: 2.5rem auto;
+    padding: 0 1.25rem;
+    overflow-wrap: break-word;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    line-height: 1.25;
+    margin: 2rem 0 0.75rem;
+    font-weight: 600;
+  }
+
+  h1 { font-size: 1.9rem; }
+  h2 { font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.25rem; }
+
+  p, ul, ol, blockquote, table, pre {
+    margin: 0 0 1rem;
+  }
+
+  a, a:visited {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
+  blockquote {
+    margin-left: 0;
+    padding: 0.2rem 1rem;
+    border-left: 4px solid var(--border);
+    color: var(--muted);
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    display: block;
+    overflow-x: auto;
+  }
+
+  th, td {
+    border: 1px solid var(--border);
+    padding: 0.4rem 0.6rem;
+    text-align: left;
+  }
+
+  th {
+    background: var(--code-bg);
+    font-weight: 600;
+  }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
+      "Liberation Mono", monospace;
+    font-size: 0.9em;
+    background: var(--code-bg);
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+  }
+
+  pre {
+    background: var(--code-bg);
+    padding: 0.9rem 1rem;
+    border-radius: 5px;
+    overflow-x: auto;
+  }
+
+  pre code {
+    background: none;
+    padding: 0;
+    font-size: 0.85rem;
+  }
+
+  /* Pandoc-Inhaltsverzeichnis (--toc) */
+  nav#TOC {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0.75rem 1rem;
+    margin-bottom: 2rem;
+    background: #fafafa;
+  }
+
+  nav#TOC ul {
+    margin: 0;
+    padding-left: 1.2rem;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fg: #e6e6e6;
+      --bg: #1b1b1b;
+      --muted: #a0a0a0;
+      --border: #444444;
+      --code-bg: #2a2a2a;
+      --accent: #6cb2ff;
+    }
+    th { background: var(--code-bg); }
+    nav#TOC { background: #232323; }
+  }
+
+  /* Interactive diagrams (docs/assets/diagram.js). The SVG keeps its own light
+     palette — it is also the EMF source for the DOCX — so it sits on a card. */
+  figure { margin: 1.5rem 0; }
+  figcaption { color: var(--muted); font-size: 0.9rem; margin-top: 0.4rem; }
+  .dia {
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem;
+    overflow-x: auto;
+  }
+  .dia svg { display: block; width: 100%; height: auto; min-width: 36rem; }
+  .dia [data-info] { cursor: pointer; outline: none; }
+  .dia [data-step], .dia [data-info] { transition: opacity 0.35s ease; }
+  .dia .dim { opacity: 0.15; }
+  .dia .cur rect, .dia .cur circle, .dia .cur ellipse, .dia .cur polygon,
+  .dia [data-info]:hover rect, .dia [data-info]:focus rect, .dia .sel rect {
+    stroke: #d97706 !important;
+    stroke-width: 3px !important;
+  }
+  .dia .flow { stroke-dasharray: 7 5; animation: dia-flow 1.1s linear infinite; }
+  @keyframes dia-flow { to { stroke-dashoffset: -24; } }
+  .dia-bar {
+    display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;
+    margin-top: 0.5rem; font-size: 0.85rem;
+  }
+  .dia-bar button {
+    font: inherit; padding: 0.2rem 0.6rem; border-radius: 4px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--code-bg); color: var(--fg);
+  }
+  .dia-bar button:focus-visible { outline: 2px solid var(--accent); }
+  .dia-bar .dia-pos { color: var(--muted); min-width: 5rem; }
+  .dia-info {
+    margin-top: 0.4rem; padding: 0.5rem 0.75rem; min-height: 1.6rem;
+    border-left: 4px solid #d97706; background: var(--code-bg); font-size: 0.92rem;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dia .flow { animation: none; }
+    .dia [data-step], .dia [data-info] { transition: none; }
+  }
+  @media print {
+    .dia-bar, .dia-info { display: none; }
+    .dia .dim { opacity: 1; }
+  }
+
+  </style>
+  <script>
+  // Interactive diagrams for the ADW doc exports — inlined by scripts/build_docs.py.
+  // Contract (see docs/diagrams/README.md): elements with data-step="N" form the
+  // step-through sequence, data-info="…" is the explanation shown on hover/focus/click,
+  // class="flow" marks edges whose dashes move.
+  (function () {
+    "use strict";
+    var DELAY_MS = 1800;
+    var de = (document.documentElement.lang || "").indexOf("de") === 0;
+    var T = de
+      ? { play: "▶ Abspielen", pause: "⏸ Pause", prev: "◀", next: "▶", all: "Alles zeigen",
+          step: "Schritt", hint: "Element anklicken oder überfahren für Details." }
+      : { play: "▶ Play", pause: "⏸ Pause", prev: "◀", next: "▶", all: "Show all",
+          step: "Step", hint: "Hover or click an element for details." };
+
+    function button(label, title, onClick) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.textContent = label;
+      if (title) b.setAttribute("aria-label", title);
+      b.addEventListener("click", onClick);
+      return b;
+    }
+
+    function setup(box) {
+      var stepped = Array.prototype.slice.call(box.querySelectorAll("[data-step]"));
+      var informed = Array.prototype.slice.call(box.querySelectorAll("[data-info]"));
+      var info = document.createElement("div");
+      info.className = "dia-info";
+      info.setAttribute("aria-live", "polite");
+      info.textContent = T.hint;
+
+      function show(el) {
+        informed.forEach(function (e) { e.classList.remove("sel"); });
+        if (!el) { info.textContent = T.hint; return; }
+        el.classList.add("sel");
+        info.textContent = el.getAttribute("data-info");
+      }
+
+      informed.forEach(function (el) {
+        el.setAttribute("tabindex", "0");
+        el.setAttribute("role", "button");
+        el.addEventListener("mouseenter", function () { show(el); });
+        el.addEventListener("focus", function () { show(el); });
+        el.addEventListener("click", function () { show(el); });
+      });
+
+      box.parentNode.insertBefore(info, box.nextSibling);
+      if (!stepped.length) return;
+
+      var steps = [];
+      stepped.forEach(function (el) {
+        var n = parseInt(el.getAttribute("data-step"), 10);
+        if (steps.indexOf(n) < 0) steps.push(n);
+      });
+      steps.sort(function (a, b) { return a - b; });
+
+      var pos = -1;  // -1 = everything visible
+      var timer = null;
+      var bar = document.createElement("div");
+      bar.className = "dia-bar";
+      var label = document.createElement("span");
+      label.className = "dia-pos";
+
+      function render() {
+        var current = pos < 0 ? null : steps[pos];
+        stepped.forEach(function (el) {
+          var n = parseInt(el.getAttribute("data-step"), 10);
+          el.classList.toggle("dim", current !== null && n > current);
+          el.classList.toggle("cur", current !== null && n === current);
+        });
+        label.textContent = pos < 0 ? "" : T.step + " " + (pos + 1) + " / " + steps.length;
+        if (current === null) { show(null); return; }
+        var lead = stepped.filter(function (el) {
+          return parseInt(el.getAttribute("data-step"), 10) === current && el.hasAttribute("data-info");
+        })[0];
+        show(lead || null);
+      }
+
+      function stop() {
+        if (timer) { clearInterval(timer); timer = null; }
+        playBtn.textContent = T.play;
+      }
+
+      function go(delta) {
+        stop();
+        pos = Math.max(0, Math.min(steps.length - 1, pos + delta));
+        render();
+      }
+
+      var playBtn = button(T.play, null, function () {
+        if (timer) { stop(); return; }
+        if (pos >= steps.length - 1 || pos < 0) pos = -1;
+        playBtn.textContent = T.pause;
+        pos += 1;
+        render();
+        timer = setInterval(function () {
+          if (pos >= steps.length - 1) { stop(); return; }
+          pos += 1;
+          render();
+        }, DELAY_MS);
+      });
+
+      bar.appendChild(playBtn);
+      bar.appendChild(button(T.prev, T.step + " −1", function () { go(-1); }));
+      bar.appendChild(button(T.next, T.step + " +1", function () { go(1); }));
+      bar.appendChild(button(T.all, null, function () { stop(); pos = -1; render(); }));
+      bar.appendChild(label);
+      box.parentNode.insertBefore(bar, info);
+    }
+
+    document.addEventListener("DOMContentLoaded", function () {
+      Array.prototype.forEach.call(document.querySelectorAll(".dia"), setup);
+    });
+  })();
+
+  </script>
 </head>
 <body>
+<nav id="TOC" role="doc-toc">
+<ul>
+<li><a href="#adw-workflow--how-a-run-flows-phase-by-phase"
+id="toc-adw-workflow--how-a-run-flows-phase-by-phase">ADW Workflow — How
+a Run Flows, Phase by Phase</a>
+<ul>
+<li><a href="#contents" id="toc-contents">Contents</a></li>
+<li><a href="#1-the-one-idea-behind-everything"
+id="toc-1-the-one-idea-behind-everything">1. The one idea behind
+everything</a></li>
+<li><a href="#2-cast-who-does-what" id="toc-2-cast-who-does-what">2.
+Cast: who does what</a></li>
+<li><a href="#3-the-run-at-a-glance" id="toc-3-the-run-at-a-glance">3.
+The run at a glance</a></li>
+<li><a href="#4-before-phase-1-starting-a-run"
+id="toc-4-before-phase-1-starting-a-run">4. Before phase 1: starting a
+run</a></li>
+<li><a href="#5-phase-1--spec" id="toc-5-phase-1--spec">5. Phase 1 —
+Spec</a></li>
+<li><a href="#6-phase-2--plan--contract"
+id="toc-6-phase-2--plan--contract">6. Phase 2 — Plan + Contract</a></li>
+<li><a href="#7-human-gates-approvals-and-breakpoints"
+id="toc-7-human-gates-approvals-and-breakpoints">7. Human gates:
+approvals and breakpoints</a></li>
+<li><a href="#8-phase-3--build-lanes-tdd-red-gate-loop"
+id="toc-8-phase-3--build-lanes-tdd-red-gate-loop">8. Phase 3 — Build
+(lanes, TDD RED, gate loop)</a></li>
+<li><a href="#9-phase-4--integration--e2e-parallel-mode-only"
+id="toc-9-phase-4--integration--e2e-parallel-mode-only">9. Phase 4 —
+Integration + E2E (parallel mode only)</a></li>
+<li><a href="#10-phase-5--codex-code-review"
+id="toc-10-phase-5--codex-code-review">10. Phase 5 — Codex code
+review</a></li>
+<li><a href="#11-phase-6--final-review--triage"
+id="toc-11-phase-6--final-review--triage">11. Phase 6 — Final review +
+triage</a></li>
+<li><a href="#12-phase-7--push--ci" id="toc-12-phase-7--push--ci">12.
+Phase 7 — Push + CI</a></li>
+<li><a href="#13-cross-cutting-mechanics"
+id="toc-13-cross-cutting-mechanics">13. Cross-cutting mechanics</a></li>
+<li><a href="#14-ending-a-run-done-paused-escalated-refused-interrupted"
+id="toc-14-ending-a-run-done-paused-escalated-refused-interrupted">14.
+Ending a run: done, paused, escalated, refused, interrupted</a></li>
+<li><a href="#15-resume-and-checkpoints"
+id="toc-15-resume-and-checkpoints">15. Resume and checkpoints</a></li>
+<li><a href="#16-observing-a-run-event-log-snapshots-gui"
+id="toc-16-observing-a-run-event-log-snapshots-gui">16. Observing a run:
+event log, snapshots, GUI</a></li>
+<li><a href="#17-worked-example-run-b65f5d75"
+id="toc-17-worked-example-run-b65f5d75">17. Worked example: run
+<code>b65f5d75</code></a></li>
+<li><a href="#18-quick-reference" id="toc-18-quick-reference">18. Quick
+reference</a></li>
+</ul></li>
+</ul>
+</nav>
 <h1 id="adw-workflow--how-a-run-flows-phase-by-phase">ADW Workflow — How
 a Run Flows, Phase by Phase</h1>
-<p><strong>English</strong> | <a href="ADW-WORKFLOW.de.md">Deutsch</a></p>
+<p><strong>English</strong> | <a
+href="ADW-WORKFLOW.de.html">Deutsch</a></p>
 <blockquote>
 <p><strong>Audience:</strong> ADW contributors and end users who want to
 understand <em>why</em> a run behaves the way it does — not only which
-command to type. <strong>Companion documents:</strong> <a href="ADW-HANDBOOK.md">ADW Handbook</a> (operating ADW as a developer) ·
-<a href="ADW-SPEC.md">ADW Spec</a> (design philosophy, invariants and
+command to type. <strong>Companion documents:</strong> <a
+href="ADW-HANDBOOK.html">ADW Handbook</a> (operating ADW as a developer) ·
+<a href="ADW-SPEC.html">ADW Spec</a> (design philosophy, invariants and
 contributor contract). <strong>Ground truth:</strong> the code under
 <code>adw/</code> at version 0.26.1. Where this document and the code
 disagree, the code wins — please file a fix for the document.</p>
@@ -167,7 +553,8 @@ triage</a></li>
 <li><a href="#12-phase-7--push--ci">Phase 7 — Push + CI</a></li>
 <li><a href="#13-cross-cutting-mechanics">Cross-cutting
 mechanics</a></li>
-<li><a href="#14-ending-a-run-done-paused-escalated-refused-interrupted">Ending
+<li><a
+href="#14-ending-a-run-done-paused-escalated-refused-interrupted">Ending
 a run: done, paused, escalated, refused, interrupted</a></li>
 <li><a href="#15-resume-and-checkpoints">Resume and checkpoints</a></li>
 <li><a href="#16-observing-a-run-event-log-snapshots-gui">Observing a
@@ -186,27 +573,27 @@ everything</h2>
 program (<code>adw/phases.py</code>) decides <em>who acts when</em>: it
 runs the loops, counts rounds, starts gates, merges branches, routes
 findings, makes commits, polls CI and writes checkpoints. None of that
-costs a single token and none of it depends on an LLM &quot;remembering&quot; a
+costs a single token and none of it depends on an LLM "remembering" a
 procedure.</p>
 <p>Language models are used <strong>only where judgment is
 needed</strong>: writing a spec, drafting a plan, implementing code,
 reviewing, assigning a red E2E test to a lane, reading CI logs. Each
 agent gets a narrow task, a narrow tool set and a narrow set of writable
 paths — and then the orchestrator checks the result itself instead of
-trusting the agent&#39;s self-report.</p>
+trusting the agent's self-report.</p>
 <p>Three rules follow from this and shape every phase:</p>
 <ol type="1">
 <li><strong>Reviewers never fix.</strong> Whoever finds a defect only
 reports it as a structured finding. Every fix goes back to a build agent
 and then through <em>all</em> gates again. There is no shortcut, not
-even for &quot;trivial&quot; changes.</li>
+even for "trivial" changes.</li>
 <li><strong>The orchestrator trusts proofs, not claims.</strong> Agents
 may not commit. Whether tests were red, whether gates were green,
 whether anything changed at all — the orchestrator measures it and
 persists the result as a proof bound to the exact worktree tree
 hash.</li>
 <li><strong>Every loop has a cap and a memory.</strong> Round limits, a
-circuit breaker for &quot;nothing changed&quot;, and a severity threshold that
+circuit breaker for "nothing changed", and a severity threshold that
 drops with every review round guarantee that a run terminates — either
 green, or with a clear escalation report a human can act on.</li>
 </ol>
@@ -298,7 +685,7 @@ green, or with a clear escalation report a human can act on.</li>
 </tbody>
 </table>
 <p>All Claude agents run through the <strong>Claude Code CLI</strong>
-(spawned headless by the Agent SDK) on the user&#39;s stored login, so usage
+(spawned headless by the Agent SDK) on the user's stored login, so usage
 counts against the Claude plan; API-key variables are actively blanked.
 The registry with tool whitelists and path rules is
 <code>adw/agents.py:REGISTRY</code>.</p>
@@ -308,49 +695,104 @@ whitelist</strong> (<code>adw/env.py</code>: <code>PATH</code>,
 <code>HOME</code>, <code>LANG</code>, … — no tokens, no secrets).</p>
 <hr />
 <h2 id="3-the-run-at-a-glance">3. The run at a glance</h2>
-<pre><code>            ┌──────────────────────── human gates (configurable) ───────────────────────┐
-            │  spec gate        plan gate (default)    before_integration   before_push │
-            ▼      ▼                 ▼                        ▼                   ▼       │
-Issue ─▶ 1 Spec ─(▲)─▶ 2 Plan+Contract ─(▲)─▶ 3 Build ─(▲)─▶ 4 Integration ─▶ 5 Codex ─▶ 6 Final ─(▲)─▶ 7 Push+CI ─▶ done
-         dual draft     dual draft            lanes,         + E2E            code       review          poll until
-         + synthesis    + synthesis           TDD RED,       (--parallel      review     + triage        green, 1 CI
-         + Codex        + Codex               gate loop      only)                                       re-entry
-           review loop    review loop</code></pre>
-<p><code>(▲)</code> marks a possible human stop. Every phase may also
-end in <strong>escalation</strong> (<code>escalation.md</code>, exit
-code 1).</p>
+<figure>
+<div class="dia" data-diagram="workflow/run-overview"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 450" width="1000" height="450" role="img">
+<title>ADW run at a glance</title>
+<desc>The seven phases of an ADW run from issue to done, with the configurable human stops and the escalation exit.</desc>
+<rect x="0" y="0" width="1000" height="450" fill="#ffffff"/>
+<g data-step="2"><path class="flow" d="M82 227 L85 227" fill="none" stroke="#475569" stroke-width="2"/><polygon points="96,227 85,232.5 85,221.5" fill="#475569"/></g>
+<g data-step="4"><path class="flow" d="M210 227 L213 227" fill="none" stroke="#475569" stroke-width="2"/><polygon points="224,227 213,232.5 213,221.5" fill="#475569"/></g>
+<g data-step="6"><path class="flow" d="M338 227 L341 227" fill="none" stroke="#475569" stroke-width="2"/><polygon points="352,227 341,232.5 341,221.5" fill="#475569"/></g>
+<g data-step="8"><path class="flow" d="M466 227 L469 227" fill="none" stroke="#475569" stroke-width="2"/><polygon points="480,227 469,232.5 469,221.5" fill="#475569"/></g>
+<g data-step="9"><path class="flow" d="M594 227 L597 227" fill="none" stroke="#475569" stroke-width="2"/><polygon points="608,227 597,232.5 597,221.5" fill="#475569"/></g>
+<g data-step="10"><path class="flow" d="M722 227 L725 227" fill="none" stroke="#475569" stroke-width="2"/><polygon points="736,227 725,232.5 725,221.5" fill="#475569"/></g>
+<g data-step="12"><path class="flow" d="M850 227 L853 227" fill="none" stroke="#475569" stroke-width="2"/><polygon points="864,227 853,232.5 853,221.5" fill="#475569"/></g>
+<g data-step="3"><path d="M217 82 L217 227" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="6 4"/><circle cx="217" cy="227" r="5" fill="#b45309"/></g>
+<g data-step="5"><path d="M345 148 L345 227" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="6 4"/><circle cx="345" cy="227" r="5" fill="#b45309"/></g>
+<g data-step="7"><path d="M473 82 L473 227" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="6 4"/><circle cx="473" cy="227" r="5" fill="#b45309"/></g>
+<g data-step="11"><path d="M857 82 L857 227" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="6 4"/><circle cx="857" cy="227" r="5" fill="#b45309"/></g>
+<g data-step="14"><path d="M153 290 L153 319" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/><polygon points="153,330 147.5,319 158.5,319" fill="#b91c1c"/></g>
+<g data-step="14"><path d="M281 290 L281 319" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/><polygon points="281,330 275.5,319 286.5,319" fill="#b91c1c"/></g>
+<g data-step="14"><path d="M409 290 L409 319" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/><polygon points="409,330 403.5,319 414.5,319" fill="#b91c1c"/></g>
+<g data-step="14"><path d="M537 290 L537 319" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/><polygon points="537,330 531.5,319 542.5,319" fill="#b91c1c"/></g>
+<g data-step="14"><path d="M665 290 L665 319" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/><polygon points="665,330 659.5,319 670.5,319" fill="#b91c1c"/></g>
+<g data-step="14"><path d="M793 290 L793 319" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/><polygon points="793,330 787.5,319 798.5,319" fill="#b91c1c"/></g>
+<g data-step="14"><path d="M872 290 L872 319" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/><polygon points="872,330 866.5,319 877.5,319" fill="#b91c1c"/></g>
+<g data-step="13"><path class="flow" d="M933 290 L933 319" fill="none" stroke="#475569" stroke-width="2"/><polygon points="933,330 927.5,319 938.5,319" fill="#475569"/></g>
+<g data-step="1" data-info="The input: issue text from --issue, a GitLab issue (glab) or a GitHub issue (gh). Exactly one source is allowed."><rect x="10" y="197" width="72" height="60" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="46" y="232.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="46" dy="0">Issue</tspan></text></g>
+<g data-step="2" data-info="Phase 1: Opus 4.8 and Codex draft the spec in parallel, Fable 5 merges them, Codex reviews in up to 5 rounds."><rect x="96" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="153" y="207.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="153" dy="0">1 Spec</tspan></text><text x="153" y="224.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="153" dy="0">dual draft</tspan></text><text x="153" y="241.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="153" dy="0">+ synthesis</tspan></text><text x="153" y="258.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="153" dy="0">+ Codex review</tspan></text></g>
+<g data-step="4" data-info="Phase 2: same pattern for plan.md and contract.yaml; at the end all artifacts are archived into the run folder."><rect x="224" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="281" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="281" dy="0">2 Plan +</tspan></text><text x="281" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="281" dy="0">Contract</tspan></text><text x="281" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="281" dy="0">plan + contract</tspan></text><text x="281" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="281" dy="0">dual draft</tspan></text><text x="281" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="281" dy="0">+ Codex review</tspan></text></g>
+<g data-step="6" data-info="Phase 3: one build agent per lane in its own worktree; optional RED proof, then the gate loop. Only the orchestrator commits."><rect x="352" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="409" y="207.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="409" dy="0">3 Build</tspan></text><text x="409" y="224.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="409" dy="0">lanes, TDD RED</tspan></text><text x="409" y="241.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="409" dy="0">gate loop</tspan></text><text x="409" y="258.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="409" dy="0">≤ 10 iterations</tspan></text></g>
+<g data-step="8" data-info="Phase 4 (parallel mode only): merge all lanes fresh from base, run the E2E gate, triage red tests back to the lanes."><rect x="480" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="537" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="537" dy="0">4 Integration</tspan></text><text x="537" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="537" dy="0">+ E2E</tspan></text><text x="537" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="537" dy="0">merge + E2E</tspan></text><text x="537" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="537" dy="0">--parallel only</tspan></text><text x="537" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="537" dy="0">≤ 10 rounds</tspan></text></g>
+<g data-step="9" data-info="Phase 5: Codex reviews the diff read-only; findings above the round&#x27;s severity floor go back to the lanes as fix tasks."><rect x="608" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="665" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="665" dy="0">5 Codex</tspan></text><text x="665" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="665" dy="0">review</tspan></text><text x="665" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="665" dy="0">diff review</tspan></text><text x="665" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="665" dy="0">severity floor</tspan></text><text x="665" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="665" dy="0">≤ 5 rounds</tspan></text></g>
+<g data-step="10" data-info="Phase 6: Fable 5 checks the result against the acceptance criteria; scope gaps become follow-ups, everything else a fix."><rect x="736" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="793" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="793" dy="0">6 Final</tspan></text><text x="793" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="793" dy="0">review</tspan></text><text x="793" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="793" dy="0">vs. spec + DoD</tspan></text><text x="793" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="793" dy="0">triage by code</tspan></text><text x="793" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="793" dy="0">≤ 3 fix cycles</tspan></text></g>
+<g data-step="12" data-info="Phase 7: the orchestrator pushes, polls the pipeline bound to the pushed SHA and allows exactly one CI fix re-entry."><rect x="864" y="165" width="114" height="125" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="921" y="197.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="921" dy="0">7 Push</tspan></text><text x="921" y="217.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="921" dy="0">+ CI</tspan></text><text x="921" y="234.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="921" dy="0">push, poll CI</tspan></text><text x="921" y="251.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="921" dy="0">SHA-bound</tspan></text><text x="921" y="268.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="921" dy="0">1 re-entry</tspan></text></g>
+<g data-step="3" data-info="Optional stop after the reviewed spec. Read spec-summary.md + spec.md, then adw approve."><rect x="142.0" y="30" width="150" height="52" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="217" y="52.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="217" dy="0">Spec gate</tspan></text><text x="217" y="69.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="217" dy="0">--gates spec | both</tspan></text></g>
+<g data-step="5" data-info="The default stop: read plan-summary.md, plan.md and contract.yaml before any code is built, then adw approve."><rect x="265.0" y="96" width="160" height="52" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="345" y="118.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="345" dy="0">Plan gate (default)</tspan></text><text x="345" y="135.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="345" dy="0">--gates plan | both</tspan></text></g>
+<g data-step="7" data-info="Optional breakpoint: all lanes are green, no merge or review work has started yet."><rect x="388.0" y="30" width="170" height="52" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="473" y="52.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="473" dy="0">Breakpoint</tspan></text><text x="473" y="69.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="473" dy="0">before_integration</tspan></text></g>
+<g data-step="11" data-info="Optional breakpoint after the final review, before anything is pushed or CI is touched."><rect x="782.0" y="30" width="150" height="52" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="857" y="52.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="857" dy="0">Breakpoint</tspan></text><text x="857" y="69.4" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="857" dy="0">before_push</tspan></text></g>
+<text x="560" y="116" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="560" dy="0">Every stop ends the process with exit code 2;</tspan><tspan x="560" dy="17">adw approve &lt;run_id&gt; continues the run.</tspan></text>
+<g data-step="14" data-info="An escalation is a verdict: a limit, a circuit breaker, a merge conflict or a missing proof. The report names phase, lanes and reason."><rect x="96" y="330" width="782" height="46" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="487" y="357.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" fill="#0f172a" text-anchor="middle"><tspan x="487" dy="0">Any phase can escalate → escalation.md · exit code 1 · terminal (start a new run)</tspan></text></g>
+<g data-step="13" data-info="Pipeline (and staging job) green for the pushed SHA: the run is done."><rect x="888" y="330" width="90" height="46" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="933" y="349.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="933" dy="0">done</tspan></text><text x="933" y="366.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="933" dy="0">exit 0</tspan></text></g>
+<g><rect x="96" y="412" width="18" height="14" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/></g>
+<text x="120" y="423.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="120" dy="0">orchestrator (deterministic code)</tspan></text>
+<g><rect x="363.5" y="412" width="18" height="14" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/></g>
+<text x="387.5" y="423.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="387.5" dy="0">agent (LLM)</tspan></text>
+<g><rect x="485.046875" y="412" width="18" height="14" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/></g>
+<text x="509" y="423.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="509" dy="0">gate / proof / success</tspan></text>
+<g><rect x="660.78125" y="412" width="18" height="14" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/></g>
+<text x="684.8" y="423.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="684.8" dy="0">human stop</tspan></text>
+<g><rect x="814.125" y="412" width="18" height="14" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/></g>
+<text x="838.1" y="423.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="838.1" dy="0">escalation</tspan></text>
+</svg></div>
+<figcaption aria-hidden="true">The run at a glance: seven phases,
+configurable human stops, one escalation exit</figcaption>
+</figure>
+<p>Amber boxes are possible human stops; the red bar is the
+<strong>escalation</strong> exit (<code>escalation.md</code>, exit code
+1) that every phase can take. In the HTML version all diagrams are
+interactive: <strong>Play</strong> steps through the flow, and every box
+explains itself on hover or click.</p>
 <h3 id="phase-state-machine">Phase state machine</h3>
 <p>The persisted <code>phase</code> field in <code>state.json</code>
 (<code>adw/state.py:Phase</code>) is the single source of truth. These
 are all its values and transitions:</p>
-<pre><code>                       spec
-                        │  spec reviewed
-            ┌───────────┴──────────────┐
-            │ --gates spec|both        │ otherwise
-            ▼                          │
-  awaiting_spec_approval ──approve──▶  plan
-                                        │  plan + contract reviewed, archived
-                                        ▼
-                                awaiting_approval ◀─────────────────────┐
-                                        │ approve / --gates none|spec   │ breakpoint
-                                        ▼                               │ (pending_breakpoint set)
-                                      build ──(before_integration)──────┤
-                                        │                               │
-                        ┌───────────────┴───────────┐                   │
-                        │ --parallel                │ single lane       │
-                        ▼                           │                   │
-                   integration                      │                   │
-                        └──────────────┬────────────┘                   │
-                                       ▼                                │
-                                  codex_review                          │
-                                       ▼                                │
-                                  final_review ──(before_push)──────────┘
-                                       ▼
-                                       ci
-                                       ▼
-                                      done
-
-  any phase ──(escalate)──▶ escalated   (terminal — start a new run)</code></pre>
+<figure>
+<div class="dia" data-diagram="workflow/state-machine"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 920" width="1000" height="920" role="img">
+<title>Phase state machine</title>
+<desc>All values of the persisted phase field in state.json and their transitions.</desc>
+<rect x="0" y="0" width="1000" height="920" fill="#ffffff"/>
+<g data-step="2"><path d="M300 52 L140 52 L140 79" fill="none" stroke="#475569" stroke-width="2"/><polygon points="140,90 134.5,79 145.5,79" fill="#475569"/><text x="150" y="44" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="150" dy="0">--gates spec | both</tspan></text></g>
+<g data-step="3"><path d="M140 134 L140 172 L289 172" fill="none" stroke="#475569" stroke-width="2"/><polygon points="300,172 289,177.5 289,166.5" fill="#475569"/><text x="150" y="192" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="150" dy="0">adw approve</tspan></text></g>
+<g data-step="3"><path class="flow" d="M400 74 L400 139" fill="none" stroke="#475569" stroke-width="2"/><polygon points="400,150 394.5,139 405.5,139" fill="#475569"/><text x="410" y="117" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="410" dy="0">otherwise</tspan></text></g>
+<g data-step="4"><path class="flow" d="M400 194 L400 239" fill="none" stroke="#475569" stroke-width="2"/><polygon points="400,250 394.5,239 405.5,239" fill="#475569"/><text x="410" y="227" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="410" dy="0">plan + contract reviewed, archived</tspan></text></g>
+<g data-step="5"><path class="flow" d="M400 294 L400 339" fill="none" stroke="#475569" stroke-width="2"/><polygon points="400,350 394.5,339 405.5,339" fill="#475569"/><text x="410" y="327" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="410" dy="0">adw approve · or --gates none | spec</tspan></text></g>
+<g data-step="6"><path class="flow" d="M370 394 L370 420 L240 420 L240 439" fill="none" stroke="#475569" stroke-width="2"/><polygon points="240,450 234.5,439 245.5,439" fill="#475569"/><text x="232" y="413" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="end"><tspan x="232" dy="0">--parallel</tspan></text></g>
+<g data-step="7"><path class="flow" d="M240 494 L240 572 L289 572" fill="none" stroke="#475569" stroke-width="2"/><polygon points="300,572 289,577.5 289,566.5" fill="#475569"/></g>
+<g data-step="7"><path class="flow" d="M430 394 L430 539" fill="none" stroke="#475569" stroke-width="2"/><polygon points="430,550 424.5,539 435.5,539" fill="#475569"/><text x="440" y="477" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="440" dy="0">single lane</tspan></text></g>
+<g data-step="8"><path class="flow" d="M400 594 L400 639" fill="none" stroke="#475569" stroke-width="2"/><polygon points="400,650 394.5,639 405.5,639" fill="#475569"/></g>
+<g data-step="10"><path class="flow" d="M400 694 L400 739" fill="none" stroke="#475569" stroke-width="2"/><polygon points="400,750 394.5,739 405.5,739" fill="#475569"/></g>
+<g data-step="11"><path class="flow" d="M400 794 L400 839" fill="none" stroke="#475569" stroke-width="2"/><polygon points="400,850 394.5,839 405.5,839" fill="#475569"/><text x="410" y="827" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="410" dy="0">pipeline green</tspan></text></g>
+<g data-step="9" data-info="Breakpoints jump back into awaiting_approval (exit 2). adw approve continues in integration / codex_review (before_integration) or in ci (before_push)."><path d="M500 372 L700 372 L700 284 L511 284" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="6 4"/><polygon points="500,284 511,278.5 511,289.5" fill="#b45309"/><text x="710" y="322" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="710" dy="0">breakpoint</tspan><tspan x="710" dy="17">before_integration</tspan></text></g>
+<g data-step="9" data-info="Breakpoints jump back into awaiting_approval (exit 2). adw approve continues in integration / codex_review (before_integration) or in ci (before_push)."><path d="M500 672 L850 672 L850 262 L511 262" fill="none" stroke="#b45309" stroke-width="2" stroke-dasharray="6 4"/><polygon points="500,262 511,256.5 511,267.5" fill="#b45309"/><text x="860" y="470" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="860" dy="0">breakpoint</tspan><tspan x="860" dy="17">before_push</tspan></text></g>
+<g data-step="12"><path d="M840 100 L840 119" fill="none" stroke="#b91c1c" stroke-width="2" stroke-dasharray="6 4"/><polygon points="840,130 834.5,119 845.5,119" fill="#b91c1c"/></g>
+<g data-step="1" data-info="Phase 1 is running: drafts, synthesis and the Codex review loop for the spec."><rect x="300" y="30" width="200" height="44" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="400" y="57.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="400" dy="0">spec</tspan></text></g>
+<g data-step="3" data-info="Phase 2 is running: plan + contract are drafted, merged and reviewed."><rect x="300" y="150" width="200" height="44" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="400" y="177.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="400" dy="0">plan</tspan></text></g>
+<g data-step="4" data-info="Paused (exit 2) at the plan gate — or at a breakpoint, which reuses this phase; pending_breakpoint says which one."><rect x="300" y="250" width="200" height="44" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="400" y="277.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="400" dy="0">awaiting_approval</tspan></text></g>
+<g data-step="5" data-info="Phase 3 is running: lanes build in their worktrees until all gates are green."><rect x="300" y="350" width="200" height="44" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="400" y="377.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="400" dy="0">build</tspan></text></g>
+<g data-step="7" data-info="Phase 5: Codex code review rounds."><rect x="300" y="550" width="200" height="44" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="400" y="577.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="400" dy="0">codex_review</tspan></text></g>
+<g data-step="8" data-info="Phase 6: final review against spec and contract, triage."><rect x="300" y="650" width="200" height="44" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="400" y="677.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="400" dy="0">final_review</tspan></text></g>
+<g data-step="10" data-info="Phase 7: push and CI polling, at most one re-entry."><rect x="300" y="750" width="200" height="44" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="400" y="777.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="400" dy="0">ci</tspan></text></g>
+<g data-step="11" data-info="Terminal success state (exit 0)."><rect x="300" y="850" width="200" height="44" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="400" y="877.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="400" dy="0">done</tspan></text></g>
+<g data-step="2" data-info="Paused (exit 2) after the reviewed spec — only with --gates spec or both."><rect x="30" y="90" width="220" height="44" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="140" y="116.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="140" dy="0">awaiting_spec_approval</tspan></text></g>
+<g data-step="6" data-info="Phase 4, only with --parallel: merge all lanes + E2E gate."><rect x="140" y="450" width="200" height="44" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="477.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">integration</tspan></text></g>
+<g data-step="9" data-info="Breakpoints jump back into awaiting_approval (exit 2). adw approve continues in integration / codex_review (before_integration) or in ci (before_push)."><rect x="600" y="730" width="380" height="96" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="610" y="757" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="start"><tspan x="610" dy="0">Breakpoints reuse awaiting_approval.</tspan></text><text x="610" y="774" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="start"><tspan x="610" dy="0">adw approve continues in</tspan></text><text x="610" y="791" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="start"><tspan x="610" dy="0">integration | codex_review</tspan></text><text x="610" y="808" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="start"><tspan x="610" dy="0">or ci (before_push).</tspan></text></g>
+<g data-step="12"><text x="840" y="92" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="840" dy="0">from any phase</tspan></text></g>
+<g data-step="12" data-info="Escalation can happen in every phase. escalated is terminal: resume is refused, a new run starts from scratch."><rect x="720" y="130" width="240" height="60" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="840" y="156.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="840" dy="0">escalated</tspan></text><text x="840" y="173.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="840" dy="0">terminal — start a new run</tspan></text></g>
+</svg></div>
+<figcaption aria-hidden="true">Phase state machine: every value of
+state.phase and its transitions</figcaption>
+</figure>
 <p>Breakpoints reuse the phase <code>awaiting_approval</code>; which
 breakpoint is waiting is recorded separately in
 <code>pending_breakpoint</code>. On <code>adw approve</code>, a
@@ -365,7 +807,7 @@ run</h2>
 sequence of checks <strong>before</strong> any state exists:</p>
 <ol type="1">
 <li><strong>Exactly one issue source:</strong>
-<code>--issue &quot;text&quot;</code>, <code>--gitlab-issue &lt;id&gt;</code> (via
+<code>--issue "text"</code>, <code>--gitlab-issue &lt;id&gt;</code> (via
 <code>glab</code>) or <code>--github-issue &lt;nr&gt;</code> (via
 <code>gh</code>).</li>
 <li><strong>Gate mode resolved:</strong>
@@ -378,7 +820,7 @@ contradiction between them fails immediately.</li>
 unknown keys, duplicate YAML keys, missing gates or non-positive
 timeouts abort with a clear message.</li>
 <li><strong>Working-tree preflight:</strong> the main checkout must be
-clean. If the <em>only</em> dirty files are ADW&#39;s own six authoring
+clean. If the <em>only</em> dirty files are ADW's own six authoring
 artifacts (<code>.adw/issue.md</code>, <code>spec.md</code>,
 <code>plan.md</code>, <code>contract.yaml</code>,
 <code>spec-summary.md</code>, <code>plan-summary.md</code>), they are
@@ -457,27 +899,63 @@ provenance: which draft contributed what, where the authors
 disagreed).</p>
 <p>Then the <strong>authoring loop</strong>
 (<code>_reviewed_authoring_loop</code>) runs:</p>
-<pre><code> synthesis run ─▶ required files present &amp; non-empty? ──no──▶ one repair run ──still missing──▶ ESCALATE
-        ▲                     │ yes
-        │                     ▼
-        │          Codex reviews issue.md + spec.md  (round n of 5)
-        │                     │
-        │       verdict ok ───┴──▶ phase done
-        │                     │ needs_fixes
-        │                     ▼
-        │      split findings by this round&#39;s severity floor
-        │      (round 1: P1–P3 · round 2: P1–P2 · round 3+: P1)
-        │         ├─ nothing actionable ─▶ accept, write authoring-spec-known-findings.md
-        │         ├─ round cap reached, P1 open ─▶ ESCALATE
-        │         ├─ round cap reached, only P2/P3 ─▶ accept + known findings
-        │         └─ same findings as last round ─▶ ESCALATE (circuit breaker)
-        │                     │
-        └── fix task to the SAME synthesis session (+ keep summary current)</code></pre>
+<figure>
+<div class="dia" data-diagram="workflow/authoring-loop"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 640" width="1000" height="640" role="img">
+<title>Spec/plan authoring: dual draft, synthesis, Codex review loop</title>
+<desc>How phases 1 and 2 produce a reviewed spec or plan.</desc>
+<rect x="0" y="0" width="1000" height="640" fill="#ffffff"/>
+<g data-step="2"><path class="flow" d="M160 95 L180 95 L180 50 L189 50" fill="none" stroke="#475569" stroke-width="2"/><polygon points="200,50 189,55.5 189,44.5" fill="#475569"/></g>
+<g data-step="2"><path class="flow" d="M180 95 L180 130 L189 130" fill="none" stroke="#475569" stroke-width="2"/><polygon points="200,130 189,135.5 189,124.5" fill="#475569"/></g>
+<g data-step="3"><path class="flow" d="M420 50 L445 50 L445 80 L459 80" fill="none" stroke="#475569" stroke-width="2"/><polygon points="470,80 459,85.5 459,74.5" fill="#475569"/></g>
+<g data-step="3"><path class="flow" d="M420 130 L445 130 L445 105 L459 105" fill="none" stroke="#475569" stroke-width="2"/><polygon points="470,105 459,110.5 459,99.5" fill="#475569"/></g>
+<g data-step="4"><path class="flow" d="M580 145 L580 169" fill="none" stroke="#475569" stroke-width="2"/><polygon points="580,180 574.5,169 585.5,169" fill="#475569"/></g>
+<g data-step="4"><path d="M690 210 L729 210" fill="none" stroke="#475569" stroke-width="2"/><polygon points="740,210 729,215.5 729,204.5" fill="#475569"/><text x="715" y="202" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="715" dy="0">no</tspan></text></g>
+<g data-step="5"><path class="flow" d="M580 240 L580 279" fill="none" stroke="#475569" stroke-width="2"/><polygon points="580,290 574.5,279 585.5,279" fill="#475569"/><text x="588" y="270" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="588" dy="0">yes</tspan></text></g>
+<g data-step="6"><path class="flow" d="M690 325 L729 325" fill="none" stroke="#475569" stroke-width="2"/><polygon points="740,325 729,330.5 729,319.5" fill="#475569"/><text x="715" y="317" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="715" dy="0">ok</tspan></text></g>
+<g data-step="7"><path class="flow" d="M580 360 L580 399" fill="none" stroke="#475569" stroke-width="2"/><polygon points="580,410 574.5,399 585.5,399" fill="#475569"/><text x="588" y="390" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="588" dy="0">needs_fixes</tspan></text></g>
+<g data-step="8"><path d="M715 412 L729 412" fill="none" stroke="#475569" stroke-width="2"/><polygon points="740,412 729,417.5 729,406.5" fill="#475569"/></g>
+<g data-step="8"><path d="M715 462 L729 462" fill="none" stroke="#475569" stroke-width="2"/><polygon points="740,462 729,467.5 729,456.5" fill="#475569"/></g>
+<g data-step="8"><path d="M715 512 L729 512" fill="none" stroke="#475569" stroke-width="2"/><polygon points="740,512 729,517.5 729,506.5" fill="#475569"/></g>
+<g data-step="8"><path d="M715 562 L729 562" fill="none" stroke="#475569" stroke-width="2"/><polygon points="740,562 729,567.5 729,556.5" fill="#475569"/></g>
+<g data-step="8"><path d="M690 450 L715 450" fill="none" stroke="#475569" stroke-width="2"/></g>
+<g data-step="8"><path d="M715 412 L715 562" fill="none" stroke="#475569" stroke-width="2"/></g>
+<g data-step="9"><path d="M470 450 L411 450" fill="none" stroke="#475569" stroke-width="2"/><polygon points="400,450 411,444.5 411,455.5" fill="#475569"/><text x="435" y="442" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="435" dy="0">actionable</tspan></text></g>
+<g data-step="9"><path class="flow" d="M300 410 L300 395 L455 395 L455 128 L459 128" fill="none" stroke="#475569" stroke-width="2"/><polygon points="470,128 459,133.5 459,122.5" fill="#475569"/><text x="310" y="387" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="310" dy="0">round n+1</tspan></text></g>
+<g data-step="1" data-info="The issue text is the input of both authors and of the reviewer."><rect x="20" y="60" width="140" height="70" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="90" y="91.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="90" dy="0">Issue</tspan></text><text x="90" y="108.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="90" dy="0">(issue.md)</tspan></text></g>
+<g data-step="2" data-info="Writes .adw/spec.md (or plan + contract); the orchestrator copies it to drafts/ and escalates if it is missing, empty or stale."><rect x="200" y="20" width="220" height="60" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="310" y="38.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="310" dy="0">Claude draft</tspan></text><text x="310" y="55.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="310" dy="0">spec_agent / plan_agent</tspan></text><text x="310" y="72.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="310" dy="0">Opus 4.8</tspan></text></g>
+<g data-step="2" data-info="The second opinion: Codex runs read-only, the orchestrator writes its draft to drafts/*.codex.*."><rect x="200" y="100" width="220" height="60" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="310" y="126.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="310" dy="0">Codex draft</tspan></text><text x="310" y="143.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="310" dy="0">read-only, returns text</tspan></text></g>
+<g data-step="2" data-info="Codex is optional here: on failure ADW degrades instead of escalating."><rect x="200" y="175" width="220" height="50" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/><text x="310" y="196.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="310" dy="0">Codex fails → *.codex.FAILED,</tspan></text><text x="310" y="213.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="310" dy="0">synthesis runs single-source</tspan></text></g>
+<g data-step="3" data-info="Fable 5 reads issue and both drafts, writes the merged artifact and the *-summary.md with provenance and disagreements."><rect x="470" y="55" width="220" height="90" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="580" y="79.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">Synthesis</tspan></text><text x="580" y="96.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">spec_synthesis / plan_synthesis</tspan></text><text x="580" y="113.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">Fable 5</tspan></text><text x="580" y="130.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">best-of merge + summary</tspan></text></g>
+<g data-step="4" data-info="The orchestrator checks the result itself instead of trusting the agent."><rect x="470" y="180" width="220" height="60" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="580" y="206.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">required files present</tspan></text><text x="580" y="223.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">&amp; non-empty?</tspan></text></g>
+<g data-step="4" data-info="One repair attempt in the same session, then escalation."><rect x="740" y="180" width="240" height="60" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="860" y="206.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">no → one repair run;</tspan></text><text x="860" y="223.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">still missing → ESCALATE</tspan></text></g>
+<g data-step="5" data-info="Codex gets the issue on purpose to check proportionality; from round 2 on also every earlier finding with its disposition."><rect x="470" y="290" width="220" height="70" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="580" y="313.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">Codex review</tspan></text><text x="580" y="330.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">issue + artifact</tspan></text><text x="580" y="347.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">round n of 5</tspan></text></g>
+<g data-step="6" data-info="Verdict ok ends the loop."><rect x="740" y="290" width="240" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="860" y="313.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">ok → phase done</tspan></text><text x="860" y="330.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="860" dy="0">spec: gate or plan phase</tspan></text><text x="860" y="347.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="860" dy="0">plan: archive → plan gate</tspan></text></g>
+<g data-step="7" data-info="Findings below this round&#x27;s floor are not fixed but recorded as known findings."><rect x="470" y="410" width="220" height="80" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="580" y="438.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">severity floor split</tspan></text><text x="580" y="455.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">R1: P1–P3 · R2: P1–P2</tspan></text><text x="580" y="472.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">R3–5: P1 only</tspan></text></g>
+<g data-step="8" data-info="All remaining findings are below the floor: accepted with a paper trail."><rect x="740" y="390" width="240" height="44" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="860" y="408.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">nothing actionable → accept,</tspan></text><text x="860" y="425.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">write *-known-findings.md</tspan></text></g>
+<g data-step="8" data-info="A blocker after the last round: a human has to decide."><rect x="740" y="440" width="240" height="44" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="860" y="458.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">round 5, P1 still open</tspan></text><text x="860" y="475.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">→ ESCALATE</tspan></text></g>
+<g data-step="8" data-info="At the cap, non-blocking findings are accepted and documented."><rect x="740" y="490" width="240" height="44" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="860" y="508.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">round 5, only P2/P3 open</tspan></text><text x="860" y="525" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">→ accept + known findings</tspan></text></g>
+<g data-step="8" data-info="The last fix changed nothing — stop instead of burning the budget."><rect x="740" y="540" width="240" height="44" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="860" y="558" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">same findings as last round</tspan></text><text x="860" y="575" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="860" dy="0">→ ESCALATE (circuit breaker)</tspan></text></g>
+<g data-step="9" data-info="Actionable findings go back to the author&#x27;s session as a fix task; the reviewer never edits."><rect x="200" y="410" width="200" height="80" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="300" y="437.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="300" dy="0">fix task → SAME</tspan></text><text x="300" y="454.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="300" dy="0">synthesis session</tspan></text><text x="300" y="471.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="300" dy="0">+ keep summary current</tspan></text></g>
+<text x="20" y="560" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="20" dy="0">Phase 1 (spec) and phase 2 (plan + contract) run this loop with</tspan><tspan x="20" dy="17">the same mechanics; config.yaml, issue.md and the approved spec</tspan><tspan x="20" dy="17">are restored after every agent run.</tspan></text>
+<g><rect x="20" y="612" width="18" height="14" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/></g>
+<text x="44" y="623.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="44" dy="0">orchestrator (deterministic code)</tspan></text>
+<g><rect x="287.5" y="612" width="18" height="14" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/></g>
+<text x="311.5" y="623.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="311.5" dy="0">agent (LLM)</tspan></text>
+<g><rect x="409.046875" y="612" width="18" height="14" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/></g>
+<text x="433" y="623.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="433" dy="0">gate / proof / success</tspan></text>
+<g><rect x="584.78125" y="612" width="18" height="14" rx="8" fill="#fef3c7" stroke="#b45309" stroke-width="2"/></g>
+<text x="608.8" y="623.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="608.8" dy="0">human stop</tspan></text>
+<g><rect x="738.125" y="612" width="18" height="14" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/></g>
+<text x="762.1" y="623.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="762.1" dy="0">escalation</tspan></text>
+</svg></div>
+<figcaption aria-hidden="true">Phases 1 and 2: dual draft, synthesis and
+the Codex review loop</figcaption>
+</figure>
 <p>Codex receives the issue text on purpose: it checks the spec for
 <strong>proportionality</strong> — is this what was actually asked for?
 From round 2 on it also gets the previous findings with their
-disposition (&quot;fix dispatched&quot;, &quot;below threshold, recorded as
-follow-up&quot;), so it does not re-report the same points (§13.1).</p>
+disposition ("fix dispatched", "below threshold, recorded as
+follow-up"), so it does not re-report the same points (§13.1).</p>
 <p><code>config.yaml</code>, <code>issue.md</code> and later the
 approved spec are <strong>protected</strong>: they are snapshotted and
 restored after <em>every</em> agent run, so even a misbehaving agent
@@ -529,7 +1007,7 @@ parallel without seeing each other.</li>
 <p>The spec and its summary are restored from the run folder and are
 <strong>fixed</strong> from here on — the plan phase may read them,
 never rewrite them. Codex reviews plan and contract <em>against</em> the
-issue and the spec&#39;s acceptance criteria.</p>
+issue and the spec's acceptance criteria.</p>
 <p><strong>Exit of phase 2:</strong> all artifacts
 (<code>issue.md</code>, <code>spec.md</code>, <code>plan.md</code>,
 <code>contract.yaml</code>, both summaries) are
@@ -660,14 +1138,14 @@ id);</li>
 9100–9149, <code>frontend</code> 9200–9249, derived from the run id,
 with a bind-check fallback), exported to its gates as
 <code>BACKEND_PORT</code> / <code>FRONTEND_PORT</code>;</li>
-<li>read denial for the other lanes&#39; worktrees.</li>
+<li>read denial for the other lanes' worktrees.</li>
 </ul>
 <p>Without <code>--parallel</code> ADW runs one lane
 (<code>backend</code> if configured). With <code>--parallel</code> both
 lanes run concurrently in a thread pool and the config must define
 both.</p>
 <p>The orchestrator first <strong>seeds</strong> the approved
-spec/plan/contract into the lane&#39;s <code>.adw/</code> and commits them
+spec/plan/contract into the lane's <code>.adw/</code> and commits them
 (<code>adw(&lt;id&gt;): Spec/Plan/Kontrakt</code>) — the build agent
 builds against checked-in artifacts.</p>
 <h3 id="82-tdd-red-stage-gates-marked-tdd-true">8.2 TDD RED stage (gates
@@ -675,37 +1153,75 @@ marked <code>tdd: true</code>)</h3>
 <p>If the lane has at least one gate with <code>tdd: true</code>, the
 <strong>initial</strong> build starts with a proof that the tests
 actually test something:</p>
-<pre><code> test-only agent run (&quot;write ONLY tests, no production code&quot;)
-        │
-        ▼
- orchestrator checks: worktree changed? ── no ──▶ ESCALATE (no tests, no RED proof)
-                      files deleted?    ── yes ─▶ ESCALATE (deletion would fake red)
-        │
-        ▼
- orchestrator runs ONLY the tdd-marked gates
-        ├─ all green ─▶ ESCALATE (&quot;tests don&#39;t cover the behavior, or it already exists&quot;)
-        └─ red ───────▶ red_confirmed = true, red_test_paths pinned, snapshot &quot;red&quot;
-                         implementation task (with the last 40 lines of red output)
-                         goes to the SAME agent session</code></pre>
+<figure>
+<div class="dia" data-diagram="workflow/tdd-red"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 380" width="1000" height="380" role="img">
+<title>TDD RED stage</title>
+<desc>The proof that new tests fail before the implementation starts (gates with tdd: true).</desc>
+<rect x="0" y="0" width="1000" height="380" fill="#ffffff"/>
+<g data-step="2"><path class="flow" d="M190 90 L209 90" fill="none" stroke="#475569" stroke-width="2"/><polygon points="220,90 209,95.5 209,84.5" fill="#475569"/></g>
+<g data-step="4"><path class="flow" d="M390 90 L409 90" fill="none" stroke="#475569" stroke-width="2"/><polygon points="420,90 409,95.5 409,84.5" fill="#475569"/><text x="405" y="82" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="405" dy="0">ok</tspan></text></g>
+<g data-step="6"><path class="flow" d="M590 90 L609 90" fill="none" stroke="#475569" stroke-width="2"/><polygon points="620,90 609,95.5 609,84.5" fill="#475569"/><text x="605" y="82" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="605" dy="0">red</tspan></text></g>
+<g data-step="7"><path class="flow" d="M790 90 L809 90" fill="none" stroke="#475569" stroke-width="2"/><polygon points="820,90 809,95.5 809,84.5" fill="#475569"/></g>
+<g data-step="3"><path d="M305 130 L305 179" fill="none" stroke="#475569" stroke-width="2"/><polygon points="305,190 299.5,179 310.5,179" fill="#475569"/><text x="313" y="165" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="313" dy="0">fail</tspan></text></g>
+<g data-step="5"><path d="M505 130 L505 179" fill="none" stroke="#475569" stroke-width="2"/><polygon points="505,190 499.5,179 510.5,179" fill="#475569"/><text x="513" y="165" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="513" dy="0">green</tspan></text></g>
+<g data-step="8"><path class="flow" d="M905 130 L905 179" fill="none" stroke="#475569" stroke-width="2"/><polygon points="905,190 899.5,179 910.5,179" fill="#475569"/></g>
+<g data-step="1" data-info="The first agent run of the lane may only write tests, no production code."><rect x="20" y="50" width="170" height="80" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="105" y="78.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">Test-only run</tspan></text><text x="105" y="95.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="105" dy="0">build_agent writes</tspan></text><text x="105" y="112.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="105" dy="0">ONLY tests</tspan></text></g>
+<g data-step="2" data-info="No change means no tests; a deletion could fake a red result."><rect x="220" y="50" width="170" height="80" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="305" y="78.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="305" dy="0">Orchestrator checks</tspan></text><text x="305" y="95.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="305" dy="0">worktree changed?</tspan></text><text x="305" y="112.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="305" dy="0">no file deleted?</tspan></text></g>
+<g data-step="4" data-info="Only the marked gates run; the RED check does not consume a gate iteration."><rect x="420" y="50" width="170" height="80" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="505" y="78.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="505" dy="0">Run ONLY</tspan></text><text x="505" y="95.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="505" dy="0">tdd: true gates</tspan></text><text x="505" y="112.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="505" dy="0">(no iteration used)</tspan></text></g>
+<g data-step="6" data-info="red_confirmed = true is persisted with the test file paths; a resume never repeats the test-only run."><rect x="620" y="50" width="170" height="80" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="705" y="78.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="705" dy="0">RED confirmed</tspan></text><text x="705" y="95.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="705" dy="0">red_test_paths</tspan></text><text x="705" y="112.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="705" dy="0">pinned · snapshot red</tspan></text></g>
+<g data-step="7" data-info="The implementation task goes to the same session, with the tail of the red output."><rect x="820" y="50" width="170" height="80" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="905" y="78.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="905" dy="0">Implementation</tspan></text><text x="905" y="95.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="905" dy="0">SAME session +</tspan></text><text x="905" y="112.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="905" dy="0">last 40 red lines</tspan></text></g>
+<g data-step="3" data-info="Without tests there is no RED proof — escalation."><rect x="220" y="190" width="170" height="64" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="305" y="209.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="305" dy="0">no change → ESCALATE</tspan></text><text x="305" y="226.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="305" dy="0">file deleted →</tspan></text><text x="305" y="243.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="305" dy="0">ESCALATE</tspan></text></g>
+<g data-step="5" data-info="Green tests before the implementation test nothing new — or the behavior already exists."><rect x="420" y="190" width="170" height="64" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="505" y="209.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="505" dy="0">all green →</tspan></text><text x="505" y="226.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="505" dy="0">ESCALATE</tspan></text><text x="505" y="243.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="505" dy="0">tests miss the behavior</tspan></text></g>
+<g data-step="8" data-info="From here the normal gate loop runs."><rect x="820" y="190" width="170" height="50" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="905" y="219.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="905" dy="0">→ gate loop (§8.3)</tspan></text></g>
+<g data-step="9" data-info="Checked at the end of the gate loop before the proof is persisted."><rect x="20" y="290" width="960" height="50" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="500" y="319.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" fill="#0f172a" text-anchor="middle"><tspan x="500" dy="0">Green gates only count if the RED test files still exist — deleting tests is not a path to green.</tspan></text></g>
+</svg></div>
+<figcaption aria-hidden="true">TDD RED stage: the new tests must fail
+before the implementation starts</figcaption>
+</figure>
 <p>The RED check consumes no gate iteration. Fix dispatches and resumes
 after the proof skip it. At the end, green gates only count if the
 <strong>RED test files still exist</strong> — deleting the tests is not
 a path to green.</p>
 <h3 id="83-the-gate-loop">8.3 The gate loop</h3>
-<pre><code> ┌─▶ limit check (iteration ≤ 10?) ── exceeded ─▶ ESCALATE
- │   checkpoint (expected HEAD, iteration counter)
- │   snapshot &quot;before_agent&quot;
- │   build agent run (same session; task = implement / fix gate failures)
- │   snapshot &quot;after_agent&quot;
- │   guards: no agent commit? still on lane branch?
- │   restore approved spec/plan/contract + config.yaml (agents can&#39;t change them)
- │   first iteration and nothing changed? ─▶ ESCALATE (or defer pure-P3 fix findings)
- │   run all lane gates in order, fail fast, real timeouts
- │   snapshot &quot;after_gates&quot;
- │      ├─ green ─▶ RED tests still present? ─▶ persist gates_passed + tree hash ─▶ commit
- │      └─ red ──▶ same failures as last iteration? ── yes ─▶ ESCALATE (circuit breaker)
- │                 │ no
- └──────────────── new task: &quot;Gates failed — fix the root cause&quot; + gate output (last 200 lines)</code></pre>
+<figure>
+<div class="dia" data-diagram="workflow/gate-loop"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 650" width="1000" height="650" role="img">
+<title>The gate loop</title>
+<desc>One lane task: agent run, guards, gates, proof and commit — or the next iteration.</desc>
+<rect x="0" y="0" width="1000" height="650" fill="#ffffff"/>
+<g data-step="2"><path class="flow" d="M240 66 L240 71" fill="none" stroke="#475569" stroke-width="2"/><polygon points="240,82 234.5,71 245.5,71" fill="#475569"/></g>
+<g data-step="3"><path class="flow" d="M240 128 L240 133" fill="none" stroke="#475569" stroke-width="2"/><polygon points="240,144 234.5,133 245.5,133" fill="#475569"/></g>
+<g data-step="4"><path class="flow" d="M240 190 L240 195" fill="none" stroke="#475569" stroke-width="2"/><polygon points="240,206 234.5,195 245.5,195" fill="#475569"/></g>
+<g data-step="5"><path class="flow" d="M240 252 L240 257" fill="none" stroke="#475569" stroke-width="2"/><polygon points="240,268 234.5,257 245.5,257" fill="#475569"/></g>
+<g data-step="6"><path class="flow" d="M240 314 L240 319" fill="none" stroke="#475569" stroke-width="2"/><polygon points="240,330 234.5,319 245.5,319" fill="#475569"/></g>
+<g data-step="7"><path class="flow" d="M240 376 L240 381" fill="none" stroke="#475569" stroke-width="2"/><polygon points="240,392 234.5,381 245.5,381" fill="#475569"/></g>
+<g data-step="1"><path d="M410 43 L459 43" fill="none" stroke="#b91c1c" stroke-width="2"/><polygon points="470,43 459,48.5 459,37.5" fill="#b91c1c"/></g>
+<g data-step="4"><path d="M410 229 L459 229" fill="none" stroke="#b91c1c" stroke-width="2"/><polygon points="470,229 459,234.5 459,223.5" fill="#b91c1c"/></g>
+<g data-step="6"><path d="M410 353 L459 353" fill="none" stroke="#b91c1c" stroke-width="2"/><polygon points="470,353 459,358.5 459,347.5" fill="#b91c1c"/></g>
+<g data-step="8"><path class="flow" d="M410 415 L459 415" fill="none" stroke="#475569" stroke-width="2"/><polygon points="470,415 459,420.5 459,409.5" fill="#475569"/><text x="440" y="407" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="440" dy="0">green</tspan></text></g>
+<g data-step="8"><path class="flow" d="M710 415 L739 415" fill="none" stroke="#475569" stroke-width="2"/><polygon points="750,415 739,420.5 739,409.5" fill="#475569"/></g>
+<g data-step="9"><path class="flow" d="M240 438 L240 469" fill="none" stroke="#475569" stroke-width="2"/><polygon points="240,480 234.5,469 245.5,469" fill="#475569"/><text x="248" y="464" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="248" dy="0">red</tspan></text></g>
+<g data-step="9"><path d="M410 503 L459 503" fill="none" stroke="#b91c1c" stroke-width="2"/><polygon points="470,503 459,508.5 459,497.5" fill="#b91c1c"/><text x="440" y="495" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="440" dy="0">yes</tspan></text></g>
+<g data-step="10"><path class="flow" d="M240 526 L240 549" fill="none" stroke="#475569" stroke-width="2"/><polygon points="240,560 234.5,549 245.5,549" fill="#475569"/><text x="248" y="548" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="248" dy="0">no</tspan></text></g>
+<g data-step="10" data-info="Next iteration: back to the limit check."><path class="flow" d="M70 588 L40 588 L40 43 L59 43" fill="none" stroke="#475569" stroke-width="2"/><polygon points="70,43 59,48.5 59,37.5" fill="#475569"/></g>
+<g data-step="1" data-info="10 iterations per task; a new dispatched fix task gets a fresh budget."><rect x="70" y="20" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="47.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">limit check: iteration ≤ 10?</tspan></text></g>
+<g data-step="2" data-info="Persisted before the expensive step, so a crash cannot lose or reset anything."><rect x="70" y="82" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="101" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">checkpoint (expected HEAD, counter)</tspan></text><text x="240" y="118" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">snapshot before_agent</tspan></text></g>
+<g data-step="3" data-info="Opus 4.8 works only inside its lane worktree; snapshot after_agent afterwards."><rect x="70" y="144" width="340" height="46" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="240" y="163.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">build agent — same session</tspan></text><text x="240" y="180.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">task: implement / fix gate failures</tspan></text></g>
+<g data-step="4" data-info="Agents may not commit or switch branches."><rect x="70" y="206" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="225.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">guards: no agent commit,</tspan></text><text x="240" y="242.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">still on the lane branch</tspan></text></g>
+<g data-step="5" data-info="The approved artifacts are immutable for agents."><rect x="70" y="268" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="287.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">restore spec / plan / contract</tspan></text><text x="240" y="304.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">+ config.yaml</tspan></text></g>
+<g data-step="6" data-info="An idle agent must not pass as success."><rect x="70" y="330" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="357.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">1st iteration: anything changed?</tspan></text></g>
+<g data-step="7" data-info="Your lint/test commands; output bounded to the last 200 lines; snapshot after_gates."><rect x="70" y="392" width="340" height="46" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="240" y="411.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">run all lane gates in order</tspan></text><text x="240" y="428.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">fail fast · real timeouts</tspan></text></g>
+<g data-step="1"><rect x="470" y="20" width="280" height="46" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="610" y="47.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="610" dy="0">exceeded → ESCALATE</tspan></text></g>
+<g data-step="4"><rect x="470" y="206" width="280" height="46" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="610" y="225.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="610" dy="0">agent commit / branch switch</tspan></text><text x="610" y="242.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="610" dy="0">→ ESCALATE</tspan></text></g>
+<g data-step="6"><rect x="470" y="330" width="280" height="46" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="610" y="349.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="610" dy="0">no change → ESCALATE</tspan></text><text x="610" y="366.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="610" dy="0">(pure-P3 fix findings → deferred)</tspan></text></g>
+<g data-step="8" data-info="Deleting the RED tests is not a path to green."><rect x="470" y="392" width="240" height="46" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="590" y="411.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="590" dy="0">green → RED tests</tspan></text><text x="590" y="428.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="590" dy="0">still present?</tspan></text></g>
+<g data-step="8" data-info="The proof is bound to the worktree hash and saved before the commit; resume trusts it only if the tree still matches."><rect x="750" y="380" width="230" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="865" y="402.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="865" dy="0">persist gates_passed</tspan></text><text x="865" y="419.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="865" dy="0">+ tree hash → orchestrator</tspan></text><text x="865" y="436.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="865" dy="0">commit</tspan></text></g>
+<g data-step="9" data-info="Compares gate, exit code and output with the previous iteration."><rect x="70" y="480" width="340" height="46" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="499.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">red: same failures as</tspan></text><text x="240" y="516" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">last iteration?</tspan></text></g>
+<g data-step="9"><rect x="470" y="480" width="280" height="46" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="610" y="499.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="610" dy="0">yes → ESCALATE</tspan></text><text x="610" y="516" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="610" dy="0">(circuit breaker)</tspan></text></g>
+<g data-step="10" data-info="The next iteration starts in the same session with the failing gate output."><rect x="70" y="560" width="340" height="56" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="240" y="584" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">new task: “Gates failed —</tspan></text><text x="240" y="601" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="240" dy="0">fix the root cause” + gate output</tspan></text></g>
+</svg></div>
+<figcaption aria-hidden="true">The gate loop of one lane
+task</figcaption>
+</figure>
 <p>Key properties:</p>
 <ul>
 <li><strong>Gates are your commands</strong>
@@ -751,11 +1267,41 @@ Integration + E2E (parallel mode only)</h2>
 </tr>
 </tbody>
 </table>
+<figure>
+<div class="dia" data-diagram="workflow/integration-e2e"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 380" width="1000" height="380" role="img">
+<title>Phase 4: integration and E2E</title>
+<desc>Merge all lanes fresh from base, run E2E, triage red tests back to the lanes.</desc>
+<rect x="0" y="0" width="1000" height="380" fill="#ffffff"/>
+<g data-step="2"><path class="flow" d="M180 85 L205 85 L205 125 L219 125" fill="none" stroke="#475569" stroke-width="2"/><polygon points="230,125 219,130.5 219,119.5" fill="#475569"/></g>
+<g data-step="2"><path d="M180 165 L205 165 L205 125" fill="none" stroke="#475569" stroke-width="2"/></g>
+<g data-step="2"><path d="M330 90 L330 67" fill="none" stroke="#b91c1c" stroke-width="2"/><polygon points="330,56 335.5,67 324.5,67" fill="#b91c1c"/></g>
+<g data-step="3"><path class="flow" d="M430 125 L469 125" fill="none" stroke="#475569" stroke-width="2"/><polygon points="480,125 469,130.5 469,119.5" fill="#475569"/></g>
+<g data-step="4"><path class="flow" d="M660 125 L709 125" fill="none" stroke="#475569" stroke-width="2"/><polygon points="720,125 709,130.5 709,119.5" fill="#475569"/><text x="690" y="117" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="690" dy="0">green</tspan></text></g>
+<g data-step="5"><path class="flow" d="M570 160 L570 229" fill="none" stroke="#475569" stroke-width="2"/><polygon points="570,240 564.5,229 575.5,229" fill="#475569"/><text x="578" y="205" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="578" dy="0">red</tspan></text></g>
+<g data-step="5"><path d="M660 275 L709 275" fill="none" stroke="#b91c1c" stroke-width="2"/><polygon points="720,275 709,280.5 709,269.5" fill="#b91c1c"/></g>
+<g data-step="6"><path class="flow" d="M480 275 L441 275" fill="none" stroke="#475569" stroke-width="2"/><polygon points="430,275 441,269.5 441,280.5" fill="#475569"/><text x="455" y="267" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="455" dy="0">new</tspan></text></g>
+<g data-step="7"><path class="flow" d="M230 275 L191 275" fill="none" stroke="#475569" stroke-width="2"/><polygon points="180,275 191,269.5 191,280.5" fill="#475569"/></g>
+<g data-step="7"><path class="flow" d="M100 240 L100 201" fill="none" stroke="#475569" stroke-width="2"/><polygon points="100,190 105.5,201 94.5,201" fill="#475569"/></g>
+<g data-step="1" data-info="Both lane branches enter with green gates."><rect x="20" y="60" width="160" height="50" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="100" y="81.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="100" dy="0">lane backend</tspan></text><text x="100" y="98.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="100" dy="0">gates green</tspan></text></g>
+<g data-step="1"><rect x="20" y="140" width="160" height="50" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="100" y="161.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="100" dy="0">lane frontend</tspan></text><text x="100" y="178.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="100" dy="0">gates green</tspan></text></g>
+<g data-step="2" data-info="Each round rebuilds the integration branch from base: idempotent and crash-safe."><rect x="230" y="90" width="200" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="330" y="113.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="330" dy="0">round r ≤ 10</tspan></text><text x="330" y="130.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="330" dy="0">fresh from base,</tspan></text><text x="330" y="147.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="330" dy="0">merge all lanes</tspan></text></g>
+<g data-step="2" data-info="Resolving merge conflicts is a human job."><rect x="230" y="10" width="200" height="46" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="330" y="29.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="330" dy="0">conflict / timeout</tspan></text><text x="330" y="46" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="330" dy="0">→ ESCALATE</tspan></text></g>
+<g data-step="3" data-info="Without an e2e config, integration is a pure merge."><rect x="480" y="90" width="180" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="570" y="113.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="570" dy="0">E2E gate</tspan></text><text x="570" y="130.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="570" dy="0">e2e.cmd</tspan></text><text x="570" y="147.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="570" dy="0">all lane ports set</tspan></text></g>
+<g data-step="4" data-info="Merged and E2E-green: on to the code review."><rect x="720" y="90" width="260" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="850" y="121.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">green → phase 5</tspan></text><text x="850" y="138.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="850" dy="0">codex_review</tspan></text></g>
+<g data-step="5"><rect x="480" y="240" width="180" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="570" y="262.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="570" dy="0">round persisted;</tspan></text><text x="570" y="279.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="570" dy="0">same output as</tspan></text><text x="570" y="296.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="570" dy="0">last round?</tspan></text></g>
+<g data-step="5"><rect x="720" y="240" width="260" height="70" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="850" y="271.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">identical → ESCALATE</tspan></text><text x="850" y="288.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">(circuit breaker)</tspan></text></g>
+<g data-step="6" data-info="Read-only; each failure becomes a finding for frontend, backend or unknown (= all lanes)."><rect x="230" y="240" width="200" height="70" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="330" y="263.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="330" dy="0">e2e_triage</tspan></text><text x="330" y="280.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="330" dy="0">Sonnet 5</tspan></text><text x="330" y="297.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="330" dy="0">assigns failures to lanes</tspan></text></g>
+<g data-step="7" data-info="The lanes run their gate loop again and get an orchestrator commit; then the next round merges again."><rect x="20" y="240" width="160" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="100" y="271.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="100" dy="0">dispatch fixes</tspan></text><text x="100" y="288.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="100" dy="0">to lanes (§13.3)</tspan></text></g>
+<text x="20" y="350" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="20" dy="0">Max 10 rounds for the whole run — review and CI fixes in parallel mode pass merge + E2E again and share this budget.</tspan></text>
+</svg></div>
+<figcaption aria-hidden="true">Phase 4: merge, E2E, triage and dispatch
+back to the lanes</figcaption>
+</figure>
 <p>Each round rebuilds the integration worktree <strong>fresh from the
 base branch</strong> and merges every lane branch into it (idempotent,
 crash-safe). A merge conflict or merge timeout
 <strong>escalates</strong> — conflict resolution is a human job.</p>
-<p>Then the E2E gate (<code>e2e.cmd</code> with all lanes&#39; ports in the
+<p>Then the E2E gate (<code>e2e.cmd</code> with all lanes' ports in the
 environment) runs. If no <code>e2e</code> is configured, integration is
 a pure merge. On red:</p>
 <ol type="1">
@@ -795,20 +1341,39 @@ circuit breaker</td>
 </tr>
 </tbody>
 </table>
-<pre><code> round n: (parallel: merge + E2E green first) ─▶ Codex reviews the diff
-     ├─ ok ─────────────────────────────────▶ final_review
-     ├─ only already-deferred findings ─────▶ final_review
-     ├─ split by severity floor of round n
-     │    dropped (below floor) ─▶ followups.md
-     │    nothing actionable    ─▶ final_review
-     ├─ round n == 5 with actionable findings ─▶ ESCALATE (a fix nobody can re-review is waste)
-     ├─ same findings as last round ─▶ ESCALATE (circuit breaker)
-     └─ dispatch actionable findings to lanes (by the finding&#39;s lane field) ─▶ round n+1</code></pre>
+<figure>
+<div class="dia" data-diagram="workflow/codex-review"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" width="1000" height="420" role="img">
+<title>Phase 5: Codex code review</title>
+<desc>One review round and every way it can end.</desc>
+<rect x="0" y="0" width="1000" height="420" fill="#ffffff"/>
+<g data-step="2"><path class="flow" d="M200 215 L229 215" fill="none" stroke="#475569" stroke-width="2"/><polygon points="240,215 229,220.5 229,209.5" fill="#475569"/></g>
+<g data-step="3"><path class="flow" d="M440 215 L469 215" fill="none" stroke="#475569" stroke-width="2"/><polygon points="480,215 469,220.5 469,209.5" fill="#475569"/></g>
+<g data-step="4"><path d="M700 55 L709 55" fill="none" stroke="#475569" stroke-width="2"/><polygon points="720,55 709,60.5 709,49.5" fill="#475569"/></g>
+<g data-step="4"><path d="M700 115 L709 115" fill="none" stroke="#475569" stroke-width="2"/><polygon points="720,115 709,120.5 709,109.5" fill="#475569"/></g>
+<g data-step="5"><path d="M700 175 L709 175" fill="none" stroke="#475569" stroke-width="2"/><polygon points="720,175 709,180.5 709,169.5" fill="#475569"/></g>
+<g data-step="5"><path d="M700 235 L709 235" fill="none" stroke="#475569" stroke-width="2"/><polygon points="720,235 709,240.5 709,229.5" fill="#475569"/></g>
+<g data-step="4"><path d="M680 215 L700 215" fill="none" stroke="#475569" stroke-width="2"/></g>
+<g data-step="4"><path d="M700 55 L700 235" fill="none" stroke="#475569" stroke-width="2"/></g>
+<g data-step="6"><path class="flow" d="M580 250 L580 289" fill="none" stroke="#475569" stroke-width="2"/><polygon points="580,300 574.5,289 585.5,289" fill="#475569"/><text x="588" y="280" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="588" dy="0">actionable</tspan></text></g>
+<g data-step="6"><path class="flow" d="M240 330 L110 330 L110 261" fill="none" stroke="#475569" stroke-width="2"/><polygon points="110,250 115.5,261 104.5,261" fill="#475569"/><text x="118" y="322" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="118" dy="0">round n+1</tspan></text></g>
+<g data-step="1" data-info="In parallel mode every round first goes through merge + E2E."><rect x="20" y="180" width="180" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="110" y="203.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="110" dy="0">round n (≤ 5)</tspan></text><text x="110" y="220.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="110" dy="0">parallel: merge +</tspan></text><text x="110" y="237.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="110" dy="0">E2E green first</tspan></text></g>
+<g data-step="2" data-info="Findings carry severity P1–P3, lane, file, issue and remediation_plan; unreadable output is an escalation, never a silent ok."><rect x="240" y="180" width="200" height="70" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="340" y="203.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="340" dy="0">Codex reviews</tspan></text><text x="340" y="220.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="340" dy="0">the diff</tspan></text><text x="340" y="237.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="340" dy="0">read-only · strict JSON</tspan></text></g>
+<g data-step="3" data-info="Pure Python: no LLM decides what happens with a finding."><rect x="480" y="180" width="200" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="580" y="203.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="580" dy="0">triage by code</tspan></text><text x="580" y="220.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">severity floor</tspan></text><text x="580" y="237.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="580" dy="0">of round n</tspan></text></g>
+<g data-step="4" data-info="The phase is done; continue with the final review."><rect x="720" y="30" width="260" height="50" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="850" y="51" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">ok / only deferred / nothing</tspan></text><text x="850" y="68" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">actionable → final_review</tspan></text></g>
+<g data-step="4" data-info="Dropped findings are not lost: they become candidate follow-up issues."><rect x="720" y="90" width="260" height="50" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="850" y="111" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">below the floor → followups.md</tspan></text><text x="850" y="128.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">(in every round)</tspan></text></g>
+<g data-step="5" data-info="A fix that nobody can re-review is waste."><rect x="720" y="150" width="260" height="50" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="850" y="171.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">round 5 with actionable</tspan></text><text x="850" y="188.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">findings → ESCALATE</tspan></text></g>
+<g data-step="5" data-info="The previous fix round changed nothing."><rect x="720" y="210" width="260" height="50" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="850" y="231.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">same findings as last round</tspan></text><text x="850" y="248.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="850" dy="0">→ ESCALATE (circuit breaker)</tspan></text></g>
+<g data-step="6" data-info="Reviewers never fix: the build agents fix, then all gates run again."><rect x="240" y="300" width="440" height="60" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="460" y="326.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="460" dy="0">dispatch actionable findings to the lanes</tspan></text><text x="460" y="343.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="460" dy="0">(by finding.lane) → gate loop → commit</tspan></text></g>
+<text x="20" y="400" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="20" dy="0">From round 2 Codex gets every earlier finding with its disposition (findings memory, §13.1).</tspan></text>
+</svg></div>
+<figcaption aria-hidden="true">Phase 5: one Codex review round and every
+way it can end</figcaption>
+</figure>
 <p>Each finding is structured JSON (<code>adw/findings.py</code>):
 <code>severity</code> (P1–P3), <code>lane</code>, <code>file</code>,
 <code>issue</code>, <code>remediation_plan</code>. The parser is
 deliberately strict — an unreadable review is an escalation, never a
-silent &quot;ok&quot;.</p>
+silent "ok".</p>
 <hr />
 <h2 id="11-phase-6--final-review--triage">11. Phase 6 — Final review +
 triage</h2>
@@ -851,13 +1416,13 @@ automatic restart</td>
 </tr>
 <tr class="even">
 <td><code>implementation</code> / <code>trivial</code></td>
-<td>fix task to the finding&#39;s lane; <code>unknown</code> lane → all
+<td>fix task to the finding's lane; <code>unknown</code> lane → all
 active lanes</td>
 </tr>
 </tbody>
 </table>
 <p>A finding without a category escalates (it cannot be triaged safely).
-Each dispatch bumps the lane&#39;s <code>fix_cycles</code> in the
+Each dispatch bumps the lane's <code>fix_cycles</code> in the
 <strong>same save</strong> as the staged task; the 4th cycle for a lane
 escalates. Only scope gaps left → phase done.</p>
 <p>Then: optional <code>before_push</code> breakpoint, then
@@ -883,10 +1448,42 @@ green E2E)</td>
 </tr>
 </tbody>
 </table>
+<figure>
+<div class="dia" data-diagram="workflow/ci"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 410" width="1000" height="410" role="img">
+<title>Phase 7: push and CI</title>
+<desc>Push, SHA-bound polling, one CI re-entry, then a human.</desc>
+<rect x="0" y="0" width="1000" height="410" fill="#ffffff"/>
+<g data-step="1"><path d="M105 110 L105 159" fill="none" stroke="#b91c1c" stroke-width="2"/><polygon points="105,170 99.5,159 110.5,159" fill="#b91c1c"/></g>
+<g data-step="2"><path class="flow" d="M190 75 L219 75" fill="none" stroke="#475569" stroke-width="2"/><polygon points="230,75 219,80.5 219,69.5" fill="#475569"/></g>
+<g data-step="3"><path class="flow" d="M400 75 L429 75" fill="none" stroke="#475569" stroke-width="2"/><polygon points="440,75 429,80.5 429,69.5" fill="#475569"/></g>
+<g data-step="4"><path class="flow" d="M610 75 L809 75" fill="none" stroke="#475569" stroke-width="2"/><polygon points="820,75 809,80.5 809,69.5" fill="#475569"/><text x="715" y="67" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="715" dy="0">green (+ staging_job)</tspan></text></g>
+<g data-step="5"><path class="flow" d="M525 110 L525 159" fill="none" stroke="#475569" stroke-width="2"/><polygon points="525,170 519.5,159 530.5,159" fill="#475569"/><text x="533" y="145" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="533" dy="0">red</tspan></text></g>
+<g data-step="5"><path d="M610 205 L639 205" fill="none" stroke="#b91c1c" stroke-width="2"/><polygon points="650,205 639,210.5 639,199.5" fill="#b91c1c"/></g>
+<g data-step="6"><path class="flow" d="M525 240 L525 279" fill="none" stroke="#475569" stroke-width="2"/><polygon points="525,290 519.5,279 530.5,279" fill="#475569"/><text x="533" y="268" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="533" dy="0">yes</tspan></text></g>
+<g data-step="6"><path d="M610 325 L639 325" fill="none" stroke="#b91c1c" stroke-width="2"/><polygon points="650,325 639,330.5 639,319.5" fill="#b91c1c"/><text x="630" y="317" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="630" dy="0">yes</tspan></text></g>
+<g data-step="7"><path class="flow" d="M440 325 L411 325" fill="none" stroke="#475569" stroke-width="2"/><polygon points="400,325 411,319.5 411,330.5" fill="#475569"/><text x="420" y="317" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="420" dy="0">no</tspan></text></g>
+<g data-step="8"><path class="flow" d="M315 290 L315 251" fill="none" stroke="#475569" stroke-width="2"/><polygon points="315,240 320.5,251 309.5,251" fill="#475569"/></g>
+<g data-step="8"><path class="flow" d="M315 170 L315 121" fill="none" stroke="#475569" stroke-width="2"/><polygon points="315,110 320.5,121 309.5,121" fill="#475569"/></g>
+<g data-step="1" data-info="GitLab (glab) or GitHub (gh). The config key wins over the origin URL."><rect x="20" y="40" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="105" y="63.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">forge detection</tspan></text><text x="105" y="80.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="105" dy="0">ci.provider</tspan></text><text x="105" y="97.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="105" dy="0">or origin host</tspan></text></g>
+<g data-step="1" data-info="A real run escalates here; set ci.provider for self-hosted forges."><rect x="20" y="170" width="170" height="60" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="105" y="196.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">unknown host</tspan></text><text x="105" y="213.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="105" dy="0">→ ESCALATE</tspan></text></g>
+<g data-step="2" data-info="Only the orchestrator pushes; hooks are disabled."><rect x="230" y="40" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="315" y="63.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">push</tspan></text><text x="315" y="80.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">--force-with-lease</tspan></text><text x="315" y="97.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">(dry-run: no push)</tspan></text></g>
+<g data-step="3" data-info="0 tokens. A stale pipeline of an earlier push cannot decide the result."><rect x="440" y="40" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="525" y="63.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="525" dy="0">poll CI</tspan></text><text x="525" y="80.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="525" dy="0">bound to pushed SHA</tspan></text><text x="525" y="97.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="525" dy="0">every 60 s, ≤ 2700 s</tspan></text></g>
+<g data-step="4" data-info="All runs for the SHA green, plus ci.staging_job if configured."><rect x="820" y="40" width="160" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="900" y="71.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="900" dy="0">done</tspan></text><text x="900" y="88.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="900" dy="0">exit 0</tspan></text></g>
+<g data-step="5" data-info="Canceled, skipped or YAML errors leave no evidence to analyse."><rect x="440" y="170" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="525" y="209.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="525" dy="0">usable job logs?</tspan></text></g>
+<g data-step="5" data-info="An analyst without logs would only hallucinate."><rect x="650" y="170" width="170" height="70" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="735" y="201.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="735" dy="0">no → ESCALATE</tspan></text><text x="735" y="218.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="735" dy="0">(no evidence)</tspan></text></g>
+<g data-step="6"><rect x="440" y="290" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="525" y="321.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="525" dy="0">re-entry already</tspan></text><text x="525" y="338.1" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="525" dy="0">used?</tspan></text></g>
+<g data-step="6" data-info="Exactly one automatic CI re-entry per run; then a human takes over."><rect x="650" y="290" width="170" height="70" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="735" y="312.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="735" dy="0">red again →</tspan></text><text x="735" y="329.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="735" dy="0">ESCALATE</tspan></text><text x="735" y="346.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="735" dy="0">with log excerpt</tspan></text></g>
+<g data-step="7" data-info="Read-only analysis of the job logs."><rect x="230" y="290" width="170" height="70" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="315" y="313.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">log_analyst</tspan></text><text x="315" y="330.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">Sonnet 5</tspan></text><text x="315" y="347.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="315" dy="0">logs → lane findings</tspan></text></g>
+<g data-step="8" data-info="Counter and fix tasks in one atomic save; then push and poll again."><rect x="230" y="170" width="170" height="70" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="315" y="192.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">dispatch to lanes</tspan></text><text x="315" y="209.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">re-entry counter +1</tspan></text><text x="315" y="226.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">(parallel: merge/E2E)</tspan></text></g>
+</svg></div>
+<figcaption aria-hidden="true">Phase 7: push, SHA-bound polling and the
+single CI re-entry</figcaption>
+</figure>
 <ol type="1">
 <li><strong>Forge detection:</strong> <code>ci.provider</code> in the
 config wins; otherwise the origin URL host must clearly say
-<code>gitlab</code> or <code>github</code> (fail fast otherwise).</li>
+<code>gitlab</code> or <code>github</code> (otherwise the run escalates
+here — after the whole build; a dry run falls back to GitLab).</li>
 <li><strong>Push</strong> by the orchestrator:
 <code>git push --force-with-lease -u origin &lt;branch&gt;</code> (hooks
 disabled; the SSH agent socket is passed to the push only). In
@@ -946,6 +1543,41 @@ therefore applies:</p>
 </tr>
 </tbody>
 </table>
+<figure>
+<div class="dia" data-diagram="workflow/review-policy"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 340" width="1000" height="340" role="img">
+<title>Review-loop policy: descending severity floor</title>
+<desc>Which severities are acted on in review rounds 1 to 5.</desc>
+<rect x="0" y="0" width="1000" height="340" fill="#ffffff"/>
+<g data-step="2"><path class="flow" d="M210 50 L219 50" fill="none" stroke="#475569" stroke-width="2"/><polygon points="230,50 219,55.5 219,44.5" fill="#475569"/></g>
+<g data-step="3"><path class="flow" d="M400 50 L409 50" fill="none" stroke="#475569" stroke-width="2"/><polygon points="420,50 409,55.5 409,44.5" fill="#475569"/></g>
+<g data-step="4"><path class="flow" d="M590 50 L599 50" fill="none" stroke="#475569" stroke-width="2"/><polygon points="610,50 599,55.5 599,44.5" fill="#475569"/></g>
+<g data-step="5"><path class="flow" d="M780 50 L789 50" fill="none" stroke="#475569" stroke-width="2"/><polygon points="800,50 789,55.5 789,44.5" fill="#475569"/></g>
+<g data-step="1" data-info="Round 1: full review — P1, P2 and P3 are fixed."><rect x="40" y="30" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="125" y="55.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="125" dy="0">Round 1</tspan></text></g>
+<g data-step="1"><rect x="40" y="80" width="170" height="40" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="125" y="104.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="125" dy="0">P1 · fix</tspan></text></g>
+<g data-step="1"><rect x="40" y="128" width="170" height="40" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="125" y="152.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="125" dy="0">P2 · fix</tspan></text></g>
+<g data-step="1"><rect x="40" y="176" width="170" height="40" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="125" y="200.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="125" dy="0">P3 · fix</tspan></text></g>
+<g data-step="2" data-info="Round 2: P1 and P2 are fixed; P3 becomes a follow-up / known finding."><rect x="230" y="30" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="315" y="55.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">Round 2</tspan></text></g>
+<g data-step="2"><rect x="230" y="80" width="170" height="40" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="315" y="104.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">P1 · fix</tspan></text></g>
+<g data-step="2"><rect x="230" y="128" width="170" height="40" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="315" y="152.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">P2 · fix</tspan></text></g>
+<g data-step="2"><rect x="230" y="176" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="315" y="200.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="315" dy="0">P3 → follow-up</tspan></text></g>
+<g data-step="3" data-info="Round 3: only P1 blocks; P2 and P3 are recorded, not fixed."><rect x="420" y="30" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="505" y="55.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="505" dy="0">Round 3</tspan></text></g>
+<g data-step="3"><rect x="420" y="80" width="170" height="40" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="505" y="104.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="505" dy="0">P1 · fix</tspan></text></g>
+<g data-step="3"><rect x="420" y="128" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="505" y="152.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="505" dy="0">P2 → follow-up</tspan></text></g>
+<g data-step="3"><rect x="420" y="176" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="505" y="200.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="505" dy="0">P3 → follow-up</tspan></text></g>
+<g data-step="4" data-info="Round 4: as round 3 — only P1."><rect x="610" y="30" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="695" y="55.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="695" dy="0">Round 4</tspan></text></g>
+<g data-step="4"><rect x="610" y="80" width="170" height="40" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="695" y="104.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="695" dy="0">P1 · fix</tspan></text></g>
+<g data-step="4"><rect x="610" y="128" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="695" y="152.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="695" dy="0">P2 → follow-up</tspan></text></g>
+<g data-step="4"><rect x="610" y="176" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="695" y="200.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="695" dy="0">P3 → follow-up</tspan></text></g>
+<g data-step="5" data-info="Round 5, the cap: an open P1 escalates (authoring: P2/P3 accepted as known findings; phase 5: any actionable finding escalates)."><rect x="800" y="30" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="885" y="55.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="885" dy="0">Round 5</tspan></text></g>
+<g data-step="5"><rect x="800" y="80" width="170" height="40" rx="8" fill="#fee2e2" stroke="#b91c1c" stroke-width="2"/><text x="885" y="104.5" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="885" dy="0">P1 open → ESCALATE</tspan></text></g>
+<g data-step="5"><rect x="800" y="128" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="885" y="152.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="885" dy="0">P2 → follow-up</tspan></text></g>
+<g data-step="5"><rect x="800" y="176" width="170" height="40" rx="8" fill="#f1f5f9" stroke="#475569" stroke-width="2"/><text x="885" y="200.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="middle"><tspan x="885" dy="0">P3 → follow-up</tspan></text></g>
+<g data-step="6" data-info="Without memory and a falling floor, a deterministic reviewer always finds one more edge case and the loop never converges."><rect x="230" y="240" width="740" height="70" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="240" y="262.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="start"><tspan x="240" dy="0">Findings memory (from round 2): the prompt carries round n, the floor and every earlier</tspan></text><text x="240" y="279.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="start"><tspan x="240" dy="0">finding with its disposition — “do not re-report unless it demonstrably persists”.</tspan></text><text x="240" y="296.6" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#0f172a" text-anchor="start"><tspan x="240" dy="0">Persisted as authoring_prior_context / review_prior_context — survives a crash.</tspan></text></g>
+<g data-step="6"><text x="40" y="270" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" font-weight="bold" fill="#0f172a" text-anchor="start"><tspan x="40" dy="0">rounds 2–5</tspan></text></g>
+</svg></div>
+<figcaption aria-hidden="true">Review-loop policy: the severity floor
+drops round by round, the findings memory grows</figcaption>
+</figure>
 <p>From round 2 on, the reviewer prompt contains the round number, the
 current floor and every earlier finding with its
 <strong>disposition</strong>, plus the instruction not to re-report them
@@ -953,7 +1585,7 @@ unless the problem demonstrably persists. The history is persisted
 (<code>authoring_prior_context</code>,
 <code>review_prior_context</code>) and survives a crash.</p>
 <h3 id="132-circuit-breaker">13.2 Circuit breaker</h3>
-<p>Every loop compares the current failure set with the previous round&#39;s
+<p>Every loop compares the current failure set with the previous round's
 (<code>triage.check_progress</code>). An identical set means the last
 fix changed nothing — the run escalates <strong>immediately</strong>
 instead of burning the rest of its budget. Keys: <code>file|issue</code>
@@ -974,6 +1606,31 @@ with the counter update (review round, fix cycle or CI re-entry);</li>
 <li>then each lane runs the normal gate loop and gets an orchestrator
 commit.</li>
 </ul>
+<figure>
+<div class="dia" data-diagram="workflow/fix-dispatch"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 330" width="1000" height="330" role="img">
+<title>Fix dispatch: one path for every fix</title>
+<desc>Every source of findings feeds the same lane loop.</desc>
+<rect x="0" y="0" width="1000" height="330" fill="#ffffff"/>
+<g data-step="1"><path d="M240 44 L280 44" fill="none" stroke="#475569" stroke-width="2"/></g>
+<g data-step="1"><path d="M240 106 L280 106" fill="none" stroke="#475569" stroke-width="2"/></g>
+<g data-step="1"><path d="M240 168 L280 168" fill="none" stroke="#475569" stroke-width="2"/></g>
+<g data-step="1"><path d="M240 230 L280 230" fill="none" stroke="#475569" stroke-width="2"/></g>
+<g data-step="1"><path d="M280 44 L280 230" fill="none" stroke="#475569" stroke-width="2"/></g>
+<g data-step="2"><path class="flow" d="M280 137 L309 137" fill="none" stroke="#475569" stroke-width="2"/><polygon points="320,137 309,142.5 309,131.5" fill="#475569"/></g>
+<g data-step="3"><path class="flow" d="M620 137 L650 137 L650 85 L669 85" fill="none" stroke="#475569" stroke-width="2"/><polygon points="680,85 669,90.5 669,79.5" fill="#475569"/></g>
+<g data-step="3"><path class="flow" d="M620 137 L650 137 L650 185 L669 185" fill="none" stroke="#475569" stroke-width="2"/><polygon points="680,185 669,190.5 669,179.5" fill="#475569"/></g>
+<g data-step="1" data-info="Each of these reviewers only reports structured findings — none of them edits code."><rect x="20" y="20" width="220" height="48" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="130" y="48.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="130" dy="0">E2E triage</tspan></text></g>
+<g data-step="1" data-info="Each of these reviewers only reports structured findings — none of them edits code."><rect x="20" y="82" width="220" height="48" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="130" y="110.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="130" dy="0">Codex code review</tspan></text></g>
+<g data-step="1" data-info="Each of these reviewers only reports structured findings — none of them edits code."><rect x="20" y="144" width="220" height="48" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="130" y="172.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="130" dy="0">final review</tspan></text></g>
+<g data-step="1" data-info="Each of these reviewers only reports structured findings — none of them edits code."><rect x="20" y="206" width="220" height="48" rx="8" fill="#ede9fe" stroke="#6d28d9" stroke-width="2"/><text x="130" y="234.9" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="130" dy="0">CI log analyst</tspan></text></g>
+<g data-step="2" data-info="Review round, fix cycle or CI re-entry counter is saved together with the staged tasks — a crash cannot reset a limit."><rect x="320" y="57" width="300" height="160" rx="8" fill="#e0f2fe" stroke="#0369a1" stroke-width="2"/><text x="330" y="108.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="start"><tspan x="330" dy="0">_dispatch_lane_fixes</tspan></text><text x="330" y="125.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="330" dy="0">group by lane (unknown → all)</tspan></text><text x="330" y="142.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="330" dy="0">reset completed / gates_passed</tspan></text><text x="330" y="159.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="330" dy="0">new task + fresh gate budget</tspan></text><text x="330" y="176.2" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="start"><tspan x="330" dy="0">ONE atomic save incl. counter</tspan></text></g>
+<g data-step="3" data-info="The normal gate loop: agent fix, all gates, proof, commit."><rect x="680" y="50" width="300" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="830" y="81.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="830" dy="0">lane backend</tspan></text><text x="830" y="98.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="830" dy="0">gate loop → orchestrator commit</tspan></text></g>
+<g data-step="3" data-info="The normal gate loop: agent fix, all gates, proof, commit."><rect x="680" y="150" width="300" height="70" rx="8" fill="#dcfce7" stroke="#15803d" stroke-width="2"/><text x="830" y="181.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="15" font-weight="bold" fill="#0f172a" text-anchor="middle"><tspan x="830" dy="0">lane frontend</tspan></text><text x="830" y="198.8" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="13" fill="#334155" text-anchor="middle"><tspan x="830" dy="0">gate loop → orchestrator commit</tspan></text></g>
+<g data-step="4"><text x="20" y="290" font-family="Liberation Sans, Arial, Helvetica, sans-serif" font-size="14" font-weight="bold" fill="#0f172a" text-anchor="start"><tspan x="20" dy="0">No shortcut, not even for “trivial” findings: every fix passes all gates again.</tspan></text></g>
+</svg></div>
+<figcaption aria-hidden="true">Fix dispatch: every source of findings
+feeds the same lane loop</figcaption>
+</figure>
 <h3 id="134-deferred-findings-and-follow-ups">13.4 Deferred findings and
 follow-ups</h3>
 <p>If a fix run leaves the worktree untouched and <em>all</em> its
@@ -1099,7 +1756,7 @@ exhausted; Codex review error/timeout; crash; Ctrl-C)</td>
 </tbody>
 </table>
 <p>The distinction matters: an <strong>escalation</strong> is a verdict
-(&quot;a human must decide&quot;), written to <code>escalation.md</code> with
+("a human must decide"), written to <code>escalation.md</code> with
 phase, lanes and the concrete reason (gate output, findings, merge
 conflict, limit). A <strong>refusal</strong> and an
 <strong>interruption</strong> are not verdicts — the run stays exactly
@@ -1196,7 +1853,7 @@ cost. Switch off with <code>trace.enabled: false</code>.</li>
 (<code>before_agent</code>, <code>after_agent</code>,
 <code>after_gates</code>, <code>red</code>) the lane worktree is pinned
 as a git commit under <code>refs/adw/&lt;run_id&gt;/&lt;seq&gt;</code> —
-without touching the real index. &quot;What did this step change?&quot; is a
+without touching the real index. "What did this step change?" is a
 <code>git diff</code> between two refs.</li>
 <li><strong>GUI (Run Inspector)</strong> — <code>adw gui</code>
 (optional extra <code>gui</code>) is a strictly
@@ -1218,8 +1875,8 @@ non-terminal runs) or compresses their event logs.</p>
 <code>b65f5d75</code></h2>
 <p>A real run of ADW on its own repository (ADW 0.11.0, single lane,
 GitHub CI). The mechanics described above were already in place; the
-numbers come from its event log. Issue: <em>&quot;Jump from a trace node into
-the raw log + prompt diff against the previous round.&quot;</em></p>
+numbers come from its event log. Issue: <em>"Jump from a trace node into
+the raw log + prompt diff against the previous round."</em></p>
 <table>
 <thead>
 <tr class="header">
@@ -1234,7 +1891,7 @@ the raw log + prompt diff against the previous round.&quot;</em></p>
 <td>0.0 – 6.7</td>
 <td>Opus draft + Codex draft in parallel; Fable synthesis. Codex review:
 round 1 and 2 each found a P2 — e.g. an acceptance criterion promised an
-interval filter shows <em>exactly</em> a subtree&#39;s events, which a
+interval filter shows <em>exactly</em> a subtree's events, which a
 sequence interval cannot guarantee. Both fixed in the same session.
 Round 3: <code>ok</code>.</td>
 </tr>
@@ -1296,7 +1953,8 @@ pause. The cost was concentrated <em>before</em> the code (spec + plan)
 — and the build needed no correction round afterwards. That is the
 design bet of ADW in numbers: thinking up front is cheaper than
 repairing at the end.</p>
-<p>A detailed German walkthrough of this run is in <a href="adw-flow-handout.de.md"><code>adw-flow-handout.de.md</code></a>.</p>
+<p>A detailed German walkthrough of this run is in <a
+href="../adw-flow-handout.de.md"><code>adw-flow-handout.de.md</code></a>.</p>
 <hr />
 <h2 id="18-quick-reference">18. Quick reference</h2>
 <h3 id="run-directory-adwrunsrun_id">Run directory

@@ -98,55 +98,19 @@ Secrets).
 
 ## 3. Der Lauf im Überblick
 
-```
-            ┌──────────────────── menschliche Haltepunkte (konfigurierbar) ─────────────┐
-            │  Spec-Gate        Plan-Gate (Default)    before_integration   before_push │
-            ▼      ▼                 ▼                        ▼                   ▼       │
-Issue ─▶ 1 Spec ─(▲)─▶ 2 Plan+Kontrakt ─(▲)─▶ 3 Build ─(▲)─▶ 4 Integration ─▶ 5 Codex ─▶ 6 Final ─(▲)─▶ 7 Push+CI ─▶ done
-         Dual-Draft     Dual-Draft            Lanes,         + E2E            Code-      Review          Pollen bis
-         + Synthese     + Synthese            TDD-RED,       (nur             Review     + Triage        grün, 1 CI-
-         + Codex-       + Codex-              Gate-Loop      --parallel)                                 Re-Entry
-           Review-Loop    Review-Loop
-```
+![Der Lauf im Überblick: sieben Phasen, konfigurierbare Halte, ein Eskalations-Ausgang](diagrams/workflow/run-overview.de.svg)
 
-`(▲)` markiert einen möglichen menschlichen Halt. Jede Phase kann außerdem in einer
-**Eskalation** enden (`escalation.md`, Exit-Code 1).
+Gelbe Kästen sind mögliche menschliche Halte; der rote Balken ist der
+**Eskalations**-Ausgang (`escalation.md`, Exit-Code 1), den jede Phase nehmen kann.
+In der HTML-Fassung sind alle Diagramme interaktiv: **Abspielen** geht den Ablauf
+Schritt für Schritt durch, jeder Kasten erklärt sich beim Überfahren oder Anklicken.
 
 ### Phasen-Zustandsmaschine
 
 Das persistierte Feld `phase` in `state.json` (`adw/state.py:Phase`) ist die
 einzige Wahrheit. Das sind alle Werte und Übergänge:
 
-```
-                       spec
-                        │  Spec reviewt
-            ┌───────────┴──────────────┐
-            │ --gates spec|both        │ sonst
-            ▼                          │
-  awaiting_spec_approval ──approve──▶  plan
-                                        │  Plan + Kontrakt reviewt, archiviert
-                                        ▼
-                                awaiting_approval ◀─────────────────────┐
-                                        │ approve / --gates none|spec   │ Breakpoint
-                                        ▼                               │ (pending_breakpoint gesetzt)
-                                      build ──(before_integration)──────┤
-                                        │                               │
-                        ┌───────────────┴───────────┐                   │
-                        │ --parallel                │ Single-Lane       │
-                        ▼                           │                   │
-                   integration                      │                   │
-                        └──────────────┬────────────┘                   │
-                                       ▼                                │
-                                  codex_review                          │
-                                       ▼                                │
-                                  final_review ──(before_push)──────────┘
-                                       ▼
-                                       ci
-                                       ▼
-                                      done
-
-  jede Phase ──(escalate)──▶ escalated   (terminal — neuen Lauf starten)
-```
+![Phasen-Zustandsmaschine: alle Werte von state.phase und ihre Übergänge](diagrams/workflow/state-machine.de.svg)
 
 Breakpoints nutzen die Phase `awaiting_approval` mit; welcher Breakpoint wartet,
 steht separat in `pending_breakpoint`. Nach `adw approve` geht es bei
@@ -227,24 +191,7 @@ Entwurf was beigesteuert hat, wo die Autoren uneins waren).
 
 Danach läuft der **Authoring-Loop** (`_reviewed_authoring_loop`):
 
-```
- Synthese-Lauf ─▶ Pflichtdateien vorhanden & nicht leer? ──nein──▶ ein Reparatur-Lauf ──fehlt weiter──▶ ESKALATION
-        ▲                     │ ja
-        │                     ▼
-        │          Codex reviewt issue.md + spec.md  (Runde n von 5)
-        │                     │
-        │       Verdict ok ───┴──▶ Phase fertig
-        │                     │ needs_fixes
-        │                     ▼
-        │      Findings nach Severity-Schwelle dieser Runde aufteilen
-        │      (Runde 1: P1–P3 · Runde 2: P1–P2 · ab Runde 3: P1)
-        │         ├─ nichts umsetzbar ─▶ akzeptieren, authoring-spec-known-findings.md schreiben
-        │         ├─ Runden-Cap erreicht, P1 offen ─▶ ESKALATION
-        │         ├─ Runden-Cap erreicht, nur P2/P3 ─▶ akzeptieren + Known Findings
-        │         └─ dieselben Findings wie letzte Runde ─▶ ESKALATION (Circuit-Breaker)
-        │                     │
-        └── Fix-Task an DIESELBE Synthese-Session (+ Summary aktuell halten)
-```
+![Phasen 1 und 2: Dual-Draft, Synthese und der Codex-Review-Loop](diagrams/workflow/authoring-loop.de.svg)
 
 Codex bekommt den Issue-Text bewusst mit: Er prüft die Spec auf
 **Proportionalität** — ist das, was tatsächlich verlangt war? Ab Runde 2 erhält er
@@ -364,20 +311,7 @@ gegen eingecheckte Artefakte.
 Hat die Lane mindestens ein Gate mit `tdd: true`, beginnt der **initiale** Build
 mit einem Beweis, dass die Tests überhaupt etwas testen:
 
-```
- reiner Test-Lauf des Agenten („NUR Tests schreiben, kein Produktivcode")
-        │
-        ▼
- Orchestrator prüft: Worktree verändert? ── nein ─▶ ESKALATION (keine Tests, kein RED-Beweis)
-                     Dateien gelöscht?   ── ja ───▶ ESKALATION (Löschen würde Rot fälschen)
-        │
-        ▼
- Orchestrator fährt NUR die tdd-markierten Gates
-        ├─ alle grün ─▶ ESKALATION („Tests decken das Verhalten nicht ab oder es existiert schon")
-        └─ rot ───────▶ red_confirmed = true, red_test_paths gepinnt, Snapshot „red"
-                         Implementierungs-Task (mit den letzten 40 Zeilen des roten Outputs)
-                         geht an DIESELBE Agent-Session
-```
+![TDD-RED-Stufe: die neuen Tests müssen vor der Implementierung rot sein](diagrams/workflow/tdd-red.de.svg)
 
 Der RED-Check verbraucht keine Gate-Iteration. Fix-Dispatches und Resumes nach dem
 Beweis überspringen ihn. Am Ende zählen grüne Gates nur, wenn die **RED-Testdateien
@@ -385,22 +319,7 @@ noch existieren** — Tests löschen ist kein Weg zu Grün.
 
 ### 8.3 Der Gate-Loop
 
-```
- ┌─▶ Limit-Check (Iteration ≤ 10?) ── überschritten ─▶ ESKALATION
- │   Checkpoint (erwarteter HEAD, Iterationszähler)
- │   Snapshot „before_agent"
- │   Build-Agent-Lauf (gleiche Session; Task = implementieren / Gate-Fehler fixen)
- │   Snapshot „after_agent"
- │   Guards: kein Agent-Commit? noch auf dem Lane-Branch?
- │   approvte Spec/Plan/Kontrakt + config.yaml restaurieren (Agents können sie nicht ändern)
- │   erste Iteration und nichts geändert? ─▶ ESKALATION (oder reine P3-Fix-Findings vertagen)
- │   alle Lane-Gates der Reihe nach, fail fast, echte Timeouts
- │   Snapshot „after_gates"
- │      ├─ grün ─▶ RED-Tests noch da? ─▶ gates_passed + Tree-Hash persistieren ─▶ Commit
- │      └─ rot ──▶ dieselben Fehler wie letzte Iteration? ── ja ─▶ ESKALATION (Circuit-Breaker)
- │                 │ nein
- └──────────────── neuer Task: „Gates fehlgeschlagen — Ursache fixen" + Gate-Output (letzte 200 Zeilen)
-```
+![Der Gate-Loop eines Lane-Auftrags](diagrams/workflow/gate-loop.de.svg)
 
 Wesentliche Eigenschaften:
 
@@ -433,6 +352,8 @@ Sind alle Lanes fertig: optionaler Breakpoint `before_integration`, dann
 | **Output** | Branch `adw/<run_id>/integration` |
 | **Loop** | max. **10 Runden**, laufweit; Circuit-Breaker |
 
+![Phase 4: Merge, E2E, Triage und Dispatch zurück an die Lanes](diagrams/workflow/integration-e2e.de.svg)
+
 Jede Runde baut den Integrations-Worktree **frisch vom Base-Branch** auf und merged
 jeden Lane-Branch hinein (idempotent, crash-sicher). Ein Merge-Konflikt oder
 Merge-Timeout **eskaliert** — Konfliktauflösung ist Menschensache.
@@ -464,17 +385,7 @@ für den ganzen Lauf.
 | **Akteure** | Codex (read-only) · Orchestrator (Triage, Dispatch) |
 | **Loop** | max. **5 Runden**, Severity-Schwelle, Findings-Gedächtnis, Circuit-Breaker |
 
-```
- Runde n: (parallel: erst Merge + E2E grün) ─▶ Codex reviewt den Diff
-     ├─ ok ─────────────────────────────────────▶ final_review
-     ├─ nur bereits vertagte Findings ──────────▶ final_review
-     ├─ Aufteilung nach Severity-Schwelle der Runde n
-     │    gedroppt (unter der Schwelle) ─▶ followups.md
-     │    nichts umsetzbar              ─▶ final_review
-     ├─ Runde n == 5 mit umsetzbaren Findings ─▶ ESKALATION (ein Fix, den niemand mehr reviewt, ist Verschwendung)
-     ├─ dieselben Findings wie letzte Runde ─▶ ESKALATION (Circuit-Breaker)
-     └─ umsetzbare Findings an die Lanes dispatchen (nach dem lane-Feld) ─▶ Runde n+1
-```
+![Phase 5: eine Codex-Review-Runde und alle Wege, wie sie endet](diagrams/workflow/codex-review.de.svg)
 
 Jedes Finding ist strukturiertes JSON (`adw/findings.py`): `severity` (P1–P3),
 `lane`, `file`, `issue`, `remediation_plan`. Der Parser ist bewusst strikt — ein
@@ -519,8 +430,10 @@ Dann: optionaler Breakpoint `before_push`, danach `ci`.
 | **Akteure** | Orchestrator (Push, Polling) · `log_analyst` (Sonnet 5) |
 | **Loop** | **1 CI-Re-Entry**, dann ein Mensch |
 
+![Phase 7: Push, SHA-gebundenes Polling und der eine CI-Re-Entry](diagrams/workflow/ci.de.svg)
+
 1. **Forge-Erkennung:** `ci.provider` in der Config hat Vorrang; sonst muss der
-   Host der Origin-URL eindeutig `gitlab` oder `github` enthalten (sonst fail fast).
+   Host der Origin-URL eindeutig `gitlab` oder `github` enthalten (sonst eskaliert der Lauf hier — nach dem kompletten Build; ein Dry-Run fällt auf GitLab zurück).
 2. **Push** durch den Orchestrator: `git push --force-with-lease -u origin
    <branch>` (Hooks abgeschaltet; der SSH-Agent-Socket wird nur dem Push
    durchgereicht). Im `--dry-run` gibt es keinen Push.
@@ -554,6 +467,8 @@ Randfall. Ohne Policy oszillieren Review-Loops endlos. ADW wendet deshalb an:
 | 2 | P1, P2 | P3 → Follow-up / Known Findings |
 | 3–5 | nur P1 | P2, P3 → Follow-up / Known Findings |
 
+![Review-Loop-Policy: die Schwelle sinkt Runde für Runde, das Findings-Gedächtnis wächst](diagrams/workflow/review-policy.de.svg)
+
 Ab Runde 2 enthält der Reviewer-Prompt die Rundennummer, die aktuelle Schwelle und
 jedes frühere Finding mit seiner **Disposition**, dazu die Anweisung, diese nicht
 erneut zu melden, außer das Problem besteht nachweislich fort. Der Verlauf wird
@@ -581,6 +496,8 @@ E2E-Fehler, Codex-Findings, Final-Review-Findings und CI-Findings laufen alle du
   gestagt (Review-Runde, Fix-Zyklus oder CI-Re-Entry);
 - danach läuft jede Lane den normalen Gate-Loop und bekommt einen
   Orchestrator-Commit.
+
+![Fix-Dispatch: jede Findings-Quelle speist denselben Lane-Loop](diagrams/workflow/fix-dispatch.de.svg)
 
 ### 13.4 Vertagte Findings und Follow-ups
 

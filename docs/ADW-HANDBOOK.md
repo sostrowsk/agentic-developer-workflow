@@ -21,6 +21,8 @@
   crash or an exhausted plan limit, `adw resume <run_id>` continues exactly
   where it stopped.
 
+![A run from your point of view: exit codes and the next step](diagrams/handbook/run-lifecycle.svg)
+
 ## Contents
 
 1. [What ADW is](#1-what-adw-is)
@@ -77,6 +79,8 @@ round policy — is the subject of [ADW-WORKFLOW.md](ADW-WORKFLOW.md).
 ---
 
 ## 2. Prerequisites and installation
+
+![Setup path: from prerequisites to the first real run](diagrams/handbook/setup-path.svg)
 
 | Requirement | Why | Check |
 |---|---|---|
@@ -139,6 +143,8 @@ lanes:
 ### 3.1 Config reference (every key)
 
 Defaults are those in `adw/config.py`. Unknown keys are rejected everywhere.
+
+![Anatomy of .adw/config.yaml: every section, required or optional, with defaults](diagrams/handbook/config-anatomy.svg)
 
 | Key | Required | Default | Meaning |
 |---|---|---|---|
@@ -293,6 +299,8 @@ discards your work; it refuses instead.
 `--gates` and the legacy flags may be combined only if they agree; a
 contradiction or an unknown value is rejected before any run is created.
 
+![Where each --gates mode pauses, and the two optional breakpoints](diagrams/handbook/gates-modes.svg)
+
 ### 6.2 What a pause looks like
 
 ```text
@@ -334,8 +342,8 @@ breakpoints:
 
 A breakpoint behaves like an approval gate: exit 2, the CLI names it, continue
 with `adw approve <run_id> --repo <path>`. A granted breakpoint never holds
-again, even after crash + resume. `--gates none` / `--no-approval` skips
-breakpoints too.
+again, even after crash + resume. Breakpoints hold only in the modes `plan` and
+`both`: `--gates none` and `--gates spec` (and their legacy flags) skip them.
 
 ---
 
@@ -443,6 +451,8 @@ carry a `Dry-Run` label. The list does not live-update — reload to refresh.
 
 ### 8.3 Run detail (`/runs/<repo>/<run_id>`)
 
+![Run Inspector: layout of the run detail page](diagrams/handbook/gui-layout.svg)
+
 - **Header:** status, a to-scale **phase band** (done / active / awaiting /
   failed, with durations; click jumps to the phase), whole-run work time, cost
   and tokens. A dry run carries a sticky `Dry-Run` banner.
@@ -455,7 +465,7 @@ carry a `Dry-Run` label. The list does not live-update — reload to refresh.
   cumulative cost and follow-ups **as of the selected node** (time travel).
 - **Recovery card:** when the run needs you, one card names the next step —
   e.g. `adw approve <id> --repo <path>` or the escalation report.
-- **Plan skeleton:** the tasks from `plan.md` above the trace.
+- **Plan skeleton:** the tasks from `plan.md` per lane, collapsed below the trace.
 - **Change scope** (collapsed): files changed per lane with `+/-` counts, next
   to the scope declared in the contract.
 - **Run-level tabs:** `Trace` (default) · `Timeline` (swimlanes: where does the
@@ -486,6 +496,8 @@ Enter/Space.
 
 Everything for one run lives under `<target>/.adw/runs/<run_id>/` (8-hex run
 ID), gitignored and readable only by you (`0600` for state and log).
+
+![Which run file to read when](diagrams/handbook/run-artifacts.svg)
 
 | Path | What it is | Read it when |
 |---|---|---|
@@ -655,6 +667,8 @@ ADW stops **before** it burns budget or causes damage. Every escalation writes
 ---
 
 ## 15. Troubleshooting and FAQ
+
+![Troubleshooting by exit code](diagrams/handbook/troubleshooting.svg)
 
 **`Fehler: …/.adw/config.yaml: config.yaml fehlt — das Ziel-Repo ist nicht ADW-fähig`**
 No config in the target repo. Copy `examples/config.yaml` (§3).

@@ -13,13 +13,17 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [0.26.2] — Unreleased
+## [0.26.2] — 2026-10-11
 
 ### Hinzugefügt
 - **Drei Dokumente auf Stand 0.26.1, jeweils auf Englisch und Deutsch, mit HTML- und DOCX-Exporten in `docs/export/`.** Alle drei sind gegen den Code geprüft:
   - [`docs/ADW-HANDBOOK.de.md`](docs/ADW-HANDBOOK.de.md) — das Handbuch für Entwickler, die ADW benutzen: Setup, jeder Config-Schlüssel, die komplette CLI, die GUI, Run-Artefakte, Retention, Briefs und Troubleshooting.
   - [`docs/ADW-WORKFLOW.de.md`](docs/ADW-WORKFLOW.de.md) — ein ausführlicher Gang durch die sieben Phasen für Nutzer und Contributors. Es behandelt die Loops, Limits, die Review-Loop-Policy, die möglichen Enden eines Runs und Resume und schließt mit einem durchgerechneten Beispiel-Run.
   - [`docs/ADW-SPEC.de.md`](docs/ADW-SPEC.de.md) — die Spec für Contributors. Sie beginnt mit der Philosophie von ADW und behandelt dann Architektur, Datenmodell, Invarianten, Erweiterungspunkte, Tests und den Release-Prozess.
+- **Diagramme für alle drei Dokumente und ein Skript für die Exporte.** Jedes Diagramm ist eine SVG unter `docs/diagrams/` und steht im Markdown als normales Bild, sodass GitHub es ebenfalls zeigt. `scripts/build_docs.py` (braucht pandoc und Inkscape) schreibt die Exporte nach `docs/export/`:
+  - **HTML:** Jedes Diagramm ist eingebettet und interaktiv. Man kann es Schritt für Schritt durchgehen, Erklärungen per Hover, Fokus oder Klick lesen, und die Kanten sind animiert. CSS und JS sind ebenfalls eingebettet, ohne CDN.
+  - **DOCX:** Jedes Diagramm wird nach EMF konvertiert und in Seitenbreite eingefügt.
+  - **Prüfung:** Das Skript bricht mit einem Fehler ab, wenn ein Diagramm etwas verwendet, das die EMF-Konvertierung stillschweigend weglassen würde. Die Regeln für Diagramm-Autoren stehen in `docs/diagrams/README.de.md`.
 
 ### Geändert
 - **README:** neue Tabelle mit den Dokumenten. Auf aktuellen Stand gebracht sind der CLI-Abschnitt (`--gates`, `adw gui`, `adw runs`), die Config-Tabelle (`codex.*`, `trace.*`, `breakpoints`), die Architektur-Liste, die Limits (höchstens 5 Codex-Review-Runden, nicht 10) und die Testanzahl.
@@ -1008,6 +1012,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.26.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.1...v0.26.2
 [0.26.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.24.0...v0.25.0

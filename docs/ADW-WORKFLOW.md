@@ -96,55 +96,19 @@ whitelist** (`adw/env.py`: `PATH`, `HOME`, `LANG`, … — no tokens, no secrets
 
 ## 3. The run at a glance
 
-```
-            ┌──────────────────────── human gates (configurable) ───────────────────────┐
-            │  spec gate        plan gate (default)    before_integration   before_push │
-            ▼      ▼                 ▼                        ▼                   ▼       │
-Issue ─▶ 1 Spec ─(▲)─▶ 2 Plan+Contract ─(▲)─▶ 3 Build ─(▲)─▶ 4 Integration ─▶ 5 Codex ─▶ 6 Final ─(▲)─▶ 7 Push+CI ─▶ done
-         dual draft     dual draft            lanes,         + E2E            code       review          poll until
-         + synthesis    + synthesis           TDD RED,       (--parallel      review     + triage        green, 1 CI
-         + Codex        + Codex               gate loop      only)                                       re-entry
-           review loop    review loop
-```
+![The run at a glance: seven phases, configurable human stops, one escalation exit](diagrams/workflow/run-overview.svg)
 
-`(▲)` marks a possible human stop. Every phase may also end in **escalation**
-(`escalation.md`, exit code 1).
+Amber boxes are possible human stops; the red bar is the **escalation** exit
+(`escalation.md`, exit code 1) that every phase can take. In the HTML version all
+diagrams are interactive: **Play** steps through the flow, and every box explains
+itself on hover or click.
 
 ### Phase state machine
 
 The persisted `phase` field in `state.json` (`adw/state.py:Phase`) is the single
 source of truth. These are all its values and transitions:
 
-```
-                       spec
-                        │  spec reviewed
-            ┌───────────┴──────────────┐
-            │ --gates spec|both        │ otherwise
-            ▼                          │
-  awaiting_spec_approval ──approve──▶  plan
-                                        │  plan + contract reviewed, archived
-                                        ▼
-                                awaiting_approval ◀─────────────────────┐
-                                        │ approve / --gates none|spec   │ breakpoint
-                                        ▼                               │ (pending_breakpoint set)
-                                      build ──(before_integration)──────┤
-                                        │                               │
-                        ┌───────────────┴───────────┐                   │
-                        │ --parallel                │ single lane       │
-                        ▼                           │                   │
-                   integration                      │                   │
-                        └──────────────┬────────────┘                   │
-                                       ▼                                │
-                                  codex_review                          │
-                                       ▼                                │
-                                  final_review ──(before_push)──────────┘
-                                       ▼
-                                       ci
-                                       ▼
-                                      done
-
-  any phase ──(escalate)──▶ escalated   (terminal — start a new run)
-```
+![Phase state machine: every value of state.phase and its transitions](diagrams/workflow/state-machine.svg)
 
 Breakpoints reuse the phase `awaiting_approval`; which breakpoint is waiting is
 recorded separately in `pending_breakpoint`. On `adw approve`, a breakpoint
@@ -222,24 +186,7 @@ contributed what, where the authors disagreed).
 
 Then the **authoring loop** (`_reviewed_authoring_loop`) runs:
 
-```
- synthesis run ─▶ required files present & non-empty? ──no──▶ one repair run ──still missing──▶ ESCALATE
-        ▲                     │ yes
-        │                     ▼
-        │          Codex reviews issue.md + spec.md  (round n of 5)
-        │                     │
-        │       verdict ok ───┴──▶ phase done
-        │                     │ needs_fixes
-        │                     ▼
-        │      split findings by this round's severity floor
-        │      (round 1: P1–P3 · round 2: P1–P2 · round 3+: P1)
-        │         ├─ nothing actionable ─▶ accept, write authoring-spec-known-findings.md
-        │         ├─ round cap reached, P1 open ─▶ ESCALATE
-        │         ├─ round cap reached, only P2/P3 ─▶ accept + known findings
-        │         └─ same findings as last round ─▶ ESCALATE (circuit breaker)
-        │                     │
-        └── fix task to the SAME synthesis session (+ keep summary current)
-```
+![Phases 1 and 2: dual draft, synthesis and the Codex review loop](diagrams/workflow/authoring-loop.svg)
 
 Codex receives the issue text on purpose: it checks the spec for
 **proportionality** — is this what was actually asked for? From round 2 on it
@@ -359,20 +306,7 @@ builds against checked-in artifacts.
 If the lane has at least one gate with `tdd: true`, the **initial** build starts
 with a proof that the tests actually test something:
 
-```
- test-only agent run ("write ONLY tests, no production code")
-        │
-        ▼
- orchestrator checks: worktree changed? ── no ──▶ ESCALATE (no tests, no RED proof)
-                      files deleted?    ── yes ─▶ ESCALATE (deletion would fake red)
-        │
-        ▼
- orchestrator runs ONLY the tdd-marked gates
-        ├─ all green ─▶ ESCALATE ("tests don't cover the behavior, or it already exists")
-        └─ red ───────▶ red_confirmed = true, red_test_paths pinned, snapshot "red"
-                         implementation task (with the last 40 lines of red output)
-                         goes to the SAME agent session
-```
+![TDD RED stage: the new tests must fail before the implementation starts](diagrams/workflow/tdd-red.svg)
 
 The RED check consumes no gate iteration. Fix dispatches and resumes after the
 proof skip it. At the end, green gates only count if the **RED test files still
@@ -380,22 +314,7 @@ exist** — deleting the tests is not a path to green.
 
 ### 8.3 The gate loop
 
-```
- ┌─▶ limit check (iteration ≤ 10?) ── exceeded ─▶ ESCALATE
- │   checkpoint (expected HEAD, iteration counter)
- │   snapshot "before_agent"
- │   build agent run (same session; task = implement / fix gate failures)
- │   snapshot "after_agent"
- │   guards: no agent commit? still on lane branch?
- │   restore approved spec/plan/contract + config.yaml (agents can't change them)
- │   first iteration and nothing changed? ─▶ ESCALATE (or defer pure-P3 fix findings)
- │   run all lane gates in order, fail fast, real timeouts
- │   snapshot "after_gates"
- │      ├─ green ─▶ RED tests still present? ─▶ persist gates_passed + tree hash ─▶ commit
- │      └─ red ──▶ same failures as last iteration? ── yes ─▶ ESCALATE (circuit breaker)
- │                 │ no
- └──────────────── new task: "Gates failed — fix the root cause" + gate output (last 200 lines)
-```
+![The gate loop of one lane task](diagrams/workflow/gate-loop.svg)
 
 Key properties:
 
@@ -426,6 +345,8 @@ When all lanes are complete: optional `before_integration` breakpoint, then
 | **Actors** | orchestrator (merge) · E2E gate · `e2e_triage` (Sonnet 5) |
 | **Output** | branch `adw/<run_id>/integration` |
 | **Loop** | max **10 rounds**, run-wide; circuit breaker |
+
+![Phase 4: merge, E2E, triage and dispatch back to the lanes](diagrams/workflow/integration-e2e.svg)
 
 Each round rebuilds the integration worktree **fresh from the base branch** and
 merges every lane branch into it (idempotent, crash-safe). A merge conflict or
@@ -458,17 +379,7 @@ shared across the whole run.
 | **Actors** | Codex (read-only) · orchestrator (triage, dispatch) |
 | **Loop** | max **5 rounds**, severity floor, findings memory, circuit breaker |
 
-```
- round n: (parallel: merge + E2E green first) ─▶ Codex reviews the diff
-     ├─ ok ─────────────────────────────────▶ final_review
-     ├─ only already-deferred findings ─────▶ final_review
-     ├─ split by severity floor of round n
-     │    dropped (below floor) ─▶ followups.md
-     │    nothing actionable    ─▶ final_review
-     ├─ round n == 5 with actionable findings ─▶ ESCALATE (a fix nobody can re-review is waste)
-     ├─ same findings as last round ─▶ ESCALATE (circuit breaker)
-     └─ dispatch actionable findings to lanes (by the finding's lane field) ─▶ round n+1
-```
+![Phase 5: one Codex review round and every way it can end](diagrams/workflow/codex-review.svg)
 
 Each finding is structured JSON (`adw/findings.py`): `severity` (P1–P3),
 `lane`, `file`, `issue`, `remediation_plan`. The parser is deliberately strict —
@@ -513,8 +424,10 @@ Then: optional `before_push` breakpoint, then `ci`.
 | **Actors** | orchestrator (push, polling) · `log_analyst` (Sonnet 5) |
 | **Loop** | **1 CI re-entry**, then a human |
 
+![Phase 7: push, SHA-bound polling and the single CI re-entry](diagrams/workflow/ci.svg)
+
 1. **Forge detection:** `ci.provider` in the config wins; otherwise the origin
-   URL host must clearly say `gitlab` or `github` (fail fast otherwise).
+   URL host must clearly say `gitlab` or `github` (otherwise the run escalates here — after the whole build; a dry run falls back to GitLab).
 2. **Push** by the orchestrator: `git push --force-with-lease -u origin <branch>`
    (hooks disabled; the SSH agent socket is passed to the push only). In
    `--dry-run` there is no push.
@@ -548,6 +461,8 @@ Without a policy, review loops oscillate forever. ADW therefore applies:
 | 2 | P1, P2 | P3 → follow-up / known findings |
 | 3–5 | P1 only | P2, P3 → follow-up / known findings |
 
+![Review-loop policy: the severity floor drops round by round, the findings memory grows](diagrams/workflow/review-policy.svg)
+
 From round 2 on, the reviewer prompt contains the round number, the current
 floor and every earlier finding with its **disposition**, plus the instruction
 not to re-report them unless the problem demonstrably persists. The history is
@@ -572,6 +487,8 @@ through `_dispatch_lane_fixes`:
 - all lanes are staged in **one** atomic save together with the counter update
   (review round, fix cycle or CI re-entry);
 - then each lane runs the normal gate loop and gets an orchestrator commit.
+
+![Fix dispatch: every source of findings feeds the same lane loop](diagrams/workflow/fix-dispatch.svg)
 
 ### 13.4 Deferred findings and follow-ups
 
