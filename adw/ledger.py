@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -283,9 +284,15 @@ def _ledger_path() -> Path | None:
     probe that times out, cannot run, is refused (exit ≠ 0, e.g. dubious
     ownership) or reports another top level raises, the export then fails and
     the prune keeps the run instead of deleting it unarchived. Decided from the
-    file system, not from git's (localised) error text."""
+    file system, not from git's (localised) error text. Explicit stat calls: only
+    genuine absence (ENOENT/ENOTDIR) or a non-directory is "no ledger"; a
+    permission or I/O error propagates and fails the export."""
     path = Path(os.environ.get("ADW_LEDGER", _DEFAULT_LEDGER)).expanduser()
-    if not path.is_dir() or not os.path.lexists(path / ".git"):
+    try:
+        if not stat.S_ISDIR(os.stat(path).st_mode):
+            return None
+        os.lstat(path / ".git")
+    except (FileNotFoundError, NotADirectoryError):
         return None
     result = run_git(path, "rev-parse", "--show-toplevel", timeout=_GIT_TIMEOUT)
     if result.returncode != 0:

@@ -822,3 +822,33 @@ def test_prune_keeps_a_run_when_the_ledger_probe_is_refused(target_repo, ledger,
     assert f"{rid}: skipped (Ledger-Export fehlgeschlagen)" in result.output
     assert rd.is_dir() and (rd / "state.json").is_file()
     assert refs_of(target_repo, rid) != []
+
+
+def test_prune_keeps_a_run_when_the_ledger_is_not_accessible(target_repo, ledger, monkeypatch):
+    """Review P1: a permission error while probing the ledger's .git entry is an
+    export failure, not "no ledger" — run dir and snapshot refs stay."""
+    import errno
+
+    git_entry = str(ledger / ".git")
+    real_stat, real_lstat = os.stat, os.lstat
+
+    def guarded(real):
+        def probe(path, *args, **kwargs):
+            if os.fspath(path) == git_entry:
+                raise PermissionError(errno.EACCES, "Permission denied", git_entry)
+            return real(path, *args, **kwargs)
+
+        return probe
+
+    monkeypatch.setattr(os, "stat", guarded(real_stat))
+    monkeypatch.setattr(os, "lstat", guarded(real_lstat))
+    rid = "aaaa3333"
+    rd = make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+    add_ref(target_repo, rid, 1)
+
+    result = prune_all(target_repo)
+
+    assert result.exit_code == 0, result.output
+    assert f"{rid}: skipped (Ledger-Export fehlgeschlagen)" in result.output
+    assert rd.is_dir() and (rd / "state.json").is_file()
+    assert refs_of(target_repo, rid) != []
