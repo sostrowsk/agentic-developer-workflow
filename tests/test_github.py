@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from adw.ci import CiTimeoutError
+from adw.ci import CiError, CiTimeoutError
 from adw.config import CiConfig
 from adw.github import poll_ci
 
@@ -27,11 +27,18 @@ class FakeGh:
 
 
 class FakeSleep:
+    """Simulated sleep coupled to a fake monotonic clock: each nap advances it."""
+
     def __init__(self):
         self.calls = []
+        self.now = 0.0
 
     def __call__(self, seconds):
         self.calls.append(seconds)
+        self.now += seconds
+
+    def clock(self):
+        return self.now
 
 
 def runs_json(*runs):
@@ -139,5 +146,124 @@ def test_timeout_when_runs_never_complete(tmp_path):
             run_gh=gh,
             sleep=sleep,
             sha="abc",
+            clock=sleep.clock,
         )
     assert sum(sleep.calls) <= 120  # Budget wird nicht überzogen
+
+
+# --- R4: Staging-Grün (C19), Pagination (C20), Log-Evidenz (C22) --------------
+
+
+def full_runs_page(start, count=100, conclusion="success"):
+    return runs_json(*[(i, "completed", conclusion) for i in range(start, start + count)])
+
+
+def full_jobs_page(count=100):
+    return json.dumps(
+        {"jobs": [{"id": i, "name": f"job-{i}", "conclusion": "success"} for i in range(count)]}
+    )
+
+
+@pytest.mark.parametrize("conclusion", ["skipped", "neutral"])
+def test_staging_job_not_success_is_not_green(tmp_path, conclusion):
+    gh = FakeGh(
+        [
+            runs_json((7, "completed", "success")),
+            jobs_json(("test", "success"), ("deploy-staging", conclusion)),
+            "Deploy-Log",
+        ]
+    )
+    result = poll_ci(tmp_path, "b", make_cfg(), run_gh=gh, sleep=FakeSleep(), sha="abc")
+    assert result.passed is False
+    assert any(c[:2] == ["run", "view"] and "--log-failed" in c for c in gh.calls)
+
+
+def test_staging_success_with_skipped_optional_run_is_green(tmp_path):
+    gh = FakeGh(
+        [
+            runs_json((7, "completed", "success"), (8, "completed", "skipped")),
+            jobs_json(("deploy-staging", "success")),
+            jobs_json(),
+        ]
+    )
+    result = poll_ci(tmp_path, "b", make_cfg(), run_gh=gh, sleep=FakeSleep(), sha="abc")
+    assert result.passed is True
+
+
+def test_staging_job_on_second_jobs_page_is_found(tmp_path):
+    gh = FakeGh(
+        [
+            runs_json((7, "completed", "success")),
+            full_jobs_page(),
+            jobs_json(("deploy-staging", "success")),
+        ]
+    )
+    result = poll_ci(tmp_path, "b", make_cfg(), run_gh=gh, sleep=FakeSleep(), sha="abc")
+    assert result.passed is True
+    assert "existiert in keinem Workflow-Run" not in result.log_excerpt
+    jobs_calls = [c for c in gh.calls if c[0] == "api" and "/jobs" in c[1]]
+    assert len(jobs_calls) == 2
+    assert "page=2" in jobs_calls[1][1]
+
+
+@pytest.mark.parametrize("second_page", ["red", "running"])
+def test_runs_on_second_page_are_evaluated(tmp_path, second_page):
+    if second_page == "red":
+        page2 = runs_json((500, "completed", "failure"))
+        responses = [full_runs_page(1), page2, "rotes Log auf Seite 2"]
+    else:
+        page2 = runs_json((500, "in_progress", None))
+        responses = [
+            full_runs_page(1),
+            page2,
+            full_runs_page(1),
+            runs_json((500, "completed", "failure")),
+            "rotes Log",
+        ]
+    gh = FakeGh(responses)
+    sleep = FakeSleep()
+    result = poll_ci(tmp_path, "b", make_cfg(staging_job=None), run_gh=gh, sleep=sleep, sha="abc")
+    assert result.passed is False
+    assert result.pipeline_id == 500
+    if second_page == "running":
+        assert sleep.calls  # laufender Run auf Seite 2 hielt das Polling offen
+    runs_calls = [c for c in gh.calls if c[0] == "api" and "/actions/runs?" in c[1]]
+    assert all("head_sha=abc" in c[1] for c in runs_calls)
+
+
+@pytest.mark.parametrize("collection", ["runs", "jobs"])
+def test_more_than_ten_pages_raise(tmp_path, collection):
+    if collection == "runs":
+        responses = [full_runs_page(i * 100) for i in range(11)]
+    else:
+        responses = [runs_json((7, "completed", "success"))] + [full_jobs_page()] * 11
+    gh = FakeGh(responses)
+    with pytest.raises(CiError, match="Seite|page"):
+        poll_ci(tmp_path, "b", make_cfg(), run_gh=gh, sleep=FakeSleep(), sha="abc")
+
+
+@pytest.mark.parametrize("log", ["", "  \n\t\n"])
+def test_red_run_with_empty_log_gives_empty_excerpt(tmp_path, log):
+    gh = FakeGh([runs_json((9, "completed", "failure")), log])
+    result = poll_ci(
+        tmp_path, "b", make_cfg(staging_job=None), run_gh=gh, sleep=FakeSleep(), sha="abc"
+    )
+    assert result.passed is False
+    assert result.log_excerpt == ""
+
+
+def test_log_fetch_error_skips_only_that_run(tmp_path):
+    gh = FakeGh(
+        [
+            runs_json((1, "completed", "startup_failure"), (2, "completed", "failure")),
+            CiError("gh run view 1 --log-failed: Exit 1 — no logs"),
+            "FAILED tests/test_y.py",
+        ]
+    )
+    result = poll_ci(
+        tmp_path, "b", make_cfg(staging_job=None), run_gh=gh, sleep=FakeSleep(), sha="abc"
+    )
+    assert result.passed is False
+    assert "### Workflow-Run 2 (failure)" in result.log_excerpt
+    assert "FAILED tests/test_y.py" in result.log_excerpt
+    assert "Workflow-Run 1" not in result.log_excerpt

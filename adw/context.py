@@ -151,6 +151,7 @@ class RunContext:
     run_glab: ci.RunGlab = ci.run_glab
     run_gh: github.RunGh = github.run_gh
     sleep: Callable[[float], None] = time.sleep
+    clock: Callable[[], float] = time.monotonic
     # The ONE emitter of this run/process (GUI-SPEC §4.3). Defaults to the
     # no-op so existing RunContext(...) constructions stay behaviour-identical.
     emitter: "EventEmitter | NoOpEmitter" = field(default_factory=NoOpEmitter)

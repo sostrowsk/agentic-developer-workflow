@@ -1,4 +1,6 @@
+import contextlib
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,13 +26,20 @@ class FakeGlab:
 
 
 class FakeSleep:
+    """Simulated sleep coupled to a fake monotonic clock: each nap advances it."""
+
     def __init__(self):
         self.total = 0.0
         self.calls = []
+        self.now = 0.0
 
     def __call__(self, seconds):
         self.total += seconds
         self.calls.append(seconds)
+        self.now += seconds
+
+    def clock(self):
+        return self.now
 
 
 def pipeline_json(status, pipeline_id=77):
@@ -80,7 +89,7 @@ def test_timeout_raises_after_budget(tmp_path):
     glab = FakeGlab([pipeline_json("running")] * 10)
     sleep = FakeSleep()
     with pytest.raises(CiTimeoutError):
-        poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=sleep)
+        poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=sleep, clock=sleep.clock)
     assert sleep.total <= 180
 
 
@@ -114,8 +123,9 @@ def test_missing_staging_job_is_a_failure(tmp_path):
 def test_no_pipeline_for_branch_keeps_polling_then_times_out(tmp_path):
     cfg = CiConfig(poll_interval=60, timeout=120, staging_job=None)
     glab = FakeGlab(["[]"] * 5)
+    sleep = FakeSleep()
     with pytest.raises(CiTimeoutError):
-        poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=FakeSleep())
+        poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=sleep, clock=sleep.clock)
 
 
 def test_sleep_never_exceeds_remaining_budget(tmp_path):
@@ -124,7 +134,7 @@ def test_sleep_never_exceeds_remaining_budget(tmp_path):
     glab = FakeGlab([pipeline_json("running")] * 10)
     sleep = FakeSleep()
     with pytest.raises(CiTimeoutError):
-        poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=sleep)
+        poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=sleep, clock=sleep.clock)
     assert sleep.total <= 90
     assert sleep.calls == [60, 30]
 
@@ -179,3 +189,94 @@ def test_poll_queries_pipelines_by_the_given_sha(tmp_path):
     assert first[0] == "api"
     assert "sha=neuesha" in first[1]
     assert "ref=adw%2Fx%2Fbackend" in first[1]  # Branch URL-encodiert
+
+
+# --- R4: monotone Deadline (C21) und GitLab manual (C23) ---------------------
+
+
+class SpanRecorder:
+    """Minimal emitter: records the ci.wait end payload."""
+
+    def __init__(self):
+        self.handle = None
+
+    @contextlib.contextmanager
+    def span(self, type, payload=None, **kwargs):
+        self.handle = SimpleNamespace(id="s1", end_payload={})
+        yield self.handle
+
+    def emit(self, *args, **kwargs):
+        return None
+
+    def current_span_id(self):
+        return None
+
+
+class SlowFetchGlab(FakeGlab):
+    """Each pipeline fetch advances the fake clock by ``cost`` seconds."""
+
+    def __init__(self, responses, clock_owner, cost):
+        super().__init__(responses)
+        self.clock_owner = clock_owner
+        self.cost = cost
+
+    def __call__(self, argv, cwd):
+        if argv[0] != "api" or "/jobs" not in argv[1]:
+            self.clock_owner.now += self.cost
+        return super().__call__(argv, cwd)
+
+
+def test_deadline_counts_fetch_time(tmp_path):
+    """C21: budget 1 s, two fetches of 0.6 s → timeout after fetch 2, no 3rd poll."""
+    cfg = CiConfig(poll_interval=60, timeout=1, staging_job=None)
+    sleep = FakeSleep()
+    glab = SlowFetchGlab([pipeline_json("running")] * 5, sleep, cost=0.6)
+    emitter = SpanRecorder()
+    with pytest.raises(CiTimeoutError):
+        poll_pipeline(
+            tmp_path, "adw/x", cfg, run_glab=glab, sleep=sleep, clock=sleep.clock, emitter=emitter
+        )
+    assert len(glab.calls) == 2
+    assert len(sleep.calls) == 1
+    assert sleep.calls[0] <= 0.4 + 1e-9
+    assert emitter.handle.end_payload["status"] == "timeout"
+    assert emitter.handle.end_payload["duration"] == pytest.approx(sleep.now)
+
+
+def test_final_status_after_deadline_is_evaluated(tmp_path):
+    cfg = CiConfig(poll_interval=60, timeout=1, staging_job=None)
+    sleep = FakeSleep()
+    glab = SlowFetchGlab([pipeline_json("success"), jobs_json(("t", "success"))], sleep, cost=5)
+    result = poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=sleep, clock=sleep.clock)
+    assert result.passed is True
+    assert sleep.calls == []
+
+
+@pytest.mark.parametrize(
+    ("jobs", "expected"),
+    [
+        (
+            jobs_json(("test", "success"), ("deploy-prod", "manual")),
+            "Pipeline wartet auf einen manuellen Job (deploy-prod) — Mensch übernimmt",
+        ),
+        (
+            jobs_json(("test", "success")),
+            "Pipeline wartet auf einen manuellen Job — Mensch übernimmt",
+        ),
+    ],
+)
+def test_manual_pipeline_escalates_immediately(tmp_path, jobs, expected):
+    from adw.ci import CiError
+
+    cfg = CiConfig(poll_interval=60, timeout=2700, staging_job="deploy-staging")
+    glab = FakeGlab([pipeline_json("manual"), jobs] + [pipeline_json("manual")] * 3)
+    sleep = FakeSleep()
+    with pytest.raises(CiError) as exc:
+        poll_pipeline(tmp_path, "adw/x", cfg, run_glab=glab, sleep=sleep, clock=sleep.clock)
+    assert not isinstance(exc.value, CiTimeoutError)
+    assert str(exc.value).endswith(expected)
+    if "(" not in expected:
+        assert "(" not in str(exc.value)
+    pipeline_fetches = [c for c in glab.calls if "/jobs" not in " ".join(c)]
+    assert len(pipeline_fetches) == 1
+    assert sleep.calls == []

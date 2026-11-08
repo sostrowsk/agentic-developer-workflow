@@ -12,6 +12,16 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.36.2] — Unreleased
+
+### Fixed
+- **ADW reads the CI result correctly (R4).**
+  - **Staging green means success (C19):** on GitHub the configured staging job only counts as green with `conclusion == "success"`; a `skipped`/`neutral` deploy job no longer marks the run `done`. Optional workflow runs may still be `skipped`/`neutral`.
+  - **GitHub pagination (C20):** workflow runs and jobs are read across all pages (at most 10); a staging job on page 2 is found, red or running runs on later pages count. Beyond the page limit phase 7 escalates instead of judging partial data.
+  - **Time budget (C21):** `ci.timeout` is a monotonic deadline over fetches, evaluation and sleeps; slow `gh`/`glab` calls no longer overrun it. `duration` in `ci.wait` is the measured time.
+  - **Log evidence (C22):** only non-empty `--log-failed` output counts; a run whose log fetch fails is skipped without losing the other red runs' logs. Without any logs the "red without usable job logs" guard hands over to a human.
+  - **GitLab `manual` (C23):** a pipeline waiting on a manual job is final and escalates at once with "Pipeline wartet auf einen manuellen Job (<name>) — Mensch übernimmt" — no log analyst, no re-entry, no misleading CI timeout.
+
 ## [0.36.1] — 2026-11-08
 
 ### Fixed

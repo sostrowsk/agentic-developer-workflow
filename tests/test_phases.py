@@ -3257,6 +3257,8 @@ class FakeGlab:
         if argv[0] == "api":
             if self.current == "failed":
                 return json.dumps([{"id": 5, "name": "pytest", "status": "failed"}])
+            if self.current == "manual":
+                return json.dumps([{"id": 7, "name": "deploy-prod", "status": "manual"}])
             return json.dumps([{"id": 6, "name": self.staging_job, "status": "success"}])
         if argv[:2] == ["ci", "trace"]:
             return "CI-LOG: ImportError in backend/app.py"
@@ -3435,9 +3437,32 @@ def test_ci_timeout_escalates(ctx, target_repo):
     add_bare_origin(target_repo)
     prepare_ci_ready(ctx)
     ctx.run_glab = FakeGlab("running")
-    ctx.sleep = lambda s: None
+    now = [0.0]
+
+    def fake_sleep(seconds):
+        now[0] += seconds
+
+    ctx.sleep = fake_sleep
+    ctx.clock = lambda: now[0]
     with pytest.raises(EscalationError, match="[Tt]imeout|nicht abgeschlossen"):
         run_ci_phase(ctx)
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
+
+
+def test_ci_manual_pipeline_escalates_without_analyst(ctx, target_repo):
+    """C23: a pipeline stuck on a manual job is final — direct handover, no timeout."""
+    add_bare_origin(target_repo)
+    prepare_ci_ready(ctx)
+    ctx.run_glab = FakeGlab("manual")
+    ctx.sleep = lambda s: None
+    with pytest.raises(EscalationError) as exc:
+        run_ci_phase(ctx)
+    message = str(exc.value)
+    assert "Pipeline wartet auf einen manuellen Job (deploy-prod) — Mensch übernimmt" in message
+    assert "Timeout" not in message
+    assert ctx.run_glab.polls == 1
+    assert [c for c in ctx.agents.calls if c.agent == "log_analyst"] == []
+    assert ctx.state.ci_reentries == 0
     assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
 
 

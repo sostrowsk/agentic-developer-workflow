@@ -567,6 +567,7 @@ def run_ci_phase(ctx: RunContext) -> None:
                     ctx.config.ci,
                     run_gh=ctx.run_gh,
                     sleep=ctx.sleep,
+                    clock=ctx.clock,
                     sha=pushed_sha,
                     emitter=ctx.emitter,
                 )
@@ -577,6 +578,7 @@ def run_ci_phase(ctx: RunContext) -> None:
                     ctx.config.ci,
                     run_glab=ctx.run_glab,
                     sleep=ctx.sleep,
+                    clock=ctx.clock,
                     sha=pushed_sha,
                     emitter=ctx.emitter,
                 )

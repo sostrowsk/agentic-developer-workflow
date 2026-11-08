@@ -13,6 +13,16 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.36.2] — Unreleased
+
+### Fixed
+- **ADW liest das CI-Ergebnis richtig (R4).**
+  - **Staging-Grün heißt success (C19):** Bei GitHub gilt der konfigurierte Staging-Job nur mit `conclusion == "success"` als grün; ein `skipped`/`neutral`-Deploy-Job macht den Lauf nicht mehr `done`. Optionale Workflow-Runs dürfen weiter `skipped`/`neutral` sein.
+  - **GitHub-Pagination (C20):** Workflow-Runs und Jobs werden über alle Seiten gelesen (höchstens 10); ein Staging-Job auf Seite 2 wird gefunden, rote oder laufende Runs auf Folgeseiten zählen. Über dem Seitenlimit eskaliert Phase 7, statt Teildaten zu bewerten.
+  - **Zeitbudget (C21):** `ci.timeout` ist eine monotone Deadline über Fetches, Auswertung und Schlafen; langsame `gh`/`glab`-Aufrufe überziehen es nicht mehr. `duration` in `ci.wait` ist die gemessene Zeit.
+  - **Log-Evidenz (C22):** Nur nicht-leere `--log-failed`-Ausgabe zählt; ein Run, dessen Log-Abruf scheitert, wird übersprungen, ohne die Logs der übrigen roten Runs zu verlieren. Ganz ohne Logs übergibt der Guard „rot ohne verwertbare Job-Logs" an den Menschen.
+  - **GitLab `manual` (C23):** Eine Pipeline, die auf einen manuellen Job wartet, ist final und eskaliert sofort mit „Pipeline wartet auf einen manuellen Job (<Name>) — Mensch übernimmt" — kein Log-Analyst, kein Re-Entry, kein irreführender CI-Timeout.
+
 ## [0.36.1] — 2026-11-08
 
 ### Fixed

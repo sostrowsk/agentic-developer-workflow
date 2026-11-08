@@ -18,6 +18,8 @@ from adw.config import CiConfig
 
 _LOG_EXCERPT_LINES = 200
 _RUNS_PER_PAGE = 100
+_JOBS_PER_PAGE = 100
+_MAX_PAGES = 10
 
 # Konclusion-Werte, die nicht als "rot" gelten.
 _GREEN_CONCLUSIONS = {"success", "skipped", "neutral"}
@@ -38,6 +40,7 @@ def poll_ci(
     sleep: Callable[[float], None] = time.sleep,
     sha: str | None = None,
     emitter=None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> CiResult:
     """Polls all workflow runs of the push until they reach a final status.
 
@@ -73,6 +76,7 @@ def poll_ci(
         ),
         evaluate=evaluate,
         timeout_message=timeout_message,
+        clock=clock,
     )
 
 
@@ -81,12 +85,32 @@ def _workflow_runs(repo: Path, branch: str, run_gh: RunGh, sha: str | None) -> l
         query = f"head_sha={sha}&per_page={_RUNS_PER_PAGE}"
     else:
         query = f"branch={quote(branch, safe='')}&per_page={_RUNS_PER_PAGE}"
-    raw = run_gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs?{query}"], repo)
-    data = _parse_json(raw, "actions runs")
-    runs = data.get("workflow_runs") if isinstance(data, dict) else None
-    if not isinstance(runs, list):
-        raise CiError(f"gh api actions/runs: unerwartetes JSON — {raw[:200]}")
-    return runs
+    return _paginate(
+        repo,
+        f"repos/{{owner}}/{{repo}}/actions/runs?{query}",
+        "workflow_runs",
+        _RUNS_PER_PAGE,
+        run_gh,
+        "actions runs",
+    )
+
+
+def _paginate(
+    repo: Path, path: str, key: str, per_page: int, run_gh: RunGh, context: str
+) -> list[dict]:
+    """Reads all pages (``&page=N``) until a short page — at most ``_MAX_PAGES``;
+    a still-full last page is incomplete data and raises instead of judging it."""
+    items: list[dict] = []
+    for page in range(1, _MAX_PAGES + 1):
+        raw = run_gh(["api", f"{path}&page={page}"], repo)
+        data = _parse_json(raw, context)
+        batch = data.get(key) if isinstance(data, dict) else None
+        if not isinstance(batch, list):
+            raise CiError(f"gh api {context}: unerwartetes JSON — {raw[:200]}")
+        items.extend(batch)
+        if len(batch) < per_page:
+            return items
+    raise CiError(f"gh api {context}: mehr als {_MAX_PAGES} Seiten — Seitenlimit erreicht")
 
 
 def _evaluate(repo: Path, runs: list[dict], cfg: CiConfig, run_gh: RunGh) -> CiResult:
@@ -108,26 +132,35 @@ def _evaluate(repo: Path, runs: list[dict], cfg: CiConfig, run_gh: RunGh) -> CiR
                 pipeline_id=first_id,
                 log_excerpt=f"Staging-Job {cfg.staging_job!r} existiert in keinem Workflow-Run",
             )
-        if any(job.get("conclusion") not in _GREEN_CONCLUSIONS for job in staging):
+        # Nur success: ein übersprungener Deploy-Job hat nichts deployt.
+        if any(job.get("conclusion") != "success" for job in staging):
             excerpt = _failed_logs(repo, runs, run_gh)
             return CiResult(passed=False, pipeline_id=first_id, log_excerpt=excerpt)
     return CiResult(passed=True, pipeline_id=first_id)
 
 
 def _jobs(repo: Path, run_id: int | None, run_gh: RunGh) -> list[dict]:
-    raw = run_gh(["api", f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page=100"], repo)
-    data = _parse_json(raw, "run jobs")
-    jobs = data.get("jobs") if isinstance(data, dict) else None
-    if not isinstance(jobs, list):
-        raise CiError(f"gh api run jobs: unerwartetes JSON — {raw[:200]}")
-    return jobs
+    return _paginate(
+        repo,
+        f"repos/{{owner}}/{{repo}}/actions/runs/{run_id}/jobs?per_page={_JOBS_PER_PAGE}",
+        "jobs",
+        _JOBS_PER_PAGE,
+        run_gh,
+        "run jobs",
+    )
 
 
 def _failed_logs(repo: Path, runs: list[dict], run_gh: RunGh) -> str:
-    """`gh run view --log-failed` per red run — food for the log analyst."""
+    """`gh run view --log-failed` per red run — food for the log analyst. Only real
+    log content counts as evidence; a run without logs contributes nothing."""
     excerpts = []
     for run in runs:
-        raw = run_gh(["run", "view", str(run.get("id")), "--log-failed"], repo)
+        try:
+            raw = run_gh(["run", "view", str(run.get("id")), "--log-failed"], repo)
+        except CiError:
+            continue  # startup_failure/cancelled: keine Job-Logs
+        if not raw.strip():
+            continue
         tail = "\n".join(raw.splitlines()[-_LOG_EXCERPT_LINES:])
         excerpts.append(f"### Workflow-Run {run.get('id')} ({run.get('conclusion')})\n{tail}")
     return "\n\n".join(excerpts)

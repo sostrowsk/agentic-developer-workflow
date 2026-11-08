@@ -13,7 +13,7 @@ from adw.env import safe_env
 from adw.events import NoOpEmitter
 
 _CLI_TIMEOUT = 120
-_TERMINAL_STATUSES = {"success", "failed", "canceled", "skipped"}
+_TERMINAL_STATUSES = {"success", "failed", "canceled", "skipped", "manual"}
 _LOG_EXCERPT_LINES = 200
 
 RunGlab = Callable[[list[str], Path], str]
@@ -25,6 +25,10 @@ class CiError(Exception):
 
 class CiTimeoutError(CiError):
     """Pipeline did not finish within the budget — escalation."""
+
+
+class CiManualError(CiError):
+    """Pipeline waits for a manual job — a human takes over (no analyst, no re-entry)."""
 
 
 @dataclass(frozen=True)
@@ -76,38 +80,40 @@ def poll_until(
     is_terminal: Callable[[object], bool],
     evaluate: Callable[[object], tuple[CiResult, str]],
     timeout_message: Callable[[object], str],
+    clock: Callable[[], float] = time.monotonic,
 ) -> CiResult:
     """The forge-neutral wait loop: a ``ci.wait`` span, one ``ci.poll`` point per
-    poll, the budget kept as remaining time with each sleep capped to it (a 61 s
-    budget at a 60 s interval must not sleep until 120 s). The forge supplies what
+    poll, the budget kept as a monotonic deadline over fetches, evaluation and sleeps, each
+    sleep capped to the remaining time (a 61 s budget at a 60 s interval must not
+    sleep until 120 s). The forge supplies what
     to fetch, how to describe it, when it is final and how to judge it."""
     emitter = emitter or NoOpEmitter()
     with emitter.span("ci.wait", {"provider": provider, "pipeline_ref": branch}) as handle:
         handle.end_payload = {"status": "aborted", "polls": 0, "duration": 0}
-        remaining = float(cfg.timeout)
+        start = clock()
+        deadline = start + float(cfg.timeout)
         polls = 0
-        elapsed = 0.0
-        while True:
-            observed = fetch()
-            polls += 1
-            emitter.emit(
-                "ci.poll",
-                {"provider": provider, "status": describe(observed), "job": None},
-                span=handle.id,
-            )
-            handle.end_payload["polls"] = polls
-            handle.end_payload["duration"] = elapsed
-            if is_terminal(observed):
-                result, status = evaluate(observed)
-                handle.end_payload["status"] = status
-                return result
-            if remaining <= 0:
-                handle.end_payload["status"] = "timeout"
-                raise CiTimeoutError(timeout_message(observed))
-            nap = min(float(cfg.poll_interval), remaining)
-            sleep(nap)
-            remaining -= nap
-            elapsed += nap
+        try:
+            while True:
+                observed = fetch()
+                polls += 1
+                emitter.emit(
+                    "ci.poll",
+                    {"provider": provider, "status": describe(observed), "job": None},
+                    span=handle.id,
+                )
+                handle.end_payload["polls"] = polls
+                if is_terminal(observed):
+                    result, status = evaluate(observed)
+                    handle.end_payload["status"] = status
+                    return result
+                remaining = deadline - clock()
+                if remaining <= 0:
+                    handle.end_payload["status"] = "timeout"
+                    raise CiTimeoutError(timeout_message(observed))
+                sleep(min(float(cfg.poll_interval), remaining))
+        finally:
+            handle.end_payload["duration"] = clock() - start
 
 
 def run_glab(argv: list[str], cwd: Path) -> str:
@@ -123,6 +129,7 @@ def poll_pipeline(
     sleep: Callable[[float], None] = time.sleep,
     sha: str | None = None,
     emitter=None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> CiResult:
     """Polls the branch's latest pipeline until it reaches a final status.
 
@@ -163,6 +170,7 @@ def poll_pipeline(
             f"Pipeline für {branch} nach {cfg.timeout}s nicht abgeschlossen "
             f"(Status: {pipeline['status'] if pipeline else 'keine Pipeline gefunden'})"
         ),
+        clock=clock,
     )
 
 
@@ -191,6 +199,8 @@ def _latest_pipeline(
 
 def _evaluate(repo: Path, pipeline: dict, cfg: CiConfig, run_glab: RunGlab) -> CiResult:
     pipeline_id = pipeline.get("id")
+    if pipeline["status"] == "manual":
+        raise CiManualError(_manual_message(repo, pipeline_id, run_glab))
     jobs = _jobs(repo, pipeline_id, run_glab)
     failed_jobs = [job for job in jobs if job.get("status") == "failed"]
     if pipeline["status"] != "success" or failed_jobs:
@@ -208,6 +218,16 @@ def _evaluate(repo: Path, pipeline: dict, cfg: CiConfig, run_glab: RunGlab) -> C
             excerpt = _logs_for(repo, staging, run_glab)
             return CiResult(passed=False, pipeline_id=pipeline_id, log_excerpt=excerpt)
     return CiResult(passed=True, pipeline_id=pipeline_id)
+
+
+def _manual_message(repo: Path, pipeline_id: int | None, run_glab: RunGlab) -> str:
+    try:
+        jobs = _jobs(repo, pipeline_id, run_glab)
+    except CiError:
+        jobs = []
+    names = [str(job.get("name")) for job in jobs if job.get("status") == "manual"]
+    detail = f" ({', '.join(names)})" if names else ""
+    return f"Pipeline wartet auf einen manuellen Job{detail} — Mensch übernimmt"
 
 
 _JOBS_PER_PAGE = 100
