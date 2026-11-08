@@ -273,7 +273,9 @@ def test_orchestrator_group_gets_one_brief_from_adw_source(ledger, agent):
                 "## Ausgangslage Aufgabe Vorentscheidungen Deferred Akzeptanzkriterien\n"}),
     json.dumps({"title": "T", "brief_markdown": BRIEF_MD.replace(
         "## Deferred\n\nx\n", "```\n## Deferred\n```\n")}),
-], ids=["invalid-json", "wrong-type", "missing-heading", "combined-heading", "fenced"])
+    json.dumps({"title": "T", "brief_markdown": "````\n```\n" + BRIEF_MD + "````\n"}),
+], ids=["invalid-json", "wrong-type", "missing-heading", "combined-heading", "fenced",
+        "long-fence"])
 def test_invalid_brief_answer_is_rejected_and_noted(ledger, agent, answer):
     install(ledger)
     calls = agent(answer)

@@ -213,7 +213,7 @@ def _regressions(pairs: list[tuple]) -> list[tuple]:
 
 
 _HEADING = re.compile(r"^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$")
-_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 
 def _missing_headings(markdown: str) -> list[str]:
@@ -222,9 +222,16 @@ def _missing_headings(markdown: str) -> list[str]:
     "Akzeptanzkriterien (messbar)" are fine) — one heading covers one name only."""
     titles, fence = [], None
     for line in markdown.splitlines():
-        if (m := _FENCE.match(line)) and (fence is None or m.group(1)[0] == fence):
-            fence = None if fence else m.group(1)[0]
-            continue
+        if m := _FENCE.match(line):
+            marker, rest = m.groups()
+            if fence is None and not (marker[0] == "`" and "`" in rest):
+                fence = marker  # opening: a backtick info string holds no backtick
+                continue
+            # closing (CommonMark): same character, at least as long, nothing after
+            if fence and marker[0] == fence[0] and len(marker) >= len(fence) \
+                    and not rest.strip():
+                fence = None
+                continue
         if fence is None and (m := _HEADING.match(line)):
             titles.append(m.group(1))
 
