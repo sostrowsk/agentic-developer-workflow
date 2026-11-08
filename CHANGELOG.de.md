@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [0.32.0] — Unreleased
+## [0.32.0] — 2026-11-08
 
 ### Hinzugefügt
 - **Jeder Agent-Lauf hat ein Turn- und Zeitlimit (W1).** Claude-Agenten liefen ohne `max_turns` und ohne Zeitlimit; ein hängender SDK-Stream blockierte den Lauf unbegrenzt, während Gates, Codex und CI harte Grenzen haben.
@@ -1193,6 +1193,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.32.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.3...v0.32.0
 [0.31.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.2...v0.31.3
 [0.31.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.0...v0.31.1
