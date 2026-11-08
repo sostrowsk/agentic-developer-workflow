@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [0.34.0] — Unreleased
+## [0.34.0] — 2026-11-08
 
 ### Hinzugefügt
 - **`adw kpis` — Kennzahlen über alle Läufe aus dem Ledger (W3).** Zahlen über Läufe hinweg gab es nur per Hand-Skript; ADW-Änderungen (Prompts, Effort, Grenzen, Schlüssel) waren nicht messbar.
@@ -1225,6 +1225,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.34.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.1...v0.33.0
 [0.32.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.3...v0.32.0
