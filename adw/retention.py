@@ -224,8 +224,25 @@ def _candidates(records: list[RunRecord], keep: int) -> list[RunRecord]:
 
 def _run_worktrees(repo: Path, run_id: str) -> list[Path]:
     """Every registered git worktree whose path lies under the run's ``trees/``
-    directory (one per lane)."""
-    trees = (repo.resolve() / RUNS_RELPATH / run_id / "trees").resolve()
+    directory (one per lane).
+
+    ``trees`` is checked UNRESOLVED first (C4): a symlink (even a dangling one), a
+    non-directory, or a path resolving outside the run folder would move the
+    deletion boundary onto foreign worktrees — refused for this run only
+    (``failed`` set, so the sweep goes on)."""
+    run_dir = repo.resolve() / RUNS_RELPATH / run_id
+    raw = run_dir / "trees"
+    if raw.is_symlink() or (raw.exists() and not raw.is_dir()):
+        reason = "trees ist kein echtes Verzeichnis — Lauf nicht gelöscht"
+        raise RetentionError(
+            f"{run_id}: {reason}", failed=PruneResult(run_id, "failed", reason=reason)
+        )
+    trees = raw.resolve()
+    if raw.exists() and not trees.is_relative_to(run_dir.resolve()):
+        reason = "trees liegt außerhalb des Laufordners — Lauf nicht gelöscht"
+        raise RetentionError(
+            f"{run_id}: {reason}", failed=PruneResult(run_id, "failed", reason=reason)
+        )
     result = _git(repo, "worktree", "list", "--porcelain", "-z")
     if result.returncode != 0:
         raise RetentionError(f"git worktree list: {result.stderr.strip()}")
@@ -272,7 +289,12 @@ def _delete_run(repo: Path, rec: RunRecord, runs_root: Path) -> PruneResult:
     registration remains, so an interruption never orphans one."""
     if rec.run_dir.is_symlink() or _contained(rec.run_dir, runs_root) is None:
         raise RetentionError(f"{rec.run_id}: Laufordner liegt außerhalb der Runs — nicht gelöscht")
-    worktrees = _run_worktrees(repo, rec.run_id)
+    try:
+        worktrees = _run_worktrees(repo, rec.run_id)
+    except RetentionError as exc:
+        if exc.failed is None:
+            raise  # repo-wide failure (git worktree list) — abort as before
+        return exc.failed  # this run's trees boundary is unsafe — partial failure
     # C4: never force-remove a worktree with uncommitted work — skip the WHOLE run.
     # A registered path whose directory is MISSING is a stale registration, not a
     # dirty worktree: it is pruned below (never a permanent skip, P2).

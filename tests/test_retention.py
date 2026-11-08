@@ -624,3 +624,30 @@ def test_older_than_treats_the_exact_day_boundary_as_old_enough(target_repo):
     assert one_second_younger not in acted
     assert not run_dir(target_repo, exact).is_dir()
     assert run_dir(target_repo, one_second_younger).is_dir()
+
+
+# --- C4: a `trees` symlink never moves the deletion boundary ----------------------
+
+
+def test_prune_refuses_run_whose_trees_symlinks_to_a_foreign_worktree(target_repo, tmp_path):
+    """A run whose ``trees`` is a symlink to a foreign registered worktree fails for
+    THAT run — nothing of it is deleted, the foreign worktree survives — and the
+    sweep still prunes the other runs."""
+    from adw import retention
+
+    foreign = tmp_path / "foreign-wt"
+    git(target_repo, "worktree", "add", "-q", "-b", "fremd", str(foreign), "staging")
+    bad, good = "aaaa0001", "aaaa0002"
+    rd_bad = make_run(target_repo, bad, _iso(datetime(2026, 8, 1)))  # processed first
+    make_run(target_repo, good, _iso(datetime(2026, 8, 2)))
+    os.symlink(foreign, rd_bad / "trees")
+    make_run(target_repo, GUARD_RUN, _iso(datetime(2099, 1, 1)))
+
+    results = {r.run_id: r.action for r in retention.prune(target_repo, keep=1)}
+
+    assert results[bad] == "failed"
+    assert results[good] == "deleted"
+    assert (foreign / "README.md").is_file()
+    assert foreign.name in worktree_list(target_repo)
+    assert rd_bad.is_dir() and (rd_bad / "trees").is_symlink()
+    assert not run_dir(target_repo, good).exists()

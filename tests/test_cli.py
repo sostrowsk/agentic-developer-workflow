@@ -1,5 +1,7 @@
 """CLI tests (typer CliRunner) — dry-run mode, 0 tokens, real git."""
 
+import contextlib
+import fcntl
 import json
 import subprocess
 
@@ -1034,3 +1036,103 @@ def test_gates_flag_prints_no_deprecation_notice(target_repo, mode):
     )
     assert res.exit_code in (0, 2), res.output
     assert "veraltet" not in res.output
+
+
+# =====================================================================
+# C3: Repo-weiter Lock vor Preflight und Ausführung; Resume-Schutz mitten
+# im Authoring.
+# =====================================================================
+
+
+@contextlib.contextmanager
+def _held_repo_lock(target_repo):
+    """Ein anderes ADW-Kommando hält den Repo-Lock (eigener Handle = eigener flock)."""
+    from adw.worktrees import ensure_runs_gitignored
+
+    ensure_runs_gitignored(target_repo)
+    with open(target_repo / ".adw" / "runs" / ".repo.lock", "a+", encoding="utf-8") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def _run_dirs(target_repo) -> list[str]:
+    runs = target_repo / ".adw" / "runs"
+    return sorted(p.name for p in runs.iterdir() if p.is_dir()) if runs.is_dir() else []
+
+
+@pytest.mark.parametrize("command", ["run", "resume", "approve"])
+def test_busy_repo_lock_refuses_without_touching_anything(target_repo, command):
+    state = None if command == "run" else _paused_run(target_repo)
+    if state is None:
+        args = ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run"]
+    else:
+        args = [command, state.run_id, "--repo", str(target_repo)]
+        state_file = state.run_dir(target_repo) / "state.json"
+        state_bytes = state_file.read_bytes()
+    stray = target_repo / ".adw" / "spec.md"
+    stray.write_text("# Zwischenstand eines anderen Laufs\n")  # sonst selbstheilbar
+    with _held_repo_lock(target_repo):
+        dirs_before = _run_dirs(target_repo)
+        res = runner.invoke(app, args)
+        assert res.exit_code == 1, res.output
+        assert "bereits ein ADW-Kommando" in res.output
+        assert _run_dirs(target_repo) == dirs_before  # kein neuer Run-Ordner
+    assert stray.read_text() == "# Zwischenstand eines anderen Laufs\n"
+    if state is not None:
+        assert state_file.read_bytes() == state_bytes
+        assert not (state.run_dir(target_repo) / "escalation.md").exists()
+
+
+def test_first_run_creates_repo_lock_without_dirtying_the_checkout(target_repo):
+    """Der Lock entsteht vor dem Preflight — die Lock-Datei darf den eigenen
+    Arbeitsbaum-Check nicht scheitern lassen und bleibt danach liegen."""
+    assert not (target_repo / ".adw" / "runs").exists()
+    res = runner.invoke(
+        app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--gates", "none"]
+    )
+    assert res.exit_code == 0, res.output
+    assert (target_repo / ".adw" / "runs" / ".repo.lock").is_file()
+    assert (target_repo / ".adw" / "runs" / ".gitignore").is_file()
+    assert ".adw/runs" not in git(target_repo, "status", "--porcelain", "--untracked-files=all")
+
+
+def _mid_authoring_run(target_repo) -> RunState:
+    """Lauf, der mitten in einer Fix-Runde der Plan-Synthese gecrasht ist."""
+    state = _paused_run(target_repo)
+    state.phase = "plan"
+    state.authoring_session = "sess-plan-synthesis"
+    state.save(target_repo)
+    return state
+
+
+def test_resume_mid_authoring_keeps_its_dirty_artifact(target_repo, monkeypatch):
+    import adw.cli as cli_mod
+
+    state = _mid_authoring_run(target_repo)
+    plan = target_repo / ".adw" / "plan.md"
+    plan.write_text("# Plan (reviewte Zwischenfassung)\n")
+    seen = {}
+
+    def execute(ctx):
+        seen["plan"] = plan.read_text() if plan.exists() else None
+
+    monkeypatch.setattr(cli_mod, "_execute", execute)
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 0, res.output  # Preflight verweigert nicht
+    assert seen["plan"] == "# Plan (reviewte Zwischenfassung)\n"  # nach dem Preflight
+
+
+def test_resume_mid_authoring_still_refuses_foreign_dirty_files(target_repo, monkeypatch):
+    state = _mid_authoring_run(target_repo)
+    plan = target_repo / ".adw" / "plan.md"
+    plan.write_text("# Plan (reviewte Zwischenfassung)\n")
+    readme = target_repo / "README.md"
+    readme.write_text("# target\n\nFREMD DIRTY\n")
+    _no_execution(monkeypatch)
+    res = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+    assert res.exit_code == 1, res.output
+    assert plan.read_text() == "# Plan (reviewte Zwischenfassung)\n"
+    assert readme.read_text() == "# target\n\nFREMD DIRTY\n"

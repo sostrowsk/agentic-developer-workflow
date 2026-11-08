@@ -640,26 +640,56 @@ def _ci_forge(ctx: RunContext) -> Forge:
 
 
 def _push_branch(ctx: RunContext, worktree: Path, branch: str) -> None:
-    """Push by the orchestrator. --force-with-lease: the integration branch
-    is rebuilt fresh from base each round (non-fast-forward is expected), but
-    foreign remote changes are never overwritten."""
+    """Push by the orchestrator. The integration branch is rebuilt fresh from
+    base each round (non-fast-forward is expected), but foreign remote changes
+    are never overwritten: the lease expects exactly the SHA this run pushed
+    last (stored in ``pushed_shas``), or no remote branch at all — never the
+    remote-tracking ref, which any ``git fetch`` may have moved."""
     extra = dict(ctx.git_env)
     # SSH-Agent nur dem Push durchreichen (bewusst nicht global in safe_env):
     # Gates/Agents sollen den Agenten-Socket nicht orten können.
     if "SSH_AUTH_SOCK" in os.environ:
         extra.setdefault("SSH_AUTH_SOCK", os.environ["SSH_AUTH_SOCK"])
+    head = _git(ctx, worktree, "rev-parse", "HEAD").strip()
+    expected = ctx.state.pushed_shas.get(branch, "")
     try:
         result = run_git(
-            worktree, "push", "--force-with-lease", "-u", "origin", branch,
+            worktree, "push", f"--force-with-lease=refs/heads/{branch}:{expected}",
+            "-u", "origin", branch,
             timeout=600, env=safe_env(extra),
         )
     except subprocess.TimeoutExpired as exc:
         raise escalate(ctx, f"Push von {branch} hat das Timeout überschritten") from exc
     if result.returncode != 0:
-        raise escalate(
-            ctx,
-            f"Push von {branch} nach origin fehlgeschlagen:\n{result.stderr.strip()}",
-        )
+        stderr = result.stderr.strip()
+        if "stale info" not in stderr and "rejected" not in stderr:
+            raise escalate(ctx, f"Push von {branch} nach origin fehlgeschlagen:\n{stderr}")
+        # Lease abgelehnt: entweder ein Crash zwischen Push und Speichern (der
+        # Remote steht schon auf HEAD) oder fremde Commits auf dem Remote.
+        try:
+            remote = run_git(
+                worktree, "ls-remote", "origin", f"refs/heads/{branch}",
+                timeout=600, env=safe_env(extra),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise escalate(ctx, f"ls-remote für {branch} hat das Timeout überschritten") from exc
+        if remote.returncode != 0:
+            raise escalate(
+                ctx,
+                f"Push von {branch} abgelehnt, Remote-Stand nicht lesbar:\n"
+                f"{stderr}\n{remote.stderr.strip()}",
+            )
+        remote_sha = remote.stdout.split()[0] if remote.stdout.split() else ""
+        if remote_sha != head:
+            raise escalate(
+                ctx,
+                f"Remote-Branch hat fremde Commits: origin/{branch} steht auf "
+                f"{remote_sha or '—'}, erwartet {expected or 'kein Branch'} — "
+                f"nichts überschrieben, Mensch übernimmt.\n{stderr}",
+            )
+    with ctx.state_lock:
+        ctx.state.pushed_shas[branch] = head
+        ctx.save()
 
 
 def _analyze_ci_logs(ctx: RunContext, worktree: Path, log_excerpt: str) -> ReviewResult:

@@ -526,23 +526,26 @@ def _worktree_tree_hash(ctx: RunContext, worktree: Path) -> str:
 def _seed_artifacts(ctx: RunContext, worktree: Path) -> None:
     """Copy spec/plan/contract from the run folder into the Lane Worktree and
     commit — the build agent works against checked-in artifacts."""
-    target_dir = worktree / ".adw"
-    target_dir.mkdir(parents=True, exist_ok=True)
     for name in ARTIFACTS:
-        source = ctx.run_dir / name
-        if not source.is_file():
+        if not (ctx.run_dir / name).is_file():
             raise escalate(
                 ctx,
                 f"Archiviertes Artefakt {name} fehlt im Run-Ordner — keine Lane "
                 f"darf gegen unvollständige/unapprovte Artefakte bauen",
             )
-        shutil.copy2(source, target_dir / name)
+    _place_approved_artifacts(ctx, worktree)
     # Nur committen, wenn sich die ARTEFAKTE selbst geändert haben — beim
     # Resume kann der Worktree außerhalb von .adw dirty sein (Crash-Reste),
-    # und ein leerer Commit würde den Lauf fälschlich eskalieren.
-    if _git(ctx, worktree, "status", "--porcelain", "--", ".adw").strip():
-        _git(ctx, worktree, "add", ".adw")
-        _git(ctx, worktree, "commit", "-m", f"adw({ctx.state.run_id}): Spec/Plan/Kontrakt")
+    # und ein leerer Commit würde den Lauf fälschlich eskalieren. Status, Add
+    # und Commit nur über die drei Pfade: Fremddateien in .adw/ und anderweitig
+    # gestagte (ungeprüfte) Änderungen bleiben draußen.
+    paths = [f".adw/{name}" for name in ARTIFACTS]
+    if _git(ctx, worktree, "status", "--porcelain", "--", *paths).strip():
+        _git(ctx, worktree, "add", "--", *paths)
+        _git(
+            ctx, worktree, "commit", "-m", f"adw({ctx.state.run_id}): Spec/Plan/Kontrakt",
+            "--", *paths,
+        )
 
 
 def _run_lane_gates(
@@ -582,12 +585,10 @@ def _has_implementation_changes(ctx: RunContext, worktree: Path) -> bool:
     return any(name and not name.startswith(".adw/") for name in changed)
 
 
-def _restore_approved_artifacts(ctx: RunContext, worktree: Path, base_ref: str) -> None:
-    """The build agent builds AGAINST spec/plan/contract — it does not change them.
-
-    Deviations from the approved versions in the run folder are reset before
-    the commit; otherwise a Lane could silently rewrite the contract
-    and parallel Lanes would build against different artifacts."""
+def _place_approved_artifacts(ctx: RunContext, worktree: Path) -> None:
+    """Put the approved artifacts from the run folder into <worktree>/.adw as
+    regular files — never through a symlink. Missing run-folder artifacts are
+    skipped; an identical file is left alone."""
     adw_dir = worktree / ".adw"
     if adw_dir.is_symlink():
         # .adw selbst als Symlink: NIE folgen — sonst schreibt der
@@ -598,7 +599,7 @@ def _restore_approved_artifacts(ctx: RunContext, worktree: Path, base_ref: str) 
     adw_dir.mkdir(parents=True, exist_ok=True)
     for name in ARTIFACTS:
         approved = ctx.run_dir / name
-        current = worktree / ".adw" / name
+        current = adw_dir / name
         if not approved.is_file():
             continue
         if current.is_symlink():
@@ -610,6 +611,15 @@ def _restore_approved_artifacts(ctx: RunContext, worktree: Path, base_ref: str) 
             shutil.rmtree(current)
         if not current.is_file() or current.read_bytes() != approved.read_bytes():
             shutil.copy2(approved, current)
+
+
+def _restore_approved_artifacts(ctx: RunContext, worktree: Path, base_ref: str) -> None:
+    """The build agent builds AGAINST spec/plan/contract — it does not change them.
+
+    Deviations from the approved versions in the run folder are reset before
+    the commit; otherwise a Lane could silently rewrite the contract
+    and parallel Lanes would build against different artifacts."""
+    _place_approved_artifacts(ctx, worktree)
     # Auch die Workflow-Config ist tabu: auf den Stand des Base-Branch
     # zurücksetzen. Schlägt das fehl (Config im Ziel-Repo untracked, also
     # nicht im Base-Branch), wird eine evtl. vom Agenten eingeschleuste

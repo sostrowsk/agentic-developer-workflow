@@ -13,6 +13,20 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.31.2] — Unreleased
+
+### Behoben
+- **Das Lane-Seeding folgte Symlinks und committete zu viel (C1).** Das Seeding kopierte Spec/Plan/Kontrakt mit einer Kopie, die einem Symlink am Ziel folgt, nach `<worktree>/.adw/` — bei jedem Lane-Start, auch bei `adw resume`.
+  - Ein Build-Agent konnte `.adw/contract.yaml -> ~/.bashrc` anlegen; nach einem Abbruch überschrieb `adw resume` diese Datei mit dem Kontrakt. Committet wurde mit `git add .adw` und nacktem `git commit` — das nahm Fremddateien in `.adw/` und jede gestagte, noch nicht durch Gates gelaufene Änderung mit; HEAD bewegte sich, und der Lauf eskalierte fälschlich mit „HEAD hat sich außerhalb des Orchestrators bewegt“.
+  - **Fix:** Das Seeding nutzt dieselbe Symlink-Behandlung wie die Artefakt-Wiederherstellung (ein gemeinsamer Helfer): `.adw` als Symlink oder Datei wird entfernt, ein Artefaktpfad als Symlink oder Verzeichnis wird entfernt, erst dann wird das Artefakt als reguläre Datei kopiert. Status, `git add` und `git commit` nennen nur die drei Artefaktpfade.
+- **`--force-with-lease` ohne Erwartungswert konnte fremde Commits überschreiben (C2).** Ohne `=<ref>:<expect>` nimmt git den Remote-Tracking-Ref als Erwartung; nach jedem `git fetch` (IDE oder Nutzer) „erfüllte“ ein fremder Commit auf dem Branch des Laufs die Lease, und der Push überschrieb ihn.
+  - **Fix:** Der State merkt sich pro Branch den zuletzt gepushten SHA (`pushed_shas`, bei älteren State-Dateien leer). Der Push erwartet genau diesen SHA bzw. gar keinen Remote-Branch. Lehnt git die Lease ab und steht der Remote schon auf dem lokalen HEAD (Crash zwischen Push und Speichern), gilt der Push als erfolgt; sonst eskaliert der Lauf mit „Remote-Branch hat fremde Commits“ und lässt den Remote unverändert.
+- **Kein Repo-weiter Lock vor Preflight und Authoring (C3).** `run`, `resume` und `approve` hielten nur den per-Run-Lock, während der Preflight die sechs ADW-Authoring-Artefakte im Haupt-Checkout selbst heilt — ein zweites `adw run` konnte die `.adw/spec.md` eines anderen Laufs wegheilen, und `adw resume` eines mitten im Authoring gecrashten Laufs setzte die eigene reviewte Zwischenfassung zurück.
+  - **Fix:** Alle drei Kommandos nehmen vor dem Preflight einen nicht blockierenden `flock` auf `.adw/runs/.repo.lock` und halten ihn bis zum Kommandoende. Ist er belegt, enden sie mit Exit 1 („In diesem Repo läuft bereits ein ADW-Kommando“) — ohne Preflight, Selbstheilung, Run-Ordner, State-Änderung oder Eskalation. `resume`/`approve` eines Laufs mitten im Authoring lassen dessen dirty Artefakte stehen statt sie zu heilen; fremde Änderungen werden weiterhin verweigert.
+  - Angepasster Test: `test_run_and_concurrent_resume_execute_the_run_only_once` erwartet jetzt, dass das konkurrierende `resume` verweigert wird (Exit 1), statt zu warten und als No-op zu enden; der Lauf wird weiterhin genau einmal ausgeführt.
+- **Ein `trees`-Symlink verschob die Lösch-Grenze von Prune (C4).** Prune löste `<run>/trees` auf, bevor es als Grenze diente; ein `trees`-Symlink auf einen fremden registrierten Worktree ließ Prune diesen entfernen.
+  - **Fix:** `trees` muss ein echtes Verzeichnis innerhalb des Run-Ordners sein. Sonst löscht Prune nichts von diesem Lauf und meldet ihn als fehlgeschlagen (Exit 1); die übrigen Läufe des Sweeps werden wie gewohnt bearbeitet.
+
 ## [0.31.1] — 2026-10-11
 
 ### Behoben

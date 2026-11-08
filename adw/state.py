@@ -162,6 +162,9 @@ class RunState(BaseModel):
     deferred_findings: list[str] = Field(default_factory=list)
     # Phase 7: rote Pipeline → Log-Analyst → EIN Re-Entry, dann Eskalation.
     ci_reentries: int = 0
+    # Branch → zuletzt erfolgreich gepushter SHA: fester Erwartungswert der
+    # Push-Lease (ein fremder, per fetch geholter Commit erfüllt sie nie).
+    pushed_shas: dict[str, str] = Field(default_factory=dict)
     # Checkpoint des Spec-/Plan-Authoring-Loops: Session, offener Fix-Task und
     # Findings-Basis überleben so einen Crash mitten im Review-Zyklus.
     authoring_session: str | None = None

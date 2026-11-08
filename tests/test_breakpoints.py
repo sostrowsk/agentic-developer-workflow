@@ -631,9 +631,9 @@ def test_concurrent_approvals_release_once_and_execute_once(target_repo):
 def test_run_and_concurrent_resume_execute_the_run_only_once(target_repo, monkeypatch):
     """P1: once an initial `adw run` has persisted its state, a concurrent
     `adw resume <run_id>` must NOT execute the same run in parallel. `run` holds
-    the per-run execution lock across its whole execution, so the racing `resume`
-    blocks until `run` finishes and then finds nothing left to do — exactly one
-    downstream execution (one CI wait span, no double push)."""
+    the repo lock (C3) across its whole execution, so the racing `resume` refuses
+    with exit 1 instead of executing — exactly one downstream execution (one CI
+    wait span, no double push)."""
     import threading
     import time
 
@@ -690,7 +690,7 @@ def test_run_and_concurrent_resume_execute_the_run_only_once(target_repo, monkey
 
     resume_thread = threading.Thread(target=resume_worker)
     resume_thread.start()
-    # Give the resume a moment to reach (and, under the fix, block on) the lock.
+    # Give the resume a moment to reach (and be refused by) the repo lock.
     time.sleep(0.5)
     proceed.set()  # release `run`; it finishes under the lock, THEN resume unblocks.
 
@@ -699,12 +699,12 @@ def test_run_and_concurrent_resume_execute_the_run_only_once(target_repo, monkey
     assert not run_thread.is_alive() and not resume_thread.is_alive(), "a thread hung"
 
     assert results["run"] == 0, results
-    assert results["resume"] == 0, results  # resume on the finished run is a clean no-op
+    assert results["resume"] == 1, results  # refused by the busy repo lock (C3)
 
     final = RunState.load(target_repo, sid)
     assert final.phase == "done"
     # Exactly one downstream execution: the run executed the CI phase once; the
-    # racing resume found the run already done and executed no phase again.
+    # racing resume was refused and executed no phase.
     ci_waits = [
         e
         for e in read_events(target_repo, sid)

@@ -12,6 +12,20 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.31.2] — Unreleased
+
+### Fixed
+- **Lane seeding followed symlinks and committed too much (C1).** Seeding copied spec/plan/contract into `<worktree>/.adw/` with a plain copy that follows a symlink at the target, on every lane start including `adw resume`.
+  - A build agent could plant `.adw/contract.yaml -> ~/.bashrc`; after an abort, `adw resume` overwrote that file with the contract. The commit used `git add .adw` and a bare `git commit`, so it took foreign files in `.adw/` and every staged change still waiting for its gates — HEAD moved and the run escalated with a false "HEAD moved outside the orchestrator".
+  - **Fix:** seeding uses the same symlink handling as the artifact restore (one shared helper): `.adw` as a symlink or file is removed, an artifact path that is a symlink or directory is removed, only then the artifact is copied as a regular file. Status, `git add` and `git commit` name only the three artifact paths.
+- **`--force-with-lease` without an expected value could overwrite foreign commits (C2).** Without `=<ref>:<expect>` git takes the remote-tracking ref as the expectation, so after any `git fetch` (IDE or user) a foreign commit on the run's branch "satisfied" the lease and the push overwrote it.
+  - **Fix:** the state records the last pushed SHA per branch (`pushed_shas`, empty for older state files). The push expects exactly that SHA, or no remote branch at all. If the lease is rejected and the remote already points at the local HEAD (crash between push and save), the push counts as done; otherwise the run escalates with "Remote-Branch hat fremde Commits" and leaves the remote alone.
+- **No repo-wide lock before preflight and authoring (C3).** `run`, `resume` and `approve` only held the per-run lock, while the preflight self-heals the six ADW authoring artifacts in the main checkout — a second `adw run` could heal away the `.adw/spec.md` another run was writing, and `adw resume` of a run that crashed mid-authoring reset its own reviewed intermediate draft.
+  - **Fix:** all three commands take a non-blocking `flock` on `.adw/runs/.repo.lock` before the preflight and hold it until the command ends. If it is taken, they stop with exit 1 ("In diesem Repo läuft bereits ein ADW-Kommando") without preflight, self-heal, run folder, state change or escalation. `resume`/`approve` of a run mid-authoring keep its dirty artifacts instead of healing them; foreign changes are still refused.
+  - Adjusted test: `test_run_and_concurrent_resume_execute_the_run_only_once` now expects the racing `resume` to be refused (exit 1) instead of blocking and finishing as a no-op; the run still executes exactly once.
+- **A symlinked `trees` moved the prune deletion boundary (C4).** Prune resolved `<run>/trees` before using it as the boundary, so a `trees` symlink to a foreign registered worktree made prune remove that worktree.
+  - **Fix:** `trees` must be a real directory inside the run folder. Otherwise prune deletes nothing of this run and reports it as failed (exit 1); the other runs of the sweep are processed as usual.
+
 ## [0.31.1] — 2026-10-11
 
 ### Fixed

@@ -1517,6 +1517,84 @@ def test_restore_survives_deleted_adw_directory(ctx):
     assert (worktree / ".adw" / "spec.md").is_file()
 
 
+# --- C1: Seeding folgt keinem Symlink und committet nur die Artefaktpfade -------
+
+SEEDED = {".adw/spec.md", ".adw/plan.md", ".adw/contract.yaml"}
+
+
+def _seedable_worktree(ctx):
+    from adw.worktrees import create_lane_worktree
+
+    prepare_approved(ctx)
+    return create_lane_worktree(ctx.repo, ctx.state.run_id, "backend", "staging")
+
+
+def test_seed_never_writes_through_an_artifact_symlink(ctx, tmp_path):
+    """C1: ein vom Agenten gelegter Symlink .adw/contract.yaml -> ~/.bashrc darf
+    beim (Resume-)Seeding nie dessen Ziel überschreiben."""
+    from adw.lanes import _seed_artifacts
+
+    worktree = _seedable_worktree(ctx)
+    outside = tmp_path / "bashrc"
+    outside.write_bytes(b"export PS1='fremd'\n")
+    link = worktree / ".adw" / "contract.yaml"
+    link.symlink_to(outside)
+    _seed_artifacts(ctx, worktree)
+    assert outside.read_bytes() == b"export PS1='fremd'\n"
+    assert not link.is_symlink() and link.is_file()
+    assert link.read_bytes() == (ctx.run_dir / "contract.yaml").read_bytes()
+
+
+def test_seed_never_writes_through_a_symlinked_adw_directory(ctx, tmp_path):
+    import shutil
+
+    from adw.lanes import _seed_artifacts
+
+    worktree = _seedable_worktree(ctx)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    shutil.rmtree(worktree / ".adw")
+    (worktree / ".adw").symlink_to(elsewhere, target_is_directory=True)
+    _seed_artifacts(ctx, worktree)
+    assert list(elsewhere.iterdir()) == []
+    adw_dir = worktree / ".adw"
+    assert not adw_dir.is_symlink() and adw_dir.is_dir()
+    for path in SEEDED:
+        assert (worktree / path).is_file() and not (worktree / path).is_symlink()
+
+
+def test_seed_commit_contains_only_the_artifact_paths(ctx):
+    """C1: weder eine Fremddatei in .adw/ noch eine gestagte, noch nicht durch
+    Gates gelaufene Änderung landet im Seed-Commit."""
+    from adw.lanes import _seed_artifacts
+    from tests.conftest import git
+
+    worktree = _seedable_worktree(ctx)
+    (worktree / "staged.py").write_text("print('ungeprüft')\n")
+    git(worktree, "add", "staged.py")
+    (worktree / ".adw" / "notes.md").write_text("fremd\n")
+    head_before = git(worktree, "rev-parse", "HEAD")
+    _seed_artifacts(ctx, worktree)
+    assert git(worktree, "rev-parse", "HEAD~1") == head_before
+    committed = git(worktree, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+    assert set(committed.splitlines()) == SEEDED
+    assert git(worktree, "diff", "--cached", "--name-only").splitlines() == ["staged.py"]
+    assert "?? .adw/notes.md" in git(worktree, "status", "--porcelain").splitlines()
+
+
+def test_foreign_file_in_adw_alone_triggers_no_seed_commit(ctx):
+    from adw.lanes import _seed_artifacts
+    from tests.conftest import git
+
+    worktree = _seedable_worktree(ctx)
+    _seed_artifacts(ctx, worktree)
+    head = git(worktree, "rev-parse", "HEAD")
+    (worktree / ".adw" / "notes.md").write_text("fremd\n")
+    _seed_artifacts(ctx, worktree)  # Resume: Artefakte unverändert
+    assert git(worktree, "rev-parse", "HEAD") == head
+    assert "?? .adw/notes.md" in git(worktree, "status", "--porcelain").splitlines()
+
+
 def test_crash_between_archive_and_phase_save_is_recoverable(ctx):
     """Regression: spec already archived, phase still 'plan' — resume must work."""
     ctx.agents.script("spec_synthesis", "Spec")
@@ -3022,6 +3100,78 @@ def test_push_failure_escalates(ctx):
     ctx.sleep = lambda s: None
     with pytest.raises(EscalationError, match="[Pp]ush"):
         run_ci_phase(ctx)
+
+
+# --- C2: Push mit festem Erwartungswert (pushed_shas) ---------------------------
+
+
+def _commit_file(worktree, name: str, content: str) -> str:
+    from tests.conftest import git
+
+    (worktree / name).write_text(content)
+    git(worktree, "add", name)
+    git(worktree, "commit", "-m", f"{name} geändert")
+    return git(worktree, "rev-parse", "HEAD")
+
+
+def _pushable_lane(ctx):
+    from adw.worktrees import create_lane_worktree, lane_branch
+
+    bare = add_bare_origin(ctx.repo)
+    worktree = create_lane_worktree(ctx.repo, ctx.state.run_id, "backend", "staging")
+    ctx.save()
+    _commit_file(worktree, "a.py", "print('v1')\n")
+    return bare, worktree, lane_branch(ctx.state.run_id, "backend")
+
+
+def test_push_never_overwrites_a_foreign_commit_after_fetch(ctx, tmp_path):
+    """C2: ein `git fetch` (IDE/Nutzer) darf die Lease nicht „erfüllen“."""
+    from adw.phases import _push_branch
+    from tests.conftest import git
+
+    bare, worktree, branch = _pushable_lane(ctx)
+    _push_branch(ctx, worktree, branch)
+    other = tmp_path / "fremder-klon"
+    git(tmp_path, "clone", "-q", "-b", branch, str(bare), str(other))
+    git(other, "config", "user.email", "fremd@example.com")
+    git(other, "config", "user.name", "Fremd")
+    foreign = _commit_file(other, "fremd.py", "print('fremd')\n")
+    git(other, "push", "-q", "origin", branch)
+    git(ctx.repo, "fetch", "-q", "origin")
+    _commit_file(worktree, "b.py", "print('v2')\n")
+    with pytest.raises(EscalationError, match="Remote-Branch hat fremde Commits") as exc:
+        _push_branch(ctx, worktree, branch)
+    assert branch in str(exc.value)
+    assert git(bare, "rev-parse", f"refs/heads/{branch}") == foreign
+    assert (ctx.run_dir / "escalation.md").is_file()
+
+
+def test_push_records_pushed_sha_and_allows_non_fast_forward(ctx):
+    from adw.phases import _push_branch
+    from tests.conftest import git
+
+    bare, worktree, branch = _pushable_lane(ctx)
+    first = git(worktree, "rev-parse", "HEAD")
+    _push_branch(ctx, worktree, branch)
+    assert RunState.load(ctx.repo, ctx.state.run_id).pushed_shas == {branch: first}
+    git(worktree, "commit", "--amend", "-m", "neu aufgebaut")  # Non-Fast-Forward
+    second = git(worktree, "rev-parse", "HEAD")
+    _push_branch(ctx, worktree, branch)
+    assert git(bare, "rev-parse", f"refs/heads/{branch}") == second
+    assert RunState.load(ctx.repo, ctx.state.run_id).pushed_shas == {branch: second}
+
+
+def test_push_after_crash_between_push_and_save_records_the_sha(ctx):
+    """E4: Remote steht schon auf dem lokalen HEAD, pushed_shas ist leer."""
+    from adw.phases import _push_branch
+    from tests.conftest import git
+
+    _bare, worktree, branch = _pushable_lane(ctx)
+    git(worktree, "push", "-q", "origin", branch)  # Push erfolgt, Save nicht mehr
+    head = git(worktree, "rev-parse", "HEAD")
+    _push_branch(ctx, worktree, branch)
+    assert RunState.load(ctx.repo, ctx.state.run_id).pushed_shas == {branch: head}
+    assert not (ctx.run_dir / "escalation.md").exists()
 
 
 def test_ci_timeout_escalates(ctx, target_repo):

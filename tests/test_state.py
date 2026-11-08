@@ -56,6 +56,16 @@ def test_state_file_without_prior_context_fields_still_loads(target_repo):
     assert loaded.authoring_prior_context == []
 
 
+def test_state_file_without_pushed_shas_still_loads(target_repo):
+    """Rückwärtskompatibel: State-Files aus der Zeit vor der Push-Lease (C2)."""
+    data = json.loads(make_state(pushed_shas={"adw/ab12cd34/backend": "abc"}).model_dump_json())
+    del data["pushed_shas"]
+    path = target_repo / ".adw" / "runs" / "ab12cd34" / "state.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert RunState.load(target_repo, "ab12cd34").pushed_shas == {}
+
+
 def test_red_confirmed_survives_the_round_trip(target_repo):
     """RED-Gate: der orchestrator-eigene RED-Beweis überlebt einen Crash."""
     state = make_state()

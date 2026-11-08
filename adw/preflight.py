@@ -136,16 +136,21 @@ def heal_adw_artifact(repo: Path, relpath: str) -> None:
             raise PreflightRefused(f"Selbstheilung von {relpath} fehlgeschlagen: {exc}") from exc
 
 
-def check_worktree(repo: Path) -> None:
+def check_worktree(repo: Path, protect_artifacts: bool = False) -> None:
     """Guard the main checkout before run/resume/approve (B1–B4). It NEVER
     escalates: a clean tree proceeds; a dirty set consisting EXCLUSIVELY of the
     six ADW-owned authoring artifacts self-heals and proceeds; anything else
     (foreign or mixed) refuses with a clear message, discarding nothing. A git
-    failure (status/heal) is also a refusal, never a silent proceed."""
+    failure (status/heal) is also a refusal, never a silent proceed.
+
+    ``protect_artifacts``: the continued run is mid-authoring, the dirty
+    artifacts are its own intermediate drafts — keep them instead of healing."""
     dirty = worktree_dirty_paths(repo)
     if not dirty:
         return
     if all(path in SELF_HEAL_ARTIFACTS for path in dirty):
+        if protect_artifacts:
+            return
         for path in dirty:
             heal_adw_artifact(repo, path)
         # Re-Check: die Heilung MUSS den Checkout sauber hinterlassen haben —
@@ -190,10 +195,16 @@ def check_models(dry_run: bool) -> None:
         raise PreflightRefused(models.outdated_message(outdated))
 
 
-def run_all(repo: Path, config: AdwConfig, dry_run: bool) -> None:
+def run_all(
+    repo: Path, config: AdwConfig, dry_run: bool, protect_artifacts: bool = False
+) -> None:
     """The preflight order of run/resume/approve: the forge is known, the main
     checkout is clean (after self-heal), and only then — so a refused checkout
-    costs no probe tokens — the model freshness check."""
+    costs no probe tokens — the model freshness check. ``protect_artifacts``
+    keeps the dirty ADW artifacts of a run continued mid-authoring (E6)."""
     check_forge(repo, config, dry_run)
-    check_worktree(repo)
+    if protect_artifacts:
+        check_worktree(repo, protect_artifacts=True)
+    else:
+        check_worktree(repo)
     check_models(dry_run)
