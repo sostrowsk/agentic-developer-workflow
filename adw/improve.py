@@ -293,8 +293,8 @@ def _brief(group: dict, group_text: str) -> tuple[str | None, str, str | None]:
         first = raw.strip().splitlines()[:1]
         if markdown is raw and first and _OUTER_OPEN.match(first[0]):
             return None, ("Brief-Entwurf verworfen: H1-Überschrift fehlt außerhalb von "
-                          "Codeblöcken (umschließender ```markdown-Block nicht entpackt: "
-                          "innere Codeblöcke brauchen eine Sprachangabe)"), raw
+                          "Codeblöcken (markdown-Codeblock umschließt nicht die ganze Antwort; "
+                          "ein innerer Codeblock ohne Sprachangabe beendet ihn vorzeitig)"), raw
         return None, "Brief-Entwurf verworfen: H1-Überschrift fehlt", raw
     missing = _missing_headings(markdown)
     if missing:

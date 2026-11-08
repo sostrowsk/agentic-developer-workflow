@@ -312,8 +312,10 @@ def test_markdown_brief_is_accepted_with_h1_title(ledger, agent, answer):
     (BRIEF_MD.replace("## Deferred\n\nx\n", "```\n## Deferred\n```\n"), "Deferred"),
     ("````\n```\n" + BRIEF_MD + "````\n", "H1"),
     ('{"title": "T", "brief_markdown": "# T"}\n', "H1"),
-    ("```markdown\n" + BRIEF_MD + "```\n\nProsa\n\n```python\nprint(1)\n```\n", "H1"),
-    ("```markdown\n" + BRIEF_MD + "\n```\nprint(1)\n```\n```\n", "Sprachangabe"),
+    ("```markdown\n" + BRIEF_MD + "```\n\nProsa\n\n```python\nprint(1)\n```\n",
+     "umschließt nicht die ganze Antwort"),
+    ("```markdown\n" + BRIEF_MD + "\n```\nprint(1)\n```\n```\n",
+     "umschließt nicht die ganze Antwort"),
 ], ids=["missing-h1", "missing-heading", "combined-heading", "fenced", "long-fence",
         "json", "two-separate-blocks", "markdown-fence-inner-bare-block"])
 def test_invalid_brief_answer_is_rejected_and_saved(ledger, agent, answer, reason):
@@ -330,6 +332,7 @@ def test_invalid_brief_answer_is_rejected_and_saved(ledger, agent, answer, reaso
             if "Brief-Entwurf verworfen: " in line]
     assert note, report(ledger)
     assert reason in note[0] and f"{WEEK}-brief.rejected.md" in note[0]
+    assert "```" not in note[0]  # renders cleanly in the report
     assert f"reports/{WEEK}-brief.rejected.md" in head_files(ledger)
     assert git(ledger, "status", "--porcelain", "reports") == ""
 
