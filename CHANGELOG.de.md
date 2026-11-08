@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [0.31.2] — Unreleased
+## [0.31.2] — 2026-11-08
 
 ### Behoben
 - **Das Lane-Seeding folgte Symlinks und committete zu viel (C1).** Das Seeding kopierte Spec/Plan/Kontrakt mit einer Kopie, die einem Symlink am Ziel folgt, nach `<worktree>/.adw/` — bei jedem Lane-Start, auch bei `adw resume`.
@@ -1157,6 +1157,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.31.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.3...v0.31.0
 [0.30.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.2...v0.30.3
