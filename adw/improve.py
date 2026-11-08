@@ -245,7 +245,26 @@ def _missing_headings(markdown: str) -> list[str]:
 
 
 _H1 = re.compile(r"^ {0,3}#\s+(.+?)\s*#*\s*$")
-_OUTER = re.compile(r"\A```markdown[ \t]*\n(.*)\n```\Z", re.DOTALL)
+_OUTER_OPEN = re.compile(r"^```markdown[ \t]*$")
+
+
+def _unwrap(raw: str) -> str:
+    """Strip one ```markdown block that encloses the whole trimmed answer — only if
+    its closing fence is the last line (inner blocks with an info string nest)."""
+    lines = raw.strip().splitlines()
+    if len(lines) < 2 or not _OUTER_OPEN.match(lines[0]):
+        return raw
+    depth = 0
+    for i, line in enumerate(lines[1:], 1):
+        if not (m := _FENCE.match(line)) or m.group(1)[0] != "`":
+            continue
+        if m.group(2).strip():
+            depth += 1  # inner block with info string
+        elif depth:
+            depth -= 1
+        else:
+            return "\n".join(lines[1:i]) + "\n" if i == len(lines) - 1 else raw
+    return raw
 
 
 def _brief(group: dict, group_text: str) -> tuple[str | None, str, str | None]:
@@ -266,7 +285,7 @@ def _brief(group: dict, group_text: str) -> tuple[str | None, str, str | None]:
         raw = SdkAgentRunner().run(REGISTRY["improve_agent"], task, ADW_SOURCE).text
     except Exception as exc:  # noqa: BLE001 — the report always comes into being
         return None, f"Brief-Entwurf verworfen: {type(exc).__name__}: {exc}", None
-    markdown = m.group(1) if (m := _OUTER.match(raw.strip())) else raw
+    markdown = _unwrap(raw)
     titles = [m.group(1) for line in _outside_fences(markdown) if (m := _H1.match(line))]
     if not titles:
         return None, "Brief-Entwurf verworfen: H1-Überschrift fehlt", raw

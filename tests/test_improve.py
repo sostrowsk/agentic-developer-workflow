@@ -286,7 +286,9 @@ def test_orchestrator_group_gets_one_brief_from_adw_source(ledger, agent):
 @pytest.mark.parametrize("answer", [
     BRIEF_MD,
     "```markdown\n" + BRIEF_MD + "```\n",
-], ids=["plain", "markdown-fence"])
+    ("```markdown\n" + BRIEF_MD + "```\n").replace("\n", "\r\n"),
+    "```markdown\n" + BRIEF_MD + "\n```python\nprint(1)\n```\n```\n",
+], ids=["plain", "markdown-fence", "markdown-fence-crlf", "markdown-fence-inner-block"])
 def test_markdown_brief_is_accepted_with_h1_title(ledger, agent, answer):
     install(ledger)
     agent(answer)
@@ -310,8 +312,9 @@ def test_markdown_brief_is_accepted_with_h1_title(ledger, agent, answer):
     (BRIEF_MD.replace("## Deferred\n\nx\n", "```\n## Deferred\n```\n"), "Deferred"),
     ("````\n```\n" + BRIEF_MD + "````\n", "H1"),
     ('{"title": "T", "brief_markdown": "# T"}\n', "H1"),
+    ("```markdown\n" + BRIEF_MD + "```\n\nProsa\n\n```python\nprint(1)\n```\n", "H1"),
 ], ids=["missing-h1", "missing-heading", "combined-heading", "fenced", "long-fence",
-        "json"])
+        "json", "two-separate-blocks"])
 def test_invalid_brief_answer_is_rejected_and_saved(ledger, agent, answer, reason):
     install(ledger)
     calls = agent(answer)
