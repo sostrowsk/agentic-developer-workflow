@@ -748,14 +748,19 @@ if it is held, or there is no usable ledger → message on stderr, exit 1.
   only the metrics and "Zu wenige Läufe für eine Auswertung", no brief.
 - **Brief draft:** without `--no-brief`, with ≥ 3 runs and a group with cause
   `orchestrator`, `gate` or `prompt`, the read-only `improve_agent` (cwd = ADW source
-  tree) drafts one brief for the top group after `docs/briefs/README.md`. Without all
-  headings (Ausgangslage, Aufgabe, Vorentscheidungen, Deferred, Akzeptanzkriterien)
-  or on any error the draft is dropped and the report notes
-  "Brief-Entwurf verworfen: <reason>". **A human decides** whether the brief becomes
+  tree) drafts one brief for the top group after `docs/briefs/README.md`. It answers in
+  plain Markdown (first line an H1 = title; one enclosing ```` ```markdown ```` block is
+  tolerated). Without the H1 or without all headings (Ausgangslage, Aufgabe,
+  Vorentscheidungen, Deferred, Akzeptanzkriterien) the draft is dropped, its raw answer
+  is kept unchanged as `reports/<YYYY>-W<WW>-brief.rejected.md`, and the report notes
+  "Brief-Entwurf verworfen: <reason>" plus that file. On an agent error the draft is
+  dropped with the same note, but no rejected file is written. **A human decides** whether the brief becomes
   an ADW run; ADW starts nothing.
 - **Files:** `reports/<YYYY>-W<WW>.md` and `reports/<YYYY>-W<WW>-brief.md` (ISO week of
   the call); a second call in the same week overwrites them, and a call without a
-  valid brief removes that week's brief. One commit `improve <YYYY>-W<WW>`, push with
+  valid brief removes that week's brief. A rejected draft adds
+  `reports/<YYYY>-W<WW>-brief.rejected.md`; a valid brief in the same week removes it
+  again. One commit (covering report, brief and rejected file) `improve <YYYY>-W<WW>`, push with
   timeout, fail-open (warning, exit 0). stdout: report path plus one count per section.
 - **Weekly timer:** ADW installs nothing. Copy `examples/systemd/adw-improve.service`
   and `adw-improve.timer` to `~/.config/systemd/user/`, replace `<ADW-Pfad>` (and

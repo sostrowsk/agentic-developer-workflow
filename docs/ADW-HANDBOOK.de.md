@@ -774,13 +774,19 @@ Exit 1.
 - **Brief-Entwurf:** ohne `--no-brief`, bei ≥ 3 Läufen und einer Gruppe mit `cause`
   `orchestrator`, `gate` oder `prompt` entwirft der nur lesende `improve_agent`
   (cwd = ADW-Quellcode) einen Brief für die höchste solche Gruppe nach
-  `docs/briefs/README.md`. Fehlt eine Pflichtüberschrift (Ausgangslage, Aufgabe,
-  Vorentscheidungen, Deferred, Akzeptanzkriterien) oder tritt ein Fehler auf, wird der
-  Entwurf verworfen und der Bericht vermerkt „Brief-Entwurf verworfen: <Grund>".
+  `docs/briefs/README.md`. Er antwortet in reinem Markdown (erste Zeile eine H1 = Titel;
+  ein umschließender ```` ```markdown ````-Block wird toleriert). Fehlt die H1 oder eine
+  Pflichtüberschrift (Ausgangslage, Aufgabe, Vorentscheidungen, Deferred,
+  Akzeptanzkriterien), wird der Entwurf verworfen, seine Rohantwort unverändert als
+  `reports/<JJJJ>-W<WW>-brief.rejected.md` abgelegt, und der Bericht vermerkt
+  „Brief-Entwurf verworfen: <Grund>" samt dieser Datei. Bei einem Fehler des Agenten
+  wird mit demselben Vermerk verworfen, aber keine Ablehnungsdatei geschrieben.
   **Der Mensch entscheidet**, ob daraus ein ADW-Lauf wird; ADW startet nichts.
 - **Dateien:** `reports/<JJJJ>-W<WW>.md` und `reports/<JJJJ>-W<WW>-brief.md` (ISO-Woche
   des Aufrufs); ein erneuter Aufruf derselben Woche überschreibt, ein Aufruf ohne
-  gültigen Brief entfernt den Brief der Woche. Ein Commit `improve <JJJJ>-W<WW>`, Push
+  gültigen Brief entfernt den Brief der Woche. Ein verworfener Entwurf legt
+  `reports/<JJJJ>-W<WW>-brief.rejected.md` an; ein gültiger Brief derselben Woche entfernt
+  sie wieder. Ein Commit (umfasst Bericht, Brief und Ablehnungsdatei) `improve <JJJJ>-W<WW>`, Push
   mit Timeout, fail-open (Warnung, Exit 0). stdout: Berichtspfad und je Abschnitt eine
   Anzahl.
 - **Wöchentlicher Timer:** ADW installiert nichts. `examples/systemd/adw-improve.service`
