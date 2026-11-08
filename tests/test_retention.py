@@ -6,6 +6,7 @@ import shutil
 import subprocess
 from datetime import UTC, datetime, timedelta, timezone
 
+import pytest
 from typer.testing import CliRunner
 
 from adw.cli import app
@@ -651,3 +652,81 @@ def test_prune_refuses_run_whose_trees_symlinks_to_a_foreign_worktree(target_rep
     assert foreign.name in worktree_list(target_repo)
     assert rd_bad.is_dir() and (rd_bad / "trees").is_symlink()
     assert not run_dir(target_repo, good).exists()
+
+
+# --- C8: prune coordinates with the executor via the run lock --------------------
+
+
+def _hold_run_lock(repo, run_id):
+    """Hold ``.adw/runs/.lock-<run_id>`` like a running executor would (own open
+    file description, so the flock conflicts even within this process)."""
+    import fcntl
+
+    fh = open(repo / ".adw" / "runs" / f".lock-{run_id}", "a+", encoding="utf-8")
+    fcntl.flock(fh, fcntl.LOCK_EX)
+    return fh
+
+
+def _prune_without_waiting(repo, *extra):
+    """``prune_all`` in a thread — a prune that blocked on the lock would hang."""
+    import threading
+
+    out = {}
+    thread = threading.Thread(target=lambda: out.update(result=prune_all(repo, *extra)))
+    thread.start()
+    thread.join(timeout=20)
+    assert not thread.is_alive(), "prune waited for a held run lock"
+    return out["result"]
+
+
+@pytest.mark.parametrize("extra", [(), ("--gzip",)], ids=["delete", "gzip"])
+def test_prune_skips_a_terminal_run_whose_lock_is_held(target_repo, extra):
+    """C8: a terminal run whose executor still holds the run lock (last events,
+    parallel lanes after an escalation) is skipped as still running — without
+    waiting, and with run dir, log and refs untouched."""
+    rid = "aaaa7777"
+    rd = make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+    add_ref(target_repo, rid, 1)
+    log_before = (rd / "events.jsonl").read_bytes()
+    state_before = (rd / "state.json").read_bytes()
+
+    lock = _hold_run_lock(target_repo, rid)
+    try:
+        result = _prune_without_waiting(target_repo, *extra)
+    finally:
+        lock.close()
+
+    assert result.exit_code == 0, result.output
+    assert f"{rid}: skipped (läuft noch)" in result.output
+    assert (rd / "events.jsonl").read_bytes() == log_before
+    assert not (rd / "events.jsonl.gz").exists()
+    assert (rd / "state.json").read_bytes() == state_before
+    assert refs_of(target_repo, rid) != []
+
+
+def test_prune_rereads_the_phase_under_the_run_lock(target_repo, monkeypatch):
+    """C8: the scan saw a terminal phase, but by the time prune holds the lock the
+    run is no longer terminal — skipped with the CURRENT phase, nothing deleted."""
+    import adw.retention as retention_mod
+    from adw.state import RunState
+
+    rid = "aaaa8888"
+    rd = make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+    add_ref(target_repo, rid, 1)
+    real_scan = retention_mod.scan_runs
+
+    def scan_then_resume(repo):
+        records = real_scan(repo)
+        # Between scan and lock a resume moved the run back into the build phase.
+        state = RunState.load(repo, rid)
+        state.phase = "build"
+        state.save(repo)
+        return records
+
+    monkeypatch.setattr(retention_mod, "scan_runs", scan_then_resume)
+    result = prune_all(target_repo)
+
+    assert result.exit_code == 0, result.output
+    assert f"{rid}: skipped (phase build)" in result.output
+    assert rd.is_dir() and (rd / "events.jsonl").is_file()
+    assert refs_of(target_repo, rid) != []

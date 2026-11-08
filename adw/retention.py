@@ -10,6 +10,7 @@ Nothing here weakens the frozen event schema or ``adw/snapshots.py``; pruning on
 removes/compresses whole run directories and their git artefacts.
 """
 
+import contextlib
 import gzip
 import json
 import os
@@ -21,7 +22,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from adw.git import run_git
-from adw.state import RUN_ID_RE, RUNS_RELPATH, RunState, StateNotFoundError
+from adw.state import RUN_ID_RE, RUNS_RELPATH, RunState, StateNotFoundError, run_lock
 from adw.state import contained as _contained
 from adw.state import runs_root as _runs_root
 from adw.worktrees import WorktreeError, remove_registered_worktree
@@ -70,7 +71,11 @@ class RetentionError(Exception):
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
-    return run_git(repo, *args, timeout=_GIT_TIMEOUT)
+    try:
+        return run_git(repo, *args, timeout=_GIT_TIMEOUT)
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        # A RetentionError carries the progress made so far to the CLI report (C12).
+        raise RetentionError(f"git {' '.join(args)}: {exc}") from exc
 
 
 # --- containment: never read/replace/delete anything outside the runs tree ------
@@ -418,6 +423,23 @@ def _compress_run(rec: RunRecord, runs_root: Path) -> PruneResult:
 # --- public prune --------------------------------------------------------------
 
 
+def _prune_locked(repo: Path, rec: RunRecord, runs_root: Path, gzip_mode: bool) -> PruneResult:
+    """Delete/compress one candidate under its run lock (C8). The executor saves
+    its terminal phase BEFORE it is finished, so a held lock means the run still
+    writes; the phase is re-read under the lock — the scan may be stale."""
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(run_lock(repo, rec.run_id, blocking=False))
+        except BlockingIOError:
+            return PruneResult(rec.run_id, "skipped", reason="läuft noch")
+        phase = _phase_of(repo, rec.run_id)
+        if phase not in _TERMINAL_PHASES:
+            return PruneResult(rec.run_id, "skipped", reason=f"phase {phase}")
+        if gzip_mode:
+            return _compress_run(rec, runs_root)
+        return _delete_run(repo, rec, runs_root)
+
+
 def prune(
     repo: Path,
     *,
@@ -425,11 +447,14 @@ def prune(
     older_than: int | None = None,
     gzip_mode: bool = False,
     now: datetime | None = None,
+    exclude: frozenset[str] | set[str] = frozenset(),
 ) -> list[PruneResult]:
     """Prune the repo's runs. Protects the newest ``keep`` runs; among the rest
     processes only those at least ``older_than`` days old (if given). Non-terminal
     runs are skipped and named (C2); deleting mode also skips a run with a dirty
-    worktree (C4). Returns one result per PROCESSED candidate (C7)."""
+    worktree (C4). A run whose lock is held is still executing and is skipped
+    without waiting (C8). Runs in ``exclude`` are never candidates and never
+    reported (C11). Returns one result per PROCESSED candidate (C7)."""
     now = now or datetime.now(UTC)
     runs_root = _runs_root(repo)
     if runs_root is None:
@@ -441,16 +466,15 @@ def prune(
     threshold = None if older_than is None else now - timedelta(days=older_than)
     results: list[PruneResult] = []
     for rec in candidates:
+        if rec.run_id in exclude:
+            continue
         if threshold is not None and not (rec.date <= threshold):
             continue  # younger than the age filter → kept, not reported
         if rec.phase not in _TERMINAL_PHASES:
             results.append(PruneResult(rec.run_id, "skipped", reason=f"phase {rec.phase}"))
             continue
         try:
-            if gzip_mode:
-                results.append(_compress_run(rec, runs_root))
-            else:
-                results.append(_delete_run(repo, rec, runs_root))
+            results.append(_prune_locked(repo, rec, runs_root, gzip_mode))
         except RetentionError as exc:
             # Preserve the progress made before the failure so the CLI can report the
             # achieved state (completed candidates + the failing run's partial state).

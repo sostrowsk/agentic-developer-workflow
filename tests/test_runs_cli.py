@@ -1,7 +1,9 @@
 """Tests for the CLI surface of ``adw runs list`` / ``adw runs prune``."""
 
 import re
+import subprocess
 
+import pytest
 from typer.testing import CliRunner
 
 from adw.cli import app
@@ -134,3 +136,48 @@ def test_prune_rejects_keep_zero_with_exit_two(home, tmp_path):
     assert result.exit_code == 2, result.output
     assert "--keep" in result.output
     assert (repo / ".adw" / "runs" / "aaaa1111").is_dir()
+
+
+# --- C12: git failures inside the retention are reported, not a traceback --------
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        subprocess.TimeoutExpired(["git", "worktree", "list"], 60),
+        OSError("git nicht ausführbar"),
+    ],
+    ids=["timeout", "oserror"],
+)
+def test_prune_reports_a_git_failure_with_the_runs_already_processed(
+    target_repo, monkeypatch, error
+):
+    """C12: git times out (or cannot be executed) after the first candidate was
+    deleted. ``adw runs prune`` exits 1 with a message naming the git command and
+    the cause — no traceback — and still reports the run already deleted."""
+    import adw.retention as retention_mod
+
+    write_run(target_repo, "aaaa0001", _done_lines(ts="2026-08-01T12:00:00.000Z"), phase="done")
+    write_run(target_repo, "aaaa0002", _done_lines(ts="2026-08-02T12:00:00.000Z"), phase="done")
+    write_run(target_repo, "ffff9999", _done_lines(ts="2099-01-01T12:00:00.000Z"), phase="done")
+    real_run_git = retention_mod.run_git
+    listings = []
+
+    def failing_second_listing(repo, *args, **kwargs):
+        if args[:2] == ("worktree", "list"):
+            listings.append(args)
+            if len(listings) == 2:  # the second candidate's worktree inventory
+                raise error
+        return real_run_git(repo, *args, **kwargs)
+
+    monkeypatch.setattr(retention_mod, "run_git", failing_second_listing)
+    result = cli.invoke(app, ["runs", "prune", "--repo", str(target_repo), "--keep", "1"])
+
+    assert result.exit_code == 1, result.output
+    assert isinstance(result.exception, SystemExit), repr(result.exception)  # no traceback
+    assert "aaaa0001: deleted" in result.output  # the achieved state is reported
+    assert "aaaa0002" in result.output  # the failing candidate is named
+    assert "git worktree list" in result.output  # the command …
+    assert str(error) in result.output  # … and the cause
+    assert not (target_repo / ".adw" / "runs" / "aaaa0001").exists()  # no rollback
+    assert (target_repo / ".adw" / "runs" / "aaaa0002").is_dir()

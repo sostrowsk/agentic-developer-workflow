@@ -211,6 +211,64 @@ def test_failed_snapshot_is_fail_open_no_ref_no_event_one_warning(target_repo, c
     assert [r for r in caplog.records if r.levelno >= logging.WARNING]  # warned
 
 
+# --- C7: parallel lanes never share a ref ----------------------------------
+
+
+def test_concurrent_captures_of_one_run_get_distinct_refs(target_repo, monkeypatch):
+    """C7: two lanes capture at the same time and both read the same next <seq>.
+    The ref is only CREATED, never overwritten — the loser retries with the next
+    seq, so each ref points at its own commit and each event names its own ref."""
+    import threading
+
+    import adw.snapshots as snapshots_mod
+
+    ctx = make_ctx(target_repo)
+    backend, _ = make_lane(ctx, "backend")
+    frontend, _ = make_lane(ctx, "frontend")
+    (backend / "b.py").write_text("b = 1\n")
+    (frontend / "f.py").write_text("f = 1\n")
+
+    # Force the collision: the first two seq reads wait for each other, so both
+    # threads pick the same seq before either sets its ref. Later reads (retries)
+    # pass straight through.
+    barrier = threading.Barrier(2)
+    reads = []
+    reads_lock = threading.Lock()
+    real_next_seq = snapshots_mod._next_ref_seq
+
+    def colliding_next_seq(*args, **kwargs):
+        seq = real_next_seq(*args, **kwargs)
+        with reads_lock:
+            reads.append(seq)
+            first_two = len(reads) <= 2
+        if first_two:
+            barrier.wait(timeout=10)
+        return seq
+
+    monkeypatch.setattr(snapshots_mod, "_next_ref_seq", colliding_next_seq)
+    threads = [
+        threading.Thread(target=snapshots_mod.capture, args=(ctx, wt, "after_agent"))
+        for wt in (backend, frontend)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert reads[:2] == [1, 1]  # the collision really happened
+
+    snaps = {s["payload"]["lane"]: s["payload"] for s in snapshot_events(ctx)}
+    assert set(snaps) == {"backend", "frontend"}
+    assert snaps["backend"]["ref"] != snaps["frontend"]["ref"]
+    refs = git(
+        target_repo, "for-each-ref", "--format=%(refname)", f"refs/adw/{ctx.state.run_id}/"
+    ).splitlines()
+    assert sorted(refs) == sorted(s["ref"] for s in snaps.values())
+    for payload in snaps.values():
+        # Each ref points at the commit of ITS lane's tree.
+        assert git(target_repo, "rev-parse", f"{payload['ref']}^{{tree}}") == payload["tree"]
+    assert snaps["backend"]["tree"] != snaps["frontend"]["tree"]
+
+
 # --- AC 9: the four snapshot points across a run ----------------------------
 
 

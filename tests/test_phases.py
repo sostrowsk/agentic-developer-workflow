@@ -1185,7 +1185,7 @@ def test_implementation_deleting_the_red_tests_escalates(ctx, target_repo):
 
 
 def test_resume_without_any_test_changes_does_not_prove_red(ctx, target_repo):
-    """Crash zwischen Session-Checkpoint und Idle-Check: ein unveränderter
+    """Crash zwischen fertigem Test-Lauf und Idle-Check: ein unveränderter
     Worktree darf auch nach dem Resume kein RED beweisen."""
     from adw.state import LaneState
     from adw.worktrees import create_lane_worktree, ports_for
@@ -1196,7 +1196,8 @@ def test_resume_without_any_test_changes_does_not_prove_red(ctx, target_repo):
         worktree=str(worktree),
         branch=f"adw/{ctx.state.run_id}/backend",
         ports=ports_for(ctx.state.run_id, "backend"),
-        session_id="mock-session-build_agent-1",  # Checkpoint, aber keine Tests
+        session_id="mock-session-build_agent-1",
+        test_pass_done=True,  # Test-Lauf regulär zurück, aber keine Tests
     )
     ctx.agents.script("build_agent", "darf nicht laufen")
     with pytest.raises(EscalationError, match="Test-Lauf"):
@@ -1252,7 +1253,8 @@ def test_resume_after_the_test_run_repeats_only_the_red_check(ctx, target_repo):
         worktree=str(worktree),
         branch=f"adw/{ctx.state.run_id}/backend",
         ports=ports_for(ctx.state.run_id, "backend"),
-        session_id="mock-session-build_agent-1",  # Checkpoint nach dem Test-Lauf
+        session_id="mock-session-build_agent-1",
+        test_pass_done=True,  # Checkpoint nach dem regulär beendeten Test-Lauf
     )
     ctx.agents.script_files("build_agent", dict(IMPL_FILES))
     ctx.agents.script("build_agent", "implementiert")
@@ -1290,29 +1292,26 @@ def test_resume_after_red_confirmed_goes_straight_to_the_implementation(ctx, tar
     assert ctx.state.phase == "codex_review"
 
 
-def test_test_only_pass_abort_persists_session_and_resume_skips_the_test_run(ctx, target_repo):
-    """Finding (D1–D3): bricht der reine Test-Lauf NACH der Session-Meldung ab
-    (SDK hat die Session gestreamt, Tests liegen im Worktree, aber der Post-Run-
-    Checkpoint kam nicht mehr), muss die Session-ID persistiert sein. Der Resume
-    geht dann direkt in den RED-Check, statt den Test-Lauf in einer neuen Session
-    zu wiederholen."""
-    from pathlib import Path
-
+def test_test_only_pass_abort_after_session_resumes_the_test_run_in_that_session(
+    ctx, target_repo
+):
+    """C6/AC 1: bricht der reine Test-Lauf NACH der Session-Meldung ab (Abo-Limit,
+    Ctrl-C), ist die Session-ID zwar früh persistiert, der Test-Lauf aber nicht
+    erledigt (``test_pass_done`` bleibt False). Der Resume startet den Test-Lauf
+    erneut in DIESER Session, statt mit „keine Änderungen" zu eskalieren."""
     from adw.agents import AgentRunError
 
     prepare_tdd_lane(ctx, target_repo)
 
     class TestPassAbortRunner(MockAgentRunner):
-        """Schreibt die Tests, meldet die Session früh über den Callback und
-        bricht dann VOR dem Post-Run-Checkpoint ab."""
+        """Meldet die Session früh über den Callback und bricht dann ab, bevor
+        der Agent etwas geschrieben hat."""
 
         def run(
             self, agent, task, cwd, resume=None, deny_read_paths=None,
             emitter=None, span=None, on_session_id=None,
         ):
             if agent.name == "build_agent":
-                for name, content in TEST_FILES.items():
-                    (Path(cwd) / name).write_text(content)
                 if on_session_id is not None:
                     on_session_id("mock-session-build_agent-1")
                 raise AgentRunError("Prozess mitten im reinen Test-Lauf abgebrochen")
@@ -1326,23 +1325,60 @@ def test_test_only_pass_abort_persists_session_and_resume_skips_the_test_run(ctx
         run_build_phase(ctx)
     saved = RunState.load(ctx.repo, ctx.state.run_id)
     assert saved.lanes["backend"].session_id == "mock-session-build_agent-1"  # früh persistiert
+    assert saved.lanes["backend"].test_pass_done is False  # Abbruch ≠ erledigt
     assert saved.lanes["backend"].red_confirmed is False
     assert saved.phase != "escalated"  # Abbruch = resumierbar, keine Eskalation
 
-    # Resume mit frischem, vollständigem Mock: KEIN zweiter Test-Lauf, direkt RED-Check.
+    # Resume: der Test-Lauf läuft erneut, in der persistierten Session.
     ctx.state = saved
-    resumed = MockAgentRunner()
-    resumed.script_files("build_agent", dict(IMPL_FILES))
-    resumed.script("build_agent", "implementiert")
-    ctx.agents = resumed
+    ctx.agents = MockAgentRunner()
+    ctx.agents.file_writes["build_agent"] = files_per_build_call(ctx, TEST_FILES, IMPL_FILES)
+    ctx.agents.script("build_agent", "Tests geschrieben", "implementiert")
     run_build_phase(ctx)
-    calls = [c for c in resumed.calls if c.agent == "build_agent"]
-    assert len(calls) == 1  # nur die Implementierung — der Test-Lauf lief nicht erneut
-    assert "RED confirmed" in calls[0].task
-    assert "ONLY the tests" not in calls[0].task
-    assert calls[0].resume == "mock-session-build_agent-1"  # dieselbe, persistierte Session
-    assert ctx.state.lanes["backend"].red_confirmed is True
+    calls = build_calls(ctx)
+    assert len(calls) == 2
+    assert "ONLY the tests" in calls[0].task
+    assert calls[0].resume == "mock-session-build_agent-1"  # dieselbe Session fortgesetzt
+    assert "RED confirmed" in calls[1].task
+    lane = ctx.state.lanes["backend"]
+    assert lane.test_pass_done is True
+    assert lane.red_confirmed is True
     assert ctx.state.phase == "codex_review"
+
+
+def test_regular_test_pass_is_persisted_and_resume_skips_it(ctx, target_repo, monkeypatch):
+    """C6/AC 2: der Test-Lauf kehrt regulär zurück (Nach-Prüfungen bestanden), dann
+    Crash vor dem RED-Check. ``test_pass_done`` steht in state.json; der Resume
+    startet keinen zweiten Test-Lauf und holt nur den RED-Check nach."""
+    import adw.lanes as lanes_mod
+
+    prepare_tdd_lane(ctx, target_repo)
+    ctx.agents.script_files("build_agent", dict(TEST_FILES))
+    ctx.agents.script("build_agent", "Tests geschrieben")
+
+    def crash(*_args, **_kwargs):
+        raise RuntimeError("Crash vor dem RED-Check")
+
+    with monkeypatch.context() as m:
+        m.setattr(lanes_mod, "_run_lane_gates", crash)
+        with pytest.raises(RuntimeError, match="Crash vor dem RED-Check"):
+            run_build_phase(ctx)
+    assert len(build_calls(ctx)) == 1
+    state_file = ctx.repo / ".adw" / "runs" / ctx.state.run_id / "state.json"
+    raw_lane = json.loads(state_file.read_text(encoding="utf-8"))["lanes"]["backend"]
+    assert raw_lane["test_pass_done"] is True
+    assert raw_lane["red_confirmed"] is False
+
+    ctx.state = RunState.load(ctx.repo, ctx.state.run_id)
+    ctx.agents = MockAgentRunner()
+    ctx.agents.script_files("build_agent", dict(IMPL_FILES))
+    ctx.agents.script("build_agent", "implementiert")
+    run_build_phase(ctx)
+    calls = build_calls(ctx)
+    assert len(calls) == 1  # kein zweiter Test-Lauf
+    assert "RED confirmed" in calls[0].task
+    assert "TESTS-ROT" in calls[0].task  # der RED-Check lief beim Resume
+    assert ctx.state.lanes["backend"].red_confirmed is True
 
 
 def test_red_check_does_not_consume_a_gate_iteration(ctx, target_repo, monkeypatch):

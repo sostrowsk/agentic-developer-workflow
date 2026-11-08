@@ -277,6 +277,43 @@ lanes:
     assert "eskaliert" in (result.output or "").lower()
 
 
+def test_resume_of_a_done_run_changes_nothing(target_repo, monkeypatch):
+    """C9: `resume` eines fertigen Laufs mit bereits komprimiertem Log endet mit
+    Exit 0 und Meldung — vor Vorflug, Emitter und Auto-Prune; kein neues
+    events.jsonl, .gz und state.json byte-gleich."""
+    import gzip
+
+    import adw.cli as cli_mod
+
+    done = runner.invoke(
+        app,
+        ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--no-approval"],
+    )
+    assert done.exit_code == 0, done.output
+    state = RunState.find_latest(target_repo)
+    assert state.phase == "done"
+    run_dir = state.run_dir(target_repo)
+    plain = run_dir / "events.jsonl"
+    (run_dir / "events.jsonl.gz").write_bytes(gzip.compress(plain.read_bytes()))
+    plain.unlink()
+    gz_before = (run_dir / "events.jsonl.gz").read_bytes()
+    state_before = (run_dir / "state.json").read_bytes()
+
+    called = []
+    monkeypatch.setattr(cli_mod, "_preflight", lambda *a, **k: called.append("preflight"))
+    monkeypatch.setattr(
+        cli_mod, "_maybe_auto_prune", lambda *a, **k: called.append("auto_prune")
+    )
+    result = runner.invoke(app, ["resume", state.run_id, "--repo", str(target_repo)])
+
+    assert result.exit_code == 0, result.output
+    assert f"Run {state.run_id} ist bereits abgeschlossen" in result.output
+    assert called == []
+    assert not plain.exists()
+    assert (run_dir / "events.jsonl.gz").read_bytes() == gz_before
+    assert (run_dir / "state.json").read_bytes() == state_before
+
+
 def test_blank_base_branch_override_is_rejected(target_repo):
     result = runner.invoke(
         app,

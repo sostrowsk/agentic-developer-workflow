@@ -200,3 +200,59 @@ def test_save_is_atomic_no_partial_file_on_existing_state(target_repo):
     assert loaded.phase == "ci"
     run_dir = target_repo / ".adw" / "runs" / "ab12cd34"
     assert [p.name for p in run_dir.glob("*.json")] == ["state.json"]
+
+
+def test_state_file_without_test_pass_done_loads_as_false(target_repo):
+    """Rückwärtskompatibel (C6): alte States ohne Flag laden mit False, keine Migration."""
+    data = json.loads(make_state().model_dump_json())
+    data["lanes"]["backend"].pop("test_pass_done", None)
+    path = target_repo / ".adw" / "runs" / "ab12cd34" / "state.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data), encoding="utf-8")
+    loaded = RunState.load(target_repo, "ab12cd34")
+    assert loaded.lanes["backend"].test_pass_done is False
+
+
+def test_write_snapshot_fsyncs_the_file_before_replace_and_then_the_run_dir(
+    target_repo, monkeypatch
+):
+    """C10: state.json übersteht Stromausfall — Datei-fsync vor os.replace,
+    danach fsync des Run-Verzeichnisses, dessen Deskriptor wieder geschlossen wird."""
+    import os
+    import stat
+
+    calls = []
+    real_fsync, real_replace, real_close = os.fsync, os.replace, os.close
+
+    def is_dir_fd(fd):
+        return stat.S_ISDIR(os.fstat(fd).st_mode)
+
+    def spy_fsync(fd):
+        calls.append(("fsync_dir" if is_dir_fd(fd) else "fsync_file", fd))
+        return real_fsync(fd)
+
+    def spy_replace(src, dst):
+        calls.append(("replace", str(dst)))
+        return real_replace(src, dst)
+
+    def spy_close(fd):
+        if is_dir_fd(fd):
+            calls.append(("close_dir", fd))
+        return real_close(fd)
+
+    monkeypatch.setattr(os, "fsync", spy_fsync)
+    monkeypatch.setattr(os, "replace", spy_replace)
+    monkeypatch.setattr(os, "close", spy_close)
+    make_state().save(target_repo)
+    monkeypatch.undo()
+
+    kinds = [kind for kind, _ in calls]
+    assert "fsync_file" in kinds and "fsync_dir" in kinds, calls
+    replace_at = kinds.index("replace")
+    assert calls[replace_at][1].endswith("state.json")
+    assert kinds.index("fsync_file") < replace_at  # Datei dauerhaft VOR dem Umbenennen
+    dir_fsync_at = kinds.index("fsync_dir")
+    assert dir_fsync_at > replace_at  # Verzeichniseintrag dauerhaft NACH dem Umbenennen
+    dir_fd = calls[dir_fsync_at][1]
+    assert ("close_dir", dir_fd) in calls[dir_fsync_at:]  # Deskriptor geschlossen
+    assert RunState.load(target_repo, "ab12cd34").issue == "ISSUE-1: Demo"

@@ -91,6 +91,10 @@ class LaneState(BaseModel):
     # RED-Beweis an die Tests, die ihn geliefert haben: fehlen sie, wenn die
     # Gates grün sind, war der schnellste Weg zu Grün das Löschen der Tests.
     red_test_paths: list[str] = Field(default_factory=list)
+    # Der reine Test-Lauf ist regulär zurückgekehrt und hat die Nach-Prüfungen
+    # bestanden. Eine gespeicherte session_id heißt nur „Session vorhanden" —
+    # ein abgebrochener Test-Lauf wird beim Resume in ihr fortgesetzt.
+    test_pass_done: bool = False
     # Offenes Gate-Feedback für den nächsten Fix-Lauf + Circuit-Breaker-Basis —
     # überlebt einen Crash zwischen Gate-Fail und Fix-Iteration.
     pending_task: str | None = None
@@ -216,6 +220,8 @@ class RunState(BaseModel):
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
                 fh.write(self.model_dump_json(indent=2))
+                fh.flush()
+                os.fsync(fh.fileno())
             os.replace(tmp_name, run_dir / "state.json")
         except BaseException:
             try:
@@ -223,6 +229,13 @@ class RunState(BaseModel):
             except OSError:
                 pass
             raise
+        # Dauerhaft erst mit dem Verzeichniseintrag: nach einem Stromausfall darf
+        # state.json weder fehlen noch leer sein (die Resume-Basis).
+        dir_fd = os.open(run_dir, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
 
     @classmethod
     def load(cls, repo: Path, run_id: str) -> "RunState":
@@ -264,6 +277,30 @@ def _repo_lock(repo: Path):
     with open(runs_dir / ".seq", "a+", encoding="utf-8") as seq_fh:
         fcntl.flock(seq_fh, fcntl.LOCK_EX)
         yield seq_fh
+
+
+@contextlib.contextmanager
+def run_lock(repo: Path, run_id: str, *, blocking: bool = True):
+    """Exclusive interprocess lock of ONE run: ``.adw/runs/.lock-<run_id>``.
+
+    Shared by the executor (``run``/``resume``/``approve``, blocking) and retention
+    (non-blocking): a held lock means the run is still being executed. Non-blocking
+    and held by someone else → ``BlockingIOError``.
+
+    A sibling of ``.seq`` (never inside the run dir, not matching ``RUN_ID_RE``): it
+    stays out of ``find_latest`` and retention enumeration, and never deadlocks
+    against the ``.seq`` state lock. The empty lock file is intentionally NOT
+    unlinked (like ``.seq``): removing a lock file races a concurrent waiter, which
+    would then open a fresh inode and lose mutual exclusion."""
+    runs_dir = repo / RUNS_RELPATH
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    flags = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+    with open(runs_dir / f".lock-{run_id}", "a+", encoding="utf-8") as fh:
+        fcntl.flock(fh, flags)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def _next_seq_locked(seq_fh, runs_dir: Path) -> int:

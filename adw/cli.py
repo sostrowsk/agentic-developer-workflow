@@ -35,7 +35,7 @@ from adw.phases import (
     run_integration_phase,
     run_spec_and_plan,
 )
-from adw.state import RUNS_RELPATH, RunState, StateNotFoundError
+from adw.state import RUNS_RELPATH, RunState, StateNotFoundError, run_lock
 from adw.worktrees import ensure_runs_gitignored
 
 app = typer.Typer(add_completion=False, help="Agentic Developer Workflow — 7-Phasen-Orchestrator")
@@ -334,6 +334,11 @@ def resume(
                     f"Run {run_id} ist eskaliert — Report unter .adw/runs/{run_id}/escalation.md "
                     f"lesen und einen neuen Run starten"
                 )
+            if state.phase == "done":
+                # Vor Vorflug, Emitter und Auto-Prune: ein fertiger Lauf bekommt
+                # keine neue Run-Spanne — sein (ggf. komprimiertes) Log bleibt.
+                typer.echo(f"Run {run_id} ist bereits abgeschlossen")
+                return
             config, rebased = _config_for_continuation(repo, state, base_branch)
             # Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save): eine
             # Verweigerung lässt den Run-State unverändert und resumierbar (B1).
@@ -629,10 +634,14 @@ def _maybe_auto_prune(repo: Path, config: AdwConfig, state: RunState) -> None:
     deleting pruning; disabled when keep_runs == 0. Fail-open: an error never
     changes the just-finished run's done phase or success exit code — it is only
     reported."""
-    if state.phase != "done" or config.trace.keep_runs <= 0:
-        return
+    if state.dry_run or state.phase != "done" or config.trace.keep_runs <= 0:
+        return  # ein Dry-Run verändert keine echten Läufe (C11)
     try:
-        results = retention.prune(repo, keep=config.trace.keep_runs, older_than=None)
+        # Der eigene Lauf ist nie Kandidat — auch wenn er nach Startzeit nicht
+        # zu den keep_runs neuesten gehört (lange am Plan-Gate gewartet).
+        results = retention.prune(
+            repo, keep=config.trace.keep_runs, older_than=None, exclude={state.run_id}
+        )
     except Exception as exc:  # noqa: BLE001 — fail-open by design (D3)
         typer.echo(f"Auto-Pruning fehlgeschlagen (Lauf bleibt done): {exc}", err=True)
         return
@@ -913,21 +922,10 @@ def _run_execution_lock(repo: Path, run_id: str):
     advanced) state under the lock and rejects cleanly — exactly one release, one
     downstream execution.
 
-    A dedicated per-run lock file kept as a sibling of ``.seq`` (never inside the
-    run dir, and not matching ``RUN_ID_RE``): it stays out of ``find_latest`` and
-    retention enumeration, and — being a separate file — never deadlocks against
-    the ``.seq`` state lock that ``state.save`` acquires transiently inside. The
-    empty lock file is intentionally NOT unlinked (like ``.seq``): removing a lock
-    file races a concurrent waiter, which would then open a fresh inode and lose
-    mutual exclusion."""
-    runs_dir = repo / RUNS_RELPATH
-    runs_dir.mkdir(parents=True, exist_ok=True)
-    with open(runs_dir / f".lock-{run_id}", "a+", encoding="utf-8") as fh:
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(fh, fcntl.LOCK_UN)
+    The lock file and its implementation are ``adw.state.run_lock`` — shared with
+    retention, which takes the same lock non-blocking before pruning a run (C8)."""
+    with run_lock(repo, run_id):
+        yield
 
 
 def _fetch_github_issue(repo: Path, issue_number: int) -> str:

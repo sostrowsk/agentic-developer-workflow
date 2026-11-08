@@ -296,10 +296,12 @@ def _confirm_red(
     current_head = _git(ctx, worktree, "rev-parse", "HEAD").strip()
     with ctx.state_lock:
         _require_expected_head(ctx, lane, lane_state, current_head)
-    if lane_state.session_id is None:
+    if not lane_state.test_pass_done:
         _run_test_only_pass(ctx, lane, worktree, lane_state, spec, deny, current_head)
-    # Crash zwischen Test-Lauf und RED-Check (session_id bereits gecheckpointet):
+    # Crash zwischen fertigem Test-Lauf und RED-Check (test_pass_done gesetzt):
     # der Worktree ist unverändert, es fehlt nur der Beweis — kein zweiter Lauf.
+    # Eine session_id allein heißt nur „Session vorhanden": sie wird schon beim
+    # Stream-Start gecheckpointet, ein abgebrochener Test-Lauf läuft erneut.
     _restore_approved_artifacts(ctx, worktree, lane_state.base_sha or ctx.config.base_branch)
     # Beide Prüfungen laufen NACH der Restauration und in beiden Pfaden (frischer
     # Lauf wie Resume) — ein Crash darf keinen Beweis ohne Tests durchlassen.
@@ -359,7 +361,8 @@ def _run_test_only_pass(
     current_head: str,
 ) -> None:
     """The agent run that writes ONLY tests — same invariants as every build
-    run: no agent commit, Lane branch, checkpoint before and after."""
+    run: no agent commit, Lane branch, checkpoint before and after. An existing
+    session (an aborted earlier test-only run) is continued, not replaced."""
     with ctx.state_lock:
         lane_state.expected_head = current_head
         ctx.save()  # Checkpoint VOR dem Agent-Lauf
@@ -372,16 +375,18 @@ def _run_test_only_pass(
     # This is a build-lane agent run too — snapshot before and after it (§5).
     snapshots.capture(ctx, worktree, "before_agent")
     result = _agent_run(
-        ctx, spec, task, cwd=worktree, resume=None, deny_read_paths=deny,
+        ctx, spec, task, cwd=worktree, resume=lane_state.session_id, deny_read_paths=deny,
         on_session_id=lambda sid: _checkpoint_lane_session(ctx, lane_state, sid),
     )
     snapshots.capture(ctx, worktree, "after_agent")
     _require_no_agent_commit(ctx, lane, worktree, current_head)
     _require_lane_branch(ctx, worktree, lane_state)
     with ctx.state_lock:
-        # Checkpoint VOR den Gates: ohne die Session-ID auf Platte würde ein
-        # Resume den Test-Lauf wiederholen statt nur den RED-Check.
+        # EIN Checkpoint VOR den Gates: ohne das Flag auf Platte würde ein
+        # Resume den Test-Lauf wiederholen statt nur den RED-Check. Abbruch oder
+        # gescheiterte Nach-Prüfung erreichen diese Stelle nie.
         lane_state.session_id = result.session_id or lane_state.session_id
+        lane_state.test_pass_done = True
         ctx.save()
 
 

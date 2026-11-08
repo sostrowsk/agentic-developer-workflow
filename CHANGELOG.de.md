@@ -13,6 +13,26 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.31.3] — Unreleased
+
+### Behoben
+- **Eine vorhandene Session galt als „Test-Lauf fertig“ (C6).** `_confirm_red` übersprang den reinen Test-Lauf, sobald eine `session_id` gespeichert war — die Session-ID wird aber schon gecheckpointet, wenn der Stream sie meldet, bevor der Agent etwas geschrieben hat. Nach einem Abbruch (Abo-Limit, Ctrl-C) übersprang `adw resume` den Lauf: ohne Änderungen eskalierte der Lauf dauerhaft mit „keine Änderungen“, mit halb geschriebenen Tests galten diese als RED-Beweis.
+  - **Fix:** Neues Lane-Feld `test_pass_done` (Default `false`, ältere State-Dateien laden ohne Migration). Es wird zusammen mit der Session-ID in einer Speicherung gesetzt, erst nachdem der reine Test-Lauf regulär zurückgekehrt ist und die Nach-Prüfungen (kein Agent-Commit, Lane-Branch) bestanden sind. Solange es `false` ist, startet Resume den Test-Lauf erneut und setzt eine vorhandene Session fort (`resume=<session_id>`), statt eine neue zu öffnen.
+  - Angepasste Tests: `test_resume_without_any_test_changes_does_not_prove_red` und `test_resume_after_the_test_run_repeats_only_the_red_check` modellieren jetzt einen fertigen Test-Lauf (`test_pass_done=True`); `test_test_only_pass_abort_persists_session_and_resume_skips_the_test_run` schrieb das Überspringen nach einem Abbruch fest und wird durch `test_test_only_pass_abort_after_session_resumes_the_test_run_in_that_session` ersetzt.
+- **Parallele Lanes konnten sich einen Snapshot-Ref teilen (C7).** `snapshots.capture` las die höchste Seq und schrieb den Ref dann mit einfachem `git update-ref`; zwei Lanes lasen dieselbe Seq, die zweite überschrieb die erste, und die GUI zeigte für eine Lane den Tree der anderen.
+  - **Fix:** Der Ref wird mit `git update-ref <ref> <commit> ""` angelegt (nur anlegen, nie überschreiben). Existiert er schon, wird die nächste Seq versucht, höchstens 10-mal; danach greift der übliche Fail-open-Pfad (Warnung, kein Event). Ref-Schema unverändert.
+- **Prune ignorierte den Lock des Laufs (C8).** Ein Lauf speichert seine Endphase, bevor der Executor fertig ist; ein gleichzeitiges `adw runs prune --gzip` konnte einen Schnappschuss des Logs komprimieren und das Original entfernen, spätere Appends gingen verloren.
+  - **Fix:** Prune nimmt für jeden Kandidaten den per-Run-Lock `.adw/runs/.lock-<run_id>` nicht blockierend (ein Lock-Helfer, geteilt mit `run`/`resume`/`approve`). Ist er belegt, wird der Lauf als `skipped (läuft noch)` gemeldet und nicht angefasst; unter dem Lock wird die Phase aus `state.json` neu gelesen, ein nicht terminaler Lauf wird mit seiner aktuellen Phase übersprungen.
+- **`resume` eines fertigen Laufs zerstörte dessen Historie (C9).** Ein Lauf in Phase `done` wurde mit neuer Run-Spanne „fortgesetzt“; bei bereits komprimiertem Log begann ein neues `events.jsonl` ab Seq 1, die Leser verloren die `.gz`-Historie, und die nächste Komprimierung ersetzte das Archiv.
+  - **Fix:** `adw resume` eines `done`-Laufs gibt „Run <id> ist bereits abgeschlossen“ aus und endet mit Exit 0 — vor Preflight, Emitter und Auto-Prune; nichts wird geschrieben.
+- **`state.json` wurde ohne fsync geschrieben (C10).** Nach Stromausfall oder Kernel-Crash konnte `state.json` leer sein, und der Lauf war nicht mehr fortsetzbar.
+  - **Fix:** Die Temp-Datei wird vor `os.replace` geflusht und gefsynct, danach das Run-Verzeichnis. Das Event-Log bleibt (bewusst) ohne fsync.
+- **Auto-Prune lief nach Dry-Runs und gegen den eigenen Lauf (C11).** Ein Dry-Run bis `done` löschte echte Läufe; und ein Lauf, der am Plan-Gate wartete, bis ≥ `keep_runs` neuere Läufe existierten, löschte beim `approve` seinen eigenen Run-Ordner.
+  - **Fix:** Kein Auto-Prune nach einem Dry-Run (auch beim Fortsetzen eines persistierten Dry-Runs). Auto-Prune nimmt den eigenen Lauf immer aus (`retention.prune(..., exclude=…)`); er ist kein Kandidat und erscheint nicht im Ergebnis. Manuelles `adw runs prune` nimmt nichts aus.
+  - Angepasste Tests: Die Auto-Prune-Tests in `tests/test_trace_config.py`, die das Pruning über einen Dry-Run auslösten, reichen dem Auto-Prune den fertigen State jetzt als echten Lauf; `test_auto_prune_reports_a_returned_partial_failure` gibt seinem Fake-State `dry_run` und `run_id`.
+- **Git-Fehler in der Retention endeten im Traceback (C12).** `subprocess.TimeoutExpired` und `OSError` von git liefen ungefiltert durch; `adw runs prune` zeigte einen Traceback und nannte die schon bearbeiteten Läufe nicht.
+  - **Fix:** Sie werden zu einem `RetentionError` mit git-Kommando und Ursache, sodass `adw runs prune` die bearbeiteten Läufe und den fehlgeschlagenen Kandidaten meldet und mit Exit 1 endet. Bereits ausgeführte Löschungen bleiben (kein Rollback).
+
 ## [0.31.2] — 2026-11-08
 
 ### Behoben

@@ -12,6 +12,26 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.31.3] — Unreleased
+
+### Fixed
+- **An existing session counted as "test-only run done" (C6).** `_confirm_red` skipped the test-only run as soon as a `session_id` was saved — but the session ID is checkpointed when the stream reports it, before the agent has written anything. After an abort (subscription limit, Ctrl-C), `adw resume` skipped the run: without changes the run escalated for good with "no changes", with half-written tests those counted as RED proof.
+  - **Fix:** new lane field `test_pass_done` (default `false`, older state files load without migration). It is set together with the session ID in one save, only after the test-only run returned normally and the post-checks (no agent commit, lane branch) passed. As long as it is `false`, resume starts the test-only run again and continues an existing session (`resume=<session_id>`) instead of opening a new one.
+  - Adjusted tests: `test_resume_without_any_test_changes_does_not_prove_red` and `test_resume_after_the_test_run_repeats_only_the_red_check` now model a finished test-only run (`test_pass_done=True`); `test_test_only_pass_abort_persists_session_and_resume_skips_the_test_run` pinned the skip after an abort and is replaced by `test_test_only_pass_abort_after_session_resumes_the_test_run_in_that_session`.
+- **Parallel lanes could share a snapshot ref (C7).** `snapshots.capture` read the highest seq and then wrote the ref with a plain `git update-ref`; two lanes read the same seq, the second overwrote the first, and the GUI showed one lane's tree for the other.
+  - **Fix:** the ref is created with `git update-ref <ref> <commit> ""` (create only, never overwrite). If it already exists, the next seq is tried, at most 10 times; after that the usual fail-open path applies (warning, no event). Ref schema unchanged.
+- **Prune ignored the run lock (C8).** A run saves its final phase before the executor has finished; a concurrent `adw runs prune --gzip` could compress a snapshot of the log and remove the original, so later appends were lost.
+  - **Fix:** prune takes the per-run lock `.adw/runs/.lock-<run_id>` non-blocking for each candidate (one lock helper shared with `run`/`resume`/`approve`). If it is held, the run is reported as `skipped (läuft noch)` and left untouched; under the lock the phase is re-read from `state.json`, and a non-terminal run is skipped with its current phase.
+- **`resume` of a finished run destroyed its history (C9).** A run in phase `done` was "continued" with a new run span; with an already compressed log a fresh `events.jsonl` started at seq 1, readers lost the `.gz` history, and the next compression replaced the archive.
+  - **Fix:** `adw resume` of a `done` run prints "Run <id> ist bereits abgeschlossen" and exits 0 — before preflight, emitter and auto-prune; nothing is written.
+- **`state.json` was written without fsync (C10).** After a power loss or kernel crash `state.json` could be empty and the run was no longer resumable.
+  - **Fix:** the temp file is flushed and fsynced before `os.replace`, the run directory afterwards. The event log stays without fsync (deliberately).
+- **Auto-prune ran after dry-runs and against the own run (C11).** A dry-run reaching `done` deleted real runs; and a run that waited at the plan gate until ≥ `keep_runs` newer runs existed deleted its own run folder on `approve`.
+  - **Fix:** no auto-prune after a dry-run (also when a persisted dry-run is continued). Auto-prune always excludes the own run (`retention.prune(..., exclude=…)`); it is no candidate and does not appear in the result. Manual `adw runs prune` excludes nothing.
+  - Adjusted tests: the auto-prune tests in `tests/test_trace_config.py` that triggered pruning through a dry-run now hand the auto-prune the finished state as a real run; `test_auto_prune_reports_a_returned_partial_failure` gives its fake state `dry_run` and `run_id`.
+- **Git errors in the retention ended in a traceback (C12).** `subprocess.TimeoutExpired` and `OSError` from git passed through; `adw runs prune` showed a traceback and did not report the runs already processed.
+  - **Fix:** they become a `RetentionError` naming the git command and the cause, so `adw runs prune` reports the processed runs and the failing candidate and exits 1. Deletions already done stay (no rollback).
+
 ## [0.31.2] — 2026-11-08
 
 ### Fixed

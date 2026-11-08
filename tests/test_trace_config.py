@@ -1,5 +1,7 @@
 """Tests for the ``trace:`` config block and automatic retention (GUI-SPEC §4.5)."""
 
+import re
+
 import pytest
 from typer.testing import CliRunner
 
@@ -45,6 +47,20 @@ def _seed_done_run(repo, run_id, ts):
     # A real ADW repo always has .adw/runs gitignored (created on first run); seed
     # it so the pre-existing run dirs don't read as an uncommitted worktree.
     ensure_runs_gitignored(repo)
+
+
+def _prune_as_real_run(monkeypatch):
+    """The CLI runs below are dry-runs (0 tokens), but a dry-run never auto-prunes
+    (C11). Hand the auto-prune the finished state as a REAL run, so the D3 rules
+    are still exercised through the real `run`/`approve`/`resume` call sites."""
+    import adw.cli as cli_mod
+
+    real = cli_mod._maybe_auto_prune
+
+    def as_real_run(repo, config, state):
+        return real(repo, config, state.model_copy(update={"dry_run": False}))
+
+    monkeypatch.setattr(cli_mod, "_maybe_auto_prune", as_real_run)
 
 
 # --- D1: config contract --------------------------------------------------------
@@ -95,9 +111,10 @@ def test_disabled_trace_writes_no_event_log_but_run_completes(target_repo):
 # --- D3: automatic pruning after a successful run -------------------------------
 
 
-def test_auto_prune_after_success_keeps_newest_and_removes_older(target_repo):
+def test_auto_prune_after_success_keeps_newest_and_removes_older(target_repo, monkeypatch):
     """D3: after a run finishes ``done`` with keep_runs=N, deleting-prune keeps the
     newest N runs (the just-finished one plus older ones) and removes the rest."""
+    _prune_as_real_run(monkeypatch)
     _write(target_repo, "trace:\n  keep_runs: 2\n")
     for i, rid in enumerate(["cccc0001", "cccc0002", "cccc0003"]):
         _seed_done_run(target_repo, rid, f"2026-08-0{i + 1}T12:00:00.000Z")
@@ -127,9 +144,10 @@ def test_keep_runs_zero_disables_auto_prune(target_repo):
         assert (target_repo / ".adw" / "runs" / rid).is_dir()
 
 
-def test_auto_prune_never_removes_a_non_terminal_run(target_repo):
+def test_auto_prune_never_removes_a_non_terminal_run(target_repo, monkeypatch):
     """D3/C2: automatic pruning obeys the safety rule — a non-terminal seeded run
     is skipped, and the just-finished run stays consistently done + exit 0."""
+    _prune_as_real_run(monkeypatch)
     _write(target_repo, "trace:\n  keep_runs: 1\n")
     # An old, non-terminal run that a keep_runs=1 prune would otherwise target.
     write_state_only_run(target_repo, "cccc0009", phase="build")
@@ -145,8 +163,9 @@ def _remaining_seeds(repo, seeds):
     return [rid for rid in seeds if (repo / ".adw" / "runs" / rid).is_dir()]
 
 
-def test_auto_prune_runs_after_approve_reaches_done(target_repo):
+def test_auto_prune_runs_after_approve_reaches_done(target_repo, monkeypatch):
     """D3: a run that reaches done through ``approve`` triggers auto-pruning too."""
+    _prune_as_real_run(monkeypatch)
     _write(target_repo, "trace:\n  keep_runs: 2\n")
     seeds = ["cccc0001", "cccc0002", "cccc0003"]
     for i, rid in enumerate(seeds):
@@ -170,6 +189,7 @@ def test_auto_prune_runs_after_resume_reaches_done(target_repo, monkeypatch):
     """D3: a run that reaches done through ``resume`` triggers auto-pruning too."""
     import adw.cli as cli_mod
 
+    _prune_as_real_run(monkeypatch)
     _write(target_repo, "trace:\n  keep_runs: 2\n")
     seeds = ["cccc0001", "cccc0002", "cccc0003"]
     for i, rid in enumerate(seeds):
@@ -210,7 +230,7 @@ def test_auto_prune_reports_a_returned_partial_failure(target_repo, monkeypatch,
 
     monkeypatch.setattr(cli_mod.retention, "prune", fake_prune)
 
-    state = type("S", (), {"phase": "done"})()
+    state = type("S", (), {"phase": "done", "dry_run": False, "run_id": "beef0001"})()
     config = type("C", (), {"trace": type("T", (), {"keep_runs": 5})()})()
     cli_mod._maybe_auto_prune(target_repo, config, state)
 
@@ -232,6 +252,7 @@ def test_failing_auto_prune_leaves_the_run_done_and_exit_zero(target_repo, monke
     _write(target_repo, "trace:\n  keep_runs: 1\n")
     write_state_only_run(target_repo, "cccc0011", phase="done")
     ensure_runs_gitignored(target_repo)
+    _prune_as_real_run(monkeypatch)
 
     def boom(*_args, **_kwargs):
         raise RuntimeError("Platte voll")
@@ -245,3 +266,38 @@ def test_failing_auto_prune_leaves_the_run_done_and_exit_zero(target_repo, monke
     assert "Platte voll" in result.output
     # Der Seed-Lauf wurde nicht angefasst — der Fehler kam vor jeder Entfernung.
     assert (target_repo / ".adw" / "runs" / "cccc0011").is_dir()
+
+
+# --- C11: no auto-prune after a dry-run, the own run is never a candidate ------
+
+
+def test_dry_run_reaching_done_never_auto_prunes_real_runs(target_repo):
+    """C11: a dry-run that reaches done leaves every real run alone — even with
+    keep_runs=1 and an older, terminal run that a real run would prune."""
+    _write(target_repo, "trace:\n  keep_runs: 1\n")
+    _seed_done_run(target_repo, "cccc0001", "2026-08-01T12:00:00.000Z")
+
+    result = _cli_run(target_repo)
+    assert result.exit_code == 0, result.output
+    assert RunState.find_latest(target_repo).phase == "done"
+    assert (target_repo / ".adw" / "runs" / "cccc0001").is_dir()
+    assert "Auto-Pruning" not in result.output
+
+
+def test_auto_prune_never_removes_the_run_that_just_finished(target_repo, monkeypatch):
+    """C11: a run finishes done while a NEWER run (by start time) takes the single
+    keep_runs slot — like a run that waited at the plan gate for a week. Auto-prune
+    removes older runs but never the just-finished run, nor names it."""
+    _prune_as_real_run(monkeypatch)
+    _write(target_repo, "trace:\n  keep_runs: 1\n")
+    _seed_done_run(target_repo, "cccc0001", "2026-08-01T12:00:00.000Z")
+    _seed_done_run(target_repo, "cccc0099", "2099-01-01T12:00:00.000Z")  # newer than ours
+
+    result = _cli_run(target_repo)
+    assert result.exit_code == 0, result.output
+    own_id = re.search(r"Run (\w+) gestartet", result.output).group(1)
+    own_dir = target_repo / ".adw" / "runs" / own_id
+    assert own_dir.is_dir()  # own run survives …
+    assert RunState.load(target_repo, own_id).phase == "done"
+    assert own_id not in result.output.split("Auto-Pruning", 1)[-1]  # … and is not named
+    assert _remaining_seeds(target_repo, ["cccc0001", "cccc0099"]) == ["cccc0099"]
