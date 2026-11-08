@@ -10,10 +10,11 @@ from adw.findings import (
     Finding,
     ReviewResult,
 )
+from adw.triage import finding_key
 
 
 def _finding_key(item: Finding) -> str:
-    return f"{item.file}|{item.issue}"
+    return finding_key(item)
 
 
 def _finding_keys(review: ReviewResult) -> list[str]:
@@ -50,6 +51,31 @@ def _actionable_severities(round_no: int) -> set[str]:
     if round_no == 2:
         return {"P1", "P2"}
     return {"P1"}
+
+
+def _severity_keys(findings: list[Finding]) -> list[str]:
+    """Breaker baseline that remembers each Finding's severity, so the next
+    round can compare at ITS threshold (C25)."""
+    return sorted(f"{item.severity}|{_finding_key(item)}" for item in findings)
+
+
+def _baseline_for_round(previous: list[str] | None, round_no: int) -> list[str] | None:
+    """Severity-keyed baseline filtered to this round's threshold, prefix stripped.
+
+    Entries without a severity prefix (state from before W4) match every
+    threshold and are compared unchanged — no migration."""
+    if previous is None:
+        return None
+    allowed = _actionable_severities(round_no)
+    baseline = []
+    for entry in previous:
+        severity, sep, key = entry.partition("|")
+        if sep and severity in ("P1", "P2", "P3"):
+            if severity in allowed:
+                baseline.append(key)
+        else:
+            baseline.append(entry)
+    return baseline
 
 
 def _split_by_severity(

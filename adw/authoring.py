@@ -44,6 +44,7 @@ from adw.findings import (
 )
 from adw.review_policy import (
     _actionable_severities,
+    _baseline_for_round,
     _below_threshold_disposition,
     _dispatched_disposition,
     _disposition_line,
@@ -51,6 +52,7 @@ from adw.review_policy import (
     _finding_keys,
     _findings_text,
     _severity_context,
+    _severity_keys,
     _split_by_severity,
     _write_followups,
 )
@@ -718,12 +720,14 @@ def _reviewed_authoring_loop(
             if dropped:
                 _write_followups(ctx, dropped)
             review = ReviewResult(verdict="needs_fixes", findings=actionable)
-            failures = _finding_keys(review)
             _require_progress(
-                ctx, previous_failures, failures, f"authoring:{review_kind}",
+                ctx, _baseline_for_round(previous_failures, round_no), _finding_keys(review),
+                f"authoring:{review_kind}",
                 f"Codex-{review_kind}-Review meldet unverändert dieselben Findings — "
                 f"Circuit-Breaker.\n\n{_findings_text(review)}",
             )
+            # Mit Severity: Runde N+1 vergleicht an IHRER Schwelle (C25).
+            failures = _severity_keys(review.findings)
             previous_failures = failures
             prior_context = _extend_context(
                 prior_context,

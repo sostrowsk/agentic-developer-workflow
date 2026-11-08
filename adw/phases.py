@@ -56,6 +56,7 @@ from adw.lanes import (
 )
 from adw.review_policy import (
     _DEFERRED_DISPOSITION,
+    _baseline_for_round,
     _below_threshold_disposition,
     _circuit_breaker_keys,
     _dispatched_disposition,
@@ -64,6 +65,7 @@ from adw.review_policy import (
     _finding_keys,
     _findings_text,
     _severity_context,
+    _severity_keys,
     _split_by_severity,
     _without_deferred,
     _write_followups,
@@ -72,6 +74,7 @@ from adw.triage import (
     MAX_FIX_CYCLES,
     LimitExceededError,
     check_fix_cycles,
+    gate_failure_keys,
     triage_final_review,
 )
 from adw.worktrees import (
@@ -151,7 +154,7 @@ def _integration_loop(ctx: RunContext, lanes: list[str]) -> Path:
                     f"Integration/E2E: {ctx.state.integration_rounds} Runden erreicht "
                     f"(Limit {MAX_E2E_ROUNDS}) — Eskalation.\n\n{_gate_failure_text(report)}",
                 )
-            failures = [f"{f.gate}|{f.exit_code}|{f.output}" for f in report.failures]
+            failures = gate_failure_keys(report)
             _require_progress(
                 ctx, previous, failures, "integration",
                 f"E2E-Fix-Runde hat nichts verändert — Circuit-Breaker.\n\n"
@@ -388,9 +391,9 @@ def run_codex_review_phase(ctx: RunContext) -> None:
                     f"Codex-Code-Review: {round_no} Runden erreicht "
                     f"(Limit {MAX_REVIEW_ROUNDS}) — Eskalation.\n\n{_findings_text(review)}",
                 )
-            failures = _finding_keys(review)
             _require_progress(
-                ctx, previous, failures, "codex_review",
+                ctx, _baseline_for_round(previous, round_no), _finding_keys(review),
+                "codex_review",
                 f"Codex-Code-Review meldet unverändert dieselben Findings — "
                 f"Circuit-Breaker.\n\n{_findings_text(review)}",
             )
@@ -399,14 +402,17 @@ def run_codex_review_phase(ctx: RunContext) -> None:
                 review.findings,
                 lanes,
                 source="Codex-Code-Review",
-                mutate_staged=_advance_review_round(ctx, round_no, prior_context, failures),
+                mutate_staged=_advance_review_round(
+                    ctx, round_no, prior_context, _severity_keys(review.findings)
+                ),
             )
             with ctx.state_lock:
                 # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4. Der
                 # Dispatch kann Findings vertagt haben; die fallen aus der Basis.
                 # Basis sind NUR die actionable Findings: ein neues, dauerhaft
                 # gedropptes P3 würde sonst ein stehengebliebenes P1 kaschieren.
-                failures = _circuit_breaker_keys(ctx, review.findings)
+                # Mit Severity: Runde N+1 vergleicht an IHRER Schwelle (C25).
+                failures = _severity_keys(_without_deferred(ctx, review.findings))
                 ctx.state.review_last_failures = failures
                 ctx.save()
             previous = failures

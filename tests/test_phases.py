@@ -657,6 +657,93 @@ lanes:
     assert len(build_calls) == 2  # nicht bis 10 ausgereizt
 
 
+# W4: Gate gibt aus, was der Build-Agent in out.txt hinterlegt; rot, solange FAILED drinsteht.
+OUTPUT_GATE_CONFIG = """\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - name: pytest
+        cmd: "sh -c 'cat out.txt; if grep -q FAILED out.txt; then exit 1; fi'"
+        timeout: 10
+"""
+
+
+def pytest_output(test: str, run_id: str, tmp_no: int, duration: str) -> str:
+    return (
+        f"FAILED tests/test_x.py::{test} - AssertionError\n"
+        f".adw/runs/{run_id}/trees/backend/tests/test_x.py:12: AssertionError\n"
+        f"/tmp/pytest-of-x/pytest-{tmp_no}/{test}0/data\n"
+        f"1 failed in {duration}\n"
+    )
+
+
+def script_gate_outputs(ctx, *outputs: str) -> None:
+    """Build-Agent-Lauf N schreibt outputs[N-1] nach out.txt."""
+    ctx.agents.script("build_agent", *["Versuch"] * len(outputs))
+
+    def writes(cwd):
+        runs = [c for c in ctx.agents.calls if c.agent == "build_agent"]
+        return {"out.txt": outputs[len(runs) - 1]}
+
+    ctx.agents.file_writes["build_agent"] = writes
+
+
+def recording_emitter(ctx) -> list:
+    from adw.events import NoOpEmitter
+
+    emitted = []
+
+    class Recording(NoOpEmitter):
+        def emit(self, type, payload=None, **kwargs):
+            emitted.append((type, payload))
+
+    ctx.emitter = Recording()
+    return emitted
+
+
+def test_gate_breaker_fires_on_pytest_output_differing_only_in_volatile_details(
+    ctx, target_repo
+):
+    """W4/AC 1: Laufzeit, Temp-Pfad und Run-ID im Worktree-Pfad verhinderten
+    bisher jeden Gate-Breaker bei pytest."""
+    write_config(target_repo, OUTPUT_GATE_CONFIG)
+    ctx.config = AdwConfig.load(target_repo)
+    prepare_approved(ctx)
+    emitted = recording_emitter(ctx)
+    script_gate_outputs(
+        ctx,
+        pytest_output("test_a", "1234abcd", 3, "36.02s"),
+        pytest_output("test_a", "9876fedc", 7, "1.65s"),
+        "1 passed in 0.10s\n",
+    )
+    with pytest.raises(EscalationError, match="Circuit"):
+        run_build_phase(ctx)
+    assert len([c for c in ctx.agents.calls if c.agent == "build_agent"]) == 2
+    breakers = [payload for type, payload in emitted if type == "circuit_breaker"]
+    assert breakers and breakers[0]["scope"] == "lane:backend"
+    # Nur der Schlüssel ist normalisiert — die Eskalation zeigt den Rohtext.
+    assert "1.65s" in (ctx.run_dir / "escalation.md").read_text()
+
+
+def test_gate_breaker_does_not_fire_for_a_different_failing_test(ctx, target_repo):
+    """W4/AC 2: anderer fehlschlagender Test = Fortschritt, kein Breaker."""
+    write_config(target_repo, OUTPUT_GATE_CONFIG)
+    ctx.config = AdwConfig.load(target_repo)
+    prepare_approved(ctx)
+    emitted = recording_emitter(ctx)
+    script_gate_outputs(
+        ctx,
+        pytest_output("test_a", "1234abcd", 3, "36.02s"),
+        pytest_output("test_b", "1234abcd", 3, "36.02s"),
+        "1 passed in 0.10s\n",
+    )
+    run_build_phase(ctx)
+    assert ctx.state.phase == "codex_review"
+    assert len([c for c in ctx.agents.calls if c.agent == "build_agent"]) == 3
+    assert not [type for type, _ in emitted if type == "circuit_breaker"]
+
+
 def test_gate_iteration_limit_escalates(ctx, target_repo):
     write_config(
         target_repo,
@@ -2261,11 +2348,15 @@ def test_e2e_failure_routes_triage_findings_to_the_named_lane(pctx, target_repo)
 
 
 def test_identical_e2e_failures_trigger_circuit_breaker(pctx, target_repo):
+    # W4: die Runden unterscheiden sich nur in Laufzeit und Temp-Pfad (Zähler
+    # außerhalb des je Runde neu aufgebauten Integration-Worktrees).
     write_config(
         target_repo,
         PARALLEL_CONFIG.replace(
             'cmd: "true"\n  timeout: 60',
-            "cmd: \"sh -c 'echo IMMER-GLEICH; exit 1'\"\n  timeout: 60",
+            "cmd: \"sh -c 'n=$(cat ../../zaehler 2>/dev/null | wc -l); echo x >> ../../zaehler; "
+            "echo IMMER-GLEICH failed in $n.5s /tmp/pytest-of-x/pytest-$n/d; exit 1'\"\n"
+            "  timeout: 60",
         ),
     )
     pctx.config = AdwConfig.load(target_repo)
@@ -2602,6 +2693,73 @@ def test_circuit_breaker_ignores_findings_below_the_threshold(ctx):
         run_codex_review_phase(ctx)
 
 
+def test_circuit_breaker_compares_at_the_current_round_threshold(ctx):
+    """W4/C25: Das P3 der Runde 1 liegt in Runde 2 unter der Schwelle — es darf
+    die Basis nicht vom unveränderten P1 unterscheiden."""
+    prepare_reviewable(ctx)
+    emitted = recording_emitter(ctx)
+    ctx.agents.script("build_agent", "angeblich gefixt", "noch ein Fix")
+    ctx.agents.file_writes["build_agent"] = lambda cwd: {
+        "src_neu.py": f"print('v{len(ctx.agents.calls)}')\n"
+    }
+    ctx.codex.script(
+        code_findings(("P1", "Race Condition"), ("P3", "Namensdetail")),
+        code_findings(("P1", "Race Condition")),
+    )
+    with pytest.raises(EscalationError, match="Circuit|unverändert"):
+        run_codex_review_phase(ctx)
+    assert len([c for c in ctx.agents.calls if c.agent == "build_agent"]) == 2  # kein 2. Fix
+    breakers = [payload for type, payload in emitted if type == "circuit_breaker"]
+    assert breakers[0]["scope"] == "codex_review"
+    assert breakers[0]["keys"] == ["src_neu.py|Race Condition"]  # ohne Severity
+
+
+def test_circuit_breaker_threshold_filter_keeps_real_progress(ctx):
+    """W4/AC 5: geändertes P1 nach {P1, P2} ist Fortschritt, kein Breaker."""
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", "fix 1", "fix 2")
+    ctx.agents.file_writes["build_agent"] = lambda cwd: {
+        "src_neu.py": f"print('v{len(ctx.agents.calls)}')\n"
+    }
+    ctx.codex.script(
+        code_findings(("P1", "Race Condition beim Speichern"), ("P2", "unsauberer Name")),
+        code_findings(("P1", "Race Condition beim Laden")),
+        OK,
+    )
+    run_codex_review_phase(ctx)
+    assert ctx.state.phase == "final_review"
+    assert len([c for c in ctx.agents.calls if c.agent == "build_agent"]) == 3
+
+
+def test_review_baseline_carries_severity_and_tolerates_legacy_entries(ctx):
+    """W4/AC 8: review_last_failures = <severity>|<finding_key>; ein Alt-Eintrag
+    ohne Präfix passt zu jeder Schwelle (keine Migration)."""
+    prepare_reviewable(ctx)
+    ctx.agents.script("build_agent", "gefixt")
+    ctx.agents.file_writes["build_agent"] = {"src_neu.py": "print('v2')\n"}
+    ctx.codex.script(code_findings(("P1", "Race Condition"), ("P3", "Namensdetail")))
+    with pytest.raises(AssertionError):  # Runde 2: Codex-Queue leer → Crash
+        run_codex_review_phase(ctx)
+    saved = RunState.load(ctx.repo, ctx.state.run_id)
+    assert sorted(saved.review_last_failures) == [
+        "P1|src_neu.py|Race Condition",
+        "P3|src_neu.py|Namensdetail",
+    ]
+
+    saved.review_last_failures = ["src_neu.py|Race Condition"]  # Alt-State
+    saved.save(ctx.repo)
+    resumed = RunContext(
+        repo=ctx.repo,
+        config=ctx.config,
+        state=RunState.load(ctx.repo, ctx.state.run_id),
+        agents=ctx.agents,
+        codex=ctx.codex,
+    )
+    ctx.codex.script(code_findings(("P1", "Race Condition")))
+    with pytest.raises(EscalationError, match="Circuit|unverändert"):
+        run_codex_review_phase(resumed)
+
+
 def test_parallel_codex_review_runs_on_integration_worktree(pctx):
     prepare_built_parallel(pctx)
     run_integration_phase(pctx)
@@ -2843,6 +3001,28 @@ def test_deferred_p3_is_not_dispatched_again_on_re_review(ctx):
     assert ctx.state.phase == "ci"
     build_calls = [c for c in ctx.agents.calls if c.agent == "build_agent"]
     assert len(build_calls) == 2  # Build + EIN wirkungsloser Fix-Lauf, kein zweiter
+
+
+def test_deferred_p3_is_recognised_despite_other_line_number_and_whitespace(ctx):
+    """W4/AC 3: Zeilennummer und Leerraum im issue machen kein neues Finding."""
+    first = finding_dict("backend", "Docstring fehlt in foo.py:12", "implementation", "P3")
+    again = finding_dict("backend", "Docstring  fehlt\nin foo.py:15", "implementation", "P3")
+    prepare_reviewable(ctx)
+    ctx.codex.script(OK)
+    run_codex_review_phase(ctx)
+    ctx.agents.script("build_agent", "Findings gesichtet")
+    ctx.agents.file_writes.pop("build_agent", None)
+    ctx.agents.script(
+        "final_reviewer",
+        final_review_json("needs_fixes", [first]),
+        final_review_json("needs_fixes", [again]),
+    )
+    run_final_review_phase(ctx)
+    assert ctx.state.phase == "ci"
+    assert len([c for c in ctx.agents.calls if c.agent == "build_agent"]) == 2
+    text = (ctx.run_dir / "followups.md").read_text()
+    assert text.count("Docstring") == 1
+    assert "Docstring fehlt in foo.py:12" in text  # Rohtext, unnormalisiert
 
 
 def test_deferred_finding_returning_as_p2_is_fixed_after_all(ctx):
@@ -4489,6 +4669,35 @@ def test_authoring_circuit_breaker_emits_the_event(ctx):
         run_spec_and_plan(ctx)
     breakers = [payload for type, payload in emitted if type == "circuit_breaker"]
     assert breakers and breakers[0]["scope"] == "authoring:spec"
+
+
+def test_authoring_circuit_breaker_compares_at_the_current_round_threshold(ctx, monkeypatch):
+    """W4/C25 im Authoring-Loop: {A:P1, B:P3} → {A:P1} ist Stillstand; die
+    Basis trägt die Severity (authoring_last_findings)."""
+    emitted = recording_emitter(ctx)
+    snapshots = []
+    real_save = RunState.save
+
+    def spy(self, repo):
+        real_save(self, repo)
+        snapshots.append(self.model_dump())
+
+    monkeypatch.setattr(RunState, "save", spy)
+    ctx.agents.script("spec_synthesis", "v1", "v2", "v3")
+    ctx.codex.script(
+        spec_findings(("P1", "kritische Lücke"), ("P3", "Formulierungsdetail")),
+        spec_findings(("P1", "kritische Lücke")),
+    )
+    with pytest.raises(EscalationError, match="Circuit|unverändert"):
+        run_spec_and_plan(ctx)
+    breakers = [payload for type, payload in emitted if type == "circuit_breaker"]
+    assert breakers and breakers[0]["scope"] == "authoring:spec"
+    assert len([c for c in ctx.agents.calls if c.agent == "spec_synthesis"]) == 2
+    assert any(
+        sorted(s["authoring_last_findings"])
+        == ["P1|.adw/spec.md|kritische Lücke", "P3|.adw/spec.md|Formulierungsdetail"]
+        for s in snapshots
+    )
 
 
 def test_log_analyst_without_routable_findings_escalates_without_reentry(ctx, target_repo):

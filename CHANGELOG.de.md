@@ -13,6 +13,17 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.32.1] — Unreleased
+
+### Behoben
+- **Der Gate-Circuit-Breaker konnte bei pytest praktisch nie auslösen (W4).** Die Breaker-Schlüssel der Gates enthielten den vollen Gate-Output, `check_progress` vergleicht Schlüssel exakt. Die pytest-Zusammenfassung trägt immer die Laufzeit (`… failed in 36.02s`), zwei Iterationen mit demselben Fehler unterschieden sich also fast immer — der Lauf reizte das Iterationslimit aus, statt zu eskalieren; in keinem der 15 vorhandenen Läufe gab es ein `circuit_breaker`-Event.
+  - **Fix:** eine Normalisierungsfunktion `normalize_key_text` in `adw/triage.py`, genutzt von allen Schlüsseln: Worktree-/Run-Pfadpräfix entfernt, Temp-Pfade → `<tmp>`, Zeitstempel → `<ts>`, Dauern → `<dur>`, Hex-Adressen → `<hex>`, Zeile/Spalte nach einem Dateinamen → `:<n>` bzw. `line <n>`, Ports von `localhost`/`127.0.0.1` → `<host>:<port>`, Leerraum zusammengefasst. Keine Kleinschreibung.
+  - Gate-Schlüssel (Lane-Gates und Integration/E2E) lauten `<gate>|<exit_code>|<normalisierter Output>`. Normalisiert wird nur der Schlüssel — der Gate-Output für Agenten und `escalation.md` bleibt unverändert und wird weiter auf 200 Zeilen gekürzt.
+- **Findings, die sich nur in Zeilennummer, Pfadpräfix oder Leerraum unterschieden, galten als neu.** Finding-Schlüssel lauten `<file ohne Worktree-Präfix>|<normalisierter issue>`; `file` verliert nur das Worktree-Präfix. Das gilt für Codex- und Authoring-Breaker, den Final-Review-Breaker, vertagte Findings und die Follow-up-Dedupe. Das `finding_key` im `triage.decision`-Event nutzt jetzt dieselbe Implementierung statt einer eigenen Formatkopie.
+- **Der Codex-Breaker verglich über verschiedene Severity-Schwellen (C25).** Die Basis der Runde N enthielt alle Findings dieser Runde, Runde N+1 nur die oberhalb ihrer höheren Schwelle: {A:P1, B:P3} gefolgt von einem unveränderten {A:P1} kostete einen zweiten Fix-Lauf.
+  - **Fix:** `review_last_failures` und `authoring_last_findings` speichern `<severity>|<finding_key>`; in Runde N werden Basis und aktuelle Findings auf die Schwelle dieser Runde gefiltert und ohne Severity verglichen. Code-Review- und Authoring-Loop gleichermaßen.
+  - Keine Migration: ältere Einträge ohne Severity-Präfix passen zu jeder Schwelle; alte unnormalisierte Schlüssel bleiben, wie sie sind (schlimmstenfalls wird ein Finding einmal mehr dispatcht).
+
 ## [0.32.0] — 2026-11-08
 
 ### Hinzugefügt

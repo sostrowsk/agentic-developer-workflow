@@ -1,12 +1,51 @@
 """Triage rules, iteration limits and Circuit-Breaker — pure functions, no I/O."""
 
+import re
 from dataclasses import dataclass, field
 
 from adw.findings import Finding, ReviewResult
+from adw.gates import GateReport
 from adw.state import LaneState
 
 MAX_GATE_ITERATIONS = 10
 MAX_FIX_CYCLES = 3
+
+
+# Key normalization (W4): only the comparison KEY is normalized, never the text
+# handed to agents. Order is fixed (spec Scope 1, rules 1–8).
+_WORKTREE_PREFIX = re.compile(r"(?:\S*/)?\.adw/runs/[0-9a-f]{8}/trees/[^/\s]+/")
+_KEY_RULES: list[tuple[re.Pattern[str], str]] = [
+    (_WORKTREE_PREFIX, ""),
+    (re.compile(r"(?:/tmp|/private/var/folders)/\S+"), "<tmp>"),
+    (
+        re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?"),
+        "<ts>",
+    ),
+    (re.compile(r"\b\d{2}:\d{2}:\d{2}(?:\.\d+)?"), "<ts>"),
+    (re.compile(r"\b\d+(?:\.\d+)?\s?(?:ms|s|sec|seconds|min)\b"), "<dur>"),
+    (re.compile(r"0x[0-9a-fA-F]+"), "<hex>"),
+    (re.compile(r"(\.[A-Za-z]\w*):\d+(?::\d+)?"), r"\1:<n>"),
+    (re.compile(r"\bline \d+"), "line <n>"),
+    (re.compile(r"(?:localhost|127\.0\.0\.1):\d+"), "<host>:<port>"),
+    (re.compile(r"\s+"), " "),
+]
+
+
+def normalize_key_text(text: str) -> str:
+    """Strip volatile details (paths, durations, addresses, line numbers, …)
+    so the same failure yields the same Circuit-Breaker/dedupe key."""
+    for pattern, replacement in _KEY_RULES:
+        text = pattern.sub(replacement, text)
+    return text.strip()
+
+
+def finding_key(item: Finding) -> str:
+    """``file`` gets only the worktree-prefix rule — line numbers there stay distinct."""
+    return f"{_WORKTREE_PREFIX.sub('', item.file)}|{normalize_key_text(item.issue)}"
+
+
+def gate_failure_keys(report: GateReport) -> list[str]:
+    return [f"{f.gate}|{f.exit_code}|{normalize_key_text(f.output)}" for f in report.failures]
 
 
 class LimitExceededError(Exception):
@@ -60,7 +99,7 @@ def triage_final_review(
             emitter.emit(
                 "triage.decision",
                 {
-                    "finding_key": f"{item.file}|{item.issue}",
+                    "finding_key": finding_key(item),
                     "severity": item.severity,
                     "action": action,
                     "reason": reason,

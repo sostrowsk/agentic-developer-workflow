@@ -43,6 +43,7 @@ from adw.triage import (
     MAX_GATE_ITERATIONS,
     LimitExceededError,
     check_gate_iterations,
+    gate_failure_keys,
     triage_final_review,
 )
 from adw.worktrees import (
@@ -204,7 +205,7 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             if report.passed:
                 _require_red_tests(ctx, lane, worktree, lane_state)
                 break
-            failures = [f"{f.gate}|{f.exit_code}|{f.output}" for f in report.failures]
+            failures = gate_failure_keys(report)
             _require_progress(
                 ctx, previous_failures, failures, f"lane:{lane}",
                 f"Lane {lane}: Gate-Fix-Iteration hat nichts verändert — "

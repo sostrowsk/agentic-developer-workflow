@@ -12,6 +12,17 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.32.1] — Unreleased
+
+### Fixed
+- **The gate circuit breaker practically never fired for pytest (W4).** Gate breaker keys contained the full gate output, and `check_progress` compares keys exactly. The pytest summary always carries the duration (`… failed in 36.02s`), so two iterations with the same failure almost always differed — the run exhausted the iteration limit instead of escalating; none of the 15 existing runs had a `circuit_breaker` event.
+  - **Fix:** one normalization function `normalize_key_text` in `adw/triage.py`, used by every key: worktree/run path prefix removed, temp paths → `<tmp>`, timestamps → `<ts>`, durations → `<dur>`, hex addresses → `<hex>`, line/column after a file name → `:<n>` and `line <n>`, `localhost`/`127.0.0.1` ports → `<host>:<port>`, whitespace collapsed. No lowercasing.
+  - Gate keys (lane gates and integration/E2E) are `<gate>|<exit_code>|<normalized output>`. Only the key is normalized — gate output for agents and `escalation.md` stays unchanged and is still cut to 200 lines.
+- **Findings differing only in line number, path prefix or whitespace counted as new.** Finding keys are `<file without worktree prefix>|<normalized issue>`; `file` only loses the worktree prefix. This applies to the Codex and authoring breakers, the final-review breaker, deferred findings and the follow-up dedupe. The `finding_key` in the `triage.decision` event now uses the same implementation instead of its own format copy.
+- **The Codex breaker compared across different severity thresholds (C25).** The baseline of round N held all findings of that round, round N+1 only those above its higher threshold: {A:P1, B:P3} followed by an unchanged {A:P1} cost a second fix run.
+  - **Fix:** `review_last_failures` and `authoring_last_findings` store `<severity>|<finding_key>`; in round N baseline and current findings are filtered to that round's threshold and compared without severity. Code review and authoring loop alike.
+  - No migration: older entries without severity prefix match every threshold; old unnormalized keys stay as they are (worst case a finding is dispatched once more).
+
 ## [0.32.0] — 2026-11-08
 
 ### Added

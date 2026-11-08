@@ -472,6 +472,26 @@ def test_triage_final_review_emits_decision_points(target_repo):
         assert point["span"] == "S-final"
 
 
+def test_triage_decision_finding_key_is_the_shared_finding_key(target_repo):
+    """W4/AC 6: one key implementation — worktree prefix stripped from ``file``
+    (rule 1 only), ``issue`` normalized; a line number in ``file`` stays distinct."""
+    from adw.review_policy import _finding_key
+
+    item = Finding(
+        severity="P2", lane="backend", file=".adw/runs/1234abcd/trees/backend/src/foo.py",
+        issue="Bug  in foo.py:12", remediation_plan=["fix"], category="implementation",
+    )
+    triage_final_review(
+        ReviewResult(verdict="needs_fixes", findings=[item]),
+        active_lanes=["backend"], emitter=EventEmitter(target_repo, RUN_ID), span_id="S",
+    )
+    (point,) = of_type(read_events(target_repo), "triage.decision")
+    assert point["payload"]["finding_key"] == _finding_key(item) == "src/foo.py|Bug in foo.py:<n>"
+    at_12 = item.model_copy(update={"file": "src/foo.py:12"})
+    at_15 = item.model_copy(update={"file": "src/foo.py:15"})
+    assert _finding_key(at_12) != _finding_key(at_15)
+
+
 # --- cli.py: run-span boundary and status mapping (B5, E1, AC 7) ------------
 
 
