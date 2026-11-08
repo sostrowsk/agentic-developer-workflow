@@ -1,92 +1,258 @@
-# Interface contract — W3: `adw kpis` — Kennzahlen über alle Läufe aus dem Ledger
+# Interface contract — W14: Jeder Lauf bekommt einen Rückblick — und du ein Urteil
 #
 # Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec (DoD)
 # pinnt dieser Contract ausschließlich extern beobachtbare Flächen:
-#   1. CLI `adw kpis` (Optionen, Exit-Codes, Ströme, Seiteneffekte),
-#   2. JSON-Struktur der Ausgabe mit `--json`,
-#   3. Kandidaten-Regelnamen und -Reihenfolge,
-#   4. die Wertänderung im run-record.json (A0).
+#   1. CLI `adw rate` und `adw feedback` (Argumente, Optionen, Exit-Codes, Seiteneffekte),
+#   2. Dateien `retro.json`, `retro.md` (Struktur) und `feedback.jsonl` (Zeilenschema),
+#   3. das Punkt-Event `retro` (Typ und Payload) und wann die Retro läuft,
+#   4. die neuen Felder im `total`-Objekt von `adw kpis --json`,
+#   5. Ledger-Bündel und Commit-Nachricht des Feedbacks.
 #
-# NICHT Teil des Contracts: interne Helfer und ihre Signaturen, das exakte
-# Textlayout ohne `--json`, Formulierung der stderr-Meldungen (nur ihr
-# Vorhandensein inkl. Pfad). `compute_kpis(records, since=None, repo_slug=None)`
-# legt die Spec selbst fest; hier steht nur ihr beobachtbares Ergebnis.
-# Keine HTTP-Routen, keine Events, kein Config-Feld.
+# NICHT Teil des Contracts: interne Helfer, Module und Signaturen (z. B. run_retro,
+# compute_kpis-Parameter), Rollentext und Auftragstext des Agenten, exaktes
+# Textlayout (retro.md, `adw kpis` ohne --json, stderr-Meldungen — nur ihr
+# Vorhandensein). Keine HTTP-Routen, kein Config-Feld.
 
 version: 1
-scope: W3
+scope: W14
 workstreams:
   - backend
 
+ledger:
+  root: "$ADW_LEDGER; Default ~/.adw/ledger (~ expandiert)"
+  run_directory: "runs/<slug>/<run_id>/"
+  slug: "Repository-Slug wie beim Export; '/' wird im Verzeichnisnamen durch '__' ersetzt"
+  bundle_adds: ["retro.json", "retro.md"]    # sofern im Run-Ordner vorhanden
+  feedback_survives_export: "eine vorhandene feedback.jsonl im Ledger-Lauf-Ordner bleibt beim (Re-)Export byte-gleich"
+  commit_message_feedback: "feedback <run_id> rate | feedback <run_id> finding"
+  export_unchanged: "sonstige Export-Mechanik (Commit-Text, fail-open Push, Idempotenz, Dry-Run-Skip)"
+
+retro:
+  agent:                                      # sichtbar im agent.run-Span-Start-Payload
+    name: retro_agent
+    model: claude-opus-5-5                    # agents.OPUS
+    max_turns: 60
+    timeout_s: 900
+    tools: [Read, Grep, Glob]
+    cwd: ".adw/runs/<run_id>/"
+  trigger:
+    commands: [run, resume, approve]
+    when: "nach _execute, innerhalb der run-Spanne (agent.run.parent = run-Span), auch wenn _execute mit typer.Exit endet"
+    condition: "state.phase in {done, escalated} UND kein Dry-Run UND kein retro.json im Run-Ordner"
+    never: "Gate-Pause (Exit 2), AgentRunError (Exit 1, Phase fortsetzbar), Dry-Run, vorhandenes retro.json, erneuter CLI-Aufruf für einen bereits fertigen Lauf"
+    order: "Ausführung → Retro (inkl. Punkt-Event) → Ende der run-Spanne (totals enthalten Retro-Kosten/Tokens) → Ledger-Export"
+    invariants: "Exit-Code, Phase und run-End-status sind mit und ohne Retro (auch fehlgeschlagene) identisch; ein anstehender typer.Exit propagiert unverändert"
+  failure: "jede Ausnahme (AgentRunError, kein parsebares JSON, Schemaverletzung, IO) → Meldung auf stderr + Event retro outcome=failed; weder retro.json noch retro.md bleiben zurück (auch bei teilweise geschriebener Datei); scheitert die Bereinigung selbst, ändert auch das weder Exit-Code noch Phase; kein zusätzlicher Logging-Kanal, kein persistenter Fehlerzustand"
+
+  answer_schema:                              # Antwort des Agenten; strikt (extra keys verboten auf beiden Ebenen)
+    summary: str
+    items: "list[item], 0..10"               # > 10, unbekannte Schlüssel, unbekannte cause, kein JSON → Fehlschlag
+    item:
+      problem: str
+      resolution: str
+      better: str
+      cause: "#/schemas/cause"
+      lever: str
+      evidence: "list[str], optional (Default [])"   # fehlend/leer/ungültig ist KEIN Schemafehler → evidence_rule
+  evidence_rule:
+    valid_if_any:
+      - "'seq:<n>' und events.jsonl des Laufs enthält einen Record mit seq == n"
+      - "relativer Pfad (nicht absolut, keine '..'-Komponente), der im Run-Ordner als Datei existiert"
+    item_kept: "mindestens ein gültiger Beleg; Eintrag bleibt dann vollständig (auch ungültige Belege darin); sonst verworfen (zählt in dropped)"
+    all_dropped: "erfolgreiche Retro mit items: [] (Event outcome=written, items 0)"
+    not_checked: "inhaltliche Passung der Belege"
+
+files:
+  retro_json:
+    local_path: ".adw/runs/<run_id>/retro.json"
+    ledger_path: "runs/<slug>/<run_id>/retro.json"
+    schema: "#/schemas/retro"
+    formatting: {sorted_keys: true, indent: 2, encoding: UTF-8}
+  retro_md:
+    local_path: ".adw/runs/<run_id>/retro.md"
+    ledger_path: "runs/<slug>/<run_id>/retro.md"
+    rendering: "deterministisch vom Code aus retro.json; kein zweiter Agententext"
+    structure:
+      - "Überschrift mit run_id und phase"
+      - "Zusammenfassung (summary)"
+      - "je behaltenem Eintrag ein Abschnitt mit problem, resolution, better, cause, lever, evidence"
+    exact_layout: unspecified
+  feedback_jsonl:
+    ledger_path: "runs/<slug>/<run_id>/feedback.jsonl"   # nur im Ledger, keine lokale Kopie
+    format: "JSON Lines; genau ein Objekt je erfolgreichem Aufruf; nur anhängen, bestehende Zeilen bleiben"
+    creation: "bei Bedarf im vorhandenen Ledger-Lauf-Ordner angelegt; nie ein Ordner"
+    line_schema:
+      oneOf:
+        - $ref: "#/schemas/rate_feedback"
+        - $ref: "#/schemas/finding_feedback"
+
+events:
+  retro:
+    type: retro
+    kind: point                               # im events.jsonl des Laufs, innerhalb der run-Spanne
+    envelope: "bestehendes Event-Format unverändert"
+    payload:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [outcome, items]
+          properties:
+            outcome: {const: written}
+            items: {type: integer, minimum: 0, maximum: 10, description: "Anzahl behaltener Einträge"}
+        - type: object
+          additionalProperties: false
+          required: [outcome, reason]
+          properties:
+            outcome: {const: failed}
+            reason: {type: string}
+
 cli:
-  "adw kpis [--since <tage>] [--repo-slug <slug>] [--json]":
-    level: top-level                          # nicht unter `adw ledger`
-    source: "$ADW_LEDGER/runs/*/*/run-record.json (Default ~/.adw/ledger, ~ expandiert); kein Run-Ordner-Fallback"
+  rate:
+    usage: "adw rate <RUN_ID> good|bad [--note TEXT] [--repo PFAD]"
+    level: top-level
+    arguments:
+      RUN_ID: {type: string, required: true}
+      VALUE: {type: string, enum: [good, bad], required: true}
     options:
-      --since: "int >= 0, Default keiner; nur Läufe mit started_at >= jetzt − N Tage (inklusive, Vergleich als Zeitpunkte); ohne/unlesbares started_at → ausgeschlossen; negativ → Meldung, Exit != 0, kein Ledger-Zugriff"
-      --repo-slug: "str, Default keiner; exakter Vergleich mit record.repo_slug (Form 'acme/widget')"
-      --json: "Flag; genau ein JSON-Objekt auf stdout (Struktur siehe json_output)"
-    filters: "UND-verknüpft; wirken vor Gruppierung, total, Kandidatenauswahl und Kosten-Median; Filter-Ausschlüsse zählen nicht in skipped"
-    exit:
-      0: "Erfolg, auch bei Ledger ohne Records (leeres Ergebnis, siehe empty_result) oder übersprungenen Records"
-      1: "kein Ledger (Pfad kein Verzeichnis oder ohne .git) oder Git-Probe scheitert; Meldung mit Pfad auf stderr, kein Traceback"
-      nonzero: "--since negativ; Meldung über ungültigen Optionswert"
-    skipped_records: "kein gültiges JSON, kein JSON-Objekt, schema_version != 1 oder fehlend → gezählt in skipped (beim Lesen, vor Filtern), kein Traceback, Exit bleibt 0"
-    side_effects: none                        # keine Schreibzugriffe (Ledger, Repo, Run-Ordner), keine Modellaufrufe, keine neue Dependency
-    text_output: "ohne --json: Texttabelle ohne Farben; eine Zeile je Version plus 'gesamt'; Spaltenfolge Version, Läufe, done/escalated/sonstige, Eskalationsanteil, Review-Runden Median/Max, Fix-Zyklen Median/Max, Gate-Iterationen Median/Max, Dauer-Median, Kosten Summe/Median, Circuit-Breaker, Approvals-Median; variable Kennzahlen als sortierte schlüssel=wert-Paare; Kandidatenzeilen mit allen candidate-Feldern und Regelnamen; Zeile '<n> übersprungen'; null als '-', Anteile ggf. in Prozent, Rundung nur zur Anzeige; exaktes Layout nicht gepinnt, Werte identisch zur JSON-Ausgabe"
+      --note: {type: string, default: null}
+      --repo: {type: path, default: "aktuelles Verzeichnis; bestimmt den Ledger-Slug wie beim Export"}
+    success:
+      exit_code: 0
+      append: "genau eine Zeile gemäß #/schemas/rate_feedback an feedback.jsonl"
+      commit_message: "feedback <run_id> rate"
+  feedback:
+    usage: "adw feedback <RUN_ID> --finding <PRÄFIX> valid|noise [--note TEXT] [--repo PFAD]"
+    level: top-level
+    arguments:
+      RUN_ID: {type: string, required: true}
+      VALUE: {type: string, enum: [valid, noise], required: true}
+    options:
+      --finding: {type: string, required: true, description: "Präfix, der genau einen finding_key aus findings[] des run-record.json im Ledger-Lauf-Ordner trifft (wiederholte Vorkommen desselben Keys = ein Kandidat); gespeichert wird der volle Key"}
+      --note: {type: string, default: null}
+      --repo: "wie bei adw rate"
+    success:
+      exit_code: 0
+      append: "genau eine Zeile gemäß #/schemas/finding_feedback an feedback.jsonl"
+      commit_message: "feedback <run_id> finding"
+    prefix_error:
+      condition: "Präfix trifft 0 oder > 1 finding_key"
+      exit_code: 1
+      stderr: "Meldung mit gekürzter Kandidatenliste"
+      effects: "nichts geschrieben; feedback.jsonl unverändert bzw. weiterhin nicht vorhanden; kein Commit"
+  common:
+    ledger: "Auflösung wie beim Export (ADW_LEDGER, Default ~/.adw/ledger); Ziel runs/<slug>/<run_id>/"
+    lock: "Repo-Lock wie die übrigen Kommandos; kein Modellaufruf"
+    missing_ledger_or_run:
+      exit_code: 1
+      stderr: "Meldung (kein/unlesbares Ledger bzw. Lauf nicht exportiert)"
+      effects: "nichts geschrieben, kein Ordner angelegt, kein Commit"
+    invalid_value:
+      exit_code: "ungleich 0"
+      effects: "nichts geschrieben"
+    push:
+      behavior: "nach dem Commit Push wie beim Export"
+      failure: "fail-open: lokaler Commit bleibt, Exit-Code bleibt 0"
 
-json_output:
-  groups: "list[group]"                       # aufsteigend: numerisch je Punkt-Komponente, dann nicht-numerisch lexikalisch, null zuletzt
-  total: metrics                              # über alle gefilterten Läufe, direkt aus den Records (nicht aus Gruppenwerten); ohne adw_version
-  candidates: "list[candidate]"               # sortiert nach started_at, dann run_id
-  skipped: "int >= 0"
+kpis:
+  command: "adw kpis [--since N] [--repo-slug SLUG] [--json]"
+  json_additions:
+    location: total                           # nur hier; groups[] ohne neue Felder
+    schema: "#/schemas/kpi_total_additions"
+  source: "optionale retro.json und feedback.jsonl im Ledger-Lauf-Ordner jedes ausgewerteten Laufs"
+  filters: "dieselben --since/--repo-slug-Filter wie für die Run-Records; Läufe ohne diese Dateien bleiben auswertbar"
+  aggregation:
+    retro_causes: "Anzahl aller Retro-Einträge je cause über alle lesbaren retro.json"
+    retro_runs: "Anzahl Läufe mit lesbarem retro.json, einschließlich items: []"
+    ratings: "je Lauf zählt nur die letzte lesbare rate-Zeile in Dateireihenfolge"
+    finding_feedback: "alle lesbaren finding-Zeilen zählen; keine Letzte-zählt-Regel"
+  unreadable: "unlesbares retro.json und unlesbare feedback-Zeilen werden ignoriert (lesbare Zeilen daneben zählen); kein Traceback, Exit unverändert; skipped zählt weiterhin nur ungültige run-record.json"
+  text_output: "neue Kennzahlen unter der Gesamtzeile; exaktes Layout nicht festgelegt"
+  unchanged: "groups[], candidates, bestehende Kennzahlen; adw kpis schreibt nichts"
 
-  group: "{adw_version: str | null, ...metrics}"   # gruppiert nach adw_version (nicht adw_versions); null bildet eigene Gruppe
-  metrics:
-    # null = kein verwertbarer Wert (nie eine erfundene 0; gemessene 0 bleibt gültig);
-    # nicht-numerische/null-Werte werden ignoriert; Median statistisch (gerade Anzahl → Mittel);
-    # Anteile 0..1, ohne Nenner null; Werte ungerundet
-    runs: "int >= 0"
-    phase_shares: "{done: float|null, escalated: float|null, other: float|null}"   # Nenner runs
-    escalation_share: "float | null"          # phase == escalated ODER escalation_reason != null
-    review_rounds: "{median: number|null, max: number|null}"
-    fix_cycles: "{median: number|null, max: number|null}"
-    gate_iterations: "{median: number|null, max: number|null}"   # je Lauf Summe über alle Lanes; ohne Lane-Werte zählt der Lauf nicht
-    duration_s: "{median: number|null}"
-    cost_usd: "{sum: number|null, median: number|null}"
-    agent_cost_shares: "{<agent>: float | null}"   # Anteil an der Summe bekannter agents[].cost_usd; {} ohne Einträge; Nenner 0 → null je Agent
-    circuit_breakers: "int | null"            # Summe
-    approvals: "{median: number|null}"
-    findings_by_severity: "{<severity>: int}"
-    findings_by_action: "{<action>: int}"
-  candidate:
-    run_id: str
-    repo_slug: "str | null"
-    adw_version: "str | null"
-    rules: "list[rule], nie leer"             # in der Reihenfolge von candidate_rules
-    issue_title: "str | null"
-  empty_result:                               # Ledger vorhanden, keine (gültigen/gefilterten) Records
-    groups: []
-    total: "alle metrics-Schlüssel vorhanden: runs 0, Anteile und Messwerte null, agent_cost_shares und Findings-Maps leer"
-    candidates: []
-    skipped: "Anzahl beim Lesen übersprungener Dateien"
+schemas:
+  cause:
+    type: string
+    enum: [prompt, context_missing, gate, orchestrator, issue_quality, model, target_repo]
 
-candidate_rules:                              # fest, nicht konfigurierbar; ein Lauf höchstens einmal Kandidat; Reihenfolge stabil
-  - escalated: 'phase == "escalated"'
-  - review_rounds: "numerischer review_rounds >= 4"
-  - gate_iterations: "gate_iterations einer einzelnen Lane >= 5 (nicht die Summe)"
-  - circuit_breakers: "numerischer circuit_breakers > 0"
-  - cost_usd: "cost_usd > 1.5 × Median cost_usd aller gefilterten Läufe (über Versionsgruppen hinweg); ohne cost_usd nie"
+  retro_item:                                 # behaltener Eintrag in retro.json (Antwortschema, unverändert)
+    type: object
+    additionalProperties: false
+    required: [problem, resolution, better, cause, lever, evidence]
+    properties:
+      problem: {type: string}
+      resolution: {type: string}
+      better: {type: string}
+      cause: {$ref: "#/schemas/cause"}
+      lever: {type: string}
+      evidence:
+        type: array
+        items: {type: string}
+        description: "wie geliefert; mindestens ein Beleg ist gültig nach evidence_rule"
 
-run_record:                                   # Änderung gegenüber W13 (A0); Form sonst gleich
-  schema_version: 1                           # unverändert
-  issue_title: "ist die erste nicht-leere Zeile die ADW-Kopfzeile ('# Issue (ADW-generiert …'), gilt der Rest danach; darin erste Markdown-Überschrift ohne '#', sonst erste nicht-leere Zeile, sonst null"
-  findings: "list[{finding_key, severity, action, reason, phase, round, loop}]"
-  review_counts: "list[{phase, round, loop, n}]"
-  phase_round_loop_source: "Span-Hierarchie (triage.decision: Spanne aus `span`; codex.review: eigene Spanne, dann parent-Kette): nächste round-Spanne → round = payload.n, loop = payload.loop; nächste phase-Spanne → phase = payload.name; kein Vorfahr/kein Start-Event → null; nie aus Top-Level-Eventfeldern"
+  retro:
+    type: object
+    additionalProperties: false
+    required: [schema_version, run_id, phase, summary, items, dropped, model]
+    properties:
+      schema_version: {const: 1}
+      run_id: {type: string}
+      phase: {type: string, enum: [done, escalated]}
+      summary: {type: string}
+      items:
+        type: array
+        maxItems: 10
+        items: {$ref: "#/schemas/retro_item"}
+      dropped: {type: integer, minimum: 0, description: "wegen fehlender gültiger Belege verworfene Einträge"}
+      model: {type: string, description: "Modell des retro_agent"}
+
+  rate_feedback:
+    type: object
+    additionalProperties: false
+    required: [ts, kind, value, note]
+    properties:
+      ts: {type: string, format: date-time, description: "ISO-8601, UTC"}
+      kind: {const: rate}
+      value: {type: string, enum: [good, bad]}
+      note: {type: [string, "null"]}
+
+  finding_feedback:
+    type: object
+    additionalProperties: false
+    required: [ts, kind, value, note, finding_key]
+    properties:
+      ts: {type: string, format: date-time, description: "ISO-8601, UTC"}
+      kind: {const: finding}
+      value: {type: string, enum: [valid, noise]}
+      note: {type: [string, "null"]}
+      finding_key: {type: string, description: "vollständiger finding_key"}
+
+  kpi_total_additions:                        # nur die neuen Felder; bestehende total-Felder bleiben
+    type: object
+    required: [retro_causes, retro_runs, ratings, finding_feedback]
+    properties:
+      retro_causes:
+        type: object
+        additionalProperties: {type: integer, minimum: 0}
+        description: "{<cause>: Anzahl}; leer {} ohne Retros"
+      retro_runs: {type: integer, minimum: 0}
+      ratings:
+        type: object
+        additionalProperties: false
+        required: [good, bad]
+        properties:
+          good: {type: integer, minimum: 0}
+          bad: {type: integer, minimum: 0}
+      finding_feedback:
+        type: object
+        additionalProperties: false
+        required: [valid, noise]
+        properties:
+          valid: {type: integer, minimum: 0}
+          noise: {type: integer, minimum: 0}
 
 unchanged:
-  - Ledger-Layout und Export-Mechanismus (`adw ledger export`, Export nach run/resume/approve, Prune)
-  - Event-Format
+  - run-record.json (schema_version 1)
+  - Phasen, Gates, Review-Loops, Exit-Codes
+  - Export-Mechanik außer bundle_adds und feedback_survives_export
   - GUI
-  - pyproject.toml-Version (0.33.0)
+  - pyproject.toml-Version (0.34.0)

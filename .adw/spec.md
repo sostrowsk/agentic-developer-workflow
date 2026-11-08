@@ -1,245 +1,272 @@
-# Spec — W3: `adw kpis` — Kennzahlen über alle Läufe aus dem Ledger
+# Spec — W14: Jeder Lauf bekommt einen Rückblick — und du ein Urteil
 
-Basis: Stand 0.33.0 (`main`, 83f2e40), am 2026-11-08 gegen den Code geprüft.
+Basis: Stand 0.34.0 (`main`, e4e7522), am 2026-11-08 gegen den Code geprüft. Vor dem
+Bauen ist die Ausgangslage gegen den dann aktuellen Stand erneut zu prüfen.
 
-- `build_run_record` (`adw/ledger.py`) liefert `schema_version: 1` mit u. a.
-  `adw_version`, `adw_versions`, `started_at`, `phase`, `escalation_reason`,
-  `approvals`, `duration_s`, `cost_usd`, `lanes.<lane>.gate_iterations`,
-  `review_rounds`, `fix_cycles` (bereits über Lanes summiert), `circuit_breakers`,
-  `agents[].{agent, cost_usd}`, `findings[]`, `review_counts[]`. `repo_slug` steht im
-  Record mit `/` (z. B. `acme/widget`); nur der Ledger-Ordnername ersetzt `/` durch `__`.
-- Die beiden Datenfehler sind vorhanden: `_issue_title` nimmt die erste nicht-leere
-  Zeile von `issue.md` (bei echten Läufen immer die ADW-Kopfzeile aus
-  `adw/authoring.py`); `findings[]`/`review_counts[]` lesen `phase`/`round` aus den
-  Top-Level-Feldern der Events, die im Event-Log immer `null` sind.
-- `_ledger_path()` löst `ADW_LEDGER` (Default `~/.adw/ledger`) auf: kein Verzeichnis
-  oder kein `.git` → `None`; vorhandenes `.git`, aber Git-Probe scheitert → `RuntimeError`.
-- Das Fixture `tests/fixtures/ledger/a1b2c3d4` bildet das echte Format **nicht** ab:
-  `issue.md` ohne ADW-Kopfzeile, Top-Level-`phase`/`round` in den Events gesetzt, keine
-  `phase`-/`round`-Spannen. Sein Golden-File `expected-run-record.json` zeigt deshalb
-  heute „richtige" Werte, die aus dem falschen Pfad stammen.
-- Handbuch: Kommando-Referenz ist §7, Ledger-Abschnitt ist §11.1 (EN und DE).
-  Die ältere W3-Skizze in `ONBOARDING-SPEC-PLAN.md` erwähnt einen Run-Ordner-Fallback;
-  E1 entscheidet dagegen.
+- `run`, `resume` und `approve` (`adw/cli.py`) führen `_execute(ctx)` innerhalb von
+  `with _run_span(...)` aus. `_run_span` (`adw/cli.py:148`) schreibt das `run`-End-Event
+  mit `status` aus dem Exit-Code (`_EXIT_STATUS`: 0 → `done`, 1 → `escalated`,
+  2 → `awaiting_approval`) und `totals` aus `RunTotals`. Danach, außerhalb der Spanne,
+  läuft `_export_after_execution` (`adw/cli.py:185`), dann der Auto-Prune.
+- **Exit 1 ist mehrdeutig:** Eskalation und `AgentRunError` enden beide mit Exit 1 und
+  damit mit `status: "escalated"` im `run`-End-Event. Nur die Phase im `state.json`
+  unterscheidet sie. Ob eine Retro läuft, entscheidet deshalb die **Phase**, nicht der
+  Exit-Code oder der Event-Status.
+- `READ_ONLY_TOOLS = ("Read", "Grep", "Glob")`, `SCOPED_READ_RULES` workspace-relativ
+  (`adw/agents.py:28`, `:34`); `final_reviewer` (`:347`) ist das Muster eines lesenden
+  JSON-Agenten. Aufruf über `context._agent_run(ctx, agent, task, cwd, …)`
+  (`adw/context.py:66`) mit `agent.run`-Span.
+- `adw/ledger.py`: `_ARTIFACTS` (`:38`) ohne Retro-Dateien; `_export` (`:402`) löscht
+  einen vorhandenen Lauf-Ordner im Ledger per `shutil.rmtree(dest)` (`:419`) und
+  schreibt ihn neu. Ledger-Ordner ist `runs/<slug>/<run_id>/` mit `slug` aus
+  `_repo_slug(repo)` (`/` → `__`). Commit-Nachricht des Exports
+  `run <id> <phase> (<slug>)`, Push über `_push` (fail-open).
+- `compute_kpis(records, since=None, repo_slug=None)` (`adw/ledger.py:607`) liefert
+  `groups`, `total`, `candidates`, `skipped` und arbeitet nur auf `run-record.json`.
+- Handbuch: `docs/ADW-HANDBOOK.md` / `.de.md` haben eine CLI-Referenz (§7) und einen
+  Abschnitt „Ledger" (§11.1).
 
 ## Ziel
 
-ADW-Änderungen (Prompts, Effort, Grenzen, Schlüssel) werden messbar: Kennzahlen je
-ADW-Version über alle Läufe im Ledger, dazu auffällige Läufe nach festen Regeln als
-Eval-Kandidaten. Reines Lesen, keine Modellaufrufe, keine Schreibzugriffe.
+Das Lauf-Protokoll (`run-record.json`) sagt heute nur, **was** in einem Lauf passiert
+ist, nicht **warum** etwas schiefging und was besser gewesen wäre. Ohne diese
+Information lassen sich Prompt-, Kontext- oder Gate-Schwächen nicht über Läufe hinweg
+erkennen, und das Urteil des Menschen über einen Lauf oder ein Finding geht verloren.
 
-Konkreter Schaden heute: Kennzahlen über Läufe hinweg gibt es nur per Hand-Skript, und
-zwei Feldgruppen des Lauf-Protokolls sind bei allen exportierten Läufen falsch
-(`issue_title` ist immer die ADW-Kopfzeile, `phase`/`round` der Findings immer `null`).
-Ohne A0 wären Kandidaten nicht benennbar und Findings nicht nach Runde auswertbar.
+Zwei neue Signale, beide im Ledger und in `adw kpis` sichtbar:
+
+1. ein Rückblick (Retro) eines nur lesenden Agenten am Ende jedes fertigen Laufs
+   (`done`/`escalated`), mit im Code geprüften Belegen;
+2. das Urteil des Menschen per `adw rate` (Lauf) und `adw feedback` (Finding).
+
+Die Retro beeinflusst weder Laufentscheidungen noch Phase oder Exit-Code.
 
 ## Scope
 
-### 1. Datenkorrektur im Lauf-Protokoll (A0)
+### 1. Retro-Agent (A1, E1)
 
-Nur Werte zweier Feldgruppen ändern sich, ein Feld kommt hinzu. Form des Schemas,
-Export-Mechanismus und `schema_version: 1` bleiben.
+Neuer Eintrag `retro_agent` in `REGISTRY` (`adw/agents.py`): `model=OPUS`,
+`max_turns=60`, `timeout_s=900`, `tools=READ_ONLY_TOOLS`,
+`allowed_tools=SCOPED_READ_RULES`, `permission_mode="default"`. Kein Effort-Setting.
 
-- **`issue_title`:** Ist die erste nicht-leere Zeile von `issue.md` die ADW-Kopfzeile
-  (`# Issue (ADW-generiert …`), gilt der Rest der Datei ab der Zeile danach; sonst die
-  ganze Datei (ein Issue ohne Kopfzeile verliert seinen Titel nicht). Darin: Text der
-  ersten Markdown-Überschrift ohne `#`-Präfix und Leerraum; gibt es keine, die erste
-  nicht-leere Zeile (getrimmt); sonst `null`.
-- **`findings[]`** (aus `triage.decision`) und **`review_counts[]`** (aus
-  `codex.review`-Ende) erhalten `phase`, `round` und neu `loop` aus der
-  Span-Hierarchie statt aus den Top-Level-Feldern der Events:
-  - Ausgangspunkt: für `triage.decision` die im Feld `span` genannte umschließende
-    Spanne; für `codex.review` die eigene Spanne, deren Vorfahren über das `parent`
-    ihres Start-Events erreicht werden.
-  - Von dort die Vorfahrenkette hinauf (je Spanne das `parent` ihres Start-Events):
-    nächste Spanne vom Typ `round` → `round = payload.n`, `loop = payload.loop`;
-    nächste Spanne vom Typ `phase` → `phase = payload.name`.
-  - Kein passender Vorfahr oder fehlendes Start-Event → betroffener Wert `null`.
-    Top-Level-Eventwerte ersetzen fehlende Vorfahren nicht. Zyklen in der Kette
-    führen nicht zu Endlosschleifen.
-- Schlüssel je Element danach: `findings[]`: `finding_key`, `severity`, `action`,
-  `reason`, `phase`, `round`, `loop`; `review_counts[]`: `phase`, `round`, `loop`, `n`.
-- Das Fixture `a1b2c3d4` wird auf das echte Format umgestellt (`issue.md` mit
-  ADW-Kopfzeile, Top-Level-`phase`/`round` der Events `null`, `phase`- und
-  `round`-Spannen um Spec-Review und Code-Review); Golden-File entsprechend.
+Kurzer Rollentext im Stil der übrigen Agenten: bewertet einen abgeschlossenen ADW-Lauf,
+ändert nichts, antwortet nur mit JSON nach Schema, jeder Eintrag braucht Belege.
 
-### 2. Kommando `adw kpis` (A1, E1, E5)
+`cwd` ist der Run-Ordner `.adw/runs/<run_id>/`; dort liest er `events.jsonl`,
+`state.json`, die Artefakte sowie `escalation.md`/`followups.md`. Die Retro-Dateien
+schreibt ausschließlich der Orchestrator (Deny-Regel für `.adw/runs/**` bleibt).
 
-Aufruf: `adw kpis [--since <tage>] [--repo-slug <slug>] [--json]` — Top-Level-Kommando,
-nicht unter `adw ledger`.
+### 2. Auslösung (E2)
 
-- **Quelle:** ausschließlich das Ledger, aufgelöst wie beim Export (`ADW_LEDGER`,
-  Default `~/.adw/ledger`, gleiche „kein Ledger"-Regel wie W13). Gelesen werden alle
-  Dateien `runs/<slug>/<run_id>/run-record.json`. Kein Fallback auf Run-Ordner.
-- **Kein Ledger** (Pfad kein Verzeichnis oder ohne `.git`) → Meldung auf stderr
-  mit Pfad, Exit 1. Ledger vorhanden, aber Git-Probe scheitert → gleiche Behandlung
-  (Meldung, Exit 1), kein Traceback. Ledger vorhanden, aber ohne Records → Exit 0,
-  leere Gruppen und Kandidaten, `total` mit `runs: 0`, keine erfundenen Messwerte.
-- **Übersprungen** (gezählt in `skipped`, kein Traceback, Exit bleibt 0): Datei kein
-  gültiges JSON, kein JSON-Objekt, oder `schema_version` ≠ 1 (auch fehlend).
-  `skipped` zählt beim Lesen; Läufe, die nur einen Filter nicht erfüllen, zählen
-  nicht als übersprungen.
-- **Filter** (wirken gemeinsam vor Gruppierung, Gesamtberechnung und
-  Kandidatenauswahl, auch vor dem Median der Kostenregel in §4):
-  - `--since N` (ganze Zahl ≥ 0): nur Läufe mit `started_at` ≥ jetzt − N Tage
-    (Grenze einschließlich, Vergleich als Zeitpunkte). Läufe ohne oder mit
-    unlesbarem `started_at` fallen bei gesetztem `--since` heraus. Negativer Wert →
-    Meldung, Exit ≠ 0.
-  - `--repo-slug S`: nur Läufe mit `repo_slug == S` (exakt, Record-Form `acme/widget`).
-- **Ort:** Lese- und Rechenlogik in `adw/ledger.py` mit einer Funktion
-  `compute_kpis(records, since=None, repo_slug=None) -> dict`; CLI-Anbindung in
-  `adw/cli.py`. Das Kommando schreibt nichts — weder ins Ledger noch in Repo oder
-  Run-Ordner — und ruft kein Modell auf. Keine neue Dependency.
+- In `run`, `resume` und `approve` **innerhalb** der `run`-Spanne, nach `_execute` in
+  einem `try/finally` — also auch, wenn `_execute` mit `typer.Exit` endet
+  (Eskalation).
+- Die Retro läuft genau dann, wenn nach `_execute` gilt: Phase im State ist `done`
+  oder `escalated`, kein Dry-Run, im Run-Ordner existiert noch kein `retro.json`.
+- Kein Aufruf bei Gate-Pause (Exit 2), nach `AgentRunError` (Exit 1, Phase bleibt
+  fortsetzbar), im Dry-Run und bei vorhandenem `retro.json`. Ein erneuter CLI-Aufruf
+  für einen bereits fertigen Lauf erzeugt keine nachträgliche oder zweite Retro.
+- Aufruf über den normalen Agentenpfad (`_agent_run`); dadurch entsteht ein
+  `agent.run`-Span innerhalb der `run`-Spanne, und Kosten/Tokens fließen über
+  `RunTotals` in die `totals` des `run`-End-Events.
+- Die Retro ändert **nie** Exit-Code, Phase oder den `status` des `run`-End-Events.
+  Jede Ausnahme (inkl. `AgentRunError`, kein parsebares JSON, Schemaverletzung) wird
+  gefangen, auf stderr gemeldet und als Punkt-Event `retro` mit
+  `{"outcome": "failed", "reason": <text>}` festgehalten; dann wird weder `retro.json`
+  noch `retro.md` geschrieben. Ein anstehender `typer.Exit` aus `_execute` propagiert
+  unverändert. Kein zusätzlicher Logging-Kanal, kein persistenter Fehlerzustand.
+- Erfolg: Punkt-Event `retro` mit `{"outcome": "written", "items": <Anzahl behaltener
+  Einträge>}`.
+- Reihenfolge: Retro → Ende der `run`-Spanne → Export. Der Export bleibt unverändert
+  und sieht die Retro-Dateien.
 
-### 3. Kennzahlen (E2)
+### 3. Auftrag und Antwort-Schema (E3)
 
-Gruppiert nach `adw_version` (nicht nach `adw_versions`). Läufe mit
-`adw_version: null` bilden eine eigene Gruppe mit `adw_version: null`. Gruppen
-aufsteigend nach Version (numerisch je Punkt-Komponente; nicht-numerische Versionen
-danach lexikalisch; `null` zuletzt). Zusätzlich `total` über alle gefilterten Läufe
-mit denselben Kennzahlen, direkt aus den Records berechnet (nicht aus Gruppenwerten).
+- Der Auftrag enthält das zum Aufrufzeitpunkt aktuelle `build_run_record(repo, run_id)`
+  als JSON und den Hinweis, Details per Grep in `events.jsonl` des Run-Ordners zu
+  suchen.
+- Antwort: JSON, geparst wie bei den bestehenden Reviewern (JSON aus dem Antworttext,
+  strikt; kein neuer Parser-Stil), validiert mit pydantic, `extra="forbid"` auf
+  Antwort- und Eintragsebene:
 
-Allgemeine Regeln: Median ist der statistische Median (bei gerader Anzahl Mittel der
-beiden mittleren Werte). Nicht-numerische oder `null`-Werte werden bei Summen,
-Medianen und Maxima ignoriert; bleibt kein Wert, ist das Ergebnis `null` — nie eine
-gemessene `0`. Ein gemessener Wert `0` bleibt gültig. Anteile sind Brüche 0..1; ohne
-Nenner `null`. JSON-Werte sind ungerundet; die Textausgabe rundet nur zur Anzeige.
+  ```json
+  {"summary": "str",
+   "items": [{"problem": "str", "resolution": "str", "better": "str",
+              "cause": "prompt|context_missing|gate|orchestrator|issue_quality|model|target_repo",
+              "lever": "str", "evidence": ["seq:42", "escalation.md"]}]}
+  ```
 
-Kennzahlen je Gruppe — JSON-Schlüssel (stabil):
+- Höchstens 10 Einträge; `items: []` ist gültig (glatter Lauf). Mehr als 10 Einträge,
+  unbekannte Schlüssel, unbekannte `cause` oder kein parsebares JSON → Fehlschlag
+  nach §2 (`outcome: "failed"`). Fehlende oder ungültige Belege eines ansonsten
+  schemakonformen Eintrags sind **kein** Schemafehler, sondern Fall für §4.
 
-| Schlüssel | Bedeutung |
-|---|---|
-| `adw_version` | Gruppenschlüssel (fehlt in `total`) |
-| `runs` | Anzahl Läufe |
-| `phase_shares` | `{done, escalated, other}`: Anteil Läufe mit `phase == "done"`, `== "escalated"`, sonst |
-| `escalation_share` | Anteil Läufe mit Eskalation: `phase == "escalated"` oder `escalation_reason` ≠ `null` (erfasst auch nach Eskalation fortgesetzte Läufe) |
-| `review_rounds` | `{median, max}` über `review_rounds` |
-| `fix_cycles` | `{median, max}` über `fix_cycles` |
-| `gate_iterations` | `{median, max}` über die je Lauf über alle Lanes summierten `lanes.*.gate_iterations` |
-| `duration_s` | `{median}` über `duration_s` |
-| `cost_usd` | `{sum, median}` über `cost_usd` |
-| `agent_cost_shares` | `{<agent>: Anteil}`: Summe `agents[].cost_usd` je `agent` geteilt durch die Summe aller bekannten Agent-Kosten der Gruppe; leer, wenn keine vorliegen |
-| `circuit_breakers` | Summe `circuit_breakers` |
-| `approvals` | `{median}` über `approvals` |
-| `findings_by_severity` | `{<severity>: Anzahl}` über alle `findings[]` |
-| `findings_by_action` | `{<action>: Anzahl}` über alle `findings[]` |
+### 4. Beleg-Prüfung (E4)
 
-### 4. Auffällige Läufe (A2, E4)
+Ein Beleg ist gültig, wenn er
 
-Feste, nicht konfigurierbare Regeln über die gefilterten Läufe; ein Lauf ist genau
-einmal Kandidat, wenn mindestens eine greift. Regelnamen (stabil, in Text und JSON):
+- die Form `seq:<n>` hat und `events.jsonl` des Laufs einen Record mit `seq == n`
+  enthält, **oder**
+- ein relativer Pfad ist (kein absoluter Pfad, keine `..`-Komponente), der im
+  Run-Ordner als Datei existiert.
 
-| Regel | Bedingung |
-|---|---|
-| `escalated` | `phase == "escalated"` |
-| `review_rounds` | `review_rounds >= 4` |
-| `gate_iterations` | `gate_iterations` mindestens **einer einzelnen** Lane `>= 5` (nicht die Summe aus §3) |
-| `circuit_breakers` | `circuit_breakers > 0` |
-| `cost_usd` | `cost_usd` strikt größer als 1,5 × Median `cost_usd` aller gefilterten Läufe (über Versionsgruppen hinweg); Läufe ohne `cost_usd` lösen nie aus |
+Ein Eintrag mit mindestens einem gültigen Beleg bleibt erhalten. Ein Eintrag ohne
+Belege oder mit ausschließlich ungültigen Belegen wird vollständig verworfen. Die Zahl
+verworfener Einträge steht in `retro.json` als `dropped`. Werden alle Einträge
+verworfen, bleibt es eine erfolgreiche Retro mit `items: []` (Event `written`).
 
-Je Kandidat: `run_id`, `repo_slug`, `adw_version`, `rules` (Liste der ausgelösten
-Regelnamen in obiger Reihenfolge), `issue_title`. Kandidaten sortiert nach
-`started_at`, dann `run_id`.
+### 5. `retro.json` und `retro.md` (E5)
 
-### 5. Ausgabe (E3)
+- `retro.json` im Run-Ordner:
+  `{"schema_version": 1, "run_id", "phase", "summary", "items": [...], "dropped": n,
+  "model"}` — `phase` ist die Endphase `done` oder `escalated`, `items` die behaltenen
+  Einträge im Antwortschema, `dropped` deren verworfene Gegenmenge, `model` das Modell
+  des `retro_agent`. Sortierte Schlüssel, Einrückung 2.
+- `retro.md` wird vom Code deterministisch aus `retro.json` gerendert: Überschrift mit
+  Run-ID und Phase, Zusammenfassung, je Eintrag ein Abschnitt mit allen Feldern
+  (`problem`, `resolution`, `better`, `cause`, `lever`, `evidence`). Kein zweiter
+  Agententext.
 
-- **Ohne `--json`:** schlichte Texttabelle auf stdout, keine Farben. Eine Zeile je
-  Version plus eine Zeile `gesamt`, feste Spaltenfolge: Version, Läufe,
-  done/escalated/sonstige, Eskalationsanteil, Review-Runden Median/Max, Fix-Zyklen
-  Median/Max, Gate-Iterationen Median/Max, Dauer-Median, Kosten Summe/Median,
-  Circuit-Breaker, Approvals-Median. Die Kennzahlen mit variablen Schlüsseln
-  (Kosten-Anteile je Agent, Findings je Severity und je Action) als sortierte
-  `schlüssel=wert`-Paare je Version plus `gesamt`. Darunter die Kandidatenliste (eine
-  Zeile je Kandidat mit allen Feldern aus §4) und die Zeile „n übersprungen".
-  `null` wird als `-` angezeigt; Anteile dürfen als Prozent erscheinen. Das exakte
-  Textlayout ist keine Contract-Fläche.
-- **Mit `--json`:** genau ein JSON-Objekt auf stdout:
-  `{"groups": [...], "total": {...}, "candidates": [...], "skipped": n}` mit den
-  Schlüsseln aus §3 und §4; `skipped` ist eine Ganzzahl.
-- Text- und JSON-Ausgabe beruhen auf demselben Ergebnis von `compute_kpis`; die
-  Textausgabe ist reine Formatierung und verändert weder Aggregate noch
-  Kandidatenauswahl.
+### 6. Export (A2, E6, E8)
 
-### 6. Doku und Changelog (A3)
+- `retro.json` und `retro.md` werden in `_ARTIFACTS` aufgenommen und landen damit,
+  sofern vorhanden, im Fall-Bündel.
+- `_export` sichert vor dem Löschen des Ledger-Lauf-Ordners eine vorhandene
+  `feedback.jsonl` und schreibt sie nach dem Neuschreiben des Bündels byte-gleich
+  zurück. Sie braucht keine Kopie im lokalen Run-Ordner. Sonst keine Änderung an der
+  Export-Logik (Commit, Push fail-open, Idempotenz, Dry-Run-Skip).
 
-- `docs/ADW-HANDBOOK.md` und `docs/ADW-HANDBOOK.de.md` synchron: Abschnitt „Ledger"
-  (§11.1) um `adw kpis` ergänzen (Aufruf, Optionen, Datenquelle, Kennzahlen,
-  Kandidaten-Regeln, JSON-Struktur, Exit 1 ohne Ledger, Überspringen kaputter oder
-  unbekannter Records); Kommando-Referenz (§7) um einen Eintrag `adw kpis` mit
-  Verweis auf §11.1; Beschreibung von `findings`/`review_counts` um `loop` und die
-  Herkunft aus der Span-Hierarchie, `issue_title` um die Kopfzeilen-Regel ergänzen.
+### 7. Kommandos `adw rate` und `adw feedback` (A3, E7)
+
+```
+adw rate <RUN_ID> good|bad [--note TEXT] [--repo PFAD]
+adw feedback <RUN_ID> --finding <PRÄFIX> valid|noise [--note TEXT] [--repo PFAD]
+```
+
+- `--repo` Default: aktuelles Verzeichnis. Ledger-Auflösung wie beim Export
+  (`ADW_LEDGER`, Default `~/.adw/ledger`); Ziel ist `runs/<slug>/<run_id>/` mit dem
+  Slug des Repos wie beim Export.
+- Kein Ledger oder Lauf-Ordner im Ledger nicht vorhanden (Lauf nicht exportiert) →
+  Meldung auf stderr, Exit 1, nichts geschrieben, kein Ordner angelegt, kein Commit.
+- Ungültiger Wert (`rate`: nicht `good`/`bad`; `feedback`: nicht `valid`/`noise`) →
+  Exit ≠ 0, nichts geschrieben.
+- `adw feedback`: `--finding` ist ein Präfix, der **genau einen** `finding_key` aus
+  `findings[]` des `run-record.json` im Ledger-Lauf-Ordner treffen muss. Kein oder
+  mehrere Treffer → Exit 1, Meldung mit gekürzter Kandidatenliste, nichts geschrieben.
+  Bei eindeutigem Treffer wird der **volle** `finding_key` gespeichert.
+- Jeder erfolgreiche Aufruf hängt genau eine JSON-Zeile an `feedback.jsonl` im
+  Ledger-Lauf-Ordner an (Datei wird bei Bedarf angelegt, bestehende Zeilen bleiben):
+  `{"ts": <ISO-8601, UTC>, "kind": "rate"|"finding", "value": <Wert>,
+  "note": <Text oder null>, "finding_key": <voller Key>}` — `finding_key` nur bei
+  `kind: "finding"`.
+- Danach Ledger-Commit mit Nachricht `feedback <run_id> <kind>` (`kind` = `rate` bzw.
+  `finding`) und Push wie beim Export (fail-open: ein fehlgeschlagener Push ändert
+  weder Exit-Code noch das lokal committete Feedback). Exit 0. Dieser Commit ist
+  Verhalten des Produkts gegenüber dem Ledger, nicht Workflow-Prozess.
+- Beide Kommandos laufen unter dem Repo-Lock (`_repo_lock(repo)`, R1) wie die übrigen
+  Kommandos. Kein Modellaufruf.
+
+### 8. `adw kpis` (A4, E9)
+
+- `adw kpis` berücksichtigt zusätzlich je ausgewertetem Lauf, falls im
+  Ledger-Lauf-Ordner vorhanden, `retro.json` und `feedback.jsonl`. Dieselben Filter
+  (`--since`, `--repo-slug`) gelten; Läufe ohne diese Dateien bleiben auswertbar.
+- Neu im `total`-Objekt (JSON) und in der Textausgabe unter der Gesamtzeile:
+  - `retro_causes`: `{<cause>: Anzahl}` über alle Einträge aller Retros;
+  - `retro_runs`: Anzahl Läufe mit lesbarem `retro.json` (auch mit `items: []`);
+  - `ratings`: `{"good": n, "bad": n}` — je Lauf zählt nur die **letzte** `rate`-Zeile
+    in Dateireihenfolge;
+  - `finding_feedback`: `{"valid": n, "noise": n}` über alle `finding`-Zeilen (keine
+    „letzte zählt"-Regel; Finding-Feedback ersetzt keine Laufbewertung).
+- Unlesbare `retro.json` bzw. unlesbare Zeilen in `feedback.jsonl` werden ignoriert
+  (kein Traceback, Exit unverändert); `skipped` zählt weiterhin nur ungültige
+  `run-record.json`.
+- Keine neuen Felder in den Versionsgruppen (`groups[]`); `candidates` und bestehende
+  Kennzahlen unverändert. `adw kpis` schreibt weiterhin nichts.
+
+### 9. Doku und Changelog (A5)
+
+- `docs/ADW-HANDBOOK.md` und `docs/ADW-HANDBOOK.de.md` synchron, Abschnitt „Ledger":
+  Retro (wann sie läuft, Schema von `retro.json`, Beleg-Regel, `retro`-Event,
+  Fehlerverhalten), `adw rate`, `adw feedback` (Aufruf, `feedback.jsonl`-Format,
+  Exit-Codes, Ledger-Voraussetzung, Überleben beim Export), neue Felder in `adw kpis`
+  samt „letzte Bewertung zählt". CLI-Referenz (§7) um `adw rate` und `adw feedback`
+  mit Verweis auf den Ledger-Abschnitt.
 - `CHANGELOG.md` und `CHANGELOG.de.md` synchron: neue oberste Sektion
-  `## [0.34.0] — Unreleased` mit `### Added` (`adw kpis`); die Korrektur aus §1 darf
-  unter `### Fixed` derselben Sektion stehen.
-- Version in `pyproject.toml` bleibt unverändert.
+  `## [0.35.0] — Unreleased` mit `### Added`.
+- `pyproject.toml`-Version bleibt unverändert.
 
 ## Non-Goals
 
-- Keine Änderung an Form des `run-record.json`-Schemas über §1 hinaus, kein Wechsel
-  von `schema_version`, keine Änderung am Ledger-Layout oder Export-Mechanismus.
-- Das Neuschreiben des bestehenden Ledgers (`adw ledger export --repo .` nach dem
-  Merge) ist kein Teil des Laufs; `adw kpis` repariert keine Records.
+- Keine Änderung an Kontrollfluss, Phasen, Gates, Review-Loops, Exit-Codes; die Retro
+  entscheidet nicht über `done`/`escalated`.
+- Kein Wechsel des `run-record.json`-Schemas (bleibt Version 1); die Retro ist eine
+  eigene Datei.
+- Keine Änderung an der Export-Mechanik außer Aufnahme der Retro-Dateien in
+  `_ARTIFACTS` und dem Erhalt von `feedback.jsonl`.
 - GUI bleibt unverändert.
-- Keine Kennzahlen außerhalb E2 (insbesondere keine Cache-Trefferquote, keine
-  automatische Vorher/Nachher-Bewertung).
-- Kein Retro-Agent, keine Wochenschleife, keine Modellaufrufe.
-- Keine Schreibzugriffe durch `adw kpis`, kein Cache der Kennzahlen.
-- Keine Farben, keine neue Dependency.
+- Kein zweiter, agentengeschriebener Retro-Text; kein neuer JSON-Parser-Stil.
+- Keine neue Dependency; Version in `pyproject.toml` unverändert.
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-- Diagramme, HTML-Bericht, GUI-Ansicht.
-- Konfigurierbare Kandidaten-Regeln oder Schwellen, statistische Tests.
-- Fallback auf Run-Ordner ohne Ledger.
-- Retro-Agent (W14), Wochenschleife (W15).
-- Weitere Filter (Agent, Modell, Phase), weitere Sortier- oder Ausgabeformate (CSV o. Ä.).
-- Persistente KPI-Caches, Indizes, Hintergrundaktualisierung, automatische
-  Ledger-Reparatur.
-- Validierung einzelner Record-Felder über `schema_version` hinaus; fehlerhafte
-  Einzelwerte werden nach den `null`-Regeln aus §3 ignoriert, nicht gemeldet.
+- Wochenschleife `adw improve` (W15), Gruppierung/Clustering der Retros.
+- Retro bei Gate-Pause, Retro nachträglich für alte Läufe, Retro neu erzeugen
+  (Überschreiben eines vorhandenen `retro.json`).
+- Effort für den Retro-Agenten (W2).
+- Feedback in der GUI, Feedback ohne Ledger (z. B. im Run-Ordner).
+- Neue Spalten pro Version in `adw kpis`.
+- Validierung, dass Belege inhaltlich zum Eintrag passen; Prüfung über Existenz von
+  `seq` bzw. Datei hinaus.
+- Bearbeiten oder Löschen von Feedback-Zeilen, Deduplizierung von Feedback.
+- Retry-Queues, persistente Abschlussmarker oder ein Transaktions-/Recovery-System für
+  Retro oder Ledger-Schreibvorgänge. Agentenlimits (W1), Events, Repo-Lock und der
+  fail-open Export sind die vorgesehenen Backstops.
 
 ## Akzeptanzkriterien
 
-0. **A0:** Das Fixture `tests/fixtures/ledger/a1b2c3d4` ist auf das echte Format
-   umgestellt (§1). Der daraus gebaute Record hat
-   `issue_title == "W99: Beispiel-Issue für das Ledger"`, und jedes Element von
-   `findings` und `review_counts` trägt `phase`, `round` und `loop` aus der
-   Span-Hierarchie; das Golden-File `expected-run-record.json` ist entsprechend
-   angepasst, die übrige Struktur unverändert, `schema_version` bleibt 1. Ein
-   `triage.decision` bzw. `codex.review` ohne `round`-/`phase`-Vorfahren ergibt
-   `null` für die betroffenen Werte.
-1. Für ein Fixture-Ledger mit 6 Läufen in zwei ADW-Versionen stimmen alle Kennzahlen
-   aus §3 je Version und in `total` mit von Hand berechneten Werten überein,
-   einschließlich `null`-Behandlung fehlender Werte.
-2. `--since 7` blendet Läufe mit `started_at` älter als 7 Tage aus; `--repo-slug`
-   beschränkt auf exakt passende `repo_slug`; die Filter wirken auch auf den Median
-   der Kostenregel.
-3. Jede Regel aus §4 wird durch genau einen Fixture-Lauf ausgelöst und erscheint mit
-   ihrem Regelnamen beim Kandidaten (samt `run_id`, `repo_slug`, `adw_version`,
-   `issue_title`); ein unauffälliger Lauf erscheint nicht in `candidates`. Die
-   Gate-Regel reagiert auf eine einzelne Lane `>= 5`, nicht auf die Lane-Summe.
-4. `--json` liefert genau ein Objekt `{groups, total, candidates, skipped}` mit den
-   Schlüsseln aus §3/§4; die Textausgabe zeigt dieselben Werte (gleiche Läufe,
-   Kandidaten und `skipped`) wie die JSON-Ausgabe.
-5. Ein Record mit unbekanntem `schema_version` und eine Datei mit kaputtem JSON
-   werden übersprungen und in `skipped` gezählt, gehen weder in Kennzahlen noch in
-   Kandidaten ein; kein Traceback, Exit 0.
-6. Kein Ledger → Meldung auf stderr, Exit 1.
-7. `adw kpis` schreibt nichts: das Ledger-Verzeichnis ist vor und nach Text- und
-   JSON-Aufruf byte-gleich (Dateiliste und Inhalte).
-8. `uv run ruff check .` und `uv run pytest -x -q` sind grün.
+1. Ein Lauf, der mit Mock-/Fake-Runner bis `done` läuft, ruft `retro_agent` genau
+   einmal mit `cwd` = Run-Ordner auf und schreibt `retro.json` (Schema §5) und
+   `retro.md`; das `agent.run`-Span der Retro liegt in der `run`-Spanne; ein
+   `retro`-Event mit `outcome: "written"` und Anzahl Einträge wird geschrieben.
+2. Ein eskalierter Lauf bekommt ebenfalls eine Retro; ein an einem Gate pausierter
+   Lauf und ein Lauf mit `AgentRunError` bekommen **keine** (kein Aufruf von
+   `retro_agent`, kein `retro.json`).
+3. Exit-Code und Phase sind mit und ohne Retro identisch — auch wenn die Retro
+   `AgentRunError` wirft oder ungültiges JSON liefert; dann gibt es ein `retro`-Event
+   mit `outcome: "failed"` und Grund, eine Meldung auf stderr und kein `retro.json`.
+4. Einträge mit `seq:` auf existierende bzw. nicht existierende Seq und mit gültigem
+   bzw. ungültigem (nicht existent, absolut, mit `..`) Dateipfad werden nach §4
+   behalten bzw. verworfen; ein Eintrag ohne Belege wird verworfen; `dropped` stimmt.
+5. Dry-Run → keine Retro (kein Aufruf, kein `retro.json`).
+6. Ein Export eines Laufs mit Retro enthält `retro.json` und `retro.md` im Bündel.
+7. `adw rate <id> bad --note x` hängt eine Zeile nach §7 an `feedback.jsonl` an und
+   erzeugt einen Ledger-Commit `feedback <id> rate`; ein anschließender erneuter Export
+   des Laufs lässt `feedback.jsonl` byte-gleich stehen.
+8. `adw feedback` mit eindeutigem Präfix schreibt den vollen `finding_key`; mit
+   mehrdeutigem oder unbekanntem Präfix Exit 1, `feedback.jsonl` unverändert bzw.
+   nicht angelegt.
+9. `adw rate` für einen nicht exportierten Lauf → Exit 1, nichts geschrieben.
+10. `adw kpis --json` enthält in `total` `retro_causes`, `retro_runs`, `ratings`
+    (letzte Bewertung je Lauf zählt) und `finding_feedback` mit den Werten eines
+    Fixture-Ledgers (mit mehrfachen Bewertungen und Läufen ohne Retro/Feedback); die
+    Textausgabe zeigt sie unter der Gesamtzeile; `groups[]` hat keine neuen Felder.
+11. `uv run ruff check .` und `uv run pytest -x -q` grün.
 
-Richtwert: 9–14 neue Tests; deutlich mehr deutet auf Gold-Plating.
+Richtwert: 12–16 neue Tests; deutlich mehr deutet auf Gold-Plating.
 
 ## Definition of Done
 
-- Alle Akzeptanzkriterien 0–8 erfüllt und durch automatisierte Tests mit
-  Fixture-`run-record.json`-Dateien in einem temporären Ledger (`ADW_LEDGER`) belegt;
-  die Tests benötigen weder das persönliche Ledger noch Modellzugriffe.
+- Akzeptanzkriterien 1–11 erfüllt und durch automatisierte Tests belegt, die den
+  Mock-Runner bzw. einen gefakten Runner und ein temporäres Ledger (`ADW_LEDGER`)
+  verwenden; kein Test ruft ein echtes Modell auf oder berührt `~/.adw/ledger`.
 - `uv run ruff check .` und `uv run pytest -x -q` grün.
-- Handbuch EN+DE und `CHANGELOG.md`/`CHANGELOG.de.md` gemäß §6 synchron aktualisiert
-  und entsprechen dem ausgelieferten Verhalten; `pyproject.toml`-Version unverändert.
-- Keine neue Dependency; GUI, Ledger-Layout und Export-Mechanismus unverändert.
-- Contract (Single-Lane) nur für extern beobachtbare Flächen: CLI `adw kpis` mit
-  Optionen `--since`, `--repo-slug`, `--json`, Exit-Codes und die JSON-Struktur aus
-  §3–§5; keine internen Helper-Signaturen, kein exaktes Textlayout.
+- Handbuch EN+DE und `CHANGELOG.md`/`CHANGELOG.de.md` gemäß §9 synchron und
+  entsprechen dem ausgelieferten Verhalten; `pyproject.toml`-Version unverändert.
+- Keine neue Dependency; GUI, `run-record.json`-Schema (Version 1) und Kontrollfluss
+  unverändert.
+- Contract (Single-Lane) nur für extern beobachtbare Flächen: CLI `adw rate` und
+  `adw feedback` (Argumente, Optionen, Exit-Codes), Dateien `retro.json`, `retro.md`
+  (Struktur), `feedback.jsonl` (Zeilenschema), das `retro`-Event (Typ und Payload) und
+  die neuen Felder im `total`-Objekt von `adw kpis --json`; keine internen
+  Helper-Signaturen, kein exaktes Textlayout.
