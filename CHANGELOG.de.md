@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [0.31.3] — Unreleased
+## [0.31.3] — 2026-11-08
 
 ### Behoben
 - **Eine vorhandene Session galt als „Test-Lauf fertig“ (C6).** `_confirm_red` übersprang den reinen Test-Lauf, sobald eine `session_id` gespeichert war — die Session-ID wird aber schon gecheckpointet, wenn der Stream sie meldet, bevor der Agent etwas geschrieben hat. Nach einem Abbruch (Abo-Limit, Ctrl-C) übersprang `adw resume` den Lauf: ohne Änderungen eskalierte der Lauf dauerhaft mit „keine Änderungen“, mit halb geschriebenen Tests galten diese als RED-Beweis.
@@ -1177,6 +1177,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.31.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.2...v0.31.3
 [0.31.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.3...v0.31.0

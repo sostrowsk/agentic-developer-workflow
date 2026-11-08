@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [0.31.3] — Unreleased
+## [0.31.3] — 2026-11-08
 
 ### Fixed
 - **An existing session counted as "test-only run done" (C6).** `_confirm_red` skipped the test-only run as soon as a `session_id` was saved — but the session ID is checkpointed when the stream reports it, before the agent has written anything. After an abort (subscription limit, Ctrl-C), `adw resume` skipped the run: without changes the run escalated for good with "no changes", with half-written tests those counted as RED proof.
@@ -1102,6 +1102,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.31.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.2...v0.31.3
 [0.31.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.30.3...v0.31.0
