@@ -359,6 +359,8 @@ adw status  [RUN_ID] [--repo PATH]
 adw gui     [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--i-know]
 adw runs list  [--repo PATH]
 adw runs prune [--repo PATH] [--keep N] [--older-than DAYS] [--gzip]
+adw ledger export [RUN_ID] [--repo PATH]
+adw kpis   [--since DAYS] [--repo-slug SLUG] [--json]
 ```
 
 `--repo` defaults to the current directory everywhere.
@@ -410,6 +412,11 @@ See §11. `--repo` must be the **root** of a git work tree.
 ### `adw ledger export [RUN_ID]`
 
 Exports one run or all runs of `--repo` into the ledger after the fact, see §11.1.
+
+### `adw kpis`
+
+Metrics per ADW version and eval candidates across all runs in the ledger
+(read-only, 0 tokens), see §11.1.
 
 ### Exit codes
 
@@ -627,6 +634,49 @@ case bundle. It is the data basis for later evaluation.
   `--gzip` does not export.
 - **Backfill:** `adw ledger export [RUN_ID] --repo <path>` exports one or all runs
   (in start order), one line `<run_id>: <result>` each; exit 1 if any failed.
+- **Record fields worth knowing:** `issue_title` is the first heading of `issue.md`
+  after the ADW header line `# Issue (ADW-generiert …)` (fallback: first non-empty
+  line). Each `findings[]` entry (`finding_key, severity, action, reason, phase,
+  round, loop`) and each `review_counts[]` entry (`phase, round, loop, n`) takes
+  `phase`/`round`/`loop` from the span hierarchy: the nearest enclosing `round` span
+  gives `round = payload.n` and `loop = payload.loop` (`authoring`, `codex_review`,
+  …), the nearest `phase` span gives `phase = payload.name`; without such an
+  ancestor the value is `null`. Records exported before 0.34.0 carry the wrong
+  values — re-export with `adw ledger export --repo .`.
+
+#### `adw kpis`
+
+`adw kpis [--since <days>] [--repo-slug <slug>] [--json]` reads every
+`runs/*/*/run-record.json` in the ledger (same `ADW_LEDGER` resolution; no fallback
+to run directories) and prints metrics per `adw_version`, plus a total. It writes
+nothing and calls no model.
+
+- **Filters:** `--since N` keeps runs with `started_at` ≥ now − N days (runs without
+  a readable `started_at` drop out; negative N is rejected); `--repo-slug` keeps runs
+  whose `repo_slug` matches exactly (`acme/widget`). Filters apply before grouping,
+  total and candidate selection, including the cost median.
+- **Metrics** (JSON keys): `runs`; `phase_shares` `{done, escalated, other}`;
+  `escalation_share` (`phase == "escalated"` or an `escalation_reason`);
+  `review_rounds`, `fix_cycles`, `gate_iterations` (per run summed over lanes) as
+  `{median, max}`; `duration_s` `{median}`; `cost_usd` `{sum, median}`;
+  `agent_cost_shares` `{<agent>: share}`; `circuit_breakers` (sum); `approvals`
+  `{median}`; `findings_by_severity`, `findings_by_action`. Shares are fractions
+  0..1; non-numeric or missing values are ignored, and with no value left the
+  metric is `null` — never an invented `0`. Groups are sorted by version
+  (numerically per dot component, then other versions, `null` last).
+- **Eval candidates** — a run is listed once with every rule it triggers:
+  `escalated` (`phase == "escalated"`), `review_rounds` (≥ 4), `gate_iterations`
+  (a single lane ≥ 5), `circuit_breakers` (> 0), `cost_usd` (> 1.5 × the median
+  cost of the considered runs). Fields: `run_id`, `repo_slug`, `adw_version`,
+  `rules`, `issue_title`; sorted by `started_at`, then `run_id`.
+- **Output:** a plain text table (one row per version plus `gesamt`, `-` for
+  `null`, shares as percent), the per-agent and findings breakdowns, the candidate
+  list and `<n> übersprungen`. With `--json`, exactly one object
+  `{"groups": [...], "total": {...}, "candidates": [...], "skipped": n}`
+  (unrounded values).
+- **Errors:** no ledger (path missing, no `.git`, or the Git probe fails) → message
+  on stderr, exit 1. Files with broken JSON, no JSON object or a `schema_version`
+  other than 1 are skipped and counted in `skipped`; the exit code stays 0.
 
 > **Keep the ledger private.** It contains issues, prompts, event logs and diffs
 > unredacted.

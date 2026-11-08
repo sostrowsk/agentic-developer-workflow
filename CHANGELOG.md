@@ -12,6 +12,18 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.34.0] — Unreleased
+
+### Added
+- **`adw kpis` — metrics across all runs from the ledger (W3).** Cross-run numbers existed only as hand-written scripts; ADW changes (prompts, effort, limits, keys) were not measurable.
+  - `adw kpis [--since <days>] [--repo-slug <slug>] [--json]` reads every `runs/*/*/run-record.json` in `$ADW_LEDGER` (no fallback to run directories) and groups by `adw_version`, plus a total row: run count, share `done`/`escalated`/other, escalation share, median/max of review rounds, fix cycles and gate iterations, median duration, cost sum/median, cost share per agent, circuit breakers, median approvals, findings per severity and per action. Missing values are `null`, never an invented `0`.
+  - **Eval candidates** by fixed rules: `escalated`, `review_rounds` ≥ 4, `gate_iterations` of a single lane ≥ 5, `circuit_breakers` > 0, `cost_usd` above 1.5 × the median of the considered runs.
+  - Plain text table or, with `--json`, one object `{groups, total, candidates, skipped}`. Broken records and unknown `schema_version` are skipped and counted; no ledger → exit 1. Read-only, 0 tokens, no new dependency.
+
+### Fixed
+- **`issue_title` in the run record was always the ADW header line** (`Issue (ADW-generiert …)`). It is now the first heading after that header (fallback: first non-empty line).
+- **`phase` and `round` of `findings` and `review_counts` were always `null`.** They now come from the span hierarchy (nearest `round` span → `round`, new field `loop`; nearest `phase` span → `phase`). `schema_version` stays 1; re-export existing runs with `adw ledger export --repo .` to correct them.
+
 ## [0.33.0] — 2026-11-08
 
 ### Added

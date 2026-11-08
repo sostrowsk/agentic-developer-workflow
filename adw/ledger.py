@@ -7,6 +7,9 @@ subprocess is ``git remote get-url origin``. ``export_run`` writes record and
 bundle to ``$ADW_LEDGER/runs/<slug>/<run_id>/``, commits in the ledger clone and
 pushes fail-open. It never raises and takes no run locks (its callers may already
 hold them). ADW never creates or clones the ledger.
+
+``compute_kpis`` (W3, ``adw kpis``) aggregates the ledger's run records per ADW
+version and lists eval candidates — read-only, no model.
 """
 
 import gzip
@@ -15,9 +18,10 @@ import os
 import re
 import shutil
 import stat
+import statistics
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from adw.config import AdwConfig
@@ -127,12 +131,20 @@ def _read_text(path: Path) -> str | None:
         return None
 
 
+_ISSUE_HEADER = "# Issue (ADW-generiert"
+
+
 def _issue_title(run_dir: Path) -> str | None:
-    text = _read_text(run_dir / "issue.md")
-    for line in (text or "").splitlines():
-        if line.strip():
-            return line.strip().lstrip("#").strip()
-    return None
+    """First Markdown heading after the ADW header line (authoring.py), else the
+    first non-empty line there; an issue without the header keeps its own title."""
+    lines = [line.strip() for line in (_read_text(run_dir / "issue.md") or "").splitlines()]
+    lines = [line for line in lines if line]
+    if lines and lines[0].startswith(_ISSUE_HEADER):
+        lines = lines[1:]
+    for line in lines:
+        if line.startswith("#") and line.lstrip("#").strip():
+            return line.lstrip("#").strip()
+    return lines[0] if lines else None
 
 
 def _paragraphs(lines: list[str]) -> list[list[str]]:
@@ -186,6 +198,31 @@ def _repo_slug(repo: Path) -> str:
     return path or fallback
 
 
+def _span_context(starts: dict, span_id) -> tuple:
+    """(phase, round, loop) from the nearest ``phase``/``round`` ancestors of
+    ``span_id`` (itself included), walking the ``parent`` of each start event;
+    None where no such ancestor or start event exists. Cycles end the walk."""
+    phase = round_ = loop = None
+    found_phase = found_round = False
+    visited = set()
+    while span_id is not None and span_id not in visited and span_id in starts:
+        visited.add(span_id)
+        start = starts[span_id]
+        if start.get("type") == "round" and not found_round:
+            found_round = True
+            round_, loop = _payload(start).get("n"), _payload(start).get("loop")
+        elif start.get("type") == "phase" and not found_phase:
+            found_phase = True
+            phase = _payload(start).get("name")
+        span_id = start.get("parent")
+    return phase, round_, loop
+
+
+def _context_fields(starts: dict, span_id) -> dict:
+    phase, round_, loop = _span_context(starts, span_id)
+    return {"phase": phase, "round": round_, "loop": loop}
+
+
 def _agent(start: dict, end: dict | None) -> dict:
     begin = _payload(start)
     finish = _payload(end)
@@ -214,6 +251,10 @@ def build_run_record(repo, run_id: str) -> dict:
     run_dir = repo / RUNS_RELPATH / run_id
     events = _read_events(run_dir)
     runs = _spans(events, "run")
+    starts: dict = {}
+    for e in events:
+        if e.get("kind") == "start":
+            starts.setdefault(e.get("span"), e)
     run_ends = [end for _, end in runs if end is not None]
     versions: list[str] = []
     for start, _ in runs:
@@ -254,18 +295,13 @@ def build_run_record(repo, run_id: str) -> dict:
                 "severity": _payload(e).get("severity"),
                 "action": _payload(e).get("action"),
                 "reason": _payload(e).get("reason"),
-                "phase": e.get("phase"),
-                "round": e.get("round"),
+                **_context_fields(starts, e.get("span")),
             }
             for e in events
             if e.get("type") == "triage.decision"
         ],
         "review_counts": [
-            {
-                "phase": e.get("phase"),
-                "round": e.get("round"),
-                "n": _count(_payload(e).get("findings")),
-            }
+            {**_context_fields(starts, e.get("span")), "n": _count(_payload(e).get("findings"))}
             for e in events
             if e.get("type") == "codex.review" and e.get("kind") == "end"
         ],
@@ -452,3 +488,169 @@ def export_run(repo, run_id: str) -> str:
         _warn(f"Ledger-Export von {run_id} fehlgeschlagen: {reason}")
     _record_event(repo, run_id, {"outcome": outcome, "pushed": pushed, "reason": reason})
     return outcome
+
+
+# --- kpis (W3) -------------------------------------------------------------------
+
+CANDIDATE_RULES = ("escalated", "review_rounds", "gate_iterations", "circuit_breakers", "cost_usd")
+
+
+def _read_ledger_records(ledger: Path) -> list:
+    """Every ``runs/*/*/run-record.json`` parsed; an unreadable file yields None."""
+    records = []
+    for path in sorted(ledger.glob("runs/*/*/run-record.json")):
+        try:
+            records.append(json.loads(path.read_text(encoding="utf-8")))
+        except (ValueError, OSError):  # UnicodeDecodeError is a ValueError
+            records.append(None)
+    return records
+
+
+def _numbers(values) -> list:
+    return [v for v in values if _is_number(v)]
+
+
+def _median(values):
+    return statistics.median(values) if values else None
+
+
+def _dict(value) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value) -> list:
+    return value if isinstance(value, list) else []
+
+
+def _lane_iterations(run: dict) -> list:
+    return _numbers(_dict(lane).get("gate_iterations") for lane in _dict(run.get("lanes")).values())
+
+
+def _share(count: int, total: int):
+    return count / total if total else None
+
+
+def _metrics(runs: list[dict]) -> dict:
+    n = len(runs)
+    phases = [r.get("phase") for r in runs]
+    review_rounds = _numbers(r.get("review_rounds") for r in runs)
+    fix_cycles = _numbers(r.get("fix_cycles") for r in runs)
+    gate_iterations = [sum(it) for it in map(_lane_iterations, runs) if it]
+    costs = _numbers(r.get("cost_usd") for r in runs)
+    circuit_breakers = _numbers(r.get("circuit_breakers") for r in runs)
+    agent_costs: dict = {}
+    for run in runs:
+        for entry in map(_dict, _list(run.get("agents"))):
+            agent, cost = entry.get("agent"), entry.get("cost_usd")
+            if isinstance(agent, str) and _is_number(cost):
+                agent_costs[agent] = agent_costs.get(agent, 0) + cost
+    agent_total = sum(agent_costs.values())
+    by_severity: dict = {}
+    by_action: dict = {}
+    for run in runs:
+        for finding in map(_dict, _list(run.get("findings"))):
+            for counts, key in ((by_severity, "severity"), (by_action, "action")):
+                if isinstance(finding.get(key), str):
+                    counts[finding[key]] = counts.get(finding[key], 0) + 1
+    escalated = sum(
+        1 for r in runs if r.get("phase") == "escalated" or r.get("escalation_reason") is not None
+    )
+    return {
+        "runs": n,
+        "phase_shares": {
+            "done": _share(phases.count("done"), n),
+            "escalated": _share(phases.count("escalated"), n),
+            "other": _share(n - phases.count("done") - phases.count("escalated"), n),
+        },
+        "escalation_share": _share(escalated, n),
+        "review_rounds": {
+            "median": _median(review_rounds),
+            "max": max(review_rounds, default=None),
+        },
+        "fix_cycles": {"median": _median(fix_cycles), "max": max(fix_cycles, default=None)},
+        "gate_iterations": {
+            "median": _median(gate_iterations),
+            "max": max(gate_iterations, default=None),
+        },
+        "duration_s": {"median": _median(_numbers(r.get("duration_s") for r in runs))},
+        "cost_usd": {"sum": sum(costs) if costs else None, "median": _median(costs)},
+        "agent_cost_shares": {
+            agent: cost / agent_total if agent_total else None
+            for agent, cost in agent_costs.items()
+        },
+        "circuit_breakers": sum(circuit_breakers) if circuit_breakers else None,
+        "approvals": {"median": _median(_numbers(r.get("approvals") for r in runs))},
+        "findings_by_severity": by_severity,
+        "findings_by_action": by_action,
+    }
+
+
+def _version_key(version) -> tuple:
+    if isinstance(version, str) and all(p.isdigit() for p in version.split(".")):
+        return (0, tuple(int(p) for p in version.split(".")))
+    return (1, str(version)) if version is not None else (2,)
+
+
+def _rules(run: dict, cost_median) -> list[str]:
+    cost = run.get("cost_usd")
+    fired = {
+        "escalated": run.get("phase") == "escalated",
+        "review_rounds": _is_number(run.get("review_rounds")) and run["review_rounds"] >= 4,
+        "gate_iterations": any(n >= 5 for n in _lane_iterations(run)),
+        "circuit_breakers": _is_number(run.get("circuit_breakers"))
+        and run["circuit_breakers"] > 0,
+        "cost_usd": cost_median is not None and _is_number(cost) and cost > 1.5 * cost_median,
+    }
+    return [rule for rule in CANDIDATE_RULES if fired[rule]]
+
+
+def compute_kpis(records, since=None, repo_slug=None) -> dict:
+    """KPIs per ``adw_version`` plus total and eval candidates over the given run
+    records (W3). Records that are no object or not ``schema_version`` 1 count as
+    ``skipped``; the filters apply before grouping, total and candidates."""
+    valid = [
+        r for r in records
+        if isinstance(r, dict)
+        and type(r.get("schema_version")) is int
+        and r["schema_version"] == SCHEMA_VERSION
+    ]
+    skipped = len(records) - len(valid)
+    runs = valid
+    if since is not None:
+        cutoff = datetime.now(UTC) - timedelta(days=since)
+        runs = [r for r in runs if (ts := _parse_ts(r.get("started_at"))) and ts >= cutoff]
+    if repo_slug is not None:
+        runs = [r for r in runs if r.get("repo_slug") == repo_slug]
+
+    groups: dict = {}
+    for run in runs:
+        version = run.get("adw_version")
+        hashable = isinstance(version, str | int | float)
+        groups.setdefault(version if hashable else None, []).append(run)
+    cost_median = _median(_numbers(r.get("cost_usd") for r in runs))
+    candidates = [(run, rules) for run in runs if (rules := _rules(run, cost_median))]
+    far_future = datetime.max.replace(tzinfo=UTC)
+
+    def order(candidate: tuple) -> tuple:
+        run = candidate[0]
+        ts = _parse_ts(run.get("started_at"))
+        return (ts is None, ts or far_future, str(run.get("run_id")))
+
+    return {
+        "groups": [
+            {"adw_version": version, **_metrics(groups[version])}
+            for version in sorted(groups, key=_version_key)
+        ],
+        "total": _metrics(runs),
+        "candidates": [
+            {
+                "run_id": run.get("run_id"),
+                "repo_slug": run.get("repo_slug"),
+                "adw_version": run.get("adw_version"),
+                "rules": rules,
+                "issue_title": run.get("issue_title"),
+            }
+            for run, rules in sorted(candidates, key=order)
+        ],
+        "skipped": skipped,
+    }

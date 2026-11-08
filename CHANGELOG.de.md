@@ -13,6 +13,18 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.34.0] — Unreleased
+
+### Hinzugefügt
+- **`adw kpis` — Kennzahlen über alle Läufe aus dem Ledger (W3).** Zahlen über Läufe hinweg gab es nur per Hand-Skript; ADW-Änderungen (Prompts, Effort, Grenzen, Schlüssel) waren nicht messbar.
+  - `adw kpis [--since <tage>] [--repo-slug <slug>] [--json]` liest alle `runs/*/*/run-record.json` in `$ADW_LEDGER` (kein Fallback auf Run-Ordner) und gruppiert nach `adw_version`, dazu eine Gesamtzeile: Anzahl Läufe, Anteil `done`/`escalated`/sonstige, Eskalationsanteil, Median/Maximum von Review-Runden, Fix-Zyklen und Gate-Iterationen, Median-Dauer, Kosten-Summe/-Median, Kostenanteil je Agent, Circuit-Breaker, Median Approvals, Findings je Severity und je Action. Fehlende Werte sind `null`, nie eine erfundene `0`.
+  - **Eval-Kandidaten** nach festen Regeln: `escalated`, `review_rounds` ≥ 4, `gate_iterations` einer einzelnen Lane ≥ 5, `circuit_breakers` > 0, `cost_usd` über dem 1,5-fachen Median der betrachteten Läufe.
+  - Schlichte Texttabelle oder mit `--json` ein Objekt `{groups, total, candidates, skipped}`. Kaputte Records und unbekanntes `schema_version` werden übersprungen und gezählt; kein Ledger → Exit 1. Nur lesend, 0 Tokens, keine neue Dependency.
+
+### Behoben
+- **`issue_title` im Lauf-Protokoll war immer die ADW-Kopfzeile** (`Issue (ADW-generiert …)`). Jetzt ist es die erste Überschrift nach dieser Kopfzeile (Fallback: erste nicht-leere Zeile).
+- **`phase` und `round` von `findings` und `review_counts` waren immer `null`.** Sie stammen jetzt aus der Span-Hierarchie (nächste `round`-Spanne → `round`, neues Feld `loop`; nächste `phase`-Spanne → `phase`). `schema_version` bleibt 1; vorhandene Läufe per `adw ledger export --repo .` neu exportieren, um sie zu korrigieren.
+
 ## [0.33.0] — 2026-11-08
 
 ### Hinzugefügt

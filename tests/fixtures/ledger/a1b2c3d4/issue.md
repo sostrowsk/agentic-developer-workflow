@@ -1,3 +1,4 @@
+# Issue (ADW-generiert aus dem Run-State — nicht manuell editieren)
 
 # W99: Beispiel-Issue für das Ledger
 

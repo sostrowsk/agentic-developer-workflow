@@ -7,6 +7,7 @@ Exit codes: 0 = done, 2 = awaiting_approval (plan-approval pause),
 import contextlib
 import fcntl
 import json
+import os
 import subprocess
 import time
 from importlib.metadata import PackageNotFoundError, version
@@ -702,6 +703,101 @@ def ledger_export(
             typer.echo(f"{rid}: {outcome}")
     if "failed" in outcomes:
         raise typer.Exit(1)
+
+
+# --- `adw kpis`: Kennzahlen über alle Läufe im Ledger (W3) --------------------
+
+_KPI_COLUMNS = (
+    "Version", "Läufe", "done/esc/sonst", "Eskal.", "Runden med/max", "Fix med/max",
+    "Gate med/max", "Dauer med", "Kosten sum/med", "CB", "Appr. med",
+)
+
+
+def _kpi_num(value) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.2f}".rstrip("0").rstrip(".") if isinstance(value, float) else str(value)
+
+
+def _kpi_pct(value) -> str:
+    return "-" if value is None else f"{value * 100:.0f}%"
+
+
+def _kpi_row(label: str, m: dict) -> list[str]:
+    shares = m["phase_shares"]
+    return [
+        label,
+        str(m["runs"]),
+        "/".join(_kpi_pct(shares[k]) for k in ("done", "escalated", "other")),
+        _kpi_pct(m["escalation_share"]),
+        *(
+            f"{_kpi_num(m[k]['median'])}/{_kpi_num(m[k]['max'])}"
+            for k in ("review_rounds", "fix_cycles", "gate_iterations")
+        ),
+        _kpi_num(m["duration_s"]["median"]),
+        f"{_kpi_num(m['cost_usd']['sum'])}/{_kpi_num(m['cost_usd']['median'])}",
+        _kpi_num(m["circuit_breakers"]),
+        _kpi_num(m["approvals"]["median"]),
+    ]
+
+
+def _kpi_pairs(values: dict, fmt) -> str:
+    return " ".join(f"{k}={fmt(values[k])}" for k in sorted(values)) or "-"
+
+
+def _format_kpis(result: dict) -> str:
+    """Plain text from the compute_kpis result — formatting only, nothing recomputed."""
+    labelled = [(_kpi_num(g["adw_version"]), g) for g in result["groups"]]
+    labelled.append(("gesamt", result["total"]))
+    rows = [list(_KPI_COLUMNS)] + [_kpi_row(label, m) for label, m in labelled]
+    widths = [max(len(row[i]) for row in rows) for i in range(len(_KPI_COLUMNS))]
+    lines = [
+        "  ".join(cell.ljust(w) for cell, w in zip(row, widths, strict=True)).rstrip()
+        for row in rows
+    ]
+    lines.append("")
+    for label, m in labelled:
+        lines.append(
+            f"{label}: Kosten-Anteile {_kpi_pairs(m['agent_cost_shares'], _kpi_pct)}"
+            f" | Severity {_kpi_pairs(m['findings_by_severity'], str)}"
+            f" | Action {_kpi_pairs(m['findings_by_action'], str)}"
+        )
+    lines.append("")
+    lines.append(f"Kandidaten ({len(result['candidates'])}):")
+    for c in result["candidates"]:
+        lines.append(
+            f"  {c['run_id']}  {_kpi_num(c['repo_slug'])}  {_kpi_num(c['adw_version'])}"
+            f"  {','.join(c['rules'])}  {_kpi_num(c['issue_title'])}"
+        )
+    lines.append(f"{result['skipped']} übersprungen")
+    return "\n".join(lines)
+
+
+@app.command("kpis")
+def kpis(
+    since: Annotated[
+        int | None, typer.Option("--since", help="Nur Läufe der letzten N Tage (started_at)")
+    ] = None,
+    repo_slug: Annotated[
+        str | None, typer.Option("--repo-slug", help="Nur Läufe dieses Repos (z. B. acme/widget)")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Ergebnis als ein JSON-Objekt")] = False,
+) -> None:
+    """Kennzahlen je ADW-Version und auffällige Läufe aus dem Ledger (nur lesend)."""
+    if since is not None and since < 0:
+        typer.echo("Fehler: --since muss mindestens 0 sein.", err=True)
+        raise typer.Exit(2)
+    path = Path(os.environ.get("ADW_LEDGER", ledger._DEFAULT_LEDGER)).expanduser()
+    try:
+        ledger_path = ledger._ledger_path()
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        raise _fail(f"Ledger {path} nicht lesbar: {exc}") from None
+    if ledger_path is None:
+        raise _fail(f"kein Ledger unter {path} (Git-Klon via ADW_LEDGER erwartet)")
+    result = ledger.compute_kpis(
+        ledger._read_ledger_records(ledger_path), since=since, repo_slug=repo_slug
+    )
+    typer.echo(json.dumps(result, ensure_ascii=False) if as_json else _format_kpis(result))
 
 
 def _maybe_auto_prune(repo: Path, config: AdwConfig, state: RunState) -> None:

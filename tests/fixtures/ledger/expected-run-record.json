@@ -47,6 +47,7 @@
     {
       "action": "fix",
       "finding_key": "spec.md|Spec lässt Exit-Pfad offen",
+      "loop": "authoring",
       "phase": "spec",
       "reason": "berechtigt",
       "round": 1,
@@ -55,6 +56,7 @@
     {
       "action": "defer",
       "finding_key": "spec.md|AC 3 nicht testbar",
+      "loop": "authoring",
       "phase": "spec",
       "reason": "Beobachtung",
       "round": 1,
@@ -63,6 +65,7 @@
     {
       "action": "fix",
       "finding_key": "x.py|Null-Check fehlt",
+      "loop": "codex_review",
       "phase": "codex_review",
       "reason": "echter Fehler",
       "round": 1,
@@ -88,16 +91,19 @@
   "repo_slug": "acme/widget",
   "review_counts": [
     {
+      "loop": "authoring",
       "n": 2,
       "phase": "spec",
       "round": 1
     },
     {
+      "loop": "codex_review",
       "n": 1,
       "phase": "codex_review",
       "round": 1
     },
     {
+      "loop": "codex_review",
       "n": 0,
       "phase": "codex_review",
       "round": 2

@@ -366,6 +366,8 @@ adw status  [RUN_ID] [--repo PFAD]
 adw gui     [--repo PFAD]... [--host 127.0.0.1] [--port 8765] [--open] [--i-know]
 adw runs list  [--repo PFAD]
 adw runs prune [--repo PFAD] [--keep N] [--older-than TAGE] [--gzip]
+adw ledger export [RUN_ID] [--repo PFAD]
+adw kpis   [--since TAGE] [--repo-slug SLUG] [--json]
 ```
 
 `--repo` ist überall standardmäßig das aktuelle Verzeichnis.
@@ -419,6 +421,11 @@ Siehe §11. `--repo` muss die **Wurzel** eines Git-Arbeitsbaums sein.
 ### `adw ledger export [RUN_ID]`
 
 Exportiert einen oder alle Läufe von `--repo` nachträglich ins Ledger, siehe §11.1.
+
+### `adw kpis`
+
+Kennzahlen je ADW-Version und Eval-Kandidaten über alle Läufe im Ledger
+(nur lesend, 0 Tokens), siehe §11.1.
 
 ### Exit-Codes
 
@@ -646,6 +653,50 @@ spätere Auswertungen.
 - **Nachtrag:** `adw ledger export [RUN_ID] --repo <pfad>` exportiert einen oder alle
   Läufe (in Startreihenfolge), je Lauf eine Zeile `<run_id>: <ergebnis>`; Exit 1,
   wenn einer fehlschlägt.
+- **Wissenswerte Felder im Protokoll:** `issue_title` ist die erste Überschrift von
+  `issue.md` nach der ADW-Kopfzeile `# Issue (ADW-generiert …)` (Fallback: erste
+  nicht-leere Zeile). Jedes `findings[]`-Element (`finding_key, severity, action,
+  reason, phase, round, loop`) und jedes `review_counts[]`-Element (`phase, round,
+  loop, n`) erhält `phase`/`round`/`loop` aus der Span-Hierarchie: Die nächste
+  umschließende `round`-Spanne liefert `round = payload.n` und `loop = payload.loop`
+  (`authoring`, `codex_review`, …), die nächste `phase`-Spanne `phase = payload.name`;
+  ohne solchen Vorfahren ist der Wert `null`. Vor 0.34.0 exportierte Records tragen
+  die falschen Werte — per `adw ledger export --repo .` neu exportieren.
+
+#### `adw kpis`
+
+`adw kpis [--since <tage>] [--repo-slug <slug>] [--json]` liest alle
+`runs/*/*/run-record.json` im Ledger (gleiche Auflösung von `ADW_LEDGER`, kein
+Fallback auf Run-Ordner) und gibt Kennzahlen je `adw_version` aus, dazu eine
+Gesamtzeile. Das Kommando schreibt nichts und ruft kein Modell auf.
+
+- **Filter:** `--since N` behält Läufe mit `started_at` ≥ jetzt − N Tage (Läufe ohne
+  lesbares `started_at` fallen heraus; negatives N wird abgelehnt); `--repo-slug`
+  behält Läufe mit exakt passendem `repo_slug` (`acme/widget`). Die Filter wirken vor
+  Gruppierung, Gesamtwerten und Kandidatenauswahl, auch vor dem Kosten-Median.
+- **Kennzahlen** (JSON-Schlüssel): `runs`; `phase_shares` `{done, escalated, other}`;
+  `escalation_share` (`phase == "escalated"` oder ein `escalation_reason`);
+  `review_rounds`, `fix_cycles`, `gate_iterations` (je Lauf über die Lanes summiert)
+  als `{median, max}`; `duration_s` `{median}`; `cost_usd` `{sum, median}`;
+  `agent_cost_shares` `{<agent>: anteil}`; `circuit_breakers` (Summe); `approvals`
+  `{median}`; `findings_by_severity`, `findings_by_action`. Anteile sind Brüche
+  0..1; nicht-numerische oder fehlende Werte werden ignoriert, bleibt keiner, ist die
+  Kennzahl `null` — nie eine erfundene `0`. Gruppen sind nach Version sortiert
+  (numerisch je Punkt-Komponente, dann übrige Versionen, `null` zuletzt).
+- **Eval-Kandidaten** — ein Lauf erscheint einmal mit allen Regeln, die er auslöst:
+  `escalated` (`phase == "escalated"`), `review_rounds` (≥ 4), `gate_iterations`
+  (eine einzelne Lane ≥ 5), `circuit_breakers` (> 0), `cost_usd` (> 1,5 × Median der
+  Kosten der betrachteten Läufe). Felder: `run_id`, `repo_slug`, `adw_version`,
+  `rules`, `issue_title`; sortiert nach `started_at`, dann `run_id`.
+- **Ausgabe:** schlichte Texttabelle (eine Zeile je Version plus `gesamt`, `-` für
+  `null`, Anteile in Prozent), die Aufschlüsselung je Agent und Findings, die
+  Kandidatenliste und `<n> übersprungen`. Mit `--json` genau ein Objekt
+  `{"groups": [...], "total": {...}, "candidates": [...], "skipped": n}`
+  (ungerundete Werte).
+- **Fehler:** kein Ledger (Pfad fehlt, kein `.git` oder die Git-Probe scheitert) →
+  Meldung auf stderr, Exit 1. Dateien mit kaputtem JSON, ohne JSON-Objekt oder mit
+  `schema_version` ungleich 1 werden übersprungen und in `skipped` gezählt; der
+  Exit-Code bleibt 0.
 
 > **Das Ledger muss privat bleiben.** Es enthält Issues, Prompts, Event-Logs und
 > Diffs ungeschwärzt.

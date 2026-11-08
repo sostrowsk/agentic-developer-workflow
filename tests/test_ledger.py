@@ -110,6 +110,44 @@ def test_build_run_record_matches_golden_file(repo):
     assert ledger_mod.build_run_record(repo, RUN_ID) == GOLDEN
 
 
+def test_findings_and_review_counts_without_round_or_phase_ancestors_are_null(repo):
+    """W3 A0: phase/round/loop come only from the span hierarchy — a decision on
+    the run span, a review whose parent has no start event and a cyclic parent
+    chain yield null (no hang), even with top-level phase/round set."""
+    run_dir = install_fixture_run(repo)
+    run_span = "5b1c2e7a90d34f1e8a6b2c4d1e0f9a87"
+    top = {"phase": "codex_review", "lane": None, "round": 9}
+    extra = [
+        {"type": "lane", "kind": "start", "span": "c1", "parent": "c2", "payload": {}},
+        {"type": "lane", "kind": "start", "span": "c2", "parent": "c1", "payload": {}},
+        {"type": "triage.decision", "kind": "point", "span": run_span, "parent": None,
+         "payload": {"finding_key": "a|run", "severity": "P2", "action": "fix", "reason": "r"}},
+        {"type": "triage.decision", "kind": "point", "span": "c1", "parent": "c2",
+         "payload": {"finding_key": "b|cycle", "severity": "P2", "action": "fix", "reason": "r"}},
+        {"type": "codex.review", "kind": "start", "span": "v1", "parent": "missing", "payload": {}},
+        {"type": "codex.review", "kind": "end", "span": "v1", "parent": "missing",
+         "payload": {"findings": []}},
+        {"type": "codex.review", "kind": "start", "span": "v2", "parent": "c2", "payload": {}},
+        {"type": "codex.review", "kind": "end", "span": "v2", "parent": "c2",
+         "payload": {"findings": [{}]}},
+    ]
+    with (run_dir / "events.jsonl").open("a", encoding="utf-8") as fh:
+        for i, event in enumerate(extra, 100):
+            line = {"seq": i, "ts": "2026-09-15T09:29:30.000Z", **top, **event}
+            fh.write(json.dumps(line) + "\n")
+
+    record = ledger_mod.build_run_record(repo, RUN_ID)
+
+    unknown = {"phase": None, "round": None, "loop": None}
+    assert record["findings"][:3] == GOLDEN["findings"]
+    assert record["findings"][3:] == [
+        {"finding_key": "a|run", "severity": "P2", "action": "fix", "reason": "r", **unknown},
+        {"finding_key": "b|cycle", "severity": "P2", "action": "fix", "reason": "r", **unknown},
+    ]
+    assert record["review_counts"][:3] == GOLDEN["review_counts"]
+    assert record["review_counts"][3:] == [{**unknown, "n": 0}, {**unknown, "n": 1}]
+
+
 def test_build_run_record_tolerates_missing_files_and_gzip_log(repo):
     """AC 2: no escalation.md/followups.md → null/0; the same log as .gz only
     yields the identical record."""
