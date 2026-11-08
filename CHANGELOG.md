@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [0.36.1] — Unreleased
+## [0.36.1] — 2026-11-08
 
 ### Fixed
 - **The live view stays live — and the GUI holds up (R3).**
@@ -1183,6 +1183,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.36.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.36.0...v0.36.1
 [0.36.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.33.0...v0.34.0
