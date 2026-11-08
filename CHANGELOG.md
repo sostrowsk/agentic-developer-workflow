@@ -12,6 +12,22 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.32.0] — Unreleased
+
+### Added
+- **Every agent run has a turn and time limit (W1).** Claude agents ran without `max_turns` and without a time limit; a hanging SDK stream blocked the run indefinitely, while gates, Codex and CI have hard limits.
+  - `AgentSpec` has the required fields `max_turns` and `timeout_s` (no defaults); every `REGISTRY` entry sets both: `build_agent` 400 / 3600 s, `final_reviewer` 250 / 1200 s, `spec_agent` and `plan_agent` 150 / 1200 s, `spec_synthesis` and `plan_synthesis` 100 / 1200 s, `e2e_triage` and `log_analyst` 50 / 600 s (about 2.5–3× the measured maximum). Constants, not config fields.
+  - `max_turns` goes to `ClaudeAgentOptions`; `timeout_s` bounds collecting the stream (`anyio.fail_after`).
+- **A limit hit names its cause.** A run that reaches a limit ends with `AgentRunError` — `<agent>: Zeitlimit <timeout_s> s überschritten` or `<agent>: max_turns <n> erreicht` — not with an escalation: the run stays at its checkpoint, the already checkpointed session ID is continued by `adw resume`. The `agent.run` end event carries the cause in `error` and keeps the session ID, usage and cost collected so far.
+- **Limits in the trace.** The `agent.run` start payload contains `max_turns` and `timeout_s` (real and mock runner).
+
+### Fixed
+- **Three error kinds ended as a raw traceback, without resume hint (C26).**
+  - **SDK exceptions from `query()`** (e.g. `ProcessError`, `CLIConnectionError`) become an `AgentRunError` with type and text of the cause; the CLI prints the resume hint and exits 1. `KeyboardInterrupt`/`SystemExit` are untouched.
+  - **`CodexError` in the Codex code review** (e.g. `codex exec: Timeout nach 900s`) becomes an `AgentRunError`: resume hint, exit 1, the run stays in `codex_review` instead of escalating. The authoring phases keep their handling.
+  - **`subprocess.TimeoutExpired` and `OSError` in the orchestrator's `context._git`** take the same path as a non-zero exit: escalation with `escalation.md` naming the git command and the cause.
+  - Adjusted tests: `test_session_id_reported_via_callback_before_a_mid_run_abort` expects `AgentRunError` instead of the raw `RuntimeError`; the two tests pinning the exact `agent.run` start fields include `max_turns` and `timeout_s`.
+
 ## [0.31.3] — 2026-11-08
 
 ### Fixed

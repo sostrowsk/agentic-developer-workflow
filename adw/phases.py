@@ -20,8 +20,9 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from adw import ci, github
-from adw.agents import REGISTRY
+from adw.agents import REGISTRY, AgentRunError
 from adw.authoring import run_spec_and_plan
+from adw.codex import CodexError
 from adw.config import Gate
 from adw.context import (
     AwaitingApproval,
@@ -351,6 +352,9 @@ def run_codex_review_phase(ctx: RunContext) -> None:
                 )
             except (FindingsParseError, ValidationError) as exc:
                 raise escalate(ctx, f"Codex-Code-Review unlesbar: {exc}") from exc
+            except CodexError as exc:
+                # Transient (e.g. Codex timeout): stay at the checkpoint, resumable.
+                raise AgentRunError(f"Codex-Code-Review: {exc}") from exc
             _round.end_payload["outcome"] = review.verdict
             if review.verdict == "ok":
                 break

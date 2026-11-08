@@ -142,6 +142,18 @@ class AgentRunError(Exception):
     """The agent run ended with an error result."""
 
 
+def _timeout_message(agent: str, timeout_s: int) -> str:
+    return f"{agent}: Zeitlimit {timeout_s} s überschritten"
+
+
+def _max_turns_message(agent: str, max_turns: int | None) -> str:
+    return f"{agent}: max_turns {max_turns} erreicht"
+
+
+def _exception_message(exc: Exception) -> str:
+    return f"{type(exc).__name__}: {exc}"
+
+
 @dataclass(frozen=True)
 class AgentSpec:
     name: str
@@ -153,6 +165,9 @@ class AgentSpec:
     tools: tuple[str, ...]
     allowed_tools: tuple[str, ...]
     system_append: str
+    # Hard per-run limits (no defaults: every agent states them explicitly).
+    max_turns: int
+    timeout_s: int
     permission_mode: str = "default"
     sandbox_bash: bool = False
 
@@ -193,6 +208,8 @@ def agent_run_start_payload(agent: AgentSpec, task: str, cwd, resume: str | None
         "resume_session": resume,
         "prompt": task,
         "system_append": agent.system_append,
+        "max_turns": agent.max_turns,
+        "timeout_s": agent.timeout_s,
     }
 
 
@@ -216,6 +233,8 @@ REGISTRY: dict[str, AgentSpec] = {
     "spec_agent": AgentSpec(
         name="spec_agent",
         model=OPUS,
+        max_turns=150,
+        timeout_s=1200,
         tools=WRITER_TOOLS,
         allowed_tools=(*SCOPED_READ_RULES, *SPEC_WRITE_RULES),
         system_append=(
@@ -228,6 +247,8 @@ REGISTRY: dict[str, AgentSpec] = {
     "plan_agent": AgentSpec(
         name="plan_agent",
         model=OPUS,
+        max_turns=150,
+        timeout_s=1200,
         tools=WRITER_TOOLS,
         allowed_tools=(*SCOPED_READ_RULES, *PLAN_WRITE_RULES),
         system_append=(
@@ -241,6 +262,8 @@ REGISTRY: dict[str, AgentSpec] = {
     "spec_synthesis": AgentSpec(
         name="spec_synthesis",
         model=FABLE,
+        max_turns=100,
+        timeout_s=1200,
         tools=WRITER_TOOLS,
         allowed_tools=(*SCOPED_READ_RULES, *SPEC_WRITE_RULES, *SPEC_SUMMARY_WRITE_RULES),
         system_append=(
@@ -257,6 +280,8 @@ REGISTRY: dict[str, AgentSpec] = {
     "plan_synthesis": AgentSpec(
         name="plan_synthesis",
         model=FABLE,
+        max_turns=100,
+        timeout_s=1200,
         tools=WRITER_TOOLS,
         allowed_tools=(*SCOPED_READ_RULES, *PLAN_WRITE_RULES, *PLAN_SUMMARY_WRITE_RULES),
         system_append=(
@@ -274,6 +299,8 @@ REGISTRY: dict[str, AgentSpec] = {
     "build_agent": AgentSpec(
         name="build_agent",
         model=OPUS,
+        max_turns=400,
+        timeout_s=3600,
         tools=BUILDER_TOOLS,
         # Schreiben nur worktree-relativ (./**) statt pauschal; Bash läuft
         # sandboxed (sandbox_bash) — kein Ausbruch in Haupt-Checkout/Lanes.
@@ -291,6 +318,8 @@ REGISTRY: dict[str, AgentSpec] = {
     "e2e_triage": AgentSpec(
         name="e2e_triage",
         model=SONNET,
+        max_turns=50,
+        timeout_s=600,
         tools=READ_ONLY_TOOLS,
         allowed_tools=SCOPED_READ_RULES,
         system_append=(
@@ -303,6 +332,8 @@ REGISTRY: dict[str, AgentSpec] = {
     "log_analyst": AgentSpec(
         name="log_analyst",
         model=SONNET,
+        max_turns=50,
+        timeout_s=600,
         tools=READ_ONLY_TOOLS,
         allowed_tools=SCOPED_READ_RULES,
         system_append=(
@@ -315,6 +346,8 @@ REGISTRY: dict[str, AgentSpec] = {
     "final_reviewer": AgentSpec(
         name="final_reviewer",
         model=FABLE,
+        max_turns=250,
+        timeout_s=1200,
         tools=READ_ONLY_TOOLS,
         allowed_tools=SCOPED_READ_RULES,
         system_append=(
@@ -519,6 +552,7 @@ class SdkAgentRunner:
             tools=list(agent.tools),
             allowed_tools=list(agent.allowed_tools),
             permission_mode=agent.permission_mode,
+            max_turns=agent.max_turns,
             env=_env_overrides(),
             # Isolation: keine repo-kontrollierten Settings/Hooks/MCP-Server —
             # das Ziel-Repo darf die Agent-Permissions nicht aufweichen.
@@ -555,12 +589,14 @@ class SdkAgentRunner:
         # without a handle (an uninstrumented caller) collects into a detached
         # handle and mirrors to a NoOp — no orphan span or stream events.
         if span is not None:
-            return self._collect_into(task, options, emitter, span, on_session_id)
+            return self._collect_into(agent, task, options, emitter, span, on_session_id)
         return self._collect_into(
-            task, options, NoOpEmitter(), SpanHandle("detached"), on_session_id
+            agent, task, options, NoOpEmitter(), SpanHandle("detached"), on_session_id
         )
 
-    def _collect_into(self, task, options, emitter, handle, on_session_id=None) -> AgentResult:
+    def _collect_into(
+        self, agent, task, options, emitter, handle, on_session_id=None
+    ) -> AgentResult:
         # Deterministic end-payload BEFORE the run: an unexpected exception
         # unwinding the span still writes a complete end record.
         handle.end_payload = {
@@ -571,7 +607,9 @@ class SdkAgentRunner:
             "is_error": True,
         }
         try:
-            return anyio.run(self._collect, task, options, emitter, handle, on_session_id)
+            return anyio.run(
+                self._collect, agent, task, options, emitter, handle, on_session_id
+            )
         finally:
             # Accumulate the run's cost/tokens even on AgentRunError — the
             # cost was incurred; handle.end_payload is set by _collect before
@@ -585,55 +623,90 @@ class SdkAgentRunner:
 
     @staticmethod
     async def _collect(
-        task: str, options: ClaudeAgentOptions, emitter, handle, on_session_id=None
+        agent: AgentSpec,
+        task: str,
+        options: ClaudeAgentOptions,
+        emitter,
+        handle,
+        on_session_id=None,
     ) -> AgentResult:
         span_id = handle.id
         session_id: str | None = None
         assistant_texts: list[str] = []
         final_text: str | None = None
         is_error = False
+        subtype: str | None = None
         usage_raw: dict | None = None
         cost_usd: float = 0.0
-        async for message in query(prompt=task, options=options):
-            found = getattr(message, "session_id", None)
-            if found is None and isinstance(getattr(message, "data", None), dict):
-                found = message.data.get("session_id")
-            if found:
-                # Checkpoint the session id the FIRST time it appears (idempotent):
-                # a mid-run abort must still leave it in the state so a resume can
-                # reconnect instead of restarting the agent run (F5).
-                if session_id is None and on_session_id is not None:
-                    on_session_id(found)
-                session_id = found
-            msg_usage = getattr(message, "usage", None)
-            if isinstance(msg_usage, dict):
-                usage_raw = msg_usage
-            for block in getattr(message, "content", []) or []:
-                text = getattr(block, "text", None)
-                if text:
-                    assistant_texts.append(text)
-                # Mirroring is read-only — the two lines above still compute the
-                # result exactly as before (AC 4 bit-identity).
-                _mirror_block(emitter, span_id, block)
-            if hasattr(message, "result"):
-                final_text = message.result
-                is_error = bool(getattr(message, "is_error", False))
-                cost = getattr(message, "total_cost_usd", None)
-                if cost is not None:
-                    cost_usd = cost
-                if is_error and not final_text:
-                    # SDK liefert die eigentliche Ursache ggf. strukturiert.
-                    errors = getattr(message, "errors", None)
-                    if errors:
-                        final_text = "; ".join(str(item) for item in errors)
+
+        def end_payload(text: str, error: str | None = None) -> dict:
+            # Built from what was collected so far — an abort keeps the already
+            # reported session id, usage and cost instead of empty defaults.
+            payload = {
+                "session_id": session_id,
+                "result_text": text,
+                "usage": _map_usage(usage_raw),
+                "cost_usd": cost_usd,
+                "is_error": is_error or error is not None,
+            }
+            if error is not None:
+                payload["error"] = error
+            return payload
+
+        try:
+            with anyio.fail_after(agent.timeout_s):
+                async for message in query(prompt=task, options=options):
+                    found = getattr(message, "session_id", None)
+                    if found is None and isinstance(getattr(message, "data", None), dict):
+                        found = message.data.get("session_id")
+                    if found:
+                        # Checkpoint the session id the FIRST time it appears
+                        # (idempotent): a mid-run abort must still leave it in the
+                        # state so a resume can reconnect instead of restarting
+                        # the agent run (F5).
+                        if session_id is None and on_session_id is not None:
+                            on_session_id(found)
+                        session_id = found
+                    msg_usage = getattr(message, "usage", None)
+                    if isinstance(msg_usage, dict):
+                        usage_raw = msg_usage
+                    for block in getattr(message, "content", []) or []:
+                        text = getattr(block, "text", None)
+                        if text:
+                            assistant_texts.append(text)
+                        # Mirroring is read-only — the two lines above still
+                        # compute the result exactly as before (AC 4 bit-identity).
+                        _mirror_block(emitter, span_id, block)
+                    if hasattr(message, "result"):
+                        final_text = message.result
+                        is_error = bool(getattr(message, "is_error", False))
+                        subtype = getattr(message, "subtype", None)
+                        cost = getattr(message, "total_cost_usd", None)
+                        if cost is not None:
+                            cost_usd = cost
+                        if is_error and not final_text:
+                            # SDK liefert die eigentliche Ursache ggf. strukturiert.
+                            errors = getattr(message, "errors", None)
+                            if errors:
+                                final_text = "; ".join(str(item) for item in errors)
+        except AgentRunError:
+            raise
+        except TimeoutError as exc:
+            reason = _timeout_message(agent.name, agent.timeout_s)
+            handle.end_payload = end_payload("\n".join(assistant_texts), reason)
+            raise AgentRunError(reason) from exc
+        except Exception as exc:
+            # C26: SDK failures (ProcessError, CLIConnectionError, …) are transient
+            # and resumable, not a traceback. KeyboardInterrupt/SystemExit pass.
+            reason = _exception_message(exc)
+            handle.end_payload = end_payload("\n".join(assistant_texts), reason)
+            raise AgentRunError(reason) from exc
         text = final_text if final_text else "\n".join(assistant_texts)
-        handle.end_payload = {
-            "session_id": session_id,
-            "result_text": text,
-            "usage": _map_usage(usage_raw),
-            "cost_usd": cost_usd,
-            "is_error": is_error,
-        }
+        if is_error and subtype == "error_max_turns":
+            reason = _max_turns_message(agent.name, options.max_turns)
+            handle.end_payload = end_payload(text, reason)
+            raise AgentRunError(reason)
+        handle.end_payload = end_payload(text)
         if is_error:
             raise AgentRunError(f"Agent-Lauf fehlgeschlagen: {final_text or '(kein Result)'}")
         return AgentResult(text=text, session_id=session_id)

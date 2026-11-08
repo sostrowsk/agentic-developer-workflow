@@ -2416,6 +2416,31 @@ def test_codex_code_review_ok_advances_to_final_review(ctx):
     assert "src_neu.py" in code_calls[0].content_refs
 
 
+@pytest.mark.parametrize("failure", ["timeout", "oserror"])
+def test_git_timeout_in_orchestrator_escalates_with_report(ctx, monkeypatch, failure):
+    """W1/C26: TimeoutExpired/OSError from context._git takes the same path as a
+    non-zero exit — escalation report naming command and cause, no traceback."""
+    import subprocess as sp
+
+    prepare_reviewable(ctx)
+    real_run = sp.run
+
+    def hanging_diff(argv, *args, **kwargs):
+        if isinstance(argv, list) and "--name-only" in argv:
+            if failure == "timeout":
+                raise sp.TimeoutExpired(cmd=argv, timeout=120)
+            raise OSError("git nicht ausführbar")
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr("adw.git.subprocess.run", hanging_diff)
+    with pytest.raises(EscalationError):
+        run_codex_review_phase(ctx)
+    report = (ctx.run_dir / "escalation.md").read_text(encoding="utf-8")
+    assert "git diff --name-only" in report
+    assert ("120" if failure == "timeout" else "git nicht ausführbar") in report
+    assert RunState.load(ctx.repo, ctx.state.run_id).phase == "escalated"
+
+
 def test_codex_code_findings_route_to_lane_and_rereview(ctx):
     prepare_reviewable(ctx)
     ctx.agents.script("build_agent", "gefixt")

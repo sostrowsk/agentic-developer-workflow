@@ -1,8 +1,11 @@
+import dataclasses
 from pathlib import Path
 
+import anyio
 import pytest
 
-from adw.agents import REGISTRY, AgentResult, SdkAgentRunner
+from adw.agents import REGISTRY, AgentResult, AgentRunError, AgentSpec, SdkAgentRunner
+from adw.events import SpanHandle
 from adw.mock import MockAgentRunner
 
 
@@ -93,7 +96,7 @@ def test_session_id_reported_via_callback_before_a_mid_run_abort(monkeypatch, tm
         return stream()
 
     monkeypatch.setattr("adw.agents.query", fake_query)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(AgentRunError, match="RuntimeError.*Verbindung abgebrochen"):
         SdkAgentRunner().run(
             REGISTRY["spec_agent"], "task", cwd=tmp_path, on_session_id=seen.append
         )
@@ -160,6 +163,117 @@ def test_sdk_runner_surfaces_structured_errors_when_result_is_none(monkeypatch, 
     monkeypatch.setattr("adw.agents.query", fake_query)
     with pytest.raises(AgentRunError, match="bubblewrap fehlt"):
         SdkAgentRunner().run(REGISTRY["spec_agent"], "task", cwd=tmp_path)
+
+
+# --- W1: Grenzen je Agent, benannte Ursache ----------------------------------
+
+EXPECTED_LIMITS = {
+    "build_agent": (400, 3600),
+    "final_reviewer": (250, 1200),
+    "spec_agent": (150, 1200),
+    "plan_agent": (150, 1200),
+    "spec_synthesis": (100, 1200),
+    "plan_synthesis": (100, 1200),
+    "e2e_triage": (50, 600),
+    "log_analyst": (50, 600),
+}
+
+
+def test_registry_limits_match_the_decided_values():
+    """A1/E1: every registry agent carries its max_turns and timeout_s explicitly."""
+    assert {
+        name: (spec.max_turns, spec.timeout_s) for name, spec in REGISTRY.items()
+    } == EXPECTED_LIMITS
+
+
+@pytest.mark.parametrize("missing", ["max_turns", "timeout_s"])
+def test_agent_spec_requires_both_limits(missing):
+    """A1: no defaults — a spec without a limit is a TypeError."""
+    fields = {
+        "name": "x", "model": "opus", "tools": (), "allowed_tools": (),
+        "system_append": "", "max_turns": 5, "timeout_s": 60,
+    }
+    AgentSpec(**fields)  # complete spec constructs
+    del fields[missing]
+    with pytest.raises(TypeError):
+        AgentSpec(**fields)
+
+
+def test_sdk_runner_passes_max_turns_to_the_options(captured_query, tmp_path):
+    spec = REGISTRY["build_agent"]
+    SdkAgentRunner().run(spec, "task", cwd=tmp_path)
+    assert captured_query["options"].max_turns == spec.max_turns
+
+
+def test_hanging_stream_ends_with_timeout_error_after_checkpoint(monkeypatch, tmp_path):
+    """A2/E2: a stream hanging past timeout_s ends as AgentRunError naming the
+    agent and limit; the session id is already checkpointed and the end payload
+    carries the cause plus the data collected so far."""
+    seen: list[str] = []
+
+    def fake_query(*, prompt, options):
+        async def stream():
+            yield FakeInitMessage("sess-haengt")
+            await anyio.sleep(30)
+            yield FakeResultMessage("nie erreicht", "sess-haengt")
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", fake_query)
+    spec = dataclasses.replace(REGISTRY["spec_agent"], timeout_s=1)
+    handle = SpanHandle("t")
+    with pytest.raises(AgentRunError) as exc_info:
+        SdkAgentRunner().run(spec, "task", cwd=tmp_path, span=handle, on_session_id=seen.append)
+    message = str(exc_info.value)
+    assert message == "spec_agent: Zeitlimit 1 s überschritten"
+    assert seen == ["sess-haengt"]
+    assert handle.end_payload["is_error"] is True
+    assert handle.end_payload["error"] == message
+    assert handle.end_payload["session_id"] == "sess-haengt"
+
+
+def test_max_turns_result_names_agent_and_limit(monkeypatch, tmp_path):
+    """A2/E3: an error_max_turns result is a named, resumable AgentRunError."""
+
+    def fake_query(*, prompt, options):
+        async def stream():
+            msg = FakeResultMessage(None, "sess-mt", is_error=True)
+            msg.subtype = "error_max_turns"
+            yield msg
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", fake_query)
+    handle = SpanHandle("t")
+    with pytest.raises(AgentRunError) as exc_info:
+        SdkAgentRunner().run(REGISTRY["plan_agent"], "task", cwd=tmp_path, span=handle)
+    message = str(exc_info.value)
+    assert message == "plan_agent: max_turns 150 erreicht"
+    assert handle.end_payload["is_error"] is True
+    assert handle.end_payload["error"] == message
+    assert handle.end_payload["session_id"] == "sess-mt"
+
+
+def test_sdk_exception_becomes_agent_run_error_with_cause(monkeypatch, tmp_path):
+    """A3/E4: any exception out of query() becomes an AgentRunError carrying
+    type and text of the cause; the end payload names it too."""
+
+    def fake_query(*, prompt, options):
+        async def stream():
+            yield FakeInitMessage("sess-sdk")
+            raise RuntimeError("boom")
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", fake_query)
+    handle = SpanHandle("t")
+    with pytest.raises(AgentRunError) as exc_info:
+        SdkAgentRunner().run(REGISTRY["spec_agent"], "task", cwd=tmp_path, span=handle)
+    message = str(exc_info.value)
+    assert message == "RuntimeError: boom"
+    assert handle.end_payload["is_error"] is True
+    assert handle.end_payload["error"] == message
+    assert handle.end_payload["session_id"] == "sess-sdk"
 
 
 def test_sdk_runner_exposes_only_spec_tools_and_sanitized_env(

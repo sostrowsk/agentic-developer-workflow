@@ -13,6 +13,22 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.32.0] — Unreleased
+
+### Hinzugefügt
+- **Jeder Agent-Lauf hat ein Turn- und Zeitlimit (W1).** Claude-Agenten liefen ohne `max_turns` und ohne Zeitlimit; ein hängender SDK-Stream blockierte den Lauf unbegrenzt, während Gates, Codex und CI harte Grenzen haben.
+  - `AgentSpec` hat die Pflichtfelder `max_turns` und `timeout_s` (ohne Default); jeder `REGISTRY`-Eintrag setzt beide: `build_agent` 400 / 3600 s, `final_reviewer` 250 / 1200 s, `spec_agent` und `plan_agent` 150 / 1200 s, `spec_synthesis` und `plan_synthesis` 100 / 1200 s, `e2e_triage` und `log_analyst` 50 / 600 s (etwa das 2,5–3-fache des gemessenen Maximums). Konstanten, keine Config-Felder.
+  - `max_turns` geht an `ClaudeAgentOptions`; `timeout_s` begrenzt das Einsammeln des Streams (`anyio.fail_after`).
+- **Eine erreichte Grenze nennt ihre Ursache.** Ein Lauf, der eine Grenze erreicht, endet mit `AgentRunError` — `<agent>: Zeitlimit <timeout_s> s überschritten` bzw. `<agent>: max_turns <n> erreicht` — nicht mit einer Eskalation: Der Lauf bleibt am Checkpoint, `adw resume` setzt die bereits gecheckpointete Session fort. Das `agent.run`-End-Event trägt die Ursache in `error` und behält die bis dahin gesammelte Session-ID, Usage und Kosten.
+- **Grenzen im Trace.** Das `agent.run`-Start-Payload enthält `max_turns` und `timeout_s` (echter und Mock-Runner).
+
+### Behoben
+- **Drei Fehlerarten endeten als roher Traceback, ohne Resume-Hinweis (C26).**
+  - **SDK-Ausnahmen aus `query()`** (z. B. `ProcessError`, `CLIConnectionError`) werden zu `AgentRunError` mit Typ und Text der Ursache; die CLI gibt den Resume-Hinweis aus und endet mit Exit 1. `KeyboardInterrupt`/`SystemExit` bleiben unberührt.
+  - **`CodexError` im Codex-Code-Review** (z. B. `codex exec: Timeout nach 900s`) wird zu `AgentRunError`: Resume-Hinweis, Exit 1, der Lauf bleibt in `codex_review`, statt zu eskalieren. Die Authoring-Phasen behalten ihre Behandlung.
+  - **`subprocess.TimeoutExpired` und `OSError` in `context._git` des Orchestrators** nehmen denselben Pfad wie ein Exit ≠ 0: Eskalation mit `escalation.md`, die git-Kommando und Ursache nennt.
+  - Angepasste Tests: `test_session_id_reported_via_callback_before_a_mid_run_abort` erwartet `AgentRunError` statt der rohen `RuntimeError`; die zwei Tests, die die exakten `agent.run`-Startfelder festschreiben, enthalten `max_turns` und `timeout_s`.
+
 ## [0.31.3] — 2026-11-08
 
 ### Behoben

@@ -592,7 +592,86 @@ def test_agent_run_error_stops_cleanly_and_stays_resumable(target_repo, monkeypa
     assert RunState.load(target_repo, state.run_id).phase == "done"
 
 
-# --- B2: Spec-Approval-Stopp (CLI) ------------------------------------------
+def _assert_stopped_resumable(result, target_repo, phase: str) -> None:
+    assert result.exit_code == 1, result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)  # kein Traceback
+    assert "resume" in result.output.lower()
+    state = RunState.find_latest(target_repo)
+    assert state.phase == phase  # am Checkpoint, NICHT escalated
+    assert state.run_id in result.output
+    assert not (state.run_dir(target_repo) / "escalation.md").exists()
+
+
+def test_sdk_exception_in_query_stops_with_resume_hint(target_repo, monkeypatch, tmp_path):
+    """W1/C26: an exception out of the SDK's query() (real runner) ends with the
+    resume hint, exit 1 — no traceback, no escalation."""
+    import adw.cli as cli_mod
+    from adw.agents import SdkAgentRunner
+
+    config_dir = tmp_path / "claude-config"
+    config_dir.mkdir()
+    (config_dir / ".credentials.json").write_text("{}")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
+
+    def fake_query(*, prompt, options):
+        async def stream():
+            raise RuntimeError("CLI-Prozess weg")
+            yield  # pragma: no cover — makes this an async generator
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", fake_query)
+    real = cli_mod._dry_run_runners
+
+    def sdk_build_agent():
+        agents, codex = real()
+        original_run = agents.run
+
+        def run(agent, task, cwd, resume=None, deny_read_paths=None, **kwargs):
+            if agent.name == "build_agent":
+                return SdkAgentRunner().run(agent, task, cwd, resume, deny_read_paths, **kwargs)
+            return original_run(agent, task, cwd, resume, deny_read_paths, **kwargs)
+
+        agents.run = run
+        return agents, codex
+
+    monkeypatch.setattr(cli_mod, "_dry_run_runners", sdk_build_agent)
+    result = runner.invoke(
+        app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--no-approval"]
+    )
+    _assert_stopped_resumable(result, target_repo, "build")
+    assert "RuntimeError: CLI-Prozess weg" in result.output
+
+
+def test_codex_error_in_code_review_stops_with_resume_hint(target_repo, monkeypatch):
+    """W1/C26: a CodexError (e.g. timeout) in the Codex code review is resumable
+    — resume hint, exit 1, phase stays codex_review, no escalation.md."""
+    import adw.cli as cli_mod
+    from adw.codex import CodexError
+
+    real = cli_mod._dry_run_runners
+
+    def codex_times_out_on_code_review():
+        agents, codex = real()
+        original_review = codex.review
+
+        def review(kind, content_refs, cwd, context=None, **kwargs):
+            if kind == "code":
+                raise CodexError("codex exec: Timeout nach 900s")
+            return original_review(kind, content_refs, cwd, context, **kwargs)
+
+        codex.review = review
+        return agents, codex
+
+    monkeypatch.setattr(cli_mod, "_dry_run_runners", codex_times_out_on_code_review)
+    result = runner.invoke(
+        app, ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--no-approval"]
+    )
+    _assert_stopped_resumable(result, target_repo, "codex_review")
+    assert "Timeout nach 900s" in result.output
+
+
+# --- B2: Spec-Approval-Stopp (CLI)------------------------------------------
 
 
 def test_run_with_spec_approval_pauses_after_spec(target_repo):

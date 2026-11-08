@@ -74,7 +74,7 @@ def test_dry_run_emits_closed_agent_run_span_with_start_and_end_payloads(target_
     start = starts[0]
     assert set(start["payload"]) == {
         "agent", "model", "tools", "allowed_tools", "cwd",
-        "resume_session", "prompt", "system_append",
+        "resume_session", "prompt", "system_append", "max_turns", "timeout_s",
     }
     end = next(e for e in ends if e["span"] == start["span"])  # the span is closed
     assert set(end["payload"]) == {"session_id", "result_text", "is_error"}

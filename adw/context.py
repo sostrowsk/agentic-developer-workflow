@@ -5,6 +5,7 @@ import functools
 import hashlib
 import logging
 import shutil
+import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -358,7 +359,10 @@ def _checkpoint_lane_session(ctx: RunContext, lane_state: LaneState, session_id:
 
 def _git(ctx: RunContext, cwd: Path, *args: str) -> str:
     """Git through the orchestrator — env whitelist, repo hooks disabled."""
-    result = run_git(cwd, *args, timeout=120, env=safe_env(ctx.git_env))
+    try:
+        result = run_git(cwd, *args, timeout=120, env=safe_env(ctx.git_env))
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        raise escalate(ctx, f"git {' '.join(args)} in {cwd} fehlgeschlagen: {exc}") from exc
     if result.returncode != 0:
         raise escalate(
             ctx, f"git {' '.join(args)} in {cwd} fehlgeschlagen: {result.stderr.strip()}"
