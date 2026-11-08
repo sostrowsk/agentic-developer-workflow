@@ -905,6 +905,29 @@ def kpis(
     typer.echo(json.dumps(result, ensure_ascii=False) if as_json else _format_kpis(result))
 
 
+@app.command("improve")
+def improve(
+    since: Annotated[
+        int, typer.Option("--since", help="Zeitraum in Tagen (started_at)", min=1)
+    ] = 7,
+    repo_slug: Annotated[
+        str | None, typer.Option("--repo-slug", help="Nur Läufe dieses Repos (z. B. acme/widget)")
+    ] = None,
+    no_brief: Annotated[
+        bool, typer.Option("--no-brief", help="Keinen Brief-Entwurf (kein Agentenaufruf)")
+    ] = False,
+) -> None:
+    """Wöchentlicher Verbesserungsbericht aus dem Ledger, optional mit Brief-Entwurf."""
+    from adw import improve as improve_mod
+
+    try:
+        lines = improve_mod.run_improve(since, repo_slug, no_brief)
+    except improve_mod.ImproveError as exc:
+        raise _fail(str(exc)) from None
+    for line in lines:
+        typer.echo(line)
+
+
 def _maybe_auto_prune(repo: Path, config: AdwConfig, state: RunState) -> None:
     """Automatic deleting-prune after a successful run (D3). Same rules as manual
     deleting pruning; disabled when keep_runs == 0. Fail-open: an error never

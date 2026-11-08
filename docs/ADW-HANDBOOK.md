@@ -365,6 +365,7 @@ adw runs list  [--repo PATH]
 adw runs prune [--repo PATH] [--keep N] [--older-than DAYS] [--gzip]
 adw ledger export [RUN_ID] [--repo PATH]
 adw kpis   [--since DAYS] [--repo-slug SLUG] [--json]
+adw improve [--since DAYS] [--repo-slug SLUG] [--no-brief]
 adw rate     RUN_ID good|bad [--note TEXT] [--repo PATH]
 adw feedback RUN_ID --finding PREFIX valid|noise [--note TEXT] [--repo PATH]
 ```
@@ -724,6 +725,42 @@ nothing and calls no model.
 - **Errors:** no ledger (path missing, no `.git`, or the Git probe fails) → message
   on stderr, exit 1. Files with broken JSON, no JSON object or a `schema_version`
   other than 1 are skipped and counted in `skipped`; the exit code stays 0.
+
+#### `adw improve` — weekly improvement report
+
+`adw improve [--since <days>, default 7] [--repo-slug <slug>] [--no-brief]` reads the
+ledger (same `ADW_LEDGER` resolution, no target repo, no repo lock) and writes a
+report. It holds a non-blocking `flock` on `<ledger>/.improve.lock` (never committed);
+if it is held, or there is no usable ledger → message on stderr, exit 1.
+
+- **Periods:** current = runs with `started_at` in the last `since` days up to now;
+  comparison = the equally long period before it (only its total row is shown).
+  `--repo-slug` filters both periods, all sections and the brief choice.
+- **Report** (pure code, 0 tokens), sections in this order: `## Kennzahlen`
+  (`adw kpis` metrics per version, total, retro causes, ratings, finding feedback;
+  previous-period total), `## Problemgruppen aus Retros` (retro items grouped by
+  `cause`; entries, distinct runs, cost sum; sorted by runs × cost; text fields cut to
+  300 characters), `## Wiederkehrende Findings` (`finding_key`s in ≥ 2 runs, at most
+  20, with severity and `valid`/`noise`), `## Regressionsfall-Kandidaten` (escalated
+  or last rating `bad`), `## Hebel je Gruppe` (`prompt`/`model` → hill climbing W7,
+  `orchestrator`/`gate` → brief for an ADW run, `context_missing`/`target_repo` →
+  expertise W9, `issue_quality` → sharpen the brief template). Fewer than 3 runs →
+  only the metrics and "Zu wenige Läufe für eine Auswertung", no brief.
+- **Brief draft:** without `--no-brief`, with ≥ 3 runs and a group with cause
+  `orchestrator`, `gate` or `prompt`, the read-only `improve_agent` (cwd = ADW source
+  tree) drafts one brief for the top group after `docs/briefs/README.md`. Without all
+  headings (Ausgangslage, Aufgabe, Vorentscheidungen, Deferred, Akzeptanzkriterien)
+  or on any error the draft is dropped and the report notes
+  "Brief-Entwurf verworfen: <reason>". **A human decides** whether the brief becomes
+  an ADW run; ADW starts nothing.
+- **Files:** `reports/<YYYY>-W<WW>.md` and `reports/<YYYY>-W<WW>-brief.md` (ISO week of
+  the call); a second call in the same week overwrites them, and a call without a
+  valid brief removes that week's brief. One commit `improve <YYYY>-W<WW>`, push with
+  timeout, fail-open (warning, exit 0). stdout: report path plus one count per section.
+- **Weekly timer:** ADW installs nothing. Copy `examples/systemd/adw-improve.service`
+  and `adw-improve.timer` to `~/.config/systemd/user/`, replace `<ADW-Pfad>` (and
+  optionally set `ADW_LEDGER`), then run `systemctl --user daemon-reload` and
+  `systemctl --user enable --now adw-improve.timer` (Mondays 07:00, `Persistent=true`).
 
 > **Keep the ledger private.** It contains issues, prompts, event logs and diffs
 > unredacted.

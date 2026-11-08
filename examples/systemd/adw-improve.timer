@@ -1,0 +1,11 @@
+# Beispiel-Timer für `adw improve` (W15): montags 07:00, verpasste Läufe nachholen.
+# Aktivieren: systemctl --user enable --now adw-improve.timer
+[Unit]
+Description=ADW weekly improvement report (timer)
+
+[Timer]
+OnCalendar=Mon *-*-* 07:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

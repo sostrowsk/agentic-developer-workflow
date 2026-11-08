@@ -1,0 +1,11 @@
+# Beispiel-Unit für `adw improve` (W15). ADW installiert nichts selbst:
+# nach ~/.config/systemd/user/ kopieren und die Platzhalter <...> anpassen.
+[Unit]
+Description=ADW weekly improvement report (adw improve)
+
+[Service]
+Type=oneshot
+# ANPASSEN: <ADW-Pfad> = Checkout des ADW-Quellcodes
+ExecStart=uv run --project <ADW-Pfad> adw improve
+# OPTIONAL ANPASSEN: Ledger-Klon, falls nicht ~/.adw/ledger
+#Environment=ADW_LEDGER=<Ledger-Pfad>

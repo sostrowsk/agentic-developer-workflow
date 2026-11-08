@@ -177,6 +177,7 @@ EXPECTED_LIMITS = {
     "e2e_triage": (50, 600),
     "log_analyst": (50, 600),
     "retro_agent": (60, 900),
+    "improve_agent": (120, 1800),
 }
 
 
@@ -767,6 +768,7 @@ EXPECTED_EFFORT = {
     "spec_agent": "low",
     "plan_agent": "low",
     "retro_agent": "low",
+    "improve_agent": None,
     "spec_synthesis": None,
     "plan_synthesis": None,
     "final_reviewer": None,

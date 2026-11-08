@@ -12,6 +12,11 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.37.0] — Unreleased
+
+### Added
+- **`adw improve` — weekly improvement report (W15).** Reads the ledger for a period (`--since`, default 7 days; `--repo-slug`), writes a deterministic report `reports/<YYYY>-W<WW>.md` (metrics with previous-period comparison, problem groups from retros, recurring findings, regression-case candidates, lever per group) and, unless `--no-brief`, lets the new read-only `improve_agent` draft one brief `reports/<YYYY>-W<WW>-brief.md` for the top ADW-side group. One ledger commit `improve <YYYY>-W<WW>`, push fail-open; non-blocking `.improve.lock`. Example systemd user units under `examples/systemd/`.
+
 ## [0.36.3] — 2026-11-08
 
 ### Fixed

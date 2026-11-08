@@ -383,6 +383,21 @@ REGISTRY: dict[str, AgentSpec] = {
         ),
         permission_mode="default",
     ),
+    "improve_agent": AgentSpec(
+        name="improve_agent",
+        model=FABLE,
+        max_turns=120,
+        timeout_s=1800,
+        tools=READ_ONLY_TOOLS,
+        allowed_tools=SCOPED_READ_RULES,
+        system_append=(
+            "You are the improve agent (strictly read-only). From one problem group of "
+            "the weekly ADW report you draft a brief in the format of docs/briefs/ and "
+            "check its premises against the ADW source code. You change nothing. "
+            'Respond ONLY with JSON: {"title": str, "brief_markdown": str}.'
+        ),
+        permission_mode="default",
+    ),
 }
 
 

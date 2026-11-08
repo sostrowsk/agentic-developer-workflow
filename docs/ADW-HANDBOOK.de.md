@@ -373,6 +373,7 @@ adw runs list  [--repo PFAD]
 adw runs prune [--repo PFAD] [--keep N] [--older-than TAGE] [--gzip]
 adw ledger export [RUN_ID] [--repo PFAD]
 adw kpis   [--since TAGE] [--repo-slug SLUG] [--json]
+adw improve [--since TAGE] [--repo-slug SLUG] [--no-brief]
 adw rate     RUN_ID good|bad [--note TEXT] [--repo PFAD]
 adw feedback RUN_ID --finding PRÄFIX valid|noise [--note TEXT] [--repo PFAD]
 ```
@@ -747,6 +748,45 @@ Gesamtzeile. Das Kommando schreibt nichts und ruft kein Modell auf.
   Meldung auf stderr, Exit 1. Dateien mit kaputtem JSON, ohne JSON-Objekt oder mit
   `schema_version` ungleich 1 werden übersprungen und in `skipped` gezählt; der
   Exit-Code bleibt 0.
+
+#### `adw improve` — wöchentlicher Verbesserungsbericht
+
+`adw improve [--since <tage>, Default 7] [--repo-slug <slug>] [--no-brief]` liest das
+Ledger (gleiche `ADW_LEDGER`-Auflösung, kein Ziel-Repo, kein Repo-Lock) und schreibt
+einen Bericht. Er hält einen nicht blockierenden `flock` auf `<ledger>/.improve.lock`
+(nie committet); ist er belegt oder fehlt ein nutzbares Ledger → Meldung auf stderr,
+Exit 1.
+
+- **Zeiträume:** aktuell = Läufe mit `started_at` in den letzten `since` Tagen bis
+  jetzt; Vergleich = der gleich lange Zeitraum davor (nur seine Gesamtzeile).
+  `--repo-slug` filtert beide Zeiträume, alle Abschnitte und die Brief-Auswahl.
+- **Bericht** (reiner Code, 0 Tokens), Abschnitte in dieser Reihenfolge:
+  `## Kennzahlen` (Kennzahlen aus `adw kpis` je Version, Gesamt, Retro-Ursachen,
+  Bewertungen, Finding-Feedback; Gesamtzeile des Vorzeitraums),
+  `## Problemgruppen aus Retros` (Retro-Einträge nach `cause`; Einträge, verschiedene
+  Läufe, Kostensumme; sortiert nach Läufe × Kosten; Textfelder auf 300 Zeichen
+  gekürzt), `## Wiederkehrende Findings` (`finding_key`s in ≥ 2 Läufen, höchstens 20,
+  mit Severity und `valid`/`noise`), `## Regressionsfall-Kandidaten` (eskaliert oder
+  letzte Bewertung `bad`), `## Hebel je Gruppe` (`prompt`/`model` → Hill Climbing W7,
+  `orchestrator`/`gate` → Brief für einen ADW-Lauf, `context_missing`/`target_repo` →
+  Expertise W9, `issue_quality` → Brief-Vorlage schärfen). Weniger als 3 Läufe → nur
+  die Kennzahlen und „Zu wenige Läufe für eine Auswertung", kein Brief.
+- **Brief-Entwurf:** ohne `--no-brief`, bei ≥ 3 Läufen und einer Gruppe mit `cause`
+  `orchestrator`, `gate` oder `prompt` entwirft der nur lesende `improve_agent`
+  (cwd = ADW-Quellcode) einen Brief für die höchste solche Gruppe nach
+  `docs/briefs/README.md`. Fehlt eine Pflichtüberschrift (Ausgangslage, Aufgabe,
+  Vorentscheidungen, Deferred, Akzeptanzkriterien) oder tritt ein Fehler auf, wird der
+  Entwurf verworfen und der Bericht vermerkt „Brief-Entwurf verworfen: <Grund>".
+  **Der Mensch entscheidet**, ob daraus ein ADW-Lauf wird; ADW startet nichts.
+- **Dateien:** `reports/<JJJJ>-W<WW>.md` und `reports/<JJJJ>-W<WW>-brief.md` (ISO-Woche
+  des Aufrufs); ein erneuter Aufruf derselben Woche überschreibt, ein Aufruf ohne
+  gültigen Brief entfernt den Brief der Woche. Ein Commit `improve <JJJJ>-W<WW>`, Push
+  mit Timeout, fail-open (Warnung, Exit 0). stdout: Berichtspfad und je Abschnitt eine
+  Anzahl.
+- **Wöchentlicher Timer:** ADW installiert nichts. `examples/systemd/adw-improve.service`
+  und `adw-improve.timer` nach `~/.config/systemd/user/` kopieren, `<ADW-Pfad>` ersetzen
+  (optional `ADW_LEDGER` setzen), dann `systemctl --user daemon-reload` und
+  `systemctl --user enable --now adw-improve.timer` (montags 07:00, `Persistent=true`).
 
 > **Das Ledger muss privat bleiben.** Es enthält Issues, Prompts, Event-Logs und
 > Diffs ungeschwärzt.
