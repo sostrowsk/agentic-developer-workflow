@@ -1,146 +1,92 @@
-# Interface contract — W13: Jeder Lauf hinterlässt ein Protokoll im zentralen Ledger
+# Interface contract — W3: `adw kpis` — Kennzahlen über alle Läufe aus dem Ledger
 #
-# Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec
-# („Contract (Single-Lane)") pinnt dieser Contract ausschließlich extern
-# beobachtbare Flächen:
-#   1. Umgebungsvariable ADW_LEDGER,
-#   2. Ledger-Layout und Commit-Nachricht,
-#   3. Schema run-record.json (schema_version 1),
-#   4. CLI `adw ledger export`,
-#   5. Event `ledger.export`,
-#   6. Prune-Ergebnis bei fehlgeschlagenem Export.
+# Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec (DoD)
+# pinnt dieser Contract ausschließlich extern beobachtbare Flächen:
+#   1. CLI `adw kpis` (Optionen, Exit-Codes, Ströme, Seiteneffekte),
+#   2. JSON-Struktur der Ausgabe mit `--json`,
+#   3. Kandidaten-Regelnamen und -Reihenfolge,
+#   4. die Wertänderung im run-record.json (A0).
 #
-# NICHT Teil des Contracts: interne Helfer und ihre Signaturen, Ablageorte von
-# Hilfsfunktionen, Timeouts außer dem Push-Timeout, Formulierung der
-# stderr-Meldungen (nur ihr Vorhandensein). Die öffentlichen Funktionen von
-# adw/ledger.py (build_run_record, export_run) legt die Spec (DoD) fest; hier
-# stehen nur ihre beobachtbaren Ergebnisse. Keine HTTP-Routen, keine
-# State-Felder, kein Config-Feld.
+# NICHT Teil des Contracts: interne Helfer und ihre Signaturen, das exakte
+# Textlayout ohne `--json`, Formulierung der stderr-Meldungen (nur ihr
+# Vorhandensein inkl. Pfad). `compute_kpis(records, since=None, repo_slug=None)`
+# legt die Spec selbst fest; hier steht nur ihr beobachtbares Ergebnis.
+# Keine HTTP-Routen, keine Events, kein Config-Feld.
 
 version: 1
-scope: W13
+scope: W3
 workstreams:
   - backend
 
-environment:
-  ADW_LEDGER:
-    default: "~/.adw/ledger"          # ~ expandiert
-    not_a_git_worktree: skipped       # fehlt oder kein Repo → kein Export, nichts angelegt, stderr-Zeile, Event reason no_ledger
-    created_or_cloned_by_adw: never
-    config_field: none                # kein Feld in .adw/config.yaml
-
-export_outcomes:
-  values: [exported, unchanged, skipped, failed]
-  exported: "Bündel geschrieben und lokal committed; ein Push-Fehler ändert das Ergebnis nicht"
-  unchanged: "nichts gestagt, kein neuer Commit; Push wird trotzdem versucht"
-  skipped: "dry_run oder no_ledger"
-  failed: "jede andere Ausnahme/Fehler (nicht: reiner Push-Fehler); stderr-Meldung"
-
-ledger_layout:
-  dir: "runs/<repo_slug mit '/' → '__'>/<run_id>/"
-  replaced_on_each_export: true       # Zielordner vor dem Schreiben vollständig gelöscht
-  files:
-    run-record.json: "json.dumps(record, sort_keys=True, indent=2) + '\\n'"
-    events.jsonl.gz: "gzip mit mtime=0, ohne Dateiname im Header; Quelle events.jsonl oder dekomprimierte .gz; ohne ledger.export-Events"
-    final.diff: "git diff <base_sha>..<branch> je Lane mit base_sha und existierendem Branch, aufsteigend nach Lane-Namen aneinandergehängt; fehlt, wenn keine Lane qualifiziert"
-    copied_if_present:
-      - issue.md
-      - spec.md
-      - plan.md
-      - contract.yaml
-      - spec-summary.md
-      - plan-summary.md
-      - followups.md
-      - escalation.md
-      - "authoring-*-known-findings.md"
-      - state.json
-    never: ["drafts/", "trees/", snapshot refs]
-  git:
-    stage: "git add -- runs/<slug>/<run_id>"          # erfasst auch Löschungen
-    commit_message: "run <run_id> <phase> (<repo_slug>)"   # nur wenn etwas gestagt ist → exported, sonst unchanged
-    identity: Git-Identität des Ledger-Klons
-    push:
-      command: "git push"
-      timeout_s: 60
-      attempted_for: [exported, unchanged]
-      failure: "nicht fatal (Ergebnis bleibt), stderr-Warnung, Event pushed false"
-    never: [pull, rebase, force-push]
-  target_repo_modified: never
-
-repo_slug:
-  from: "git remote get-url origin"
-  rule: "Schema/Host-Präfix und .git entfernt (git@host:a/b.git, https://host/a/b.git → a/b)"
-  fallback: "Verzeichnisname des Repos"
-
-run_record:
-  schema_version: 1
-  missing_values: "null; fehlende Ereignisse → leere Liste bzw. 0; nicht gemessen ≠ 0"
-  excluded: [prompts, system_append, session ids, message contents]
-  keys:
-    schema_version: int                      # 1
-    run_id: str
-    repo_slug: str
-    adw_version: "str | null"               # erster run-Start
-    adw_versions: "list[str]"               # verschieden, Reihenfolge des ersten Auftretens
-    started_at: "str | null"                # ts erster run-Start
-    ended_at: "str | null"                  # ts letztes run-Ende; null, wenn letzte Spanne ohne Ende
-    phase: str
-    dry_run: bool
-    parallel: bool
-    gates: {skip_approval: bool, spec_approval: bool}
-    issue_title: "str | null"               # erste nicht-leere Zeile von issue.md ohne führende '#'
-    escalation_reason: "str | null"         # erster Absatz unter '## Grund', sonst erster Nicht-Überschrift-Absatz
-    invocations: int                         # Anzahl run-Starts
-    approvals: int                           # Anzahl aller approval-Events (awaited und granted; ein Gate-Durchlauf zählt 2)
-    duration_s: "float | null"               # Summe totals.duration aller run-Enden
-    cost_usd: "float | null"                 # Summe totals.cost
-    tokens: "int | null"                     # Summe totals.tokens
-    lanes: "{<lane>: {gate_iterations: int, red_confirmed: bool}}"
-    review_rounds: int
-    ci_reentries: int
-    fix_cycles: int                          # Summe der Lane-fix_cycles
-    circuit_breakers: int                    # Anzahl circuit_breaker-Events
-    agents: "list[{agent, model, effort, max_turns, timeout_s, duration_s, cost_usd, usage, is_error}]"  # je agent.run-Spanne, Startreihenfolge; effort null; Spanne ohne Ende → Ende-Werte null
-    findings: "list[{finding_key, severity, action, reason, phase, round}]"  # je triage.decision, Log-Reihenfolge
-    review_counts: "list[{phase, round, n}]"  # je codex.review-Ende, n = Anzahl findings (fehlt die Liste → 0)
-    followups: int                           # Zeilen in followups.md mit Präfix '- '
-
-events:
-  ledger.export:
-    kind: point
-    written_to: Event-Log des exportierten Laufs, nach jedem Exportversuch (auch failed)
-    payload:
-      outcome: "exported | unchanged | skipped | failed"
-      pushed: "bool | null"                  # null ohne Push-Versuch
-      reason: "str | null"                   # skipped: no_ledger | dry_run; failed: Fehlermeldung; sonst null
-    fail_open: true                          # Logging-Fehler nie Lauf-Fehler; trace.enabled=false → kein Event
-    gzip_only_log: "liegt nur events.jsonl.gz vor, wird das Event als weiteres gzip-Member an diese Datei angehängt; es entsteht kein events.jsonl (sonst Überschreiben der .gz beim nächsten --gzip-Prune). Lesbar über die bestehenden gzip-Leser."
-
 cli:
-  "adw ledger export [RUN_ID] --repo <pfad>":
-    repo_default: "."                        # wie runs list/prune; muss Git-Wurzel sein
-    stdout: "<run_id>: <ergebnis>  (je Lauf eine Zeile)"
-    without_run_id: alle Läufe unter .adw/runs/ in Startreihenfolge (retention.scan_runs); ein failed bricht nicht ab
-    unknown_run_id: {exit: 1}
-    exit: "1 bei mindestens einem failed, sonst 0 (auch bei lauter skipped)"
-    lock: Repo-Lock
+  "adw kpis [--since <tage>] [--repo-slug <slug>] [--json]":
+    level: top-level                          # nicht unter `adw ledger`
+    source: "$ADW_LEDGER/runs/*/*/run-record.json (Default ~/.adw/ledger, ~ expandiert); kein Run-Ordner-Fallback"
+    options:
+      --since: "int >= 0, Default keiner; nur Läufe mit started_at >= jetzt − N Tage (inklusive, Vergleich als Zeitpunkte); ohne/unlesbares started_at → ausgeschlossen; negativ → Meldung, Exit != 0, kein Ledger-Zugriff"
+      --repo-slug: "str, Default keiner; exakter Vergleich mit record.repo_slug (Form 'acme/widget')"
+      --json: "Flag; genau ein JSON-Objekt auf stdout (Struktur siehe json_output)"
+    filters: "UND-verknüpft; wirken vor Gruppierung, total, Kandidatenauswahl und Kosten-Median; Filter-Ausschlüsse zählen nicht in skipped"
+    exit:
+      0: "Erfolg, auch bei Ledger ohne Records (leeres Ergebnis, siehe empty_result) oder übersprungenen Records"
+      1: "kein Ledger (Pfad kein Verzeichnis oder ohne .git) oder Git-Probe scheitert; Meldung mit Pfad auf stderr, kein Traceback"
+      nonzero: "--since negativ; Meldung über ungültigen Optionswert"
+    skipped_records: "kein gültiges JSON, kein JSON-Objekt, schema_version != 1 oder fehlend → gezählt in skipped (beim Lesen, vor Filtern), kein Traceback, Exit bleibt 0"
+    side_effects: none                        # keine Schreibzugriffe (Ledger, Repo, Run-Ordner), keine Modellaufrufe, keine neue Dependency
+    text_output: "ohne --json: Texttabelle ohne Farben; eine Zeile je Version plus 'gesamt'; Spaltenfolge Version, Läufe, done/escalated/sonstige, Eskalationsanteil, Review-Runden Median/Max, Fix-Zyklen Median/Max, Gate-Iterationen Median/Max, Dauer-Median, Kosten Summe/Median, Circuit-Breaker, Approvals-Median; variable Kennzahlen als sortierte schlüssel=wert-Paare; Kandidatenzeilen mit allen candidate-Feldern und Regelnamen; Zeile '<n> übersprungen'; null als '-', Anteile ggf. in Prozent, Rundung nur zur Anzeige; exaktes Layout nicht gepinnt, Werte identisch zur JSON-Ausgabe"
 
-run_commands:                                # run / resume / approve
-  export_when: nach jeder stattgefundenen Ausführung, jeder Ausgang (done, Eskalation, Pause, AgentRunError, Ausnahme)
-  order: "Ende run-Spanne → Freigabe per-Run-Lock → Export → Auto-Prune (unter Repo-Lock, Auto-Prune nur im bisherigen Erfolgspfad)"
-  rejected_before_execution: kein Export
-  dry_run: "skipped, reason dry_run, keine Ledger-Dateien, kein Commit, kein Push (auch bei resume/approve, Prune und Nachtrag)"
-  exit_code_and_phase: unchanged             # 0/1/2 wie heute, auch bei Exportfehler; ursprüngliche Ausnahme/typer.Exit bleibt
+json_output:
+  groups: "list[group]"                       # aufsteigend: numerisch je Punkt-Komponente, dann nicht-numerisch lexikalisch, null zuletzt
+  total: metrics                              # über alle gefilterten Läufe, direkt aus den Records (nicht aus Gruppenwerten); ohne adw_version
+  candidates: "list[candidate]"               # sortiert nach started_at, dann run_id
+  skipped: "int >= 0"
 
-prune:
-  deleting_mode: Export jedes Löschkandidaten unter dessen per-Run-Lock, nach der Phasen-Prüfung, vor der Löschung (Run-Ordner, Worktrees, Snapshot-Refs)
-  applies_to: [adw runs prune, auto-prune]
-  export_failed: {action: skipped, reason: "Ledger-Export fehlgeschlagen"}   # Run-Ordner bleibt
-  export_exported_unchanged_or_skipped: Löschen wie heute (Push-Fehler allein blockiert nicht)
-  gzip_mode: kein Export
+  group: "{adw_version: str | null, ...metrics}"   # gruppiert nach adw_version (nicht adw_versions); null bildet eigene Gruppe
+  metrics:
+    # null = kein verwertbarer Wert (nie eine erfundene 0; gemessene 0 bleibt gültig);
+    # nicht-numerische/null-Werte werden ignoriert; Median statistisch (gerade Anzahl → Mittel);
+    # Anteile 0..1, ohne Nenner null; Werte ungerundet
+    runs: "int >= 0"
+    phase_shares: "{done: float|null, escalated: float|null, other: float|null}"   # Nenner runs
+    escalation_share: "float | null"          # phase == escalated ODER escalation_reason != null
+    review_rounds: "{median: number|null, max: number|null}"
+    fix_cycles: "{median: number|null, max: number|null}"
+    gate_iterations: "{median: number|null, max: number|null}"   # je Lauf Summe über alle Lanes; ohne Lane-Werte zählt der Lauf nicht
+    duration_s: "{median: number|null}"
+    cost_usd: "{sum: number|null, median: number|null}"
+    agent_cost_shares: "{<agent>: float | null}"   # Anteil an der Summe bekannter agents[].cost_usd; {} ohne Einträge; Nenner 0 → null je Agent
+    circuit_breakers: "int | null"            # Summe
+    approvals: "{median: number|null}"
+    findings_by_severity: "{<severity>: int}"
+    findings_by_action: "{<action>: int}"
+  candidate:
+    run_id: str
+    repo_slug: "str | null"
+    adw_version: "str | null"
+    rules: "list[rule], nie leer"             # in der Reihenfolge von candidate_rules
+    issue_title: "str | null"
+  empty_result:                               # Ledger vorhanden, keine (gültigen/gefilterten) Records
+    groups: []
+    total: "alle metrics-Schlüssel vorhanden: runs 0, Anteile und Messwerte null, agent_cost_shares und Findings-Maps leer"
+    candidates: []
+    skipped: "Anzahl beim Lesen übersprungener Dateien"
+
+candidate_rules:                              # fest, nicht konfigurierbar; ein Lauf höchstens einmal Kandidat; Reihenfolge stabil
+  - escalated: 'phase == "escalated"'
+  - review_rounds: "numerischer review_rounds >= 4"
+  - gate_iterations: "gate_iterations einer einzelnen Lane >= 5 (nicht die Summe)"
+  - circuit_breakers: "numerischer circuit_breakers > 0"
+  - cost_usd: "cost_usd > 1.5 × Median cost_usd aller gefilterten Läufe (über Versionsgruppen hinweg); ohne cost_usd nie"
+
+run_record:                                   # Änderung gegenüber W13 (A0); Form sonst gleich
+  schema_version: 1                           # unverändert
+  issue_title: "ist die erste nicht-leere Zeile die ADW-Kopfzeile ('# Issue (ADW-generiert …'), gilt der Rest danach; darin erste Markdown-Überschrift ohne '#', sonst erste nicht-leere Zeile, sonst null"
+  findings: "list[{finding_key, severity, action, reason, phase, round, loop}]"
+  review_counts: "list[{phase, round, loop, n}]"
+  phase_round_loop_source: "Span-Hierarchie (triage.decision: Spanne aus `span`; codex.review: eigene Spanne, dann parent-Kette): nächste round-Spanne → round = payload.n, loop = payload.loop; nächste phase-Spanne → phase = payload.name; kein Vorfahr/kein Start-Event → null; nie aus Top-Level-Eventfeldern"
 
 unchanged:
-  - Event-Format, Phasen, Gate-Entscheidungen, Run-Ordner-Layout, Retention-Auswahlregeln
-  - .adw/config.yaml-Schema
+  - Ledger-Layout und Export-Mechanismus (`adw ledger export`, Export nach run/resume/approve, Prune)
+  - Event-Format
   - GUI
-  - pyproject.toml-Version (0.32.1)
+  - pyproject.toml-Version (0.33.0)

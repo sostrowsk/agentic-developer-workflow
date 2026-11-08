@@ -1,278 +1,241 @@
-# Plan — W13: Jeder Lauf hinterlässt ein Protokoll im zentralen Ledger
+# Plan — W3: `adw kpis` — Kennzahlen über alle Läufe aus dem Ledger
 
-Maßgeblich ist `.adw/spec.md` (Scope 1–10, AC 1–13). Single-Lane-Projekt
-(`.adw/config.yaml`): nur der Workstream **backend**; er umfasst Code, Tests, beide
-Handbücher und beide Changelogs. Kein Frontend-Workstream.
+Maßgeblich ist `.adw/spec.md` (Scope §1–§6, AC 0–8). Single-Lane-Projekt
+(`.adw/config.yaml`): nur der Workstream **backend**; er umfasst Code, Tests, Fixture,
+beide Handbücher und beide Changelogs. Kein Frontend-Workstream, keine Übergabe.
 
-Basis: Stand **0.32.1** (`9a4e16e`). Die Code-Stellen der Spec sind am 2026-11-08 geprüft
-und stimmen: `_maybe_auto_prune`-Aufrufe `adw/cli.py:313`, `:361`, `:437` (außerhalb des
-`_run_execution_lock`, innerhalb `_repo_lock`); `_execute` `adw/cli.py:743` (alle
-Abbruchpfade enden in `typer.Exit`); `_run_span` `adw/cli.py:147` (Start-Payload mit
-`adw_version`, Ende-Payload `{status, totals: {duration, cost, tokens}}`);
-`retention._prune_locked` `adw/retention.py:426–440`; `retention.scan_runs` sortiert
-`(date, run_id)` aufsteigend; `adw.git.run_git(cwd, *args, timeout, env=None)`
-`adw/git.py:16`; Event-Records `{ts, type, kind, span, parent, …, payload}`
-(`adw/events.py:196`), `kind` ∈ `start`/`end`/Punkt; `agent.run`-Start-Payload
-`adw/agents.py:198` (`agent`, `model`, `max_turns`, `timeout_s`; kein `effort`), Ende mit
-`usage`, `cost_usd`, `is_error`; Lane-Felder `branch`, `base_sha`, `gate_iterations`,
-`fix_cycles`, `red_confirmed` (`adw/state.py:69–89`); `--repo` hat bei `runs list/prune`
-den Default `Path(".")` und läuft durch `_require_repo`. `adw runs prune` nimmt heute
-**keinen** `_repo_lock` — `adw ledger export` nimmt ihn trotzdem (Spec §9: kein
-gleichzeitiger Lauf exportiert). Vor dem Bauen gegen den dann aktuellen Stand prüfen.
+Basis: Stand **0.33.0** (`83f2e40`), am 2026-11-08 gegen den Code geprüft:
+`_issue_title` `adw/ledger.py:130` (erste nicht-leere Zeile); `findings`/`review_counts`
+`adw/ledger.py:251–271` (lesen `e.get("phase")`/`e.get("round")`); `_ledger_path`
+`adw/ledger.py:279` (`None` ohne Verzeichnis/`.git`, sonst `RuntimeError` bei
+gescheiterter Probe; `os.stat`-Fehler außer ENOENT/ENOTDIR propagieren als `OSError`,
+`run_git` kann `subprocess.TimeoutExpired` werfen); Helfer `_parse_ts` (`:98`),
+`_is_number` (`:108`, schließt `bool` aus), `_spans` (`:83`), `_payload` (`:93`) vorhanden.
+ADW-Kopfzeile `# Issue (ADW-generiert aus dem Run-State — nicht manuell editieren)` +
+Leerzeile + Issue-Text (`adw/authoring.py:777`). Spannen: `phase` mit `payload.name`
+(`adw/context.py:243`, `adw/authoring.py:146/192`), `round` mit `payload.{loop, n, cap}`
+(`adw/authoring.py:635` `loop "authoring"`, `adw/phases.py:344` `"codex_review"`,
+`:437` `"final_review"`, ferner `phases.py:138`, `lanes.py:174`); `triage.decision`
+trägt die vom Aufrufer übergebene umschließende Spanne im Feld `span`
+(`adw/triage.py:99–108`). CLI: `_fail` `adw/cli.py:52`, `ledger_app` `:575`,
+`runs prune` lehnt negatives `--older-than` mit `typer.Exit(2)` ab (`:643`).
+Tests: autouse-Fixture `_isolate_ledger` (`tests/conftest.py:52`) setzt `ADW_LEDGER` auf
+einen nicht existierenden Pfad; Fixture `ledger` (`tests/conftest.py:60`) liefert einen
+echten Ledger-Klon mit `.git` und setzt `ADW_LEDGER` darauf. Handbuch: §7 „CLI
+reference" (`docs/ADW-HANDBOOK.md:350`), §11.1 „Ledger" (`:603`), DE analog.
+Vor dem Bauen gegen den dann aktuellen Stand prüfen.
 
-Betroffene Dateien (abschließend): neu `adw/ledger.py`; `adw/cli.py`, `adw/retention.py`;
-Tests unter `tests/` (neu `tests/test_ledger.py`, Fixture-Daten unter
-`tests/fixtures/ledger/`, `tests/conftest.py`, `tests/test_retention.py`);
-`docs/ADW-HANDBOOK.md`, `docs/ADW-HANDBOOK.de.md`, `CHANGELOG.md`, `CHANGELOG.de.md`.
-`adw/state.py`, `adw/events.py`, `adw/config.py`, GUI und `pyproject.toml` (bleibt
-`0.32.1`) unverändert.
+Betroffene Dateien (abschließend): `adw/ledger.py`, `adw/cli.py`;
+`tests/fixtures/ledger/a1b2c3d4/{issue.md,events.jsonl}`,
+`tests/fixtures/ledger/expected-run-record.json`, `tests/test_ledger.py`, neu
+`tests/test_kpis.py`; `docs/ADW-HANDBOOK.md`, `docs/ADW-HANDBOOK.de.md`,
+`CHANGELOG.md`, `CHANGELOG.de.md`. GUI, `adw/events.py`, `adw/retention.py`,
+Ledger-Layout, Export-Mechanismus und `pyproject.toml` (bleibt `0.33.0`) unverändert.
 
-Contract: `.adw/contract.yaml` pinnt nur die extern beobachtbaren Flächen aus §Contract der
-Spec. Helfernamen und -aufteilung in diesem Plan sind Empfehlungen.
-
-### Zwei Hinweise zur Umsetzung (kein Abweichen vom Spec-Wortlaut)
-
-1. **`approvals`** zählt gemäß Issue E3 und Spec §3 **alle** `approval`-Events, unabhängig
-   vom `payload.event` (`awaited`/`granted`, `adw/cli.py:430`, `:737`, `:765`, `:777`).
-   Ein kompletter Gate-Durchlauf ergibt damit 2. Der Golden-Fixture aus AC 1 („einem
-   approval") enthält genau **ein** `approval`-Event und erwartet `approvals: 1`.
-2. **Event bei gzip-only-Log.** Spec §6 verlangt ein `ledger.export`-Event nach jedem
-   Exportversuch. Liegt im Run-Ordner nur `events.jsonl.gz` (kein `events.jsonl`), darf
-   kein neues `events.jsonl` entstehen: `_compress_run` behandelt bei Koexistenz die
-   `.jsonl` als maßgeblich und legt sie über die `.gz` (`adw/retention.py:375–376`,
-   `:386–415`) — Verlust des Verlaufs beim nächsten `--gzip`-Prune. Das Event wird in
-   diesem Fall als **neues gzip-Member an `events.jsonl.gz` angehängt** (B2.6).
-   `gzip.open(path, "rb")` liest mehrteilige gzip-Dateien transparent; `_iter_events`,
-   `_is_valid_gzip` (`adw/retention.py:84–91`, `:107–114`) und der Ledger-Export selbst
-   lesen das Event damit ohne Code-Änderung. `adw/events.py` bleibt unverändert.
+Contract: `.adw/contract.yaml` pinnt nur extern beobachtbare Flächen (CLI `adw kpis`,
+Exit-Codes, JSON-Struktur, Regelnamen, die Wertänderung im `run-record.json`).
+Helfernamen und -aufteilung in diesem Plan sind Empfehlungen; `compute_kpis` legt die
+Spec selbst fest (§2 „Ort") — das ist Plan-, nicht Contract-Fläche.
 
 ## Workstream backend
 
-### B1 — `adw/ledger.py`: `build_run_record` (Scope 1, 3; AC 1, 2)
+### B1 — Datenkorrektur im Lauf-Protokoll (Scope §1; AC 0)
 
-Genau zwei öffentliche Funktionen im Modul; alles andere `_privat`, keine Klassen. Das Modul
-importiert **nicht** `adw.retention` (retention importiert ledger, B4) und nicht `adw.cli`.
+Datei: `adw/ledger.py`, nur `build_run_record` und seine Helfer.
 
-1. Eingaben lesen: `state.json` über `RunState.load(repo, run_id)` (bzw. als JSON, falls
-   das für Rohfelder einfacher ist); Event-Log aus `events.jsonl`, sonst aus
-   `events.jsonl.gz` (gzip). Zeilen einzeln `json.loads`, unlesbare/nicht-Dict-Zeilen
-   überspringen. Ein gemeinsamer Helfer `_read_events(run_dir) -> list[dict]` dient auch
-   B2 (dort werden die Rohzeilen gebraucht, s. B2.4).
-2. Spannen: Start und Ende über die `span`-ID paaren (`kind == "start"`/`"end"`),
-   Reihenfolge = Reihenfolge der Starts im Log.
-3. Felder exakt nach Spec-Tabelle §3; Hinweise:
-   - `repo_slug`: einziger Subprozess, `run_git(repo, "remote", "get-url", "origin",
-     timeout=10)`; Rückgabecode ≠ 0, leere Ausgabe oder Fehler → `repo.resolve().name`.
-     Normalisierung: `.git`-Suffix ab, dann `scheme://host/` bzw. `user@host:` abtrennen.
-   - `adw_version`/`adw_versions`/`started_at`/`ended_at`/`invocations` aus den
-     `run`-Spannen; `ended_at` = `ts` des Endes der **letzten** Spanne, sonst `null`.
-   - `duration_s`/`cost_usd`/`tokens`: Summe über die `totals`-Werte vorhandener
-     `run`-Enden, je Messwert getrennt; liefert kein Ende einen Zahlenwert → `null`
-     (nicht `0`). Wartezeit zwischen Spannen wird nicht aufgeschlagen.
-   - `approvals`: Anzahl aller Records mit `type == "approval"` (Hinweis 1).
-   - `issue_title`: erste nicht-leere Zeile von `issue.md`, `lstrip("#").strip()`; ohne
-     Datei `null`.
-   - `escalation_reason`: Absatz = zusammenhängende nicht-leere Zeilen; zuerst der erste
-     Absatz nach einer Zeile `## Grund`, sonst der erste Absatz, der nicht mit `#`
-     beginnt; Zeilen mit `"\n"` verbunden, `strip()`; ohne Datei `null`.
-   - `lanes`: `{name: {gate_iterations, red_confirmed}}`; `fix_cycles` = Summe der
-     Lane-`fix_cycles` (es gibt kein Run-Level-Feld).
-   - `agents`: je `agent.run`-Spanne; `effort` konstant `null`; `duration_s` =
-     Differenz der ISO-`ts` (Format `YYYY-MM-DDTHH:MM:SS.mmmZ`) in Sekunden, auf 3
-     Nachkommastellen gerundet (deterministisch, kein Float-Rauschen); Spanne ohne Ende →
-     `duration_s`/`cost_usd`/`usage`/`is_error` `null`. `usage` wird unverändert aus dem
-     End-Payload übernommen (kein neues Usage-Schema).
-   - `findings`: je `triage.decision` `{finding_key, severity, action, reason}` aus dem
-     Payload, `phase`/`round` aus den Record-Feldern; Log-Reihenfolge.
-   - `review_counts`: je `codex.review`-**Ende** `{phase, round, n=len(payload.findings)}`
-     (`phase`/`round` aus dem Record; fehlt die `findings`-Liste → `n = 0`, wie Spec §3
-     „fehlende Einträge ergeben Zähler 0").
-   - `followups`: Zeilen von `followups.md` mit Präfix `- `; ohne Datei `0`.
-4. Keine Prompts, `system_append`, Session-IDs oder Nachrichteninhalte im Dict.
-5. Rein lesend: keine Datei-, Log- oder Git-Schreibzugriffe.
+1. **`_issue_title`:** Zeilen von `issue.md`; ist die erste nicht-leere Zeile (getrimmt)
+   eine ADW-Kopfzeile (`startswith("# Issue (ADW-generiert")`), weiter mit den Zeilen
+   danach, sonst mit allen (ein Issue ohne Kopfzeile verliert seinen Titel nicht). Darin
+   die erste Zeile, die (getrimmt) mit `#` beginnt → `lstrip("#").strip()`; ist das leer,
+   als nicht gefunden behandeln. Keine Überschrift → erste nicht-leere Zeile getrimmt;
+   sonst `null`. Ohne Datei `null` wie heute.
+2. **Span-Hierarchie:** einmal je Record ein Index `span_id → Start-Event` (erstes
+   `kind == "start"` je `span`). Helfer `_span_context(starts, span_id) ->
+   (phase, round, loop)`: von `span_id` aus die Kette über `starts[id]["parent"]`
+   hinauf; die erste Spanne vom Typ `round` liefert `round = payload.n`,
+   `loop = payload.loop`, die erste vom Typ `phase` liefert `phase = payload.name`
+   (unabhängig voneinander). Abbruch bei fehlendem Start-Event, `parent` `null` oder
+   bereits besuchter ID (`visited`-Menge gegen Zyklen); nicht gefundene Werte `null`.
+   Kein Rückgriff auf Top-Level-`phase`/`round` der Events.
+3. Anwenden: `findings[]` je `triage.decision` mit Start bei `e["span"]`;
+   `review_counts[]` je `codex.review`-Ende ebenfalls mit Start bei `e["span"]` (die
+   eigene `codex.review`-Spanne ist weder `round` noch `phase`; die Kette läuft über
+   das `parent` ihres Start-Events weiter — genau die Spec-Regel). Schlüssel:
+   `findings`: `finding_key, severity, action, reason, phase, round, loop`;
+   `review_counts`: `phase, round, loop, n`. Alle übrigen Felder unverändert,
+   `schema_version` bleibt 1.
+4. **Fixture auf echtes Format** (`tests/fixtures/ledger/a1b2c3d4/`):
+   - `issue.md`: Kopfzeile wie `authoring.py:777`, Leerzeile, dann der bisherige Inhalt
+     (`# W99: Beispiel-Issue für das Ledger` …).
+   - `events.jsonl`: Top-Level-`phase` und `round` aller Events `null`. Um die
+     Spec-Review eine `phase`-Spanne (`name "spec"`) mit einer `round`-Spanne
+     (`loop "authoring"`, `n 1`) darin; `codex.review` (spec) mit `parent` = Round-Spanne,
+     die beiden `triage.decision` mit `span` = Round-Spanne. Um die Code-Review eine
+     `phase`-Spanne (`name "codex_review"`) mit zwei `round`-Spannen
+     (`loop "codex_review"`, `n 1` und `n 2`); Reviews und `triage.decision` darin
+     analog. `seq` neu durchnummerieren; die abgeschnittene Zeile (heute `seq 18`), beide
+     `run`-Spannen, Totals, `approval`, `circuit_breaker` und `agent.run`-Spannen bleiben
+     inhaltlich gleich, damit sich am Golden-File nur die A0-Felder ändern.
+   - `expected-run-record.json`: `findings` mit `phase/round/loop` =
+     `spec/1/authoring` (2×) und `codex_review/1/codex_review`; `review_counts` =
+     `spec/1/authoring n 2`, `codex_review/1/codex_review n 1`,
+     `codex_review/2/codex_review n 0`; `issue_title` bleibt
+     `"W99: Beispiel-Issue für das Ledger"`; Rest unverändert.
 
-### B2 — `adw/ledger.py`: `export_run` (Scope 1, 2, 4, 5, 6; AC 3–5, 8, 9)
+### B2 — `compute_kpis` und Ledger-Lesen (Scope §2–§4; AC 1–3, 5)
 
-`export_run(repo, run_id) -> str`, wirft nie (äußeres `try/except Exception` →
-`"failed"`, Meldung auf stderr). Nimmt keine Locks. Ablauf:
+Datei: `adw/ledger.py`. Rein lesend, keine Modellaufrufe, keine neue Dependency.
 
-1. State laden; Fehler → `"failed"`. `state.dry_run` → `"skipped"`, `reason "dry_run"`,
-   nichts im Ledger (gilt damit automatisch für `resume`/`approve`, Prune und Nachtrag).
-2. Ledger-Pfad: `Path(os.environ.get("ADW_LEDGER", "~/.adw/ledger")).expanduser()`.
-   Kein Verzeichnis oder `run_git(ledger, "rev-parse", "--show-toplevel")` ≠ 0 bzw.
-   Toplevel ≠ Pfad → `"skipped"`, eine stderr-Zeile „Ledger nicht gefunden: <pfad>,
-   Export übersprungen", `reason "no_ledger"`; nichts anlegen.
-3. Zielordner `ledger/runs/<slug mit / → __>/<run_id>`: sicherstellen, dass er
-   (aufgelöst) unter `ledger/runs/` liegt (Slug stammt aus einer URL; vor `rmtree` nötig),
-   sonst `"failed"`. Existiert er, `shutil.rmtree`, dann neu anlegen (Überschreiben statt
-   Mischen — verschwundene Artefakte bleiben nicht als veraltete Kopien zurück).
-4. Schreiben: `run-record.json` (`json.dumps(..., sort_keys=True, indent=2) + "\n"`);
-   vorhandene Artefakte aus Spec §4 per `shutil.copyfile` (inkl. Glob
-   `authoring-*-known-findings.md`); `events.jsonl.gz` = Rohzeilen des Logs **ohne**
-   Records mit `type == "ledger.export"`, unverändert als Text wieder verbunden, dann
-   `gzip.compress(data, mtime=0)` (kein Dateiname im Header). Ohne Log keine Datei.
-   `final.diff`: je Lane in `sorted(state.lanes)` mit `base_sha` und existierendem Branch
-   (`run_git(repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")`)
-   `run_git(repo, "diff", f"{base_sha}..{branch}")`, Ausgaben aneinanderhängen; keine
-   Lane → keine Datei. Kein `drafts/`, kein `trees/`. Das Ziel-Repo wird nicht verändert.
-5. Git im Ledger, alle über `run_git` mit Timeout (Empfehlung 30 s, Push 60 s):
-   `add -- runs/<slug>/<run_id>` (erfasst auch Löschungen); dann
-   `diff --cached --quiet -- runs/<slug>/<run_id>`: Rückgabe 0 → `"unchanged"`, sonst
-   `commit -m "run <run_id> <phase> (<repo_slug>)"` → `"exported"`. Nicht-null-Rückgabe
-   von `add`/`commit` → Ausnahme → `"failed"`. Danach in **beiden** Fällen `push` (60 s),
-   damit liegengebliebene Commits nachgeholt werden; Rückgabe ≠ 0 oder Timeout/OSError →
-   stderr-Warnung, `pushed = False`, Ergebnis bleibt. Kein Pull/Rebase/Force.
-6. Event `ledger.export` `{outcome, pushed, reason}` (Spec §6) nach **jedem** Versuch,
-   auch im `failed`-Pfad; `enabled` aus `AdwConfig.load(repo).trace.enabled`, bei
-   Ladefehler `True`; `False` → kein Event. Das Schreiben steht in einem eigenen
-   `try/except` (fail-open, Fehler nur als Warnung auf stderr). Zwei Wege je Log-Zustand:
-   - `events.jsonl` vorhanden (oder gar kein Log): frischer
-     `EventEmitter(repo, run_id, enabled=…)`, Punkt-Event ohne Span (`emitter.emit`).
-   - nur `events.jsonl.gz` vorhanden (Hinweis 2): privater Helfer baut den Record in der
-     Form von `EventEmitter._append` (`{seq, ts, type: "ledger.export", kind: "point",
-     span: null, parent: null, phase: null, lane: null, round: null, payload}`,
-     `seq` = höchstes `seq` der lesbaren Records + 1, `ts` wie `_utc_millis`) und hängt
-     ihn mit `gzip.open(gz, "ab")` als eigenes gzip-Member plus `\n` an. Keine neue
-     `.jsonl`. Der Ledger-Export rekonstruiert `events.jsonl.gz` ohnehin aus allen
-     dekomprimierten Zeilen ohne `ledger.export` (B2.4), also bleibt der zweite Export
-     `"unchanged"` (E9).
-7. Rückgabe des Ergebnisses.
+1. **Lesen** (`_read_ledger_records(ledger) -> list`): `sorted(ledger.glob(
+   "runs/*/*/run-record.json"))`; je Datei `json.loads(read_text("utf-8"))`; bei
+   `ValueError`/`UnicodeDecodeError`/`OSError` → `None`. Rückgabe: Liste der geparsten
+   Werte (ungültig → `None`). Keine weitere Feldvalidierung, keine Diagnose fehlerhafter
+   Einzelwerte (Deferred).
+2. **`compute_kpis(records, since=None, repo_slug=None) -> dict`** (Signatur aus der
+   Spec, keine weiteren Parameter; „jetzt" = einmal `datetime.now(UTC)` je Aufruf):
+   - Gültig ist ein Wert nur als `dict` mit `type(schema_version) is int` und `== 1`
+     (`True`/`1.0` gelten nicht). Alles andere (auch `None` aus B2.1) zählt in
+     `skipped`. Filter danach; Filter-Ausfälle zählen nicht als übersprungen.
+   - `since`: `cutoff = now - timedelta(days=since)`; Lauf bleibt nur bei
+     `_parse_ts(started_at) >= cutoff`; fehlend/unlesbar → raus. `repo_slug`: exakte
+     Gleichheit (Record-Form `acme/widget`). Beide Filter wirken gemeinsam vor
+     Gruppierung, `total`, Kandidatenauswahl und Kosten-Median.
+   - Gruppen nach `adw_version` (nicht `adw_versions`); Sortierschlüssel: Version als
+     `str` aus nur Ziffern-Komponenten → `(0, tuple(int))`; sonstiger Nicht-`null`-Wert →
+     `(1, str(v))`; `null` → `(2,)`. Je Gruppe `{"adw_version": v, **_metrics(runs)}`;
+     `total = _metrics(alle gefilterten)` (direkt aus den Records, ohne
+     `adw_version`-Schlüssel; bei 0 Läufen alle Schlüssel vorhanden, `runs: 0`, Werte
+     `null`, Maps leer).
+   - `_metrics(runs)` nach der Tabelle in Spec §3. Werte über `_is_number` filtern;
+     leere Wertmenge → `null` (Summe, Median, Max); gemessene `0` bleibt gültig. Median:
+     `statistics.median`. Anteile: Nenner `runs`, bei `0` alle `null`.
+     `phase_shares.other` = alle, die weder `"done"` noch `"escalated"` sind.
+     `escalation_share`: `phase == "escalated"` oder `escalation_reason is not None`.
+     `gate_iterations` je Lauf = Summe der numerischen `lanes.*.gate_iterations` (kein
+     numerischer Wert/keine Lanes → Lauf ignoriert, keine erfundene 0); `fix_cycles` ist
+     im Record bereits über Lanes summiert. `agent_cost_shares`: nur Einträge mit
+     `str`-`agent` und numerischem `cost_usd`; keine Einträge → `{}`; Einträge vorhanden,
+     Gesamtsumme `0` → je Agent `null` (Spec §3 „ohne Nenner `null`").
+     `findings_by_severity`/`_by_action`: nur `str`-Werte zählen (JSON-Schlüssel).
+     Nicht-Listen/Nicht-Dicts werden wie fehlende Werte behandelt.
+   - **Kandidaten** über die gefilterten Läufe, Regeln in der Spec-Reihenfolge
+     `escalated, review_rounds, gate_iterations, circuit_breakers, cost_usd`;
+     `cost_usd`: `median` der numerischen `cost_usd` aller gefilterten Läufe (über
+     Versionsgruppen hinweg), Regel greift nur bei Median ≠ `null` und
+     `cost_usd > 1.5 * median`. `gate_iterations`: irgendeine einzelne Lane mit
+     numerischem Wert `>= 5` (nicht die Summe). Ein Lauf höchstens einmal, `rules` nie
+     leer. Je Kandidat `{run_id, repo_slug, adw_version, rules, issue_title}`;
+     Sortierung nach (`started_at` geparst, ungültig/fehlend zuletzt), dann `str(run_id)`.
+   - Rückgabe `{"groups": [...], "total": {...}, "candidates": [...],
+     "skipped": int}`; JSON-Werte ungerundet.
 
-### B3 — Andocken an `run`/`resume`/`approve` (Scope 7; AC 5–7, 9)
+### B3 — CLI `adw kpis` (Scope §2, §5; AC 4–7)
 
-Datei: `adw/cli.py`.
+Datei: `adw/cli.py`, `@app.command("kpis")` (Top-Level, nicht unter `ledger_app`).
 
-1. Kleiner Helfer `_export_after_execution(repo, run_id)`: ruft `ledger.export_run` in
-   `try/except Exception` (zweite Sicherung, Meldung auf stderr), Ergebnis wird
-   verworfen.
-2. In allen drei Kommandos den Block `with _run_execution_lock(...)` in `try/finally`
-   einschließen; ein lokales Flag `executed` wird unmittelbar vor `_execute(ctx)` auf
-   `True` gesetzt. Im `finally`: `if executed: _export_after_execution(repo, run_id)`.
-   Damit läuft der Export nach Ende der `run`-Spanne und nach Freigabe des per-Run-Locks,
-   unter `_repo_lock`, vor `_maybe_auto_prune`. Ein `typer.Exit`/eine Ausnahme aus
-   `_execute` läuft unverändert weiter; eine Export-Ausnahme ersetzt sie nie.
-3. `_maybe_auto_prune` bleibt außerhalb des `finally` im bisherigen Erfolgspfad; Pausen
-   und Fehler lösen keinen zusätzlichen Auto-Prune aus.
-4. Abweisungen vor `_execute` (unbekannt, `done`, `escalated`, falsche Phase bei
-   `approve`, Vorflug, Repo-Lock belegt) setzen das Flag nicht → kein Export.
-5. Dry-Run: `export_run` liefert `"skipped"` (B2.1); keine Sonderbehandlung in der CLI.
+1. Optionen: `--since` (`int | None`), `--repo-slug` (`str | None`), `--json` (bool).
+   `since < 0` → Meldung auf stderr, `typer.Exit(2)` (wie `runs prune --older-than`),
+   vor jedem Ledger-Zugriff.
+2. Ledger: `ledger._ledger_path()` in `try/except (RuntimeError, OSError,
+   subprocess.SubprocessError)`; Ausnahme oder `None` → `_fail(...)` mit dem Pfad
+   (`ADW_LEDGER` expandiert), Exit 1, kein Traceback. Vorhandenes Ledger ohne Records →
+   reguläres leeres Ergebnis, Exit 0.
+3. `result = ledger.compute_kpis(ledger._read_ledger_records(path), since=…,
+   repo_slug=…)` — genau einmal berechnet.
+4. `--json`: `typer.echo(json.dumps(result, ensure_ascii=False))` — genau ein Objekt.
+   Sonst Textformatierung aus genau diesem `result` (privater Helfer in `cli.py`):
+   Tabelle mit fester Spaltenfolge aus Spec §5, eine Zeile je Gruppe plus `gesamt`;
+   je Gruppe/`gesamt` eine Zeile mit sortierten `schlüssel=wert`-Paaren für
+   `agent_cost_shares`, `findings_by_severity`, `findings_by_action`; dann je Kandidat
+   eine Zeile (`run_id`, `repo_slug`, `adw_version`, Regeln kommagetrennt,
+   `issue_title`); zuletzt `"<n> übersprungen"`. `null` → `-`, Anteile als Prozent,
+   Zahlen nur zur Anzeige gerundet. Keine Farben. Die Formatierung berechnet nichts neu
+   und verändert weder Aggregate noch Kandidatenauswahl.
+5. Keine Schreibzugriffe, keine Locks, kein `_require_repo` (kein Ziel-Repo nötig),
+   kein Modellaufruf.
 
-### B4 — Prune exportiert zuerst (Scope 8; AC 10)
+### B4 — Doku und Changelog (Scope §6; DoD)
 
-Datei: `adw/retention.py`, `_prune_locked`.
-
-Nach der Phasen-Prüfung, nur im löschenden Modus (der `gzip_mode`-Zweig bleibt davor und
-exportiert nicht), unmittelbar vor `_delete_run`:
-`if ledger.export_run(repo, rec.run_id) == "failed": return PruneResult(rec.run_id,
-"skipped", reason="Ledger-Export fehlgeschlagen")`. Run-Ordner, Worktrees und
-Snapshot-Refs bleiben dann erhalten. `"exported"`, `"unchanged"`, `"skipped"` → Löschen
-wie heute (ein Push-Fehler allein blockiert nicht). Gilt automatisch für manuelles
-`adw runs prune` und Auto-Prune. `export_run` nimmt keinen Lock (kein Selbst-Deadlock
-unter dem gehaltenen per-Run-Lock). Keine weitere Änderung an Auswahl, Schutzbedingungen
-oder Ergebnisformaten.
-
-### B5 — CLI `adw ledger export` (Scope 9; AC 11)
-
-Datei: `adw/cli.py`, neben `runs_app`: `ledger_app = typer.Typer(...)`,
-`app.add_typer(ledger_app, name="ledger")`, Kommando `export`.
-
-1. `--repo` wie bei `runs list/prune` (`Path(".")`, dann `_require_repo(repo)`); dann
-   `with _repo_lock(repo):`.
-2. Mit `RUN_ID`: Existenz wie `_load_state` prüfen (unbekannt → `_fail`, Exit 1).
-   Ohne: `retention.scan_runs(repo)` in derselben Startreihenfolge wie Retention
-   (Sortierung `(date, run_id)` aufsteigend).
-3. Je Lauf `export_run`, Zeile `<run_id>: <ergebnis>` auf stdout; kein Abbruch bei
-   `"failed"`. Am Ende Exit 1, wenn ein Ergebnis `"failed"`, sonst 0 (auch bei lauter
-   `"skipped"`).
-
-### B6 — Doku und Changelog (Scope 10; AC 12)
-
-- Beide Handbücher: Abschnitt „Ledger" (EN-Datei englisch, DE-Datei deutsch, inhaltlich
-  gleich): Zweck; `ADW_LEDGER` mit Default `~/.adw/ledger` und Verhalten ohne Repo
-  (übersprungen, nichts angelegt; einmalig selbst anlegen/klonen); Layout
-  `runs/<slug>/<run_id>/`; Export in jedem Ausgang, Prune exportiert zuerst und löscht
-  bei Fehlschlag nicht; `adw ledger export [RUN_ID]`; Warnung: Ledger muss privat sein
-  (Issues, Prompts, Diffs ungeschwärzt).
-- `CHANGELOG.md`/`CHANGELOG.de.md`: `## [0.33.0] — Unreleased` oberhalb `0.32.1`,
-  `### Added` mit den vier Punkten der Spec (Lauf-Protokoll, Ledger-Export,
-  Prune-Anbindung, Nachtragskommando), im Stil der vorhandenen Einträge.
+- Beide Handbücher synchron (EN englisch, DE deutsch, inhaltlich gleich): §11.1 um
+  `adw kpis` (Aufruf, `--since`/`--repo-slug`/`--json`, Quelle nur Ledger, Kennzahlen
+  mit JSON-Schlüsseln, Gruppierung/Sortierung, die fünf Kandidaten-Regeln,
+  JSON-Struktur `{groups, total, candidates, skipped}`, Exit 1 ohne Ledger,
+  Überspringen kaputter/unbekannter Records); Hinweis, dass nur nach W3 exportierte
+  oder neu exportierte Records korrekte `issue_title`/`phase`/`round`/`loop` tragen
+  (`adw ledger export --repo .`). §7 um einen Eintrag `adw kpis` mit Verweis auf §11.1.
+  Beschreibung von `findings`/`review_counts` (+ `loop`, Herkunft aus der
+  Span-Hierarchie) und `issue_title` (Kopfzeilen-Regel) anpassen.
+- `CHANGELOG.md`/`CHANGELOG.de.md`: `## [0.34.0] — Unreleased` oberhalb `0.33.0`,
+  `### Added` (`adw kpis`), `### Fixed` (`issue_title`, `phase`/`round` + neu `loop` in
+  `findings`/`review_counts`), im Stil der vorhandenen Einträge.
 - `pyproject.toml` unverändert.
 
 ## Reihenfolge
 
-B1 → B2 → B3 und B4 (beide brauchen `export_run`) → B5 → B6. Jeden neuen Test zuerst rot
-sehen.
+B1 → B2 → B3 → B4. Jeden neuen Test zuerst rot sehen (beim Golden-File: Fixture und
+Golden umstellen, Test rot, dann B1). Das Neuschreiben des persönlichen Ledgers nach dem
+Merge gehört nicht zum Lauf.
 
-## Tests (Richtwert 12–16 neue Tests; geplant 15)
+## Tests (Richtwert 9–14 neue Tests; geplant 10)
 
-Hermetik (E10):
-- **autouse**-Fixture in `tests/conftest.py` (Muster `_isolate_registry`): `ADW_LEDGER`
-  auf einen nicht existierenden Pfad unter `tmp_path_factory` — kein bestehender Test
-  (Prune, Auto-Prune, CLI) berührt je `~/.adw/ledger`.
-- Fixture `ledger` (in `tests/test_ledger.py`): Bare-Repo + Klon mit `user.email`/`name`,
-  Initial-Commit per `push -u origin HEAD` (Upstream gesetzt), `ADW_LEDGER` auf den Klon.
-- Ziel-Repo: bestehendes `target_repo`, mit `git remote add origin
-  git@example.com:acme/widget.git` für einen festen Slug.
-- CLI-Ausgänge (AC 5–7) ohne echte Agenten: `cli._execute` per `monkeypatch` durch eine
-  Funktion ersetzen, die die gewünschte Phase speichert und `typer.Exit(1)`/`(2)` wirft
-  bzw. normal zurückkehrt; Lauf mit `dry_run=False` über `CliRunner`. Vorflug ggf. wie in
-  bestehenden CLI-Tests neutralisieren.
+Hermetik: `_isolate_ledger` (autouse) zeigt auf einen nicht existierenden Pfad; für
+Tests mit Ledger die **bestehende** conftest-Fixture `ledger` verwenden (echter Klon mit
+`.git`, Git-Probe besteht) — keine neue Ledger-Fixture bauen. Helfer in
+`tests/test_kpis.py`: `write_record(ledger, slug, run_id, record_or_bytes)` schreibt
+`runs/<slug mit / → __>/<run_id>/run-record.json`. Records als minimale Dicts mit
+`schema_version: 1` und nur den gebrauchten Feldern. `started_at` relativ zu
+`datetime.now(UTC)` erzeugen (z. B. jetzt − 2 Tage / − 10 Tage), keine Uhr-Injektion.
+CLI über `typer.testing.CliRunner` wie in `tests/test_ledger.py`.
+
+Fixture-Ledger für AC 1/3/4 (6 Läufe; Versionen `"0.9.0"` und `"0.10.0"`, damit die
+numerische Sortierung `0.9.0` vor `0.10.0` mitgeprüft wird). Vorschlag für die
+regelrelevanten Felder (übrige Felder so setzen, dass jede Kennzahl mindestens einen
+`null`/fehlenden Wert und mindestens eine gemessene `0` enthält):
+
+| Lauf | Version | löst aus | Kernwerte |
+|---|---|---|---|
+| r1 | 0.9.0 | — (unauffällig) | `phase done`, Lanes `backend 3`, `frontend 3` (Summe 6, keine ≥ 5), `cost 2.0` |
+| r2 | 0.9.0 | `escalated` | `phase escalated`, `cost 2.0` |
+| r3 | 0.9.0 | `review_rounds` | `review_rounds 4`, `phase done`, `escalation_reason` gesetzt (zählt in `escalation_share`, nicht als Regel), `cost_usd`/`duration_s` `null` |
+| r4 | 0.10.0 | `gate_iterations` | Lane `backend 5`, `cost 2.0` |
+| r5 | 0.10.0 | `circuit_breakers` | `circuit_breakers 1`, `cost 1.0` |
+| r6 | 0.10.0 | `cost_usd` | `cost 10.0` (Median 2.0 → Schwelle 3.0), `phase` weder done noch escalated |
 
 | AC | Test (Kurzbeschreibung) | Ort |
 |----|-------------------------|-----|
-| 1 | Golden File: Fixture-Run-Ordner (zwei `run`-Spannen mit Versionen/Totals, genau ein `approval`-Event → `approvals: 1`, zwei `codex.review`-Runden, `triage.decision`, `agent.run`-Spannen, eine unlesbare Zeile) → Dict == `expected-run-record.json` | `tests/test_ledger.py`, Daten `tests/fixtures/ledger/` |
-| 2 | Ohne `escalation.md`/`followups.md`: `escalation_reason` `null`, `followups` `0`; dieselben Events nur als `.gz` → identisches Dict | dto. |
-| 2/4 (gzip-only) | Export eines Laufs mit nur `events.jsonl.gz`: `ledger.export`-Event steht danach im `.gz` (über `retention._iter_events` lesbar, `_is_valid_gzip` wahr), kein `events.jsonl` entstanden; zweiter Export → `"unchanged"` | dto. |
-| 3 | Export in Test-Ledger: Dateien aus §4 vorhanden (inkl. `final.diff` in Lane-Reihenfolge), kein `drafts/`/`trees/`, genau ein neuer Commit mit Nachricht, im Bare-Repo angekommen, `"exported"` | dto. |
-| 4 | Zweiter Export → `"unchanged"`, kein neuer Commit, obwohl ein `ledger.export`-Event im Log steht | dto. |
-| 5 | `origin` des Ledgers auf unerreichbaren Pfad → `"exported"`, Commit lokal, stderr-Warnung, Event `pushed: false` | dto. |
-| 8 | `ADW_LEDGER` auf leeres Verzeichnis ohne Repo → `"skipped"`, stderr, Event `reason: "no_ledger"`, Verzeichnis bleibt leer | dto. |
-| 9 | Dry-Run-State → `"skipped"`, `reason: "dry_run"`, kein Commit | dto. |
-| 7 | CLI `run` mit Eskalation (Exit 1) bzw. `approve`/`resume` mit Gate-Pause (Exit 2), parametrisiert → Exit-Code wie ohne Export, Lauf im Ledger | dto. |
-| 6 | CLI-Lauf, `ledger.build_run_record` wirft → Exit-Code und Phase unverändert, stderr-Meldung, Event `outcome: "failed"` | dto. |
-| 5 (CLI) | CLI-Lauf `done` mit unerreichbarem Ledger-`origin` → Exit 0 | dto. (ggf. als Parameter von AC 7) |
-| 10 | Prune: Export eines Kandidaten scheitert (z. B. `build_run_record` gepatcht) → Ordner bleibt, `skipped`/„Ledger-Export fehlgeschlagen" | `tests/test_retention.py` |
-| 10 | Prune ohne Ledger löscht wie bisher; mit Ledger liegt der gelöschte Lauf danach im Ledger; `--gzip` exportiert nicht | dto. |
-| 11 | `adw ledger export --repo` über drei Läufe (einer scheitert) → je Zeile `<id>: <ergebnis>`, Exit 1; ohne Fehlschlag Exit 0 | `tests/test_ledger.py` |
-| 11 | `adw ledger export <unbekannt>` → Exit 1 | dto. |
-| 12 | Doku/Changelogs: kein Test, Prüfung im Review | — |
-| 13 | `uv run ruff check .`, `uv run pytest -x -q` | Gate |
+| 0 | Golden File mit umgestelltem Fixture (bestehender Test, Daten neu) | `tests/test_ledger.py` (kein neuer Test) |
+| 0 | `triage.decision`/`codex.review` ohne `round`-/`phase`-Vorfahren (an die Fixture-Kopie angehängt bzw. `span`/`parent` auf `run`-Spanne), dazu eine zyklische `parent`-Kette → `phase`/`round`/`loop` `null`, kein Hänger, trotz gesetzter Top-Level-Werte | `tests/test_ledger.py` |
+| 1 | 6-Lauf-Ledger: `compute_kpis` → `groups` (Reihenfolge, alle §3-Schlüssel) und `total` gleich von Hand berechneten Werten, inkl. `null`-Fälle, gerader Median und `escalation_share` über `escalation_reason` | `tests/test_kpis.py` |
+| 2 | `since=7`: älterer Lauf und Lauf ohne/unlesbares `started_at` fallen heraus; `skipped` bleibt 0 | dto. |
+| 2 | `repo_slug`: nur exakter Slug; Kosten-Median über den gefilterten Satz (z. B. Slug A `[1, 1, 4]`, Slug B `[4, 4]`: ohne Filter kein Kosten-Kandidat, mit `repo_slug=A` ist der 4er Kandidat) | dto. |
+| 3 | 6-Lauf-Ledger: jede Regel genau bei ihrem Lauf mit allen Kandidatenfeldern, r1 fehlt, Reihenfolge nach `started_at`/`run_id` | dto. |
+| 4 | CLI `--json` → genau ein Objekt mit `{groups, total, candidates, skipped}`; Textausgabe enthält dieselben Versionen, `gesamt`-Läufe, Kandidaten-`run_id`s und `skipped` (kein exaktes Layout) | dto. |
+| 5 | Record mit `schema_version 2`, Datei mit kaputtem JSON und JSON-Nicht-Objekt → `skipped == 3`, nicht in Kennzahlen/Kandidaten, Exit 0, kein Traceback | dto. |
+| 6 | CLI ohne Ledger, parametrisiert: Pfad fehlt / Verzeichnis ohne `.git` / `.git` vorhanden, Probe scheitert → stderr mit Pfad, Exit 1, keine Exception im Result; dazu `--since -1` → Exit ≠ 0 | dto. |
+| 6 (Scope §2) | Ledger ohne Records → Exit 0, `groups`/`candidates` leer, `total.runs == 0`, Kennzahlen `null`/leer | dto. |
+| 7 | Snapshot (Dateiliste + Bytes) des Ledgers vor/nach Text- und `--json`-Aufruf gleich | dto. |
+| 8 | `uv run ruff check .`, `uv run pytest -x -q` | Gate |
 
-Bestandstests: Durch das neue `ledger.export`-Event (auch bei `"skipped"`) hängt nach
-jedem `run`/`resume`/`approve` ein Punkt-Event hinter dem `run`-Ende. Tests, die eine
-vollständige Event-Folge oder „letztes Event = `run`-Ende" pinnen, und GUI-Projektionen,
-die den Laufstatus aus dem letzten Event ableiten, gegen diesen Fall prüfen. Bricht ein
-Bestandstest nur deshalb, die Assertion um `ledger.export` filtern — Verhalten
-(Event-Format, GUI) nicht ändern. Keine Testmatrix über URL-Varianten oder Event-Typen
-hinaus; keine Zusatztests für offene Spannen, Push-Wiederholung oder Event-Schreibfehler
-jenseits der ACs.
+Keine weiteren Tests (keine Matrix über Versionsformate, Zeitzonen-Varianten, Rundung
+der Textausgabe oder einzelne fehlerhafte Feldtypen).
 
 ## Gates / Definition of Done
 
 - `uv run ruff check .` und `uv run pytest -x -q` grün (in Build-Sandboxes ggf. direkt
   `.venv/bin/python -m pytest -x -q`); bestehende Suite grün.
-- AC 1–13 erfüllt, außer 12 durch Tests belegt.
-- `adw/ledger.py` hat genau `build_run_record` und `export_run` öffentlich; alle Git-Aufrufe
-  im Ledger über `adw.git.run_git`.
-- Exit-Codes, Phasen und Auto-Prune von `run`/`resume`/`approve` ohne Ledger unverändert.
-- Handbücher und Changelogs EN/DE synchron; `pyproject.toml` unverändert.
-- Contract auf die externen Flächen aus §Contract der Spec beschränkt.
+- AC 0–8 durch Tests belegt; Tests brauchen weder das persönliche Ledger noch Modelle.
+- `adw kpis` schreibt nichts und ruft kein Modell auf; keine neue Dependency.
+- Handbücher und Changelogs EN/DE synchron; `pyproject.toml` unverändert; GUI,
+  Ledger-Layout und Export-Mechanismus unverändert.
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-- Retro-Agent, `adw rate`, `adw feedback` (W14); `adw kpis` (W3); Wochenschleife (W15).
-- Schwärzung/Redaktion (das Ledger ist privat, D6).
-- Anlegen/Klonen des Ledgers, Pull/Rebase/Konfliktbehandlung, Retry-Schleifen für Push
-  (der nächste Export pusht liegengebliebene Commits mit).
-- Ledger-Konfiguration in `.adw/config.yaml`.
-- Anzeige des Ledgers in der GUI.
-- Export von `drafts/`, `trees/` und Snapshot-Refs.
-- Persistente Exportmarker, Retry-Queues, Hintergrunddienste: lokale Ledger-Commits,
-  spätere Exportaufrufe und vorhandene Logs sind die Backstops.
-- Export bei abgewiesenen Aufrufen ohne Ausführung (Lauf unverändert; der Nachtrag
-  `adw ledger export` deckt jeden Bedarf ab).
-- Eigene Sperre für das Ledger über Repo-Grenzen hinweg (zwei Repos exportieren
-  gleichzeitig): seltener Fall, ein kollidierender `git commit` endet als `"failed"`,
-  der Prune löscht dann nicht, der nächste Export holt nach.
-- Schema-Migration oder Neuberechnung alter Protokolle bei künftigen
-  `schema_version`-Änderungen.
+- Diagramme, HTML-Bericht, GUI-Ansicht.
+- Konfigurierbare Kandidaten-Regeln oder Schwellen, statistische Tests.
+- Fallback auf Run-Ordner ohne Ledger.
+- Retro-Agent (W14), Wochenschleife (W15).
+- Weitere Filter (Agent, Modell, Phase), weitere Sortier- oder Ausgabeformate (CSV o. Ä.).
+- Persistente KPI-Caches, Indizes, Hintergrundaktualisierung, automatische
+  Ledger-Reparatur.
+- Validierung einzelner Record-Felder über `schema_version` hinaus; fehlerhafte
+  Einzelwerte werden nach den `null`-Regeln aus §3 ignoriert, nicht gemeldet.
