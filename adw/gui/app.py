@@ -198,8 +198,10 @@ async def _stream(events_path, last_id, awaiting_approval=lambda: False,
         return
     reader = EventReader(events_path)
     spans = _SpanTracker()
+    pending = None
     while True:
-        result = reader.read()
+        result = pending if pending is not None else reader.read()
+        pending = None
         out = [_sse_problem(asdict(problem)) for problem in result.problems]
         for record in result.events:
             spans.see(record)
@@ -215,13 +217,19 @@ async def _stream(events_path, last_id, awaiting_approval=lambda: False,
             out.append(_sse_event(record))
         for frame in out:
             yield frame
-        # The whole batch is evaluated first: a later start in it makes an end historic.
-        if spans.ended and not awaiting_approval():
-            yield _SSE_CLOSED
-            return
         if os.fspath(events_path).endswith(".gz"):
             # A gzipped log is a pruned, finished run: nothing more will arrive,
             # and every read would decompress the whole archive again.
+            yield _SSE_CLOSED
+            return
+        # The whole batch is evaluated first: a later start in it makes an end historic.
+        if spans.ended and not awaiting_approval():
+            # The state was read AFTER the batch: an approve may have appended a new
+            # span and left approval in between. Re-read the log once; anything new
+            # is delivered (and re-evaluated) before the stream may close.
+            pending = reader.read()
+            if pending.events or pending.problems:
+                continue
             yield _SSE_CLOSED
             return
         if not out:

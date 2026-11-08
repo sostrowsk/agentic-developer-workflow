@@ -584,7 +584,7 @@ def gui(
 
     # R3/E4: the GUI answers loopback hostnames only; an explicit --i-know host is
     # allowed in addition.
-    extra_host = host if i_know and not _is_loopback(host) else None
+    extra_host = host if i_know else None  # create_app skips an already allowed host
     application = create_app(repos=[str(p) for p in (repo or [])], extra_host=extra_host)
     if open_browser:
         import webbrowser

@@ -108,3 +108,17 @@ def test_gui_i_know_host_is_added_to_the_host_allowlist(home, monkeypatch):
     assert client.get("/api/runs", headers={"Host": "gui.lan:8765"}).status_code == 200
     assert client.get("/api/runs", headers={"Host": "localhost"}).status_code == 200
     assert client.get("/api/runs", headers={"Host": "evil.example"}).status_code == 400
+
+
+def test_gui_i_know_extra_loopback_host_is_allowed(home, monkeypatch):
+    """Review P2: an explicit --i-know host is allowed even when it is a loopback
+    address outside the fixed allowlist; unrelated hosts stay rejected."""
+    from fastapi.testclient import TestClient
+
+    started = []
+    monkeypatch.setattr("uvicorn.run", lambda application, **k: started.append(application))
+    result = cli.invoke(app, ["gui", "--host", "127.0.0.2", "--i-know"])
+    assert result.exit_code == 0, result.output
+    client = TestClient(started[0])
+    assert client.get("/api/runs", headers={"Host": "127.0.0.2:8765"}).status_code == 200
+    assert client.get("/api/runs", headers={"Host": "evil.example"}).status_code == 400

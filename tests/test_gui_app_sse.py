@@ -330,3 +330,34 @@ def test_stream_over_a_gzipped_archive_is_one_pass(home, tmp_path):
     assert _seqs(body) == [1, 2]
     assert ": ping" not in body
     assert body.endswith(_CLOSED) and body.count("event: closed") == 1
+
+
+def test_stream_rereads_log_before_closing_on_a_state_change(home, tmp_path, monkeypatch):
+    """Review P2: approve appends span B and leaves approval between the stream's
+    read of A's batch and its completion check. The stream must deliver B and stay
+    open — never close on the stale batch."""
+    import adw.gui.app as app_mod
+    from adw.state import RunState
+
+    lines = _span_ab_lines(b_ended=False)[:2]
+    app, slug, run_dir = _setup(tmp_path, lines, phase="awaiting_approval")
+    repo = tmp_path / "repo"
+    real_load_state = app_mod._load_state
+    approved = {"done": False}
+
+    def approve_then_load(*args, **kwargs):
+        if not approved["done"]:
+            approved["done"] = True
+            _append(run_dir, rec(3, "run", "start", "B", None, sec=3,
+                                 payload=run_start_payload("Gated")))
+            RunState(run_id="aaaa1111", issue="Issue text", phase="build",
+                     parallel=False).save(repo)
+        return real_load_state(*args, **kwargs)
+
+    monkeypatch.setattr(app_mod, "_load_state", approve_then_load)
+    status, body, ended = _drive(
+        app, f"/api/runs/{slug}/aaaa1111/stream", on_chunk=lambda text: 3 in _seqs(text),
+    )
+    assert status == 200 and not ended
+    assert _seqs(body) == [1, 2, 3]
+    assert "event: closed" not in body
