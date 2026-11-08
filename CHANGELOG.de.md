@@ -13,6 +13,14 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.35.0] — Unreleased
+
+### Hinzugefügt
+- **Jeder Lauf bekommt einen Rückblick — und du ein Urteil (W14).** Das Lauf-Protokoll zählte, was passiert ist, nicht warum etwas schiefging oder was besser gewesen wäre.
+  - **Retro-Agent:** Am Ende jedes Laufs, der in `done` oder `escalated` endet (nicht bei Gate-Pause, nach einem Agentenfehler oder im Dry-Run), bewertet der nur lesende `retro_agent` den Lauf aus seinem Run-Ordner und antwortet mit striktem JSON (Zusammenfassung, höchstens 10 Einträge mit `problem`, `resolution`, `better`, `cause`, `lever`, `evidence`). Einträge ohne gültigen Beleg (`seq:<n>` eines existierenden Events oder eine existierende relative Datei im Run-Ordner) werden verworfen und gezählt. ADW schreibt `retro.json` und das vom Code gerenderte `retro.md` in den Run-Ordner; beide gehören zum Ledger-Bündel. Ein `retro`-Event hält `written` oder `failed` fest; eine fehlschlagende Retro ändert nie Exit-Code oder Phase. Ihre Kosten zählen in die `totals` des Laufs.
+  - **`adw rate <RUN_ID> good|bad`** und **`adw feedback <RUN_ID> --finding <PRÄFIX> valid|noise`** (je mit `--note`, `--repo`) hängen eine JSON-Zeile an `feedback.jsonl` im Ledger-Ordner des Laufs an, committen `feedback <run_id> rate|finding` und pushen fail-open. Der Lauf muss exportiert sein; `--finding` muss genau einen `finding_key` treffen. `feedback.jsonl` überlebt jeden erneuten Export.
+  - **`adw kpis`:** Die Gesamtwerte (JSON `total` und Text unter der Gesamtzeile) enthalten zusätzlich `retro_causes`, `retro_runs`, `ratings` (`good`/`bad`, je Lauf zählt die letzte Bewertung) und `finding_feedback` (`valid`/`noise`).
+
 ## [0.34.0] — 2026-11-08
 
 ### Hinzugefügt

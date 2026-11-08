@@ -12,6 +12,14 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.35.0] — Unreleased
+
+### Added
+- **Every run gets a retro — and you a verdict (W14).** The run record counted what happened, not why it went wrong or what would have been better.
+  - **Retro agent:** at the end of every run that ends `done` or `escalated` (not at a gate pause, after an agent error or in a dry run), the read-only `retro_agent` assesses the run from its run folder and answers with strict JSON (summary, at most 10 items with `problem`, `resolution`, `better`, `cause`, `lever`, `evidence`). Items without valid evidence (`seq:<n>` of an existing event or an existing relative file in the run folder) are dropped and counted. ADW writes `retro.json` and the code-rendered `retro.md` into the run folder; both are part of the ledger bundle. A `retro` event records `written` or `failed`; a failing retro never changes exit code or phase. Its cost counts in the run's `totals`.
+  - **`adw rate <RUN_ID> good|bad`** and **`adw feedback <RUN_ID> --finding <PREFIX> valid|noise`** (each with `--note`, `--repo`) append one JSON line to `feedback.jsonl` in the run's ledger folder, commit `feedback <run_id> rate|finding` and push fail-open. The run must have been exported; `--finding` must match exactly one `finding_key`. `feedback.jsonl` survives every re-export.
+  - **`adw kpis`:** the total (JSON `total` and text below the total row) adds `retro_causes`, `retro_runs`, `ratings` (`good`/`bad`, the last rating per run counts) and `finding_feedback` (`valid`/`noise`).
+
 ## [0.34.0] — 2026-11-08
 
 ### Added

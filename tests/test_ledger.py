@@ -215,6 +215,21 @@ def test_export_writes_bundle_commits_and_pushes(repo, ledger):
     assert event["payload"] == {"outcome": "exported", "pushed": True, "reason": None}
 
 
+def test_export_bundles_retro_files(repo, ledger):
+    """W14 AC 6: retro.json and retro.md of the run belong to the bundle, unchanged."""
+    run_dir = install_fixture_run(repo)
+    (run_dir / "retro.json").write_text('{"schema_version": 1}\n', encoding="utf-8")
+    (run_dir / "retro.md").write_text("# Retro a1b2c3d4 (escalated)\n", encoding="utf-8")
+
+    assert ledger_mod.export_run(repo, RUN_ID) == "exported"
+
+    dest = ledger_dir(ledger)
+    files = {p.relative_to(dest).as_posix() for p in dest.rglob("*") if p.is_file()}
+    assert files == BUNDLE | {"retro.json", "retro.md"}
+    for name in ("retro.json", "retro.md"):
+        assert (dest / name).read_bytes() == (run_dir / name).read_bytes()
+
+
 def test_second_export_without_change_is_unchanged(repo, ledger):
     """AC 4: the first export's own ledger.export event does not count as change."""
     run_dir = install_fixture_run(repo)
@@ -317,6 +332,17 @@ def _start_run(repo, monkeypatch, outcome: str):
 @pytest.fixture
 def no_preflight(monkeypatch):
     monkeypatch.setattr(cli_mod, "_preflight", lambda *a, **k: None)
+
+    # W14: a non-dry run ending done/escalated triggers the retro agent through the
+    # real SDK runner — it must fail fast here instead of reaching a real model.
+    def no_model(*, prompt, options):
+        async def stream():
+            raise RuntimeError("kein echtes Modell in Tests")
+            yield  # pragma: no cover — makes this an async generator
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", no_model)
 
 
 @pytest.mark.parametrize(

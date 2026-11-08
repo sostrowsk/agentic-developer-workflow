@@ -361,6 +361,8 @@ adw runs list  [--repo PATH]
 adw runs prune [--repo PATH] [--keep N] [--older-than DAYS] [--gzip]
 adw ledger export [RUN_ID] [--repo PATH]
 adw kpis   [--since DAYS] [--repo-slug SLUG] [--json]
+adw rate     RUN_ID good|bad [--note TEXT] [--repo PATH]
+adw feedback RUN_ID --finding PREFIX valid|noise [--note TEXT] [--repo PATH]
 ```
 
 `--repo` defaults to the current directory everywhere.
@@ -417,6 +419,10 @@ Exports one run or all runs of `--repo` into the ledger after the fact, see §11
 
 Metrics per ADW version and eval candidates across all runs in the ledger
 (read-only, 0 tokens), see §11.1.
+
+### `adw rate` / `adw feedback`
+
+Rate an exported run (`good`/`bad`) or one of its findings (`valid`/`noise`); the line lands in `feedback.jsonl` in the ledger, see §11.1.
 
 ### Exit codes
 
@@ -644,6 +650,36 @@ case bundle. It is the data basis for later evaluation.
   ancestor the value is `null`. Records exported before 0.34.0 carry the wrong
   values — re-export with `adw ledger export --repo .`.
 
+#### Retro and human feedback
+
+- **Retro:** at the end of every `run`, `resume` and `approve` whose run ends
+  `done` or `escalated`, the read-only `retro_agent` (Opus, 60 turns, 900 s, `Read`/
+  `Grep`/`Glob`, working directory = the run folder `.adw/runs/<run_id>/`) assesses
+  the run. It runs inside the `run` span, so its cost counts in the run's `totals`.
+  No retro at a gate pause, after an agent error (the run is resumable), in a dry
+  run, or when `retro.json` already exists. The agent answers with JSON
+  `{"summary", "items": [{"problem", "resolution", "better", "cause", "lever",
+  "evidence": [...]}]}`, at most 10 items; `cause` is one of `prompt`,
+  `context_missing`, `gate`, `orchestrator`, `issue_quality`, `model`, `target_repo`.
+  Evidence is `seq:<n>` (an event with that `seq` exists in `events.jsonl`) or a
+  relative path (no `..`, not absolute) of a file in the run folder; an item without
+  any valid evidence is dropped. ADW writes `retro.json` (`schema_version, run_id,
+  phase, summary, items, dropped, model`; sorted keys, indent 2) and renders
+  `retro.md` from it; both are part of the ledger bundle. A `retro` event records
+  `{"outcome": "written", "items": n}` or `{"outcome": "failed", "reason": …}`. A
+  failing retro (agent error, invalid JSON, schema violation, I/O) is reported on
+  stderr, leaves neither file behind and never changes exit code or phase.
+- **`adw rate <RUN_ID> good|bad [--note TEXT] [--repo PATH]`** and
+  **`adw feedback <RUN_ID> --finding <PREFIX> valid|noise [--note TEXT] [--repo PATH]`**
+  append one JSON line to `feedback.jsonl` in the run's ledger folder:
+  `{"ts", "kind": "rate"|"finding", "value", "note"}` plus `finding_key` for
+  `feedback`. The run must have been exported first (otherwise exit 1, nothing
+  written). `--finding` is a prefix that must match exactly one `finding_key` of the
+  run's `run-record.json`; none or several → exit 1 with the (shortened) candidate
+  list. Then commit `feedback <run_id> rate|finding` and push (fail-open, like the
+  export). `feedback.jsonl` lives only in the ledger and survives every re-export
+  byte for byte.
+
 #### `adw kpis`
 
 `adw kpis [--since <days>] [--repo-slug <slug>] [--json]` reads every
@@ -674,6 +710,11 @@ nothing and calls no model.
   list and `<n> übersprungen`. With `--json`, exactly one object
   `{"groups": [...], "total": {...}, "candidates": [...], "skipped": n}`
   (unrounded values).
+- **Retro and feedback** (only in `total`, below the total row in the text output):
+  `retro_causes` `{<cause>: n}` over all items of all readable `retro.json`;
+  `retro_runs` (runs with a readable `retro.json`, including `items: []`); `ratings`
+  `{good, bad}` — per run only the last `rate` line counts; `finding_feedback`
+  `{valid, noise}` over all `finding` lines. Unreadable files and lines are ignored.
 - **Errors:** no ledger (path missing, no `.git`, or the Git probe fails) → message
   on stderr, exit 1. Files with broken JSON, no JSON object or a `schema_version`
   other than 1 are skipped and counted in `skipped`; the exit code stays 0.

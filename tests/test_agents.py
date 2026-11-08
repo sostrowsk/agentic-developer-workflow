@@ -176,6 +176,7 @@ EXPECTED_LIMITS = {
     "plan_synthesis": (100, 1200),
     "e2e_triage": (50, 600),
     "log_analyst": (50, 600),
+    "retro_agent": (60, 900),
 }
 
 

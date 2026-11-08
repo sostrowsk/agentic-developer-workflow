@@ -10,6 +10,8 @@ import json
 import os
 import subprocess
 import time
+from datetime import UTC, datetime
+from enum import StrEnum
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Annotated, get_args
@@ -17,7 +19,7 @@ from typing import Annotated, get_args
 import typer
 from pydantic import ValidationError
 
-from adw import ci, github, ledger, preflight, retention
+from adw import ci, github, ledger, preflight, retention, retro
 from adw import dry_run as dry
 from adw.agents import AgentRunError, RunTotals, SdkAgentRunner
 from adw.codex import CodexRunner
@@ -326,7 +328,12 @@ def run(
                         f"Run {state.run_id} gestartet (Phase: {state.phase}, Gates: {gate_mode})"
                     )
                     executed = True
-                    _execute(ctx)
+                    try:
+                        _execute(ctx)
+                    finally:
+                        # W14: retro of a finished run inside the run span; never
+                        # raises, so a pending typer.Exit propagates unchanged.
+                        retro.run_retro(ctx)
         finally:
             # E6: export after every execution (done, escalation, pause, error) —
             # after the run span and the per-run lock, before auto-prune.
@@ -385,7 +392,12 @@ def resume(
                     )
                     typer.echo(f"Run {state.run_id} wird fortgesetzt (Phase: {state.phase})")
                     executed = True
-                    _execute(ctx)
+                    try:
+                        _execute(ctx)
+                    finally:
+                        # W14: retro of a finished run inside the run span; never
+                        # raises, so a pending typer.Exit propagates unchanged.
+                        retro.run_retro(ctx)
         finally:
             # E6: export after every execution (done, escalation, pause, error) —
             # after the run span and the per-run lock, before auto-prune.
@@ -472,7 +484,12 @@ def approve(
                     )
                     typer.echo(f"Approval erteilt — Run {state.run_id} läuft weiter")
                     executed = True
-                    _execute(ctx)
+                    try:
+                        _execute(ctx)
+                    finally:
+                        # W14: retro of a finished run inside the run span; never
+                        # raises, so a pending typer.Exit propagates unchanged.
+                        retro.run_retro(ctx)
         finally:
             # E6: export after every execution (done, escalation, pause, error) —
             # after the run span and the per-run lock, before auto-prune.
@@ -705,6 +722,72 @@ def ledger_export(
         raise typer.Exit(1)
 
 
+# --- `adw rate` / `adw feedback`: menschliches Urteil im Ledger (W14) ---------
+
+
+class RateValue(StrEnum):
+    good = "good"
+    bad = "bad"
+
+
+class FindingValue(StrEnum):
+    valid = "valid"
+    noise = "noise"
+
+
+def _append_feedback(repo: Path, run_id: str, entry: dict, finding: str | None = None) -> None:
+    """Resolve the run's ledger folder, pick the full finding key for ``finding``
+    and append the line — under the repo lock; any refusal is exit 1, nothing
+    written."""
+    repo = _require_repo(repo)
+    with _repo_lock(repo):
+        try:
+            ledger_dir, rel = ledger.ledger_run_dir(repo, run_id)
+            if finding is not None:
+                keys = [k for k in ledger.finding_keys(ledger_dir, rel) if k.startswith(finding)]
+                if len(keys) != 1:
+                    shown = ", ".join(keys[:5]) + (", …" if len(keys) > 5 else "")
+                    problem = "trifft keinen" if not keys else "ist mehrdeutig"
+                    raise ledger.FeedbackError(
+                        f"--finding {finding!r} {problem} finding_key"
+                        + (f" (Kandidaten: {shown})" if keys else "")
+                    )
+                entry["finding_key"] = keys[0]
+            ledger.append_feedback(ledger_dir, rel, entry)
+        except ledger.FeedbackError as exc:
+            raise _fail(str(exc)) from None
+    typer.echo(f"Feedback für {run_id} gespeichert ({entry['kind']} {entry['value']})")
+
+
+def _feedback_entry(kind: str, value: str, note: str | None) -> dict:
+    return {"ts": datetime.now(UTC).isoformat(), "kind": kind, "value": value, "note": note}
+
+
+@app.command("rate")
+def rate(
+    run_id: Annotated[str, typer.Argument(help="Run-ID des exportierten Laufs")],
+    value: Annotated[RateValue, typer.Argument(help="good | bad")],
+    note: Annotated[str | None, typer.Option("--note", help="Kurze Begründung")] = None,
+    repo: Annotated[Path, typer.Option("--repo", help="Pfad zum Ziel-Repo")] = Path("."),
+) -> None:
+    """Einen Lauf bewerten (Zeile in feedback.jsonl im Ledger)."""
+    _append_feedback(repo, run_id, _feedback_entry("rate", value.value, note))
+
+
+@app.command("feedback")
+def feedback(
+    run_id: Annotated[str, typer.Argument(help="Run-ID des exportierten Laufs")],
+    value: Annotated[FindingValue, typer.Argument(help="valid | noise")],
+    finding: Annotated[
+        str, typer.Option("--finding", help="Präfix, der genau einen finding_key trifft")
+    ],
+    note: Annotated[str | None, typer.Option("--note", help="Kurze Begründung")] = None,
+    repo: Annotated[Path, typer.Option("--repo", help="Pfad zum Ziel-Repo")] = Path("."),
+) -> None:
+    """Ein Finding eines Laufs als valid oder noise beurteilen (Zeile in feedback.jsonl)."""
+    _append_feedback(repo, run_id, _feedback_entry("finding", value.value, note), finding)
+
+
 # --- `adw kpis`: Kennzahlen über alle Läufe im Ledger (W3) --------------------
 
 _KPI_COLUMNS = (
@@ -755,6 +838,12 @@ def _format_kpis(result: dict) -> str:
         "  ".join(cell.ljust(w) for cell, w in zip(row, widths, strict=True)).rstrip()
         for row in rows
     ]
+    total = result["total"]
+    lines.append(
+        f"Retros {total['retro_runs']}: {_kpi_pairs(total['retro_causes'], str)}"
+        f" | Bewertungen {_kpi_pairs(total['ratings'], str)}"
+        f" | Findings {_kpi_pairs(total['finding_feedback'], str)}"
+    )
     lines.append("")
     for label, m in labelled:
         lines.append(
@@ -794,9 +883,8 @@ def kpis(
         raise _fail(f"Ledger {path} nicht lesbar: {exc}") from None
     if ledger_path is None:
         raise _fail(f"kein Ledger unter {path} (Git-Klon via ADW_LEDGER erwartet)")
-    result = ledger.compute_kpis(
-        ledger._read_ledger_records(ledger_path), since=since, repo_slug=repo_slug
-    )
+    records, signals = ledger._read_ledger_runs(ledger_path)
+    result = ledger.compute_kpis(records, since=since, repo_slug=repo_slug, signals=signals)
     typer.echo(json.dumps(result, ensure_ascii=False) if as_json else _format_kpis(result))
 
 

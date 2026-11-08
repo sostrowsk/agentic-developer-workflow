@@ -97,6 +97,14 @@ METRIC_KEYS = {
     "gate_iterations", "duration_s", "cost_usd", "agent_cost_shares", "circuit_breakers",
     "approvals", "findings_by_severity", "findings_by_action",
 }
+# W14: only in ``total``, never per version
+SIGNAL_KEYS = {"retro_causes", "retro_runs", "ratings", "finding_feedback"}
+NO_SIGNALS = {
+    "retro_causes": {},
+    "retro_runs": 0,
+    "ratings": {"good": 0, "bad": 0},
+    "finding_feedback": {"valid": 0, "noise": 0},
+}
 
 
 def approx(value):
@@ -131,7 +139,7 @@ def test_metrics_per_version_and_total_match_hand_computed_values(ledger):
     assert [g["adw_version"] for g in result["groups"]] == ["0.9.0", "0.10.0"]
     old, new = result["groups"]
     assert set(old) == METRIC_KEYS | {"adw_version"}
-    assert set(result["total"]) == METRIC_KEYS
+    assert set(result["total"]) == METRIC_KEYS | SIGNAL_KEYS
     assert old == approx({
         "adw_version": "0.9.0",
         "runs": 3,
@@ -178,6 +186,7 @@ def test_metrics_per_version_and_total_match_hand_computed_values(ledger):
         "approvals": {"median": 1},
         "findings_by_severity": {"P1": 2, "P2": 1, "P3": 1},
         "findings_by_action": {"fix": 3, "defer": 2},
+        **NO_SIGNALS,
     })
     assert result["skipped"] == 0
 
@@ -291,6 +300,109 @@ def test_unknown_schema_and_broken_files_are_skipped_and_counted(ledger):
     assert "4 übersprungen" in res.stdout
 
 
+# --- W14 AC 10: retro causes and human feedback in total --------------------------
+
+
+def run_folder(ledger: Path, run_id: str, slug: str = "acme/widget") -> Path:
+    return ledger / "runs" / slug.replace("/", "__") / run_id
+
+
+def write_retro(ledger: Path, run_id: str, causes: list[str], slug: str = "acme/widget"):
+    items = [
+        {"problem": "p", "resolution": "r", "better": "b", "cause": c, "lever": "l",
+         "evidence": ["seq:1"]}
+        for c in causes
+    ]
+    retro = {"schema_version": 1, "run_id": run_id, "phase": "done", "summary": "s",
+             "items": items, "dropped": 0, "model": "claude-opus-5-5"}
+    (run_folder(ledger, run_id, slug) / "retro.json").write_text(
+        json.dumps(retro, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+    )
+
+
+def write_feedback(ledger: Path, run_id: str, *entries, slug: str = "acme/widget"):
+    """``entries``: ("rate", value) / ("finding", value) tuples or raw str lines."""
+    out = []
+    for entry in entries:
+        if isinstance(entry, str):
+            out.append(entry)
+            continue
+        kind, value = entry
+        line = {"ts": "2026-11-08T10:00:00+00:00", "kind": kind, "value": value, "note": None}
+        if kind == "finding":
+            line["finding_key"] = "x.py|Null-Check fehlt"
+        out.append(json.dumps(line))
+    (run_folder(ledger, run_id, slug) / "feedback.jsonl").write_text(
+        "".join(f"{line}\n" for line in out), encoding="utf-8"
+    )
+
+
+def test_retro_causes_and_feedback_are_counted_in_total(ledger):
+    install(ledger, [
+        run("r1", adw_version="0.9.0", started_at=ago(1), phase="done"),
+        run("r2", adw_version="0.9.0", started_at=ago(1), phase="escalated"),
+        run("r3", adw_version="0.10.0", started_at=ago(1), phase="done"),
+        run("r4", adw_version="0.10.0", started_at=ago(1), phase="done"),
+        run("x1", adw_version="0.10.0", started_at=ago(1), phase="done", repo_slug="other/x"),
+    ])
+    write_retro(ledger, "r1", ["prompt", "gate", "prompt"])
+    write_feedback(ledger, "r1", ("rate", "good"), ("finding", "valid"), ("rate", "bad"),
+                   ("finding", "noise"))
+    write_retro(ledger, "r2", [])  # a smooth run's retro still counts as a retro run
+    write_feedback(ledger, "r2", ("rate", "good"), ("finding", "valid"))
+    write_retro(ledger, "r4", ["model"])
+    write_feedback(ledger, "r4", ("rate", "bad"), ("rate", "good"))
+    write_retro(ledger, "x1", ["orchestrator"], slug="other/x")
+    write_feedback(ledger, "x1", ("rate", "bad"), ("finding", "noise"), slug="other/x")
+
+    total = kpis_json()["total"]
+    assert total["retro_causes"] == {"prompt": 2, "gate": 1, "model": 1, "orchestrator": 1}
+    assert total["retro_runs"] == 4
+    assert total["ratings"] == {"good": 2, "bad": 2}  # the last rate line per run counts
+    assert total["finding_feedback"] == {"valid": 2, "noise": 2}
+
+    result = kpis_json("--repo-slug", "acme/widget")
+    assert {k: result["total"][k] for k in SIGNAL_KEYS} == {
+        "retro_causes": {"prompt": 2, "gate": 1, "model": 1},
+        "retro_runs": 3,
+        "ratings": {"good": 2, "bad": 1},
+        "finding_feedback": {"valid": 2, "noise": 1},
+    }
+    for group in result["groups"]:
+        assert set(group) == METRIC_KEYS | {"adw_version"}
+
+    res = runner.invoke(app, ["kpis", "--repo-slug", "acme/widget"])
+    assert res.exit_code == 0, res.output
+    below_total = res.stdout[res.stdout.index("gesamt"):]
+    for cause in ("prompt", "gate", "model"):
+        assert cause in below_total
+    assert "orchestrator" not in below_total
+
+
+def test_unreadable_retro_and_feedback_lines_are_ignored(ledger):
+    install(ledger, [
+        run("a", adw_version="0.9.0", started_at=ago(1), phase="done"),
+        run("b", adw_version="0.9.0", started_at=ago(1), phase="done"),
+    ])
+    (run_folder(ledger, "a") / "retro.json").write_bytes(b'{"items": [')
+    (run_folder(ledger, "b") / "retro.json").write_text('{"items": 3}', encoding="utf-8")
+    write_feedback(ledger, "a", ("rate", "good"), "{kaputt", "[1, 2]", ("finding", "noise"),
+                   ("rate", "meh"))
+
+    res = runner.invoke(app, ["kpis", "--json"])
+
+    assert res.exit_code == 0, res.output
+    assert "Traceback" not in res.output
+    result = json.loads(res.stdout)
+    assert result["skipped"] == 0
+    assert result["total"]["runs"] == 2
+    assert result["total"]["retro_causes"] == {}
+    assert result["total"]["retro_runs"] == 0
+    assert result["total"]["ratings"] == {"good": 1, "bad": 0}
+    assert result["total"]["finding_feedback"] == {"valid": 0, "noise": 1}
+    assert runner.invoke(app, ["kpis"]).exit_code == 0
+
+
 # --- AC 6: no ledger / empty ledger / invalid option ------------------------------
 
 
@@ -336,6 +448,7 @@ def test_empty_ledger_gives_empty_result_without_invented_values(ledger):
             "approvals": {"median": None},
             "findings_by_severity": {},
             "findings_by_action": {},
+            **NO_SIGNALS,
         },
         "candidates": [],
         "skipped": 0,

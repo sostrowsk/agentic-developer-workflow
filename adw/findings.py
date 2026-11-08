@@ -224,7 +224,12 @@ def _last_json_fence_content(text: str) -> str | None:
 
 
 def extract_review_result(text: str) -> ReviewResult:
-    """Parses a review result according to the strict contract (see module docstring).
+    """Parses a review result according to the strict contract (see module docstring)."""
+    return ReviewResult.model_validate(extract_json_object(text))
+
+
+def extract_json_object(text: str) -> dict:
+    """The strict JSON object of an agent answer (shared by reviewers and retro).
 
     The candidate is the last ```json fence, otherwise the entire text. The candidate
     must be entirely ONE JSON object; duplicate keys, extreme nesting depth
@@ -248,4 +253,4 @@ def extract_review_result(text: str) -> ReviewResult:
         raise FindingsParseError("Top-Level-JSON ist kein Objekt", text)
     if _too_deep(data):
         raise FindingsParseError("JSON übersteigt die maximale Nesting-Tiefe", text)
-    return ReviewResult.model_validate(data)
+    return data

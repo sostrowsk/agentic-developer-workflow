@@ -368,6 +368,8 @@ adw runs list  [--repo PFAD]
 adw runs prune [--repo PFAD] [--keep N] [--older-than TAGE] [--gzip]
 adw ledger export [RUN_ID] [--repo PFAD]
 adw kpis   [--since TAGE] [--repo-slug SLUG] [--json]
+adw rate     RUN_ID good|bad [--note TEXT] [--repo PFAD]
+adw feedback RUN_ID --finding PRÄFIX valid|noise [--note TEXT] [--repo PFAD]
 ```
 
 `--repo` ist überall standardmäßig das aktuelle Verzeichnis.
@@ -426,6 +428,10 @@ Exportiert einen oder alle Läufe von `--repo` nachträglich ins Ledger, siehe �
 
 Kennzahlen je ADW-Version und Eval-Kandidaten über alle Läufe im Ledger
 (nur lesend, 0 Tokens), siehe §11.1.
+
+### `adw rate` / `adw feedback`
+
+Einen exportierten Lauf (`good`/`bad`) oder eines seiner Findings (`valid`/`noise`) bewerten; die Zeile landet in `feedback.jsonl` im Ledger, siehe §11.1.
 
 ### Exit-Codes
 
@@ -663,6 +669,37 @@ spätere Auswertungen.
   ohne solchen Vorfahren ist der Wert `null`. Vor 0.34.0 exportierte Records tragen
   die falschen Werte — per `adw ledger export --repo .` neu exportieren.
 
+#### Retro und menschliches Urteil
+
+- **Retro:** Am Ende jedes `run`, `resume` und `approve`, dessen Lauf in `done` oder
+  `escalated` endet, bewertet der nur lesende `retro_agent` (Opus, 60 Turns, 900 s,
+  `Read`/`Grep`/`Glob`, Arbeitsverzeichnis = Run-Ordner `.adw/runs/<run_id>/`) den
+  Lauf. Er läuft innerhalb der `run`-Spanne, seine Kosten zählen also in die
+  `totals` des Laufs. Keine Retro bei Gate-Pause, nach einem Agentenfehler (der Lauf
+  ist fortsetzbar), im Dry-Run oder wenn `retro.json` schon existiert. Der Agent
+  antwortet mit JSON `{"summary", "items": [{"problem", "resolution", "better",
+  "cause", "lever", "evidence": [...]}]}`, höchstens 10 Einträge; `cause` ist einer
+  von `prompt`, `context_missing`, `gate`, `orchestrator`, `issue_quality`, `model`,
+  `target_repo`. Ein Beleg ist `seq:<n>` (im `events.jsonl` gibt es ein Event mit
+  dieser `seq`) oder ein relativer Pfad (kein `..`, nicht absolut) einer Datei im
+  Run-Ordner; ein Eintrag ohne gültigen Beleg wird verworfen. ADW schreibt
+  `retro.json` (`schema_version, run_id, phase, summary, items, dropped, model`;
+  sortierte Schlüssel, Einrückung 2) und rendert daraus `retro.md`; beide gehören
+  zum Ledger-Bündel. Ein `retro`-Event hält `{"outcome": "written", "items": n}`
+  oder `{"outcome": "failed", "reason": …}` fest. Eine fehlschlagende Retro
+  (Agentenfehler, ungültiges JSON, Schemaverletzung, I/O) wird auf stderr gemeldet,
+  hinterlässt keine der beiden Dateien und ändert nie Exit-Code oder Phase.
+- **`adw rate <RUN_ID> good|bad [--note TEXT] [--repo PFAD]`** und
+  **`adw feedback <RUN_ID> --finding <PRÄFIX> valid|noise [--note TEXT] [--repo PFAD]`**
+  hängen eine JSON-Zeile an `feedback.jsonl` im Ledger-Ordner des Laufs an:
+  `{"ts", "kind": "rate"|"finding", "value", "note"}`, bei `feedback` zusätzlich
+  `finding_key`. Der Lauf muss vorher exportiert sein (sonst Exit 1, nichts
+  geschrieben). `--finding` ist ein Präfix, der genau einen `finding_key` aus dem
+  `run-record.json` des Laufs treffen muss; kein oder mehrere Treffer → Exit 1 mit
+  der (gekürzten) Kandidatenliste. Danach Commit `feedback <run_id> rate|finding`
+  und Push (fail-open, wie beim Export). `feedback.jsonl` liegt nur im Ledger und
+  überlebt jeden erneuten Export byte-gleich.
+
 #### `adw kpis`
 
 `adw kpis [--since <tage>] [--repo-slug <slug>] [--json]` liest alle
@@ -693,6 +730,12 @@ Gesamtzeile. Das Kommando schreibt nichts und ruft kein Modell auf.
   Kandidatenliste und `<n> übersprungen`. Mit `--json` genau ein Objekt
   `{"groups": [...], "total": {...}, "candidates": [...], "skipped": n}`
   (ungerundete Werte).
+- **Retro und Feedback** (nur in `total`, in der Textausgabe unter der Gesamtzeile):
+  `retro_causes` `{<cause>: n}` über alle Einträge aller lesbaren `retro.json`;
+  `retro_runs` (Läufe mit lesbarem `retro.json`, auch `items: []`); `ratings`
+  `{good, bad}` — je Lauf zählt nur die letzte `rate`-Zeile; `finding_feedback`
+  `{valid, noise}` über alle `finding`-Zeilen. Unlesbare Dateien und Zeilen werden
+  ignoriert.
 - **Fehler:** kein Ledger (Pfad fehlt, kein `.git` oder die Git-Probe scheitert) →
   Meldung auf stderr, Exit 1. Dateien mit kaputtem JSON, ohne JSON-Objekt oder mit
   `schema_version` ungleich 1 werden übersprungen und in `skipped` gezählt; der

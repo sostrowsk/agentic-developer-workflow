@@ -358,6 +358,22 @@ REGISTRY: dict[str, AgentSpec] = {
         ),
         permission_mode="default",
     ),
+    "retro_agent": AgentSpec(
+        name="retro_agent",
+        model=OPUS,
+        max_turns=60,
+        timeout_s=900,
+        tools=READ_ONLY_TOOLS,
+        allowed_tools=SCOPED_READ_RULES,
+        system_append=(
+            "You are the retro agent (strictly read-only). You assess a finished ADW "
+            "run from its run folder: what went wrong, why, and what would have been "
+            "better. You change nothing. Respond ONLY with the retro JSON according to "
+            "the schema; every item needs evidence (seq:<n> from events.jsonl or a "
+            "relative file path in the run folder)."
+        ),
+        permission_mode="default",
+    ),
 }
 
 

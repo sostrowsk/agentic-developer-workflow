@@ -45,7 +45,11 @@ _ARTIFACTS = (
     "followups.md",
     "escalation.md",
     "state.json",
+    "retro.json",
+    "retro.md",
 )
+# Human feedback (W14, ``adw rate``/``adw feedback``) lives only in the ledger.
+FEEDBACK_FILE = "feedback.jsonl"
 _SCP_URL = re.compile(r"^[^/:]+:(?!/)")
 
 
@@ -415,9 +419,13 @@ def _export(repo: Path, run_id: str) -> tuple[str, bool | None, str | None]:
     dest = ledger / rel
     if not dest.resolve().is_relative_to(runs_dir) or dest.resolve() == runs_dir:
         raise RuntimeError(f"Ledger-Ziel liegt außerhalb von runs/: {rel}")
+    feedback = dest / FEEDBACK_FILE
+    kept = feedback.read_bytes() if feedback.is_file() else None
     if dest.exists():
         shutil.rmtree(dest)
     _write_bundle(repo, state, record, dest)
+    if kept is not None:  # E8: the human verdict survives the rewrite
+        feedback.write_bytes(kept)
     _git_ok(ledger, "add", "--", rel.as_posix())
     staged = run_git(ledger, "diff", "--cached", "--quiet", "--", rel.as_posix(),
                      timeout=_GIT_TIMEOUT)
@@ -492,18 +500,137 @@ def export_run(repo, run_id: str) -> str:
 
 # --- kpis (W3) -------------------------------------------------------------------
 
+# --- human feedback (W14) ---------------------------------------------------------
+
+
+class FeedbackError(Exception):
+    """``adw rate``/``adw feedback`` cannot write (no ledger, run not exported, …)."""
+
+
+def ledger_run_dir(repo: Path, run_id: str) -> tuple[Path, Path]:
+    """The ledger clone and the run's folder relative to it — the folder must exist
+    (the run was exported). Creates nothing."""
+    try:
+        ledger = _ledger_path()
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        raise FeedbackError(f"Ledger nicht lesbar: {exc}") from exc
+    if ledger is None:
+        path = Path(os.environ.get("ADW_LEDGER", _DEFAULT_LEDGER)).expanduser()
+        raise FeedbackError(f"Ledger nicht gefunden: {path}")
+    rel = Path("runs") / _repo_slug(repo).replace("/", "__") / run_id
+    runs_dir = (ledger / "runs").resolve()
+    dest = ledger / rel
+    if not dest.resolve().is_relative_to(runs_dir) or dest.resolve() == runs_dir:
+        raise FeedbackError(f"Ledger-Ziel liegt außerhalb von runs/: {rel}")
+    if not dest.is_dir():
+        raise FeedbackError(f"Lauf {run_id} nicht im Ledger (erst exportieren: adw ledger export)")
+    return ledger, rel
+
+
+def finding_keys(ledger: Path, rel: Path) -> list[str]:
+    """The distinct ``finding_key`` values of the exported run record."""
+    try:
+        record = json.loads((ledger / rel / "run-record.json").read_text(encoding="utf-8"))
+    except (ValueError, OSError) as exc:
+        raise FeedbackError(f"run-record.json nicht lesbar: {exc}") from exc
+    keys = (_dict(f).get("finding_key") for f in _list(_dict(record).get("findings")))
+    return sorted({k for k in keys if isinstance(k, str)})
+
+
+def append_feedback(ledger: Path, rel: Path, entry: dict) -> bool:
+    """Append one JSON line to the run's feedback.jsonl, commit it and push fail-open.
+    Returns whether the push succeeded; a failed add/commit raises FeedbackError."""
+    path = ledger / rel / FEEDBACK_FILE
+    prefix = ""
+    if path.is_file() and path.stat().st_size:
+        with path.open("rb") as fh:
+            fh.seek(-1, os.SEEK_END)
+            prefix = "" if fh.read(1) == b"\n" else "\n"
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(prefix + json.dumps(entry, ensure_ascii=False) + "\n")
+    try:
+        _git_ok(ledger, "add", "--", (rel / FEEDBACK_FILE).as_posix())
+        _git_ok(ledger, "commit", "-m", f"feedback {rel.name} {entry['kind']}")
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        raise FeedbackError(f"Ledger-Commit fehlgeschlagen: {exc}") from exc
+    return _push(ledger)
+
+
 CANDIDATE_RULES = ("escalated", "review_rounds", "gate_iterations", "circuit_breakers", "cost_usd")
 
 
 def _read_ledger_records(ledger: Path) -> list:
     """Every ``runs/*/*/run-record.json`` parsed; an unreadable file yields None."""
-    records = []
+    return _read_ledger_runs(ledger)[0]
+
+
+def _read_ledger_runs(ledger: Path) -> tuple[list, list[dict]]:
+    """The run records plus, in parallel, each run's optional signals (W14):
+    ``{"retro": <readable retro.json or None>, "feedback": [<readable lines>]}``."""
+    records, signals = [], []
     for path in sorted(ledger.glob("runs/*/*/run-record.json")):
         try:
             records.append(json.loads(path.read_text(encoding="utf-8")))
         except (ValueError, OSError):  # UnicodeDecodeError is a ValueError
             records.append(None)
-    return records
+        signals.append({
+            "retro": _read_retro(path.parent / "retro.json"),
+            "feedback": _read_feedback(path.parent / FEEDBACK_FILE),
+        })
+    return records, signals
+
+
+def _read_retro(path: Path) -> dict | None:
+    try:
+        retro = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 — missing or unreadable: no retro
+        return None
+    return retro if isinstance(retro, dict) and isinstance(retro.get("items"), list) else None
+
+
+def _read_feedback(path: Path) -> list[dict]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001 — missing or unreadable: no feedback
+        return []
+    entries = []
+    for line in text.splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict):
+            entries.append(entry)
+    return entries
+
+
+def _signal_metrics(signals: list[dict]) -> dict:
+    causes: dict = {}
+    ratings = {"good": 0, "bad": 0}
+    finding_feedback = {"valid": 0, "noise": 0}
+    retro_runs = 0
+    for signal in signals:
+        retro = signal.get("retro")
+        if retro is not None:
+            retro_runs += 1
+            for item in map(_dict, _list(retro.get("items"))):
+                if isinstance(item.get("cause"), str):
+                    causes[item["cause"]] = causes.get(item["cause"], 0) + 1
+        last = None
+        for entry in signal.get("feedback", []):
+            kind, value = entry.get("kind"), entry.get("value")
+            if kind == "rate" and value in ratings:
+                last = value
+            elif kind == "finding" and value in finding_feedback:
+                finding_feedback[value] += 1
+        if last is not None:
+            ratings[last] += 1
+    return {
+        "retro_causes": causes,
+        "retro_runs": retro_runs,
+        "ratings": ratings,
+        "finding_feedback": finding_feedback,
+    }
 
 
 def _numbers(values) -> list:
@@ -604,23 +731,30 @@ def _rules(run: dict, cost_median) -> list[str]:
     return [rule for rule in CANDIDATE_RULES if fired[rule]]
 
 
-def compute_kpis(records, since=None, repo_slug=None) -> dict:
+def compute_kpis(records, since=None, repo_slug=None, signals=None) -> dict:
     """KPIs per ``adw_version`` plus total and eval candidates over the given run
     records (W3). Records that are no object or not ``schema_version`` 1 count as
-    ``skipped``; the filters apply before grouping, total and candidates."""
+    ``skipped``; the filters apply before grouping, total and candidates.
+    ``signals`` (W14) runs parallel to ``records`` (retro and human feedback per
+    run) and only feeds the total."""
+    if signals is None:
+        signals = [{} for _ in records]
     valid = [
-        r for r in records
+        (r, s) for r, s in zip(records, signals, strict=True)
         if isinstance(r, dict)
         and type(r.get("schema_version")) is int
         and r["schema_version"] == SCHEMA_VERSION
     ]
     skipped = len(records) - len(valid)
-    runs = valid
+    pairs = valid
     if since is not None:
         cutoff = datetime.now(UTC) - timedelta(days=since)
-        runs = [r for r in runs if (ts := _parse_ts(r.get("started_at"))) and ts >= cutoff]
+        pairs = [
+            (r, s) for r, s in pairs if (ts := _parse_ts(r.get("started_at"))) and ts >= cutoff
+        ]
     if repo_slug is not None:
-        runs = [r for r in runs if r.get("repo_slug") == repo_slug]
+        pairs = [(r, s) for r, s in pairs if r.get("repo_slug") == repo_slug]
+    runs = [r for r, _ in pairs]
 
     groups: dict = {}
     for run in runs:
@@ -641,7 +775,7 @@ def compute_kpis(records, since=None, repo_slug=None) -> dict:
             {"adw_version": version, **_metrics(groups[version])}
             for version in sorted(groups, key=_version_key)
         ],
-        "total": _metrics(runs),
+        "total": {**_metrics(runs), **_signal_metrics([s for _, s in pairs])},
         "candidates": [
             {
                 "run_id": run.get("run_id"),
