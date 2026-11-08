@@ -1,224 +1,108 @@
-# Plan — W15: `adw improve`, der wöchentliche Verbesserungsbericht
+# Plan — W15.1: Der Wochenbericht liefert seinen Brief, die Retro behält ihre Belege
 
-Basis: `.adw/spec.md`, gemergter Stand **0.36.3** (nach R5). Die Vorentscheidungen
-E1–E8 sind bindend. `.adw/config.yaml` enthält ausschließlich die Lane `backend`; es
-gibt keinen Frontend-Workstream.
+Quelle: `.adw/spec.md`, Stand `0.37.0`. Single-Lane: nur Workstream **backend**.
+Contract: `.adw/contract.yaml` — pinnt ausschließlich extern beobachtbare Flächen (Dateien
+unter `reports/`, Vermerk im Bericht, Ledger-Commit, Text des Retro-Auftrags). Interne
+Rückgabetypen und Helper-Signaturen (`_brief`, `_commit`, …) sind frei. Es entstehen keine
+HTTP-Routen, Events oder neuen Schnittstellen.
 
-Contract: `.adw/contract.yaml` (Single-Lane). Er pinnt nur beobachtbares Verhalten: CLI
-mit Optionen, Exits und stdout; Dateien unter `reports/`; Abschnitte und feste Sätze des
-Berichts; Brief-Bedingungen, Pflichtüberschriften und Lebenszyklus; Ledger-Commit mit
-Nachricht und Push-Verhalten; Timer-Units. Agentenkonfiguration, JSON-Antwortschema und
-Git-Staging sind Umsetzungsdetails dieses Plans (B3, B4), kein Contract. Keine
-HTTP-Routen, keine Events, keine internen Helper-Signaturen.
+## Workstream: backend
 
-## Workstreams
+**Betroffene Dateien:** `adw/improve.py`, `adw/agents.py`, `adw/retro.py`,
+`tests/test_improve.py`, `tests/test_retro.py`, `CHANGELOG.md`, `CHANGELOG.de.md`.
 
-- **backend** — gesamte Umsetzung (CLI, Bericht, Agent, Ablage, Units, Doku, Tests).
-- **frontend** — entfällt (keine Lane).
+### B1 — Brief als reines Markdown (A1/E1) — `adw/improve.py`, `adw/agents.py`
 
-## Workstream backend
+1. `_brief`: Auftragsende `'Antworte NUR mit JSON: …'` ersetzen durch die ausdrückliche
+   Vorgabe für reines Markdown (sinngemäß „Antworte mit dem Brief als reinem Markdown, kein
+   JSON, kein Codeblock um die ganze Antwort; erste Zeile ist eine H1-Überschrift mit dem
+   Titel").
+2. `REGISTRY["improve_agent"]` in `adw/agents.py`: `system_append` analog anpassen
+   („Respond with the brief as plain Markdown, no JSON, no code fence around the whole
+   answer; first line is an H1 heading with the title"); die JSON-Anweisung entfällt.
+3. `_brief` verarbeitet `result.text` ohne `json.loads`; die Rohantwort bleibt unverändert
+   erhalten:
+   - höchstens **einen** umschließenden ```` ```markdown … ``` ````-Block entfernen — nur
+     wenn die gesamte, getrimmte Antwort von genau diesem Block umschlossen ist; keine
+     rekursive Entpackung, keine Entfernung innerer Codeblöcke;
+   - Titel = Text der ersten H1 (`# …`) außerhalb von Codeblöcken; fehlt sie → verworfen
+     mit Grund (z. B. „Brief-Entwurf verworfen: H1-Überschrift fehlt");
+   - `_missing_headings` unverändert auf den (entpackten) Brief anwenden; Grundtext wie
+     heute („Brief-Entwurf verworfen: Überschriften fehlen: …");
+   - Erfolgsvermerk wie heute: `Brief-Entwurf (<cause>): <Titel>` (Titel via `_cut`).
+4. Rohantwort und Ablehnungsgrund für B2 verfügbar machen (interne Datenübergabe frei).
+5. `import json` in `adw/improve.py` entfernen, falls danach unbenutzt (ruff).
 
-Verantwortung: A1–A5 und Akzeptanzkriterien 1–11.
+### B2 — Verworfene Rohantwort sichern (A2/E2) — `adw/improve.py`
 
-Betroffene Dateien:
+1. `_improve` unterscheidet drei Ausgänge von `_brief`: angenommen (Brief) / fachlich
+   verworfen (Rohantwort + Grund) / Agentenausnahme (nur Vermerk, keine Rohantwort).
+2. Neben `brief_path`: `rejected_path = reports / f"{week}-brief.rejected.md"`
+   (Jahr und zweistellige ISO-Woche wie bisher über `week`).
+   - Fachlich verworfen (fehlende H1, fehlende Pflichtüberschrift): Rohantwort
+     **unverändert** nach `rejected_path` schreiben — einschließlich eines äußeren
+     Codeblocks und der ursprünglichen Zeilenumbrüche, keine Normalisierung wie beim
+     angenommenen Brief. Der Vermerk im Bericht beginnt wie heute mit
+     „Brief-Entwurf verworfen: " und nennt Grund **und** Dateinamen
+     `<week>-brief.rejected.md`. Wie bisher bleibt kein veralteter `…-brief.md` übrig.
+   - Gültiger Brief: `rejected_path.unlink(missing_ok=True)`, Brief schreiben.
+   - Agentenausnahme / `--no-brief` / keine geeignete Gruppe / zu wenige Läufe: keine
+     Ablehnungsdatei; Vermerk wie heute (bei Ausnahme weiterhin mit `str(exc)`).
+3. `_commit(...)`-Pfadliste um `f"reports/{week}-brief.rejected.md"` ergänzen. Die
+   bestehende `ls-files`/`add -A`-Logik nimmt damit Anlage **und** Entfernung der Datei in
+   denselben `improve <week>`-Commit auf. Commit-/Push-Fehlerverhalten unverändert
+   (Warnung, lokale Artefakte bleiben).
 
-- Neu: `adw/improve.py` (Auswertung, Bericht, Brief-Koordination, Ablage, Git).
-- Bestehend: `adw/cli.py` (Subcommand) und `adw/agents.py` (`improve_agent` in `REGISTRY`).
-- Neu: `tests/test_improve.py`.
-- Neu: `examples/systemd/adw-improve.service`, `examples/systemd/adw-improve.timer`.
-- Bestehend: `docs/ADW-HANDBOOK.md`, `docs/ADW-HANDBOOK.de.md`, `CHANGELOG.md`,
-  `CHANGELOG.de.md`.
+### B3 — Retro-Auftrag präzisieren (A3/E3) — `adw/retro.py`
 
-Wiederverwendet werden `_ledger_path`, `_read_ledger_runs`, `compute_kpis`, `run_git`,
-`_PUSH_TIMEOUT` (`adw/ledger.py`, `adw/git.py`), das `flock`-Muster von `_repo_lock`
-(`adw/cli.py:1170`) und `SdkAgentRunner`. Export, Retro, Feedback, KPI-Semantik und
-Dateischemata bleiben unverändert.
+1. `_task` um einen Satz ergänzen: `seq:<n>` bezeichnet das Top-Level-Feld `seq` des
+   Event-Records (jede Zeile von `events.jsonl` beginnt mit `{"seq": <n>, …`); `seq`-Werte
+   innerhalb einer `payload` (z. B. bei `state.saved`) sind keine Belege.
+2. Keine Änderung an `_SEQ`, `_event_seqs`, `_valid_evidence`.
 
-### B1 — CLI, Ledger, Lock und Zeitfenster (A1; AK 1, 4, 8)
+### B4 — Changelogs (A4)
 
-1. `adw improve` in `adw/cli.py` registrieren: `--since` (int, Default 7),
-   `--repo-slug` (optional), `--no-brief` (Flag).
-2. Ledger über `_ledger_path` auflösen (`ADW_LEDGER`, sonst `~/.adw/ledger`, Wurzel
-   eines Git-Arbeitsbaums). Fehlendes oder nicht nutzbares Ledger → Meldung, Exit 1.
-   Kein Ziel-Repo, kein `.adw/runs/` als Ersatz.
-3. Vor jedem Lesen, Schreiben und Agentenaufruf exklusiven, nicht blockierenden `flock`
-   auf `<ledger>/.improve.lock` nehmen (Muster `_repo_lock`, ohne den Repo-Lock selbst
-   aufzurufen). Belegt → sofort Exit 1 mit Meldung, nichts geschrieben, kein
-   Agentenaufruf. Lock bis nach den Git-Schritten halten, zuverlässig freigeben, nie
-   stagen.
-4. Aufrufzeitpunkt `t` einmal erfassen. Aktuelles Fenster
-   `t − since Tage ≤ started_at ≤ t`; Vorzeitraum
-   `t − 2·since Tage ≤ started_at < t − since Tage`. Zukünftige Läufe gehören zu
-   keinem Fenster.
-5. Records und Signale gemeinsam über `_read_ledger_runs` lesen; beim Filtern die
-   Zuordnung Record ↔ Signale erhalten. `--repo-slug` auf beide Fenster und alle daraus
-   abgeleiteten Berichtsteile einschließlich Brief-Auswahl anwenden.
-6. **Vorgefilterte** Records samt Signalen an `compute_kpis(..., since=None)` übergeben.
-   Dessen eigener `since`-Filter rechnet relativ zu `datetime.now()` und hat keine
-   obere Grenze; er darf für den Vorzeitraum nicht benutzt werden. KPI-Semantik bleibt
-   unverändert.
-7. Nach geschriebenem Bericht: Berichtspfad und je **tatsächlich ausgegebenem**
-   Abschnitt eine Zeile mit Anzahl auf stdout (Läufe im Zeitraum, Problemgruppen,
-   wiederkehrende Findings, Regressionsfall-Kandidaten, Gruppen mit Hebel). Im
-   verkürzten Bericht nur die Laufzahl. Exit 0 auch ohne Brief und bei Commit-/
-   Push-Fehlern.
+1. `CHANGELOG.md` und `CHANGELOG.de.md`: neue Sektion `## [0.37.1] — Unreleased` mit
+   `### Fixed`, inhaltlich gleichlautend: Brief als Markdown statt JSON; Sicherung
+   verworfener Antworten in `…-brief.rejected.md`; präzisierter Retro-Auftrag (Event-Seq).
+2. `pyproject.toml` bleibt `0.37.0`.
 
-### B2 — Deterministischer Markdown-Bericht (A2; AK 1–4)
+### Tests (4–6 neu/angepasst) — `tests/test_improve.py`, `tests/test_retro.py`
 
-Code, 0 Modell-Tokens. Überschriften exakt wie im Contract, Reihenfolge fix:
+Vorhandene Fake-Runner- und Ledger-Fixtures weiterverwenden. Die JSON-Briefantworten
+(`GOOD`, Parametrisierungen, zweite Fassung im Commit-Lebenszyklus-Test) auf Markdown mit
+H1 umstellen; `json.dumps` für andere Testdaten (run-record, retro, events) bleibt.
 
-1. **Kennzahlen:** Versionsgruppen und Gesamtzeile aus `compute_kpis` für das aktuelle
-   Fenster; die W14-Signale (`retro_causes`, `retro_runs`, `ratings`,
-   `finding_feedback`) so, wie `total` sie heute liefert, ohne Verteilung auf
-   Versionsgruppen. Vom Vorzeitraum **nur die Gesamtzeile**.
-2. **Problemgruppen aus Retros:** alle Retro-Einträge der aktuellen Läufe nach `cause`
-   gruppieren. Je Gruppe Anzahl Einträge, Anzahl **verschiedener** Läufe, Summe
-   `cost_usd` dieser Läufe (ein Lauf zählt je Gruppe einmal, auch bei mehreren
-   Einträgen). Sortierung absteigend nach Läufe × Kostensumme, Gleichstand stabil nach
-   `cause`-Name; Eintragsreihenfolge ebenfalls deterministisch. Je Eintrag `problem`,
-   `better`, `lever`, Run-ID und `evidence`; jedes Textfeld einschließlich einzelner
-   Belege auf höchstens 300 Zeichen gekürzt (Kürzungszeichen zählt zum Limit).
-3. **Wiederkehrende Findings:** Vorkommen je (Lauf, `finding_key`) deduplizieren. Nur
-   Schlüssel aus mindestens zwei verschiedenen aktuellen Läufen, höchstens 20, sortiert
-   nach Laufzahl absteigend, dann Schlüssel. Je Eintrag Schlüssel, Laufzahl, Severity
-   und Feedback `valid`/`noise`, zugeordnet über Lauf und `finding_key`;
-   Mehrfachvorkommen vervielfachen Feedback nicht.
-4. **Regressionsfall-Kandidaten:** aktuelle Läufe mit `phase == "escalated"` oder
-   letzter gültiger `rate`-Bewertung `bad`. Maßgeblich ist die Dateireihenfolge der
-   gültigen Zeilen, nicht der Zeitstempel; `bad` gefolgt von `good` zählt nicht. Je
-   Kandidat einmal Run-ID, `issue_title`, Grund (bei Eskalation und `bad` beide
-   Gründe). **Nicht** die weiter gefassten `candidates` von `compute_kpis` übernehmen.
-5. **Hebel je Gruppe:** nur vorhandene Gruppen, feste Zuordnung aus dem Contract
-   (`prompt`/`model` → Hill Climbing W7; `orchestrator`/`gate` → Brief für einen
-   ADW-Lauf; `context_missing`/`target_repo` → Expertise W9; `issue_quality` →
-   Brief-Vorlage schärfen).
+1. **AK1+AK2 (parametrisiert):** gültiger Markdown-Brief, einmal roh, einmal in einem
+   umschließenden ```` ```markdown ````-Block → `…-brief.md` ohne äußeren Block, Bericht
+   nennt den H1-Titel, keine `…-brief.rejected.md`.
+2. **AK3 (parametrisiert):** ohne H1 / mit H1, aber ohne Pflichtüberschrift (bestehende
+   Varianten „missing-heading", „combined-heading", „fenced", „long-fence" auf Markdown
+   umstellen) → kein `…-brief.md`; `…-brief.rejected.md` enthält exakt die Rohantwort;
+   Datei ist mit dem Bericht in `HEAD` (`git show --name-only`); Bericht nennt
+   „Brief-Entwurf verworfen: ", Grund und Dateinamen.
+3. **AK4:** verworfener Lauf, dann gültiger Lauf in derselben Woche → Brief + Titelvermerk;
+   `…-brief.rejected.md` lokal weg und in `HEAD` nicht mehr vorhanden.
+4. **AK5:** bestehender Ausnahme-/Timeout-Test bleibt grün; zusätzlich Assert: keine
+   `…-brief.rejected.md`; einmaliger Agentenaufruf bleibt.
+5. **Commit-Lebenszyklus:** bestehender Test `test_one_commit_per_call_overwrite_and_brief_removal`
+   nur auf Markdown-Antworten umgestellt, Aussagen zu Briefentfernung und Commit erhalten.
+6. **AK6 (`tests/test_retro.py`):** Text von `_task` enthält den Hinweis auf das
+   Top-Level-Feld `seq` des Event-Records und den Ausschluss von Payload-`seq`
+   (`state.saved`).
 
-Weniger als 3 aktuelle Läufe (nach Repo-Filter) → ausschließlich Abschnitt 1 und der
-Satz **„Zu wenige Läufe für eine Auswertung"**; dieser Satz ist zugleich der Grund für
-den fehlenden Brief. Kein Agentenaufruf, Exit 0.
+Geprüft werden nur Dateien unter `reports/`, Berichtsvermerke, der vom Produkt erzeugte
+Ledger-Commit und der Retro-Auftragstext — keine Tests auf neue interne Rückgabetypen.
 
-### B3 — `improve_agent` und genau ein Brief-Entwurf (A3; AK 5–6)
+### Gates (E4)
 
-1. `REGISTRY`-Eintrag in `adw/agents.py` analog `retro_agent`: `model=FABLE`,
-   `tools=READ_ONLY_TOOLS`, `allowed_tools=SCOPED_READ_RULES`, `max_turns=120`,
-   `timeout_s=1800`, Effort Default. Ausführung über `SdkAgentRunner`; Runner für Tests
-   injizierbar.
-2. `cwd` = Wurzelverzeichnis des laufenden ADW-Quellcodes, aus dem Paketpfad
-   abgeleitet; nicht Shell-Verzeichnis, Ledger oder Ziel-Repo. Der Agent schreibt keine
-   Dateien.
-3. Aufruf nur, wenn **alle** Bedingungen gelten: nicht `--no-brief`; ≥ 3 aktuelle
-   Läufe; mindestens eine Gruppe mit `cause` ∈ {`orchestrator`, `gate`, `prompt`}.
-   Gewählt wird die erste berechtigte Gruppe der sortierten Liste. `prompt` ist
-   briefberechtigt trotz W7-Hebel; `model` allein nicht. Sonst kein Aufruf und ein
-   kurzer Grund im Bericht.
-4. Auftrag: Bericht-Abschnitt der gewählten Gruppe, Inhalt von `docs/briefs/README.md`
-   und `docs/briefs/r2-log-integritaet.md`. Antwort ausschließlich JSON
-   `{"title": str, "brief_markdown": str}`.
-5. Validierung im Code: JSON, Feldtypen, fünf Pflichtüberschriften („Ausgangslage",
-   „Aufgabe", „Vorentscheidungen", „Deferred", „Akzeptanzkriterien"). Fehlschlag →
-   kein Brief, Vermerk **„Brief-Entwurf verworfen: <Grund>"**.
-6. Vorlagen-/Beispielzugriff, Runner-Aufruf und Validierung stehen unter einer
-   Fehlerbehandlung: jede Ausnahme (auch Timeout, unlesbare Referenzdatei) → kein
-   Brief, Vermerk mit Grund, Bericht entsteht trotzdem, Exit 0. Kein Retry, kein
-   zweiter Agent, keine eigene nummerierte Berichtssektion für den Vermerk.
-
-### B4 — Wochenartefakte, Commit und Push (A4; AK 6–7)
-
-1. ISO-Jahr und zweistellige ISO-Woche des erfassten Aufrufdatums bestimmen;
-   `reports/` bei Bedarf anlegen.
-2. Bericht nach `<ledger>/reports/<YYYY>-W<WW>.md`, gültigen Brief nach
-   `<ledger>/reports/<YYYY>-W<WW>-brief.md`; erneuter Aufruf derselben Woche
-   überschreibt.
-3. Entsteht kein gültiger Brief (aus welchem Grund auch immer), einen vorhandenen
-   `…-brief.md` derselben Woche entfernen; der Bericht nennt den Grund.
-4. Erst den lokalen Zielzustand herstellen, dann gemeinsam committen: `run_git`
-   (Hooks aus). Berichtspfad immer per `git add -A --` stagen; Briefpfad nur, wenn die
-   Datei existiert oder im Index getrackt ist (`git ls-files --error-unmatch`), dann
-   ebenfalls `git add -A -- <pfad>` (erfasst Löschung). Ein nie vorhandener Brief wird
-   nicht als Pathspec übergeben.
-5. Commit nur bei gestagten Änderungen (`diff --cached --quiet`), Nachricht
-   `improve <YYYY>-W<WW>`. Push mit `_PUSH_TIMEOUT`.
-6. Commit- und Push-Fehler fail-open: Warnung, lokaler Artefaktzustand bleibt, Exit 0.
-   Kein Fehlerstatus auf Platte, keine Warteschlange, keine Wiederholung.
-
-### B5 — Timer-Units, Handbuch, Changelog (A5; AK 9–10)
-
-1. `examples/systemd/adw-improve.service`: `[Unit]`, `[Service]` mit `Type=oneshot`
-   und `ExecStart=uv run --project <ADW-Pfad> adw improve`; Platzhalter für ADW-Pfad
-   und optional `Environment=ADW_LEDGER=<Ledger-Pfad>` klar markiert.
-2. `examples/systemd/adw-improve.timer`: `[Unit]`, `[Timer]` mit
-   `OnCalendar=Mon *-*-* 07:00` und `Persistent=true`, `[Install]` mit
-   `WantedBy=timers.target`. ADW installiert oder aktiviert nichts.
-3. Handbuch EN+DE, Abschnitt 11.1 „Ledger": Aufruf, Optionen, Exits, Zeiträume,
-   Berichtsaufbau, Brief-Entwurf und menschliche Entscheidung, Ablage unter `reports/`
-   mit Überschreiben, Timer-Einrichtung mit Pfadanpassung und
-   `systemctl --user enable --now adw-improve.timer`. Inhaltlich synchron.
-4. `CHANGELOG.md` / `CHANGELOG.de.md`: `## [0.37.0] — Unreleased` mit `### Added`.
-   `pyproject.toml` bleibt `0.36.3`.
-
-### B6 — Tests (`tests/test_improve.py`, Richtwert 10–14; AK 1–9)
-
-Temporäres Git-Ledger über `ADW_LEDGER`, festes `now`, gefakter Runner; Push gefaked
-oder gegen ein temporäres lokales Bare-Repo. Kein Netz, kein Modell, kein
-`~/.adw/ledger`. Muster aus `tests/test_kpis.py`, `tests/test_ledger.py`,
-`tests/test_retro.py` wiederverwenden. Zusatzvarianten gehören in die Fixture, nicht in
-neue Dateien. Zielbild 12 Fälle:
-
-1. Fixture 5 aktuelle + 2 ältere Läufe: fünf Abschnitte in Reihenfolge, Zahlen,
-   Vergleichs-Gesamtzeile nur mit den 2 älteren Läufen, Sortierung Läufe × Kosten,
-   Dedup Lauf je Gruppe, Hebel, Kürzung auf 300 Zeichen (AK 1).
-2. Wiederkehrendes Finding mit Anzahl 2, Severity, Feedback; Einzellauf-Finding trotz
-   Duplikaten nicht (AK 2).
-3. Regressionskandidaten: eskaliert und `bad` mit Run-ID, `issue_title`, Grund;
-   `bad`→`good` nicht (AK 3).
-4. < 3 Läufe: nur Kennzahlen und exakter Hinweissatz, stdout nur Laufzahl, kein Agent,
-   Exit 0 (AK 4).
-5. Gruppe `orchestrator`, gültige Antwort: genau ein Aufruf, `cwd` = ADW-Quelle,
-   `…-brief.md` geschrieben; höchstsortierte berechtigte Gruppe gewählt (AK 5).
-6. Ungültiges JSON, falscher Feldtyp oder fehlende Pflichtüberschrift: kein Brief,
-   „Brief-Entwurf verworfen: …", Exit 0 (AK 5).
-7. Agentenausnahme (inkl. Timeout): kein Brief, Vermerk mit Grund, kein Retry, Exit 0
-   (AK 5).
-8. `--no-brief` → kein Agent, Bericht committet ohne je vorhandenen Brief; keine
-   berechtigte Gruppe (nur `model`/`context_missing`) → kein Agent (AK 6).
-9. Gleiche ISO-Woche: Pfade, genau ein Commit `improve <YYYY>-W<WW>` mit Bericht und
-   Brief; Überschreiben; Folgeaufruf ohne Brief entfernt alten Brief als Git-Löschung
-   und nennt den Grund; unveränderte Artefakte → kein leerer Commit (AK 7).
-10. Simulierter Push-Fehler: Warnung, Exit 0, Artefakte lokal erhalten (AK 7).
-11. Belegter Lock → Exit 1 ohne Warten, nichts geschrieben, kein Agent; fehlendes
-    Ledger → Exit 1 mit Meldung (AK 8).
-12. Timer-Units: Sektionen, `Type`, `ExecStart`, `OnCalendar`, `Persistent`,
-    `WantedBy` (AK 9).
-
-### Gates
-
-- `uv run ruff check .`
-- `uv run pytest -x -q`
-
-AK 10 per Dateiprüfung (beide Handbücher, beide Changelogs, `pyproject.toml` auf
-`0.36.3`). Bestehende Tests grün; keine neue Abhängigkeit; kein neuer persistenter
-Zustand außer `reports/` und `.improve.lock`.
-
-## Non-Goals
-
-- Änderungen an `adw kpis`, Export, Retro, `adw rate`/`adw feedback` oder an den
-  Schemata von `run-record.json`, `retro.json`, `feedback.jsonl`.
-- Nachträgliche Reparatur oder Migration vorhandener Laufdaten.
-- Version in `pyproject.toml` ändern.
-- Repo-Lock oder Ziel-Repo-Bezug für `adw improve`.
-- Neuer persistenter Zustand außer den Dateien unter `reports/` und der Lock-Datei.
-- Neue Abhängigkeiten.
-- Contract-Zusagen für interne Helper-Signaturen.
+- `uv run ruff check .` und `uv run pytest -x -q` grün.
+- Abschlussprüfung der Non-Goals: `_missing_headings`, Berichtsauswertung, Gruppenauswahl,
+  `--no-brief`, `BRIEF_CAUSES`, Retro-Beleg-Prüfung, Event-Format, `state.saved`-Payload,
+  Ledger-Schema und GUI unverändert.
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-- Automatisches Starten eines ADW-Laufs aus dem Brief, Auto-Merge.
-- Semantisches Clustering der Retro-Texte (W12).
-- Hill Climbing (W7), Expertise-Datei (W9).
-- Benachrichtigung per Mail/Slack/Desktop.
-- Installation des Timers durch ADW.
-- Retry oder Reparatur-Lauf bei verworfenem Brief; inhaltliche Qualitätsprüfung über
-  JSON- und Überschriftencheck hinaus.
-- Historie/Archiv mehrerer Berichte je Woche (Überschreiben ist gewollt).
-- Persistente Warteschlangen oder Wochenstatus für Agenten- und Push-Fehler; Warnung,
-  Vermerk im Bericht und erneuter Aufruf reichen.
+- Umbenennen des Payload-Felds `seq` bei `state.saved`.
+- Ein Event-Log oder Span-Tracing für `adw improve`.
+- Wiederholungsversuch des Agenten nach Verwerfen eines Entwurfs.

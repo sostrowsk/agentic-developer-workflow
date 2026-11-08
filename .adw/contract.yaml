@@ -1,124 +1,58 @@
-# Contract — W15 `adw improve` (Single-Lane: backend)
-# Nur extern beobachtbares Verhalten: CLI, Dateien, Berichtsabschnitte, Brief-Inhalt und
-# -Lebenszyklus, Ledger-Commit/Push, Timer-Units. Agentenkonfiguration, Antwortschema und
-# Git-Staging stehen im Plan (B3, B4); keine Helper-Signaturen, keine HTTP-/Event-Flächen.
+# Contract — W15.1 (Single-Lane: backend)
+# Pinnt nur extern beobachtbare Flächen. Interne Signaturen (_brief, _commit, ...) sind frei.
+# Keine HTTP-Routen, keine neuen Events, keine Schema-Änderungen.
 version: 1
-lanes: [backend]
+workstreams: [backend]
 
 cli:
-  command: "adw improve"
-  usage: "adw improve [--since <tage>] [--repo-slug <slug>] [--no-brief]"
-  options:
-    --since:
-      type: int
-      unit: days
-      default: 7
-    --repo-slug:
-      type: str
-      default: null
-      scope: "filtert beide Zeiträume, alle Berichtsteile und die Brief-Auswahl"
-    --no-brief:
-      type: flag
-      default: false
-      effect: "kein Agentenaufruf, kein Brief"
-  data_source:
-    resolution: ["ADW_LEDGER", "~/.adw/ledger"]
-    requirement: "Wurzel eines Git-Arbeitsbaums"
-    fallback_to_target_repo: false
-  periods:
-    reference: "einmal erfasster Aufrufzeitpunkt t"
-    current: "t - since Tage <= started_at <= t"
-    previous: "t - 2*since Tage <= started_at < t - since Tage"
-  lock:
-    path: "<ledger>/.improve.lock"
-    mode: "flock LOCK_EX | LOCK_NB; kein Repo-Lock"
-    contention: "sofort Exit 1 mit Meldung; nichts geschrieben, kein Agentenaufruf"
-    committed: false
-  exit_codes:
-    0: "Bericht geschrieben; auch ohne Brief und bei Brief-, Commit- oder Push-Fehlern"
-    1: "fehlendes/nicht nutzbares Ledger oder belegter Lock, jeweils mit Meldung"
-  stdout:
-    - "Pfad des Berichts"
-    - "je tatsächlich ausgegebenem Abschnitt eine Zeile mit Anzahl, in dieser Reihenfolge: Läufe im Zeitraum, Problemgruppen, wiederkehrende Findings, Regressionsfall-Kandidaten, Gruppen mit Hebel"
-    - "im verkürzten Bericht (< 3 Läufe) nur die Laufzahl"
+  command: adw improve
+  unchanged: [flags, exit_codes, stdout_lines, brief_conditions]  # --no-brief, BRIEF_CAUSES, MIN_RUNS
 
-files:
-  report: "<ledger>/reports/<YYYY>-W<WW>.md"
-  brief: "<ledger>/reports/<YYYY>-W<WW>-brief.md"
-  week: "ISO-Jahr und zweistellige ISO-Woche des Aufrufdatums, unabhängig vom ausgewerteten Zeitraum"
-  rules:
-    - "reports/ wird bei Bedarf angelegt"
-    - "erneuter Aufruf derselben Woche überschreibt Bericht und erneut erzeugten Brief"
-    - "Brief existiert genau dann, wenn der zuletzt geschriebene Bericht derselben Woche einen gültigen Brief erzeugt hat; sonst wird ein vorhandener Brief entfernt"
-    - "der Bericht nennt den Grund, wenn kein Brief vorliegt"
-
-report:
-  format: markdown
-  model_tokens: 0
-  sections_in_order:
-    - heading: "## Kennzahlen"
-      content: "compute_kpis des aktuellen Zeitraums (Versionsgruppen, Gesamtzeile, W14-Signale wie in total); vom Vorzeitraum nur die Gesamtzeile"
-    - heading: "## Problemgruppen aus Retros"
-      group_by: cause
-      per_group: "Anzahl Einträge, Anzahl verschiedener Läufe, Summe cost_usd dieser Läufe (Lauf je Gruppe einmal)"
-      per_entry: "problem, better, lever, Run-ID, evidence"
-      order: "absteigend nach Läufe × Kostensumme; Gleichstand deterministisch"
-      text_field_max_chars: 300
-    - heading: "## Wiederkehrende Findings"
-      eligibility: "finding_key in mindestens zwei verschiedenen Läufen"
-      max_entries: 20
-      count: "Anzahl verschiedener Läufe; Duplikate im selben Lauf zählen einmal"
-      per_entry: "Schlüssel, Anzahl, Severity, Feedback valid/noise (Zuordnung über Lauf und finding_key)"
-      order: deterministic
-    - heading: "## Regressionsfall-Kandidaten"
-      eligibility: 'phase == "escalated" oder letzte gültige rate-Bewertung == "bad" (durch good abgelöstes bad zählt nicht)'
-      per_entry: "Run-ID, issue_title, Grund (bei beiden Auslösern beide)"
-    - heading: "## Hebel je Gruppe"
-      scope: "nur vorhandene Gruppen"
-      mapping:
-        prompt: "Kandidat für Hill Climbing (W7)"
-        model: "Kandidat für Hill Climbing (W7)"
-        orchestrator: "Brief für einen ADW-Lauf"
-        gate: "Brief für einen ADW-Lauf"
-        context_missing: "Wissen für das Ziel-Repo (Expertise, W9)"
-        target_repo: "Wissen für das Ziel-Repo (Expertise, W9)"
-        issue_quality: "Brief-Vorlage schärfen"
-  too_few_runs:
-    condition: "< 3 Läufe im aktuellen Zeitraum (nach Repo-Filter)"
-    sections: ["## Kennzahlen"]
-    sentence: "Zu wenige Läufe für eine Auswertung"
-    agent_calls: 0
-    exit_code: 0
-  brief_rejected_note: "Brief-Entwurf verworfen: <Grund>"
-
-brief:
-  format: markdown
-  eligibility_all_of:
-    - "--no-brief nicht gesetzt"
-    - ">= 3 Läufe im aktuellen Zeitraum (nach Repo-Filter)"
-    - "mindestens eine Problemgruppe mit cause in {orchestrator, gate, prompt}"
-  selection: "höchstsortierte berechtigte Gruppe; höchstens ein Entwurf je Aufruf, kein Retry"
+agent_answer:
+  role: improve_agent
+  format: markdown            # kein JSON; Auftrag (_brief) und Rollentext (agents.py) verlangen das ausdrücklich
+  first_line: "H1 heading = brief title"
+  outer_fence: >-
+    Höchstens ein einzelner umschließender ```markdown … ```-Block wird toleriert und
+    entfernt (nur wenn er die gesamte getrimmte Antwort umschließt); keine rekursive
+    Entpackung, innere Codeblöcke bleiben.
   required_headings: [Ausgangslage, Aufgabe, Vorentscheidungen, Deferred, Akzeptanzkriterien]
-  rejected: "Entwurf ohne alle Pflichtüberschriften oder in ungültiger Form → kein Brief; Bericht vermerkt brief_rejected_note"
-  error: "Fehler beim Entwurf (auch Timeout) → kein Brief; Bericht vermerkt den Grund"
-  failures_change_exit: false
-  starts_adw_run: false
-  auto_merge: false
+  headings_check: unchanged   # _missing_headings inkl. Ausschluss von Überschriften in Codeblöcken
 
-ledger_commit:
-  content: "Bericht und Brief bzw. Brieflöschung in genau einem Commit"
-  condition: "nur bei geänderten Artefakten; kein leerer Commit"
-  message: "improve <YYYY>-W<WW>"
-  never_committed: [".improve.lock"]
-  push: "nach dem Commit, mit Timeout"
-  failure: "Commit- oder Push-Fehler fail-open mit Warnung; lokaler Artefaktzustand bleibt; Exit 0"
+ledger_files:                 # <week> = <Jahr>-W<zweistellige ISO-Woche>, wie bisher
+  root: "<ledger>/reports"
+  report: "<week>.md"
+  brief: "<week>-brief.md"
+  rejected: "<week>-brief.rejected.md"
 
-systemd:
-  service:
-    path: examples/systemd/adw-improve.service
-    must_contain: ["[Unit]", "[Service]", "Type=oneshot", "ExecStart=uv run --project <ADW-Pfad> adw improve"]
-    placeholders: "ADW-Pfad und ggf. ADW_LEDGER klar als anzupassen markiert"
-  timer:
-    path: examples/systemd/adw-improve.timer
-    must_contain: ["[Unit]", "[Timer]", "OnCalendar=Mon *-*-* 07:00", "Persistent=true", "[Install]", "WantedBy=timers.target"]
-  installed_by_adw: false
+outcomes:
+  accepted:
+    brief_file: "Brief ohne äußeren Codeblock"
+    rejected_file: removed    # lokal und im committeten Stand
+    report_note: "Brief-Entwurf (<cause>): <H1-Titel>"   # Titelaufbereitung wie bisher (_cut)
+  rejected:                   # Gründe: fehlende H1, fehlende Pflichtüberschrift(en)
+    brief_file: absent        # ein veralteter Brief derselben Woche wird wie bisher entfernt
+    rejected_file: "Rohantwort unverändert (inkl. etwaigem äußeren Codeblock und Zeilenumbrüchen)"
+    report_note: "beginnt mit 'Brief-Entwurf verworfen: ', nennt Grund und Dateiname <week>-brief.rejected.md"
+  agent_exception:            # keine Antwort (Exception/Timeout)
+    brief_file: absent
+    rejected_file: not_written
+    report_note: unchanged    # "Brief-Entwurf verworfen: <Typ>: <exc>"
+    retry: false
+
+commit:
+  message: "improve <week>"   # unverändert
+  includes: [report, brief, rejected]   # Hinzufügen und Entfernen im selben Commit
+  error_behavior: unchanged   # Warnung, Artefakte bleiben lokal; Push wie heute
+
+retro_task:
+  function: adw.retro._task (Text)
+  must_state:
+    - "seq:<n> = Top-Level-Feld seq des Event-Records (Zeile in events.jsonl beginnt mit {\"seq\": <n>, …)"
+    - "seq-Werte in einer payload (z. B. state.saved) sind keine Belege"
+  evidence_check: unchanged   # _SEQ, _event_seqs, _valid_evidence
+
+changelog:
+  files: [CHANGELOG.md, CHANGELOG.de.md]
+  section: "## [0.37.1] — Unreleased / ### Fixed"
+  pyproject_version: "0.37.0"
