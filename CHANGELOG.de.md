@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [0.35.0] — Unreleased
+## [0.35.0] — 2026-11-08
 
 ### Hinzugefügt
 - **Jeder Lauf bekommt einen Rückblick — und du ein Urteil (W14).** Das Lauf-Protokoll zählte, was passiert ist, nicht warum etwas schiefging oder was besser gewesen wäre.
@@ -1233,6 +1233,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.35.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.1...v0.33.0
 [0.32.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.0...v0.32.1

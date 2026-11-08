@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [0.35.0] — Unreleased
+## [0.35.0] — 2026-11-08
 
 ### Added
 - **Every run gets a retro — and you a verdict (W14).** The run record counted what happened, not why it went wrong or what would have been better.
@@ -1158,6 +1158,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.35.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.1...v0.33.0
 [0.32.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.0...v0.32.1
