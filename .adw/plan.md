@@ -1,235 +1,191 @@
-# Plan — W2: Effort pro Agent — und Codex denkt wieder mit
+# Plan — R3: Die Live-Ansicht bleibt live — und die GUI hält stand
 
-Maßgeblich ist `.adw/spec.md` (Scope A1–A4, AC 1–9). Single-Lane-Projekt
-(`.adw/config.yaml`): nur der Workstream **backend**; er umfasst Code, Tests, beide
-Handbücher, `examples/config.yaml` und beide Changelogs. Kein Frontend-Workstream.
-Dieser Plan beschreibt die Implementierung; er implementiert nichts.
+Maßgeblich ist `.adw/spec.md`; die Vorentscheidungen E1–E8 sind bindend und kein
+Finding. Single-Lane: Workstream **backend** umfasst auch `adw/gui/static/app.js`,
+die Templates und die Doku (keine eigene Frontend-Lane). Der Contract
+`.adw/contract.yaml` pinnt nur extern beobachtbare Flächen (SSE-Stream, Host-Prüfung,
+Datenattribute/Links im Template, `/api` unverändert), keine Helper-Signaturen.
 
-## Ausgangslage
+## Ausgangslage (am 2026-11-08 im Code geprüft) und Abweichungen
 
-Basis: Stand **0.35.0** (`a18ecdf`), am 2026-11-08 gegen den Code geprüft. Vor dem
-Bauen gegen den dann aktuellen Stand erneut prüfen.
+Vor dem Bauen gegen den aktuellen Stand prüfen; Abweichungen melden, nicht umdeuten.
 
-- `adw/agents.py`: `AgentSpec` `:158` (frozen dataclass, kein `effort`);
-  `agent_run_start_payload` `:198` baut den `agent.run`-Start-Payload; `REGISTRY` `:232`
-  (neun Agenten, `retro_agent` `:361`); `SdkAgentRunner` `:540` baut
-  `ClaudeAgentOptions` `:564`. **Importkette:** `agents.py` → `adw.events` (`:20`) →
-  `adw.state` (`events.py:23`) → `adw.config` (`state.py:14`). Ein Modul-Level-Import
-  von `REGISTRY` in `config.py` wäre daher ein Zyklus (partially initialized module
-  beim CLI-Start); der Zugriff muss lokal in der Validator-Funktion erfolgen.
-- SDK (`claude_agent_sdk/types.py`): `ClaudeAgentOptions.effort:
-  Literal["low","medium","high","xhigh","max"] | None = None`.
-- `adw/context.py:66` `_agent_run(ctx, agent, …)`: **einzige** Aufrufstelle aller
-  Agentenläufe (Authoring, Phasen, Lanes, Retro); baut den Start-Payload und ruft
-  `ctx.agents.run(agent, …)` — Mock und echter Runner gleich.
-- `adw/codex.py`: `CodexRunner.__init__(emitter, timeout, totals)` `:362`;
-  `effective_argv` `:373` und `effective_author_argv` liefern `self._argv(...)`, der
-  ausgeführte argv entsteht aus demselben `_argv`; `_argv` `:466` ist `@staticmethod`,
-  pinnt nur `-m CODEX_MODEL` und `-c mcp_servers={}`. Start-Events setzen `argv` in
-  `context.py:87` (review) und `authoring.py:464` (author).
-- `adw/mock.py:115` `MockCodexRunner`: `effective_argv`/`effective_author_argv` liefern
-  einen festen Platzhalter-argv („exact content is not contract-pinned"); Konstruktion
-  ohne Config in `adw/dry_run.py:112`.
-- `adw/config.py`: `CodexConfig` `:97` (nur `timeout`), `AdwConfig` `:115`
-  (`extra="forbid"`), `load` `:135` hebt `ValidationError` als `ConfigError`.
-- `adw/state.py:147` `pinned_breakpoints: list[...] | None = None` (leere Liste =
-  echte Pinnung, `None` = Alt-State); Pin in `adw/cli.py:302`, Anwendung in
-  `_config_for_continuation` `:1104`/`:1124` per `model_copy(update=…)`.
-  `_build_context` `:1215` baut `CodexRunner(...)` `:1245`.
-- `adw/ledger.py:230` `_agent` setzt `"effort": None` (`:241`); `build_run_record` `:251`.
-  Golden: `tests/fixtures/ledger/expected-run-record.json` (aus
-  `tests/fixtures/ledger/a1b2c3d4/events.jsonl`; die dortigen `codex.review`-Starts
-  `seq 8/21/27` tragen kein `argv`).
-- Tests: `captured_query`-Fixture in `tests/test_agents.py` für den Options-Bau; exakte
-  argv-Vergleiche in `tests/test_codex.py:622/626`; exakte Start-Payload-Vergleiche
-  möglich in `tests/test_instrumentation.py`, `tests/test_codex_author_span.py`;
-  Pinning-Muster in `tests/test_breakpoints.py`.
-- Doku: Handbuch §3.1 Config-Tabelle (`docs/ADW-HANDBOOK.md:143`, DE `:146`; Zeile
-  `codex.timeout` `:163`/`:166`), §5.4 „Pinned settings" (`:273`, DE `:280`);
-  `examples/config.yaml` (Breakpoints-Block `:30` als Stilvorbild); Changelog oben
-  `## [0.35.0] — 2026-11-08`.
+- `adw/gui/app.py:151` `_stream`: synchroner Generator, `time.sleep`, endet beim ersten
+  `run`-Ende (auch unterhalb des Cursors, `:175`), kein `closed`, kein Ping, kein
+  Abgleich mit Run-State oder letzter gestarteter Spanne. `.gz` wird bereits einmalig
+  gelesen (`:181`).
+- **Abweichung zur Issue-Formulierung „vorhandener Mechanismus":** Die Route
+  `api_run_stream` (`app.py:313–320`) liest nur den Header `Last-Event-ID`
+  (`_parse_last_event_id`); ein Query-Parameter `last_id` existiert nicht, und der Client
+  öffnet `streamUrl` ohne Startpunkt (`app.js:35`, `:1334`). `last_id` muss ergänzt
+  werden — mit derselben Seq-Semantik und demselben Parser wie der Header.
+- `adw/gui/runs.py:114` `_run_span` ordnet das Ende bereits der letzten gestarteten
+  Span-ID zu. `runs.py:289–291` behandelt die State-Phasen `awaiting_approval` **und**
+  `awaiting_spec_approval` als Warten auf Approval; diese Abbildung ist für E1
+  wiederzuverwenden.
+- `app.js:1334–1348`: `EventSource` immer; `source.close()` beim `run`-Ende; der
+  finale Refresh (`setTimeout(refresh, 250)`) wird dort ausgelöst.
+- `run_detail.html:120` `window_nav` baut `?param=N[&focus=]` neu; `<body>` trägt
+  bereits `data-repo`/`data-run-id` (`app.js:14–17`), aber weder Status noch Start-Seq.
+- `create_app` (`app.py:210`) ohne Host-Middleware; `adw/cli.py:559–569` prüft
+  Bind-Adresse und `--i-know`.
+- `adw/gui/registry.py:167` `register_repo`: atomarer Ersatz vorhanden, Read-Modify-Write
+  ungeschützt.
+- `adw/gui/reader.py`: erkennt kaputte Zeilen und Seq-Lücken, prüft die E6-Feldtypen nicht.
+- Alle bestehenden HTTP-Tests nutzen `TestClient(create_app(...))` ohne `base_url`,
+  d. h. Host `testserver` — nach E4 würde das 400 liefern (siehe B5).
 
-Betroffene Dateien (abschließend): `adw/agents.py`, `adw/context.py`, `adw/config.py`,
-`adw/state.py`, `adw/cli.py`, `adw/codex.py`, `adw/ledger.py`;
-`tests/test_agents.py`, `tests/test_config.py`, `tests/test_codex.py`,
-`tests/test_ledger.py`, `tests/test_cli.py`, `tests/fixtures/ledger/…` (Golden +
-Fixture-Events) sowie bestehende Tests mit exakten Payload-/argv-Vergleichen;
-`docs/ADW-HANDBOOK.md`, `docs/ADW-HANDBOOK.de.md`, `examples/config.yaml`,
-`CHANGELOG.md`, `CHANGELOG.de.md`.
-Unverändert: Modelle, `max_turns`/`timeout_s`, `codex.timeout`, Phasen/Gates,
-`adw/mock.py`, `adw/dry_run.py`, GUI, `schema_version` 1, `pyproject.toml`.
+## Workstream: backend
 
-Contract: `.adw/contract.yaml` pinnt nur die extern beobachtbaren Flächen (Config-
-Schlüssel, `agent.run`-Start-Payload `effort`, argv-Paar in `codex.review`/
-`codex.author`-Starts, `run-record.json`-Felder). Helfer- und Feldnamen im State sowie
-der Bau von `ClaudeAgentOptions` (Keyword nur bei konkretem Wert, B3.4) sind
-Planvorgaben, keine Vertragsbestandteile.
+Reihenfolge: B7 (Reader) ist unabhängig und kommt zuerst; B1→B2→B3 vor B4 (Client
+braucht `last_id` und `closed`); B5, B6, B8 danach; B9 nach dem endgültigen Verhalten.
 
-## Workstream backend
+### B1 — Stream über Run-Spannen (A1/C13, E1) — `adw/gui/app.py`
 
-### B1 — `AgentSpec.effort` und Registry-Defaults (A1, E1)
+- Die maßgebliche Spanne aus **allen bisher gelesenen** Records bestimmen (letzte
+  gestartete Run-Spanne, Abgleich wie `_run_span`: Ende gehört zur zuletzt gestarteten
+  Span-ID und liegt nach deren Start), unabhängig vom Ausgabe-Cursor.
+- Einen vollständig gelesenen Batch auswerten, bevor ein Ende als Abschluss gilt: ein
+  späterer Start im selben Batch macht das Ende historisch. Enden früherer Spannen
+  beenden den Stream nie.
+- Vor der Abschlussentscheidung den vorhandenen Run-State laden; die Approval-Phasen
+  (`awaiting_approval`, `awaiting_spec_approval`) nach der vorhandenen Abbildung aus
+  `runs.py` behandeln. Bei Approval-Wartezustand offen bleiben und weiterpollen;
+  spätere `approve`/`resume`-Events aus demselben Log laufen über dieselbe Verbindung.
+- Der Cursor (`Last-Event-ID`/`last_id`) begrenzt nur die Ausgabe (`seq > Cursor`).
+  Liegt das Ende der letzten Spanne auf oder unter dem Cursor und wartet der Lauf nicht
+  auf Approval → sofort `closed`, ohne erneute Record-Ausgabe.
+- Kein neuer persistenter Abschlusszustand; Log und Run-State sind die einzige Quelle.
+- `last_id` als Query-Parameter an denselben Parser und dieselbe Filterung wie
+  `Last-Event-ID` anschließen. Ein gültiger Header hat Vorrang (der Browser-Reconnect
+  trägt den fortgeschrittenen Cursor im Header, die URL den alten `last_id`).
 
-`adw/agents.py`:
-1. `ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]`.
-2. `AgentSpec` erhält `effort: ClaudeEffort | None = None` (am Ende, mit Default, damit
-   bestehende Konstruktionen gültig bleiben).
-3. `REGISTRY`: `effort="low"` für `build_agent`, `spec_agent`, `plan_agent`,
-   `retro_agent`; die übrigen fünf bleiben ohne Angabe (`None`). Das ist die einzige
-   Default-Tabelle; `REGISTRY` wird nirgends mutiert.
+### B2 — Async-Generator, Ping, Abbruch (A2/C14, E2) — `adw/gui/app.py`
 
-### B2 — Config-Schlüssel und Validierung (A1, A2, E2, E3; AC 3, 6)
+- `_stream` → `async def`, `await asyncio.sleep(_POLL_SECONDS)` statt `time.sleep`;
+  Dateilesen über den bestehenden `EventReader` bleibt synchron.
+- Jeder leere Poll einer weiterhin offenen Verbindung liefert `": ping\n\n"`.
+- Client-Abbruch (Cancellation/`GeneratorExit` der `StreamingResponse`) beendet
+  Generator und Polling; Cancellation nicht unterdrücken, kein terminales Event an einen
+  abgebrochenen Client erzwingen. Keine neue Dependency, keine weitere Route auf async.
 
-`adw/config.py`:
-1. `EffortSetting = Literal["low", "medium", "high", "xhigh", "max", "default"]`;
-   `CodexEffort = Literal["low", "medium", "high", "xhigh"]`.
-2. `AdwConfig.effort: dict[str, EffortSetting] = Field(default_factory=dict)` plus
-   `field_validator("effort")`: jeder Schlüssel muss in `REGISTRY` stehen, sonst
-   `ValueError` mit dem Namen (→ `ConfigError` über `load`). **Kein** Modul-Level-Import
-   von `adw.agents` in `config.py` (Zyklus über `events` → `state` → `config`, siehe
-   Ausgangslage): `from adw.agents import REGISTRY` steht lokal im Validator-Body und
-   läuft damit erst nach der Modulinitialisierung, zur Ladezeit der Config. Kurzer
-   Kommentar am Import, warum er lokal ist. Unbekannte Stufe, Nicht-Mapping
-   (`effort: 3`, `effort:` leer = `None`) scheitern an der Typisierung.
-3. `CodexConfig.reasoning_effort: CodexEffort = "high"` (`default`/`max` damit
-   unzulässig).
-4. Validierung läuft beim Config-Laden vor `RunState.new` — kein Run-Ordner, kein State.
-   `extra="forbid"` bleibt auf allen Modellen.
-5. Startkontrolle: `uv run adw --help` und die bestehenden CLI-/Config-Tests müssen nach
-   B2 ohne Import-Fehler laufen (deckt den Zyklus ab); kein neuer Test dafür.
+### B3 — Terminales `closed` (A3/C16, E3) — `adw/gui/app.py`
 
-### B3 — Eine Stelle für den wirksamen `AgentSpec` (A1, E4, E5; AC 1, 2, 4)
+- Jedes reguläre Ende sendet zuletzt genau einmal `event: closed\ndata: {}\n\n`:
+  Ende der letzten Spanne nach B1, Lauf ohne Trace (`events_path is None`), `.gz`-Log
+  nach einmaliger Ausgabe der ausstehenden Events auch ohne End-Record.
+- Bestehende Frames (`id:`/`data:`-Records, `event: problem`), Pfadprüfung und
+  Fehlerantworten (404) bleiben.
 
-1. `adw/agents.py` (Empfehlung): `effective_spec(spec, overrides) -> AgentSpec`:
-   ohne Eintrag `spec` unverändert; `"default"` → `dataclasses.replace(spec,
-   effort=None)`; sonst `replace(spec, effort=<stufe>)`.
-2. `adw/context.py` `_agent_run`: als erste Zeile
-   `agent = effective_spec(agent, ctx.config.effort)` — Start-Payload und Runner
-   erhalten denselben wirksamen Spec. Keine Änderung an den Aufrufern; damit sind
-   Authoring/Synthese, Build, Review, Triage, Analyse und Retro inklusive Mock
-   abgedeckt.
-3. `agent_run_start_payload`: zusätzliches Feld `"effort": agent.effort`
-   (Stufe oder `None` → JSON `null`, niemals der String `default`). Da der Payload an
-   der Aufrufstelle entsteht, gilt das für `SdkAgentRunner` und `MockAgentRunner`
-   gleich; `adw/mock.py` bleibt unverändert.
-4. `SdkAgentRunner.run`: `effort` nur bei konkretem Wert übergeben, z. B.
-   `**({"effort": agent.effort} if agent.effort is not None else {})` in
-   `ClaudeAgentOptions(...)`; bei `None` fehlt das Keyword vollständig.
+### B4 — Client und gerenderter Startpunkt (A1/A3, E3) — `run_detail.html`, `app.js`, `app.py`
 
-### B4 — Codex-Reasoning-Effort im argv (A2, E3; AC 6)
+- `<body>` erhält `data-run-status` (gerenderter Run-Status) und `data-last-seq`
+  (höchste gültige Seq des für den Snapshot geladenen Logs, nicht aus der
+  gefilterten/paginierten Raw-/Tools-Ansicht; `0` ohne gültige Seq). Keine neuen
+  JSON-API-Felder.
+- `app.js` (~Z. 1334): bei `done`/`escalated` keine `EventSource`; übrige
+  Initialisierung und Bedienung laufen weiter. Sonst Verbindung mit
+  `?last_id=<data-last-seq>`.
+- Beim `run`-Ende den finalen Refresh behalten, `source.close()` entfernen.
+  Listener für `closed` schließt die `EventSource`. Regionentausch, 200-ms-Entprellung,
+  Lazy-Panes unverändert.
 
-`adw/codex.py`:
-1. `CodexRunner.__init__(…, reasoning_effort: str = "high")` → `self._reasoning_effort`.
-2. `_argv` wird Instanzmethode; nach `"-c", "mcp_servers={}"` zusätzlich
-   `"-c", f"model_reasoning_effort={self._reasoning_effort}"` (kurzer Kommentar: wirkt
-   unabhängig von einer Nutzer-Config, das isolierte `CODEX_HOME` hat keine). Damit
-   enthalten `effective_argv`, `effective_author_argv` und der ausgeführte argv das Paar
-   identisch — für Authoring (Spec und Plan) und Code-Review.
-3. `adw/cli.py` `_build_context`: `CodexRunner(…, reasoning_effort=config.codex.reasoning_effort)`.
-   `MockCodexRunner` bleibt unverändert: sein argv ist laut Docstring nicht gepinnt, er
-   führt kein `codex exec` aus, und AC 6 betrifft den `codex exec`-argv. Dry-Run-Läufe
-   haben daher `codex_effort: null` im Run-Record.
+### B5 — Host-Allowlist (A4/C5, E4) — `adw/gui/app.py`, `adw/cli.py`
 
-### B5 — Pinning im Run-State (Validierung und Pinning; AC 5)
+- `create_app` nimmt intern einen optionalen zusätzlichen Host entgegen und fügt
+  `TrustedHostMiddleware` mit `["127.0.0.1", "localhost", "::1", "[::1]"]` plus ggf.
+  genau diesem Host hinzu. Port im `Host`-Header ist zulässig; fremder Host → 400, bevor
+  GUI-/API-Inhalte ausgeliefert werden. Keine Wildcard.
+- `adw/cli.py`: bei `--i-know` und anderem `--host` diesen Host durchreichen;
+  Bind-Prüfung, Bedeutung von `--i-know` und Lazy-Imports unverändert.
+- Bestehende HTTP-Tests auf eine erlaubte Basisadresse umstellen (z. B.
+  `TestClient(..., base_url="http://127.0.0.1")`, zentral in `tests/gui_app_helpers.py`
+  und den direkten `TestClient(create_app(...))`-Stellen). `testserver` **nicht** in die
+  Produktions-Allowlist aufnehmen.
 
-1. `adw/state.py` (Empfehlung): `pinned_effort: dict[str, EffortSetting] | None = None`
-   und `pinned_codex_reasoning_effort: CodexEffort | None = None`, kommentiert wie
-   `pinned_breakpoints`: das leere Mapping ist eine echte Pinnung („keine
-   Übersteuerung"); `None` = Alt-State von vor W2, dann gilt weiterhin die Config.
-2. `adw/cli.py` `run` neben `:302`: `state.pinned_effort = dict(config.effort)`,
-   `state.pinned_codex_reasoning_effort = config.codex.reasoning_effort` — vor dem
-   ersten `state.save`. Auch ein leeres `effort`-Mapping wird gepinnt, damit später
-   hinzugefügte Config-Einträge einen laufenden Run nicht verändern.
-3. `_config_for_continuation` neben `:1124`: bei nicht-`None`-Pins
-   `config.model_copy(update={"effort": dict(state.pinned_effort)})` bzw.
-   `codex=config.codex.model_copy(update={"reasoning_effort": …})`. Docstring um die
-   beiden Pins ergänzen. `resume` und `approve` gehen beide über diese Funktion; ein
-   neuer `run` liest die aktuelle Config. Bestehende States ohne die neuen Felder laden
-   weiterhin (optionale Felder mit Default `None`).
+### B6 — Registry-Lock (A5/C15, E5) — `adw/gui/registry.py`
 
-### B6 — Ledger (A3; AC 7)
+- `register_repo` (Z. 167): stabile Lock-Datei neben der tatsächlich verwendeten
+  Registry; `fcntl.flock(LOCK_EX)` über Laden → Ändern → atomares Ersetzen; Lock auch
+  im Fehlerfall freigeben. Registry-Verzeichnis bei Bedarf vor dem Öffnen anlegen; die
+  Lock-Datei nicht entfernen (gleiches Lock-Ziel für parallele Prozesse).
+- Format, kanonische Pfade, Slugs, Zeitstempel und Fehlerbehandlung unverändert; keine
+  anderen Registry-Schreiber sperren.
 
-`adw/ledger.py`:
-1. `_agent`: `"effort": begin.get("effort")` (Kommentar „not recorded until W2" weg);
-   fehlt das Feld (Altlauf) → `None`.
-2. `build_run_record`: neues Feld `"codex_effort"` (z. B. direkt nach `"agents"`):
-   erstes Event in Dateireihenfolge mit `type in ("codex.review", "codex.author")` und
-   `kind == "start"`; aus dessen `payload.argv` (nur wenn Liste) den Wert des ersten
-   `str`-Elements mit Präfix `model_reasoning_effort=`; fehlt der Start, das `argv` oder
-   das Element → `None`. Nur der erste Start zählt, keine weitere Suche zu späteren
-   Starts; keine Ersatzwerte aus Config, Registry oder State.
-3. `SCHEMA_VERSION` bleibt 1.
-4. Golden: in `tests/fixtures/ledger/a1b2c3d4/events.jsonl` einem `agent.run`-Start
-   `"effort": "low"` und dem ersten `codex.review`-Start (`seq 8`) ein `argv` mit
-   `-c model_reasoning_effort=high` geben; `expected-run-record.json` entsprechend
-   (`agents[].effort`, `"codex_effort": "high"`).
+### B7 — Typprüfung an einer Stelle (A6/C17, E6) — `adw/gui/reader.py`
 
-### B7 — Doku und Changelog (A4; AC 8)
+- Eine Funktion nach dem JSON-/dict-Check und vor den Projektionen: `type`, `kind`,
+  `span`, `parent`, `ts` → String; `payload` → dict; `payload.status` (bei
+  dict-Payload) → String. Fehlende/`None`-Werte bleiben fehlend.
+- Falsch typisiert → `None`, Record bleibt sonst nutzbar, `problem` über den bestehenden
+  Kanal mit Zeilenposition. Kein Ersatzwert, Quelldatei unverändert, keine Prüfungen in
+  `runs.py`/`serialize.py`/`model.py`/Templates.
 
-- `docs/ADW-HANDBOOK.md` / `.de.md` synchron: §3.1-Tabelle um `effort.<agent>`
-  (Registry-Defaults E1, Werte `low|medium|high|xhigh|max|default`, `default` = SDK-
-  Default auch für `low`-Agenten, nicht aufgeführte behalten Default) und
-  `codex.reasoning_effort` (`low|medium|high|xhigh`, Default `high`, Authoring und
-  Review, als `-c model_reasoning_effort=…`); Validierungsabsatz um unbekannten
-  Agentennamen/unzulässige Stufe ergänzen; §5.4 um beide Pins (`resume`/`approve`
-  verwenden die Start-Werte, ein neuer Run die geänderte Config). Sichtbarkeit: Feld
-  `effort` im `agent.run`-Start, argv in `codex.*`-Starts, `agents[].effort`/
-  `codex_effort` im Run-Record — ein Satz, wo der Run-Record beschrieben ist.
-- `examples/config.yaml`: auskommentierter Block im Stil von `breakpoints` mit dem
-  `effort:`-Beispiel aus der Spec und `codex: reasoning_effort: high`.
-- `CHANGELOG.md` / `.de.md`: oberste Sektion `## [0.36.0] — Unreleased` mit
-  `### Added` (Config `effort`, `codex.reasoning_effort`, Ledger-Felder) und
-  `### Changed` (Build-, Spec-, Plan-, Retro-Agent laufen jetzt auf `low`; Codex läuft
-  ausdrücklich auf `high` — behebt F17). `pyproject.toml` bleibt `0.35.0`.
+### B8 — Tools-Navigation (A7/C18, E7) — `run_detail.html`, ggf. `app.py`
 
-## Reihenfolge
+- Prev/Next von `window_nav(tool_window, "tools_offset", …)` aus dem aktuellen
+  Query-String mit ersetztem `tools_offset` bauen (wie `switch_qs`). `limit`, `raw_q`,
+  `raw_type`, `raw_from_seq`, `raw_to_seq` und ein vorhandener `focus` bleiben; ein
+  vorhandener `focus` wird nicht durch `node.seq` überschrieben, die bisherige
+  Fokus-Ergänzung bei fehlendem `focus` darf bleiben. Offset-Rechnung und Fenstergröße
+  unverändert.
 
-B1 → B2 → B3 → B4 → B5 → B6 → B7. Jeden neuen Test zuerst rot sehen.
+### B9 — Dokumentation (A8)
 
-## Tests (Richtwert 8–12 neue Tests; geplant 10)
+- `docs/GUI-SPEC.md` + `docs/GUI-SPEC.de.md` synchron: Spannen-Regel,
+  Approval-Wartezustand, Cursor-unabhängige Abschlussprüfung, `closed`, Ping und
+  Abbruch, kein Stream für fertige Seiten, Client-Startpunkt (`last_id`), Host-Allowlist.
+  Aussagen zum Schließen bei jedem `run`-Ende ersetzen.
+- `CHANGELOG.md` + `CHANGELOG.de.md`: oben `## [0.36.1] — Unreleased` mit `### Fixed`.
+- `pyproject.toml` **nicht** ändern.
 
-Hermetik: kein echtes Modell, kein echtes `codex`; Options-Bau über die bestehende
-`captured_query`-Fixture, CLI über `typer.testing.CliRunner` mit `--dry-run`.
+## Tests (Richtwert 10–14; bestehende Tests anpassen statt doppeln)
 
-| AC | Test (Kurzbeschreibung) | Ort |
-|----|-------------------------|-----|
-| 1 | Options-Bau: `REGISTRY["build_agent"]` → `options.effort == "low"`; `REGISTRY["final_reviewer"]` → `options.effort is None` (kein Keyword übergeben). Dazu eine Dict-Gleichheit `{name: spec.effort}` über `REGISTRY` gegen die E1-Tabelle (eine Assertion, keine Matrix) | `tests/test_agents.py` |
-| 2 | `effective_spec` parametrisiert mit `{build_agent: medium, final_reviewer: high, retro_agent: default}`: `medium`, `high`, `None`; nicht aufgeführter `spec_agent` bleibt `low`, `e2e_triage` bleibt `None`; übrige Felder unverändert | dto. |
-| 3, 6 | `AdwConfig.load` parametrisiert → `ConfigError`: unbekannter Agentenname, unbekannte Claude-Stufe, `effort` kein Mapping / `null`, `codex.reasoning_effort` `max` / `default` / unbekannt; Gegenprobe: ohne Schlüssel `effort == {}` und `codex.reasoning_effort == "high"` | `tests/test_config.py` |
-| 3 | CLI `adw run --dry-run` mit unbekanntem Agentennamen unter `effort:` → Exit ≠ 0, kein Run-Ordner/State angelegt | `tests/test_cli.py` |
-| 4 | Dry-Run bis `done` (Mock-Runner): `agent.run`-Start von `build_agent` hat `effort "low"`, von `final_reviewer` `effort null` | dto. |
-| 4 | `_agent_run` mit `SdkAgentRunner` (`captured_query`) und Config-Übersteuerung `build_agent: high`: Start-Payload `effort "high"` und `options.effort == "high"` | `tests/test_agents.py` |
-| 5 | Dry-Run mit `effort: {build_agent: medium}` und `codex.reasoning_effort: low` bis Plan-Gate; Config auf `high`/`xhigh` ändern; `adw approve` → `build_agent`-Start `effort "medium"`; `_config_for_continuation(...)` liefert `effort` und `codex.reasoning_effort` gepinnt (`medium`/`low`). Zweiter Fall: Run ohne `effort:` gestartet, Config danach um `build_agent: high` ergänzt → Fortsetzung bleibt bei `low` (leeres Mapping gepinnt) | `tests/test_cli.py` |
-| 6 | Parametrisiert: `CodexRunner()` / `CodexRunner(reasoning_effort="xhigh")` → `effective_argv` und `effective_author_argv` enthalten das benachbarte Paar `-c`, `model_reasoning_effort=high` bzw. `=xhigh`; ausgeführter argv (`captured_run`) identisch; `_build_context` (Nicht-Dry-Run) reicht `config.codex.reasoning_effort` an den Runner | `tests/test_codex.py` |
-| 7 | Parametrisiert über Events: kein Codex-Start → `null`; erster Start ohne Paar, späterer mit → `null`; erster `codex.author` mit `low`, späterer Review mit `high` → `"low"`; `agents[].effort` aus Payload (`"low"`, explizit `null`, fehlendes Feld → `null`) | `tests/test_ledger.py` |
-| 7 | Golden-File angepasst (B6.4) — bestehender Test, kein neuer | dto. |
-| 8 | Sichtprüfung Handbuch EN/DE, `examples/config.yaml`, Changelogs, `pyproject.toml` | — |
-| 9 | `uv run ruff check .`, `uv run pytest -x -q` | Gate |
+| Nr. | Nachweis | Ort |
+|---|---|---|
+| 1 | AK1: A (Start/Ende) + B (Start, Phase, Events): alle Events beider Spannen in Reihenfolge, offen; B-Ende bei `done` → genau ein `closed` zuletzt. | `tests/test_gui_app_sse.py` |
+| 2 | AK2a: Cursor hinter A-Ende: keine Wiederholung, B kommt, kein sofortiges Ende; Header und `last_id` filtern gleich. | SSE-Tests |
+| 3 | AK2b: Cursor auf/hinter B-Ende bei `done`: keine Records, sofort ein `closed`; gültiger Header übersteuert älteren `last_id`. | SSE-Tests |
+| 4 | AK3: `awaiting_approval` nach A-Ende: kein `closed`; später angehängte Events kommen über dieselbe Verbindung. | SSE-Tests |
+| 5 | AK4: leeres offenes Log: `: ping`; Warten asynchron (kein Thread); simulierter Abbruch beendet Generator und Polling. | SSE-Tests, bestehende Async-/ASGI-Technik |
+| 6 | AK5a/b: Lauf ohne Trace → `closed`; `.gz` ohne End-Record → Events einmal + `closed`. | Archivtest anpassen, No-Trace-Fall ergänzen |
+| 7 | AK5c: JS-Harness: `done`/`escalated` → keine `EventSource`; sonst URL mit `last_id` = `data-last-seq`. | `tests/gui_js_harness.js`/`.py` |
+| 8 | AK5d: JS-Harness: `run`-Ende → Refresh, aber kein Close; `closed` → Close. | JS-Harness |
+| 9 | AK6a: `Host: evil.example` → 400 (GUI und `/api`); `127.0.0.1:<port>`, `localhost` → 200. | GUI-HTTP-Tests |
+| 10 | AK6b: `--i-know --host X`: X → 200, anderer fremder Host → 400. | `tests/test_gui_cli.py` |
+| 11 | AK7: zwei parallele `register_repo` (Threads oder Prozesse) verschiedener Pfade: beide + Altbestand vorhanden. | `tests/test_gui_registry.py` |
+| 12 | AK8: `payload.status` Liste / `ts` Zahl: Reader liefert `None` + `problem`; `/` und `/api/runs` → 200, Problem am Lauf, übrige unverändert. | `tests/test_gui_reader.py`, Runlist-Tests |
+| 13 | AK9: `?limit=400&raw_q=foo&tools_offset=200`: Prev/Next behalten `limit`, `raw_q` (und vorhandenen `focus`), ersetzen nur `tools_offset`. | `tests/test_gui_app_detail.py` |
 
-Bestehende exakte Vergleiche anpassen statt neue Tests: argv in
-`tests/test_codex.py:622/626` (und weitere, die `_argv` exakt prüfen), exakte
-`agent.run`-Start-Payload-Schlüssel (z. B. `tests/test_instrumentation.py`,
-`tests/test_codex_author_span.py`), ggf. `AgentSpec`-Gleichheiten. Keine weiteren
-Tests (keine Matrix über alle Stufen oder alle Agenten im Options-Bau).
+Für offene Streams koordinierte Append-/Disconnect-Signale und begrenzte Laufzeit
+nutzen; keine ungepufferten GETs auf dauerhaft offene Quellen. Bestehende SSE-Tests auf
+async, Ping-Kommentare und das terminale Frame anpassen.
 
-## Gates / Definition of Done
+## Gates und Definition of Done
 
-- `uv run ruff check .` und `uv run pytest -x -q` grün (in Build-Sandboxes ggf. direkt
-  `.venv/bin/python -m pytest -x -q`); bestehende Suite grün.
-- AC 1–7 durch Tests belegt, AC 8 durch Sichtprüfung.
-- Keine zweite Default-Tabelle; Modelle, `max_turns`/`timeout_s`, `codex.timeout`,
-  Phasen/Gates/Review-Entscheidungen/Retro-Zeitpunkt, `pyproject.toml`-Version
-  unverändert; `schema_version` bleibt 1; keine neue KPI-/GUI-Darstellung.
-- Handbücher und Changelogs EN/DE inhaltlich synchron.
+- AK1–9 durch die Tests oben belegt; AK10: `uv run ruff check .` und
+  `uv run pytest -x -q` grün (in Build-Sandboxes ggf. `.venv/bin/python -m pytest`).
+- E1–E8 umgesetzt; `/api`-Felder und -Werte, Rendering, Bedienung,
+  Run-/Gate-/Approval-/Resume-Semantik, Loopback/`--i-know` unverändert.
+- GUI-Specs und Changelogs synchron; `pyproject.toml` unverändert.
+- Keine neue Laufzeit-Dependency, kein CDN, kein Frontend-Paket; kein Deferred-Punkt gebaut.
+
+## Non-Goals
+
+Wie Spec: Gestaltung/Tastatur, Regionentausch/Entprellung/Panes, `/api`-Felder,
+Run-/Gate-/Approval-/Resume-Semantik, Loopback/`--i-know`; keine persistente
+Stream-Verwaltung (einzige neue Datei: Registry-Lock); keine Dependency/CDN/Frontend-
+Paket; keine Versionsänderung.
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-- Effort je Phase oder je Runde (z. B. höher in Fix-Runden).
-- Automatische Effort-Wahl, Hill Climbing (W7).
-- Modellwechsel je Agent per Config.
-- Hervorhebung des Effort in der GUI (steht im Start-Payload und ist dort sichtbar).
-- Nachträgliches Befüllen von `effort`/`codex_effort` für Altläufe im Ledger (bleiben `null`).
-- Überwachungs-, Retry- oder Fallback-Mechanismen, die eine bestimmte Reasoning-Tokenzahl
-  oder Kostenersparnis erzwingen. Gates, unabhängiges Review, Limits und Events bleiben
-  die Backstops.
-- Zusätzliche persistente Effort-Historien neben dem Pinning im vorhandenen Run-State,
-  den Events und den Ledger-Feldern.
+- Authentifizierung/Token für die GUI.
+- Live-Aktualisierung der Run-Liste.
+- Umstellung weiterer Routen auf async.
+- Weitere Härtungen über C5 und C13–C18 hinaus, insbesondere:
+  - Watchdogs, Inaktivitätsfristen oder serverseitige Reconnect-Verwaltung für den
+    Stream. Ein offener Lauf ohne End-Record darf bei bestehender Verbindung weiter auf
+    Events warten; asynchrones Polling plus Abbrucherkennung beheben C14.
+  - Lock für andere Registry-Schreiber als `register_repo`.
+  - Allgemeine Event-Schema-Validierung über die in E6 genannten Felder hinaus.
+  - Reconnect-Backoff im Client.

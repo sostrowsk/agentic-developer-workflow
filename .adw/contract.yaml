@@ -1,126 +1,106 @@
-# Interface contract — W2: Effort pro Agent — und Codex denkt wieder mit
-#
-# Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec pinnt dieser
-# Contract ausschließlich extern beobachtbare Flächen — additiv zu den bestehenden:
-#   1. Config-Schlüssel `effort` und `codex.reasoning_effort` (Werte, Defaults, Validierung, Pinning),
-#   2. das Feld `effort` im `agent.run`-Start-Payload,
-#   3. das argv-Paar in den `codex.review`-/`codex.author`-Start-Events,
-#   4. die run-record.json-Felder `agents[].effort` und `codex_effort`.
-#
-# NICHT Teil des Contracts: interne Helfer und Signaturen (z. B. effective_spec,
-# CodexRunner-Parameter, _argv), der Bau von ClaudeAgentOptions (steht im Plan, B3),
-# Namen der State-Felder für die Pins, Position des Paars im argv, argv des
-# Mock-Codex-Runners. Keine HTTP-Routen, keine Templates, kein neuer Event-Typ.
-# Unveränderte Felder der beschriebenen Flächen bleiben gültig.
+# Contract — R3 (Single-Lane: nur extern beobachtbare Flächen, keine Helper-Signaturen)
+openapi: 3.1.0
+info:
+  title: ADW GUI — R3 Live-Stream, Host-Prüfung, Template-Verhalten
+  version: 0.36.1
+  description: >-
+    Ergänzender Minimal-Contract. Bestehende Routen, JSON-Antwortfelder, gültige Werte
+    und Event-Record-Strukturen bleiben unverändert.
 
-version: 1
-scope: W2
-workstreams:
-  - backend
+paths:
+  /api/runs/{repo}/{run_id}/stream:
+    get:
+      summary: SSE-Live-Stream eines Laufs
+      parameters:
+        - {name: repo, in: path, required: true, schema: {type: string}}
+        - {name: run_id, in: path, required: true, schema: {type: string}}
+        - name: Last-Event-ID
+          in: header
+          required: false
+          schema: {type: string}
+          description: >-
+            Zuletzt bestätigte Seq (Integer). Ein gültiger Wert hat Vorrang vor last_id.
+            Begrenzt nur die Ausgabe.
+        - name: last_id
+          in: query
+          required: false
+          schema: {type: string}
+          description: >-
+            Startpunkt (Integer, gleiche Semantik wie Last-Event-ID), wirksam ohne
+            gültigen Header. Ohne gültigen Cursor beginnt die Ausgabe am Log-Anfang.
+      responses:
+        "200":
+          description: text/event-stream, siehe x-sse.
+          content:
+            text/event-stream:
+              schema: {type: string}
+        "400":
+          description: Host nicht in der Allowlist (oder bestehender Validierungsfehler).
+        "404":
+          description: Repository/Lauf nicht auflösbar (unverändert).
+      x-sse:
+        record:
+          frame: "id: <seq>\ndata: <Event-Record als JSON>\n\n"
+          order: Log-Reihenfolge
+          filter: nur Records mit seq > Cursor
+        problem:
+          frame: "event: problem\ndata: <bestehendes Problemformat>\n\n"
+          behavior: beendet den Stream nicht (unverändert)
+        ping:
+          frame: ": ping\n\n"
+          behavior: bei jedem leeren Poll einer weiterhin offenen Verbindung
+        closed:
+          frame: "event: closed\ndata: {}\n\n"
+          behavior: genau einmal, als letztes Frame jedes regulären Stream-Endes
+        completion:
+          live_log: >-
+            Ein run-Ende beendet den Stream nur, wenn es zur letzten bisher gestarteten
+            Run-Spanne gehört (Span-ID, Ende nach Start) und der Run-State nicht auf
+            Approval wartet (awaiting_approval / awaiting_spec_approval). Enden früherer
+            Spannen beenden ihn nicht.
+          awaiting_approval: >-
+            Verbindung bleibt offen; spätere approve-/resume-Events aus demselben Log
+            kommen über dieselbe Verbindung.
+          cursor_independence: >-
+            Die maßgebliche Spanne wird aus dem gesamten Log bestimmt. Liegt ihr Ende
+            auf/unter dem Cursor und wartet der Lauf nicht auf Approval, folgt sofort
+            closed ohne erneute Record-Ausgabe.
+          no_trace: sofort closed
+          gzip: ausstehende Events einmal, dann closed auch ohne End-Record
+          disconnect: Client-Abbruch beendet Generator und Polling (kein belegter Thread)
+          open_without_end: ohne maßgebliches Ende weiter auf Events warten
 
-types:
-  ClaudeEffortOverride:                        # Wert im Config-Mapping `effort`
-    type: string
-    enum: [low, medium, high, xhigh, max, default]
-  ClaudeEffectiveEffort:                       # wirksamer Wert in Payload und Run-Record
-    type: [string, "null"]
-    enum: [low, medium, high, xhigh, max, null]
-  CodexReasoningEffort:                        # Config-Wert; default und max unzulässig
-    type: string
-    enum: [low, medium, high, xhigh]
-  RecordedCodexEffort:                         # Run-Record; aus dem argv gelesen, nicht validiert
-    type: [string, "null"]
+x-host-policy:
+  applies_to: alle GUI- und /api-Anfragen, vor Auslieferung von Inhalten
+  allowed: ["127.0.0.1", "localhost", "::1", "[::1]"]
+  port_in_host_header: erlaubt (z. B. 127.0.0.1:<port>)
+  cli_extension: >-
+    Bei --i-know und einem anderen --host wird genau dieser Host zusätzlich erlaubt.
+    Keine Wildcard. Bind-Prüfung und --i-know-Bedeutung unverändert.
+  foreign_host: 400
 
-config:
-  file: .adw/config.yaml
-  effort:
-    location: top-level
-    optional: true
-    type: "mapping <agent_name> -> ClaudeEffortOverride"
-    agent_name:
-      enum: [build_agent, spec_agent, plan_agent, retro_agent, spec_synthesis, plan_synthesis, final_reviewer, e2e_triage, log_analyst]
-      description: "registrierte Agentennamen (REGISTRY)"
-    semantics:
-      omitted: "keine Übersteuerung; Registry-Defaults gelten"
-      unlisted_agent: "behält seinen Registry-Default"
-      default_value: "SDK-Default: der Agent läuft ohne expliziten Effort; beobachtbar als null im agent.run-Start-Payload und im Run-Record — auch für Agenten mit Registry-Default low"
-      concrete_value: "der Agent läuft mit dieser Stufe; beobachtbar als Stufe im agent.run-Start-Payload und im Run-Record"
-    registry_defaults:                         # einzige Default-Tabelle (REGISTRY)
-      build_agent: low
-      spec_agent: low
-      plan_agent: low
-      retro_agent: low
-      spec_synthesis: null
-      plan_synthesis: null
-      final_reviewer: null
-      e2e_triage: null
-      log_analyst: null
-    example: {build_agent: medium, final_reviewer: high, retro_agent: default}
-  codex_reasoning_effort:
-    key: codex.reasoning_effort
-    optional: true
-    type: CodexReasoningEffort
-    default: high
-    applies_to: [authoring, code_review]       # Spec-/Plan-Authoring und jedes Review
-  validation:
-    error: ConfigError
-    timing: "beim Start (run/resume/approve), bevor ein Run angelegt wird; kein Run-Ordner, kein State"
-    rejects:
-      - "unbekannter Agentenname unter effort"
-      - "unzulässige Stufe unter effort oder in codex.reasoning_effort (dort auch default und max)"
-      - "falsche Struktur oder Typ, einschließlich null statt Mapping oder Stufe"
-      - "unbekannte Schlüssel (AdwConfig/CodexConfig bleiben extra=forbid)"
-  pinning:
-    when: "beim Run-Start (adw run), im bestehenden Run-State, analog pinned_breakpoints"
-    pinned: [effort, codex.reasoning_effort]
-    empty_mapping: "ein leeres oder fehlendes effort-Mapping wird als leeres Mapping gepinnt (echte Pinnung)"
-    continuation: "resume und approve verwenden die gepinnten Werte, auch nach Änderung der config.yaml"
-    new_run: "ein neuer adw run verwendet die aktuelle Config"
-    legacy_state: "State ohne Pins (vor W2) folgt der Config"
+x-template-behavior:
+  run_detail:
+    path: /runs/{repo}/{run_id}
+    body_attributes:
+      data-run-status: gerenderter Run-Status
+      data-last-seq: >-
+        höchste gültige Seq des für den Snapshot geladenen Logs (unabhängig von
+        Raw-/Tools-Filtern und Pagination); 0 ohne gültige Seq
+    event_source:
+      skip_when_status: [done, escalated]
+      initial_cursor: "?last_id=<data-last-seq>"
+      on_run_end: finaler Refresh wie bisher; Verbindung bleibt offen
+      on_closed: EventSource schließen
+    tools_navigation:
+      behavior: >-
+        Prev/Next entstehen aus dem aktuellen Query-String mit ersetztem tools_offset;
+        ein vorhandener focus wird nicht überschrieben.
+      preserved_parameters: [limit, raw_q, raw_type, raw_from_seq, raw_to_seq, focus]
 
-events:
-  agent_run_start:
-    type: agent.run
-    kind: start
-    added_payload_fields:
-      effort:
-        type: ClaudeEffectiveEffort
-        required: true
-        description: "wirksamer Effort dieses Laufs = Registry-Default, übersteuert durch den gepinnten effort-Eintrag; SDK-Default als JSON-null, niemals als String default"
-    runners: "identisch beim echten SdkAgentRunner und beim Mock-Runner (Dry-Run)"
-    unchanged: "alle bisherigen Payload-Felder"
-  codex_start:
-    types: [codex.review, codex.author]
-    kind: start
-    argv_contains:
-      pair: ["-c", "model_reasoning_effort=<wirksamer codex.reasoning_effort>"]
-      adjacent: true                           # "-c" direkt gefolgt vom Wert
-      position: unspecified
-    scope: "echter CodexRunner (jeder codex exec); der Start-argv ist identisch mit dem ausgeführten argv"
-    mock: "argv des Mock-Codex-Runners ist nicht gepinnt und trägt das Paar nicht"
-    unchanged: "übrige argv-Elemente (Modell, Sandbox, mcp_servers, …) und Payload-Felder"
-
-run_record:
-  file: run-record.json
-  schema_version: 1                            # additiv, unverändert
-  fields:
-    agents[].effort:
-      type: ClaudeEffectiveEffort
-      required: true
-      source: "Feld effort des jeweiligen agent.run-Start-Payloads"
-      null_when: "Feld fehlt (Altlauf) oder ist null"
-    codex_effort:
-      type: RecordedCodexEffort
-      required: true
-      source: "Wert von model_reasoning_effort=<wert> im payload.argv des ERSTEN Events mit kind=start und type codex.review oder codex.author, in Ereignisreihenfolge"
-      null_when: "kein solcher Start, oder sein argv fehlt bzw. enthält kein model_reasoning_effort"
-      selection_rule: "ausschließlich der erste passende Start; fehlt dort die Einstellung, keine Suche in späteren Starts"
-      no_backfill: "keine heutigen Config-, Registry- oder State-Werte als Ersatz; Altläufe bleiben null"
-
-unchanged:
-  - Modelle je Agent (REGISTRY)
-  - max_turns, timeout_s, codex.timeout
-  - Phasen, Gates, Review-Entscheidungen, Retro-Zeitpunkt
-  - GUI, KPI-Auswertung
-  - run-record.json schema_version (1)
-  - pyproject.toml-Version (0.35.0)
+x-unchanged:
+  - Felder und Werte aller /api-Antworten
+  - Resume-Semantik von Last-Event-ID (Seq-Cursor)
+  - Falsch typisierte E6-Felder (type, kind, span, parent, ts als Nicht-String;
+    payload als Nicht-Dict; payload.status als Nicht-String) gelten als fehlend und
+    erzeugen ein Problem im bestehenden Format; / und /api/runs antworten 200
