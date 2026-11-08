@@ -97,13 +97,17 @@ def install(ledger: Path) -> None:
             findings=[("a.py|Bug", "P1"), ("a.py|Bug", "P1")],
             feedback=[("finding", "valid", "a.py|Bug")])
     add_run(ledger, "r2", 2, 1.0, phase="escalated", causes=["gate"],
-            findings=[("a.py|Bug", "P1")])
+            findings=[("a.py|Bug", "P1")],
+            feedback=[("finding", "noise", ["unhashable"])])  # malformed: skipped
+
     add_run(ledger, "r3", 3, 2.0, causes=["gate"],
             findings=[("b.py|Solo", "P2"), ("b.py|Solo", "P2")],
             feedback=[("rate", "bad")])
     add_run(ledger, "r4", 4, 3.0, causes=["model"],
             feedback=[("rate", "bad"), ("rate", "good")])
-    add_run(ledger, "r5", 5, 4.0, causes=["prompt"])
+    add_run(ledger, "r5", 5, 4.0, causes=["prompt"], findings=[("c.py|Eins", "P3")])
+    path = ledger / "runs" / "acme__widget" / "r5" / "run-record.json"  # malformed run_id
+    path.write_text(path.read_text().replace('"run_id": "r5"', '"run_id": ["r5"]'))
     add_run(ledger, "o1", 9, 50.0, phase="escalated", causes=["target_repo"])
     add_run(ledger, "o2", 10, 60.0)
     # unsupported schema: excluded from every section, not only from the KPIs
@@ -183,6 +187,8 @@ def test_report_has_five_sections_with_sorted_groups_and_truncation(ledger, agen
     assert TOO_FEW not in text
     groups = section(text, SECTIONS[1])
     order = [groups.index(c) for c in ("orchestrator", "gate", "prompt", "model")]
+    assert "### orchestrator\n\nEinträge 2, Läufe 1, Kosten 10 USD" in groups  # run once
+    assert "### gate\n\nEinträge 2, Läufe 2, Kosten 3 USD" in groups
     assert order == sorted(order)
     assert "target_repo" not in groups and "o1" not in groups  # older run excluded
     assert LONG not in text and "L" * 299 in groups
@@ -194,6 +200,9 @@ def test_report_has_five_sections_with_sorted_groups_and_truncation(ledger, agen
     assert "Brief-Vorlage schärfen" not in levers
     assert "issue_quality" not in text and "s9" not in text
     kpis = section(text, SECTIONS[0])
+    previous = kpis.split("Vorzeitraum", 1)[1]
+    [total_row] = [ln for ln in previous.splitlines() if ln.startswith("| gesamt")]
+    assert total_row.split("|")[2].strip() == "2"  # exactly the two older runs
     for needle in ["done/esc/sonst", "Runden med/max", "4/4", "CB", "Appr. med",
                    "build_agent=", "P1=", "fix="]:
         assert needle in kpis, needle
@@ -350,7 +359,8 @@ def test_one_commit_per_call_overwrite_and_brief_removal(ledger, agent):
 
     assert improve("--no-brief").exit_code == 0
     assert commits(ledger) == before + 3  # unchanged artifacts: no empty commit
-    assert git(ledger, "status", "--porcelain") == "A  fremd.txt"  # stays staged only
+    status = git(ledger, "status", "--porcelain").splitlines()
+    assert sorted(status) == ["?? .improve.lock", "A  fremd.txt"]  # staged, never committed
 
 
 def test_push_failure_warns_and_keeps_local_artifacts(ledger, agent, tmp_path):

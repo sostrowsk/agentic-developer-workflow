@@ -49,20 +49,14 @@ def _improve_lock(path: Path):
         except BlockingIOError:
             raise ImproveError("adw improve läuft bereits für dieses Ledger") from None
         try:
-            _exclude_lock_file(path)
             yield
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
 
 
-def _exclude_lock_file(path: Path) -> None:
-    """Only under the held lock: no writes on contention, no racing rewrites."""
-    exclude = path / ".git" / "info" / "exclude"
-    with contextlib.suppress(OSError):
-        lines = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
-        if LOCK_FILE not in lines:
-            exclude.parent.mkdir(parents=True, exist_ok=True)
-            exclude.write_text("".join(f"{x}\n" for x in [*lines, LOCK_FILE]), encoding="utf-8")
+def _run_id(record: dict) -> str:
+    """Hashable run id: a malformed (e.g. list) value is skipped, never a TypeError."""
+    return str(record.get("run_id"))
 
 
 def _cut(value) -> str:
@@ -141,8 +135,8 @@ def _groups(pairs: list[tuple]) -> list[dict]:
                 continue
             group = groups.setdefault(item["cause"], {"cause": item["cause"], "entries": [],
                                                       "runs": {}})
-            group["entries"].append((record.get("run_id"), item))
-            group["runs"][record.get("run_id")] = _cost(record)
+            group["entries"].append((_run_id(record), item))
+            group["runs"][_run_id(record)] = _cost(record)
     for group in groups.values():
         group["cost"] = sum(group["runs"].values())
         group["score"] = len(group["runs"]) * group["cost"]
@@ -174,14 +168,15 @@ def _group_lines(group: dict) -> list[str]:
 def _recurring(pairs: list[tuple]) -> list[dict]:
     found: dict = {}
     for record, signal in pairs:
-        run_id = record.get("run_id")
+        run_id = _run_id(record)
         keys = {}
         for f in record.get("findings") or []:
             if isinstance(f, dict) and isinstance(f.get("finding_key"), str):
                 keys.setdefault(f["finding_key"], f.get("severity"))
         votes = {}
         for entry in signal.get("feedback", []):
-            if entry.get("kind") == "finding" and entry.get("value") in ("valid", "noise"):
+            if entry.get("kind") == "finding" and entry.get("value") in ("valid", "noise") \
+                    and isinstance(entry.get("finding_key"), str):
                 votes.setdefault(entry.get("finding_key"), []).append(entry["value"])
         for key, severity in keys.items():
             data = found.setdefault(key, {"key": key, "runs": set(), "severity": set(),
