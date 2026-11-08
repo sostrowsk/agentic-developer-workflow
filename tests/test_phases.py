@@ -3174,6 +3174,22 @@ def test_push_after_crash_between_push_and_save_records_the_sha(ctx):
     assert not (ctx.run_dir / "escalation.md").exists()
 
 
+def test_hook_rejected_push_is_not_reported_as_foreign_commits(ctx):
+    """Nur eine Lease-Ablehnung (stale info) führt in den ls-remote-Pfad — eine
+    Hook-/Policy-Ablehnung eskaliert als gewöhnlicher Push-Fehler."""
+    from adw.phases import _push_branch
+
+    bare, worktree, branch = _pushable_lane(ctx)
+    hook = bare / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\necho 'policy: nein' >&2\nexit 1\n")
+    hook.chmod(0o755)
+    with pytest.raises(EscalationError) as exc:
+        _push_branch(ctx, worktree, branch)
+    assert "Remote-Branch hat fremde Commits" not in str(exc.value)
+    assert "fehlgeschlagen" in str(exc.value)
+    assert RunState.load(ctx.repo, ctx.state.run_id).pushed_shas == {}
+
+
 def test_ci_timeout_escalates(ctx, target_repo):
     add_bare_origin(target_repo)
     prepare_ci_ready(ctx)

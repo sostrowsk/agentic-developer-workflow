@@ -662,7 +662,9 @@ def _push_branch(ctx: RunContext, worktree: Path, branch: str) -> None:
         raise escalate(ctx, f"Push von {branch} hat das Timeout überschritten") from exc
     if result.returncode != 0:
         stderr = result.stderr.strip()
-        if "stale info" not in stderr and "rejected" not in stderr:
+        # Nur "(stale info)" kennzeichnet eine Lease-Ablehnung — "rejected" steht
+        # auch bei Hook-/Policy-Ablehnungen, die keine fremden Commits bedeuten.
+        if "stale info" not in stderr:
             raise escalate(ctx, f"Push von {branch} nach origin fehlgeschlagen:\n{stderr}")
         # Lease abgelehnt: entweder ein Crash zwischen Push und Speichern (der
         # Remote steht schon auf HEAD) oder fremde Commits auf dem Remote.
