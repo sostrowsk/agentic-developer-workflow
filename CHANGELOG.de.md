@@ -13,6 +13,15 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.33.0] — Unreleased
+
+### Hinzugefügt
+- **Jeder Lauf hinterlässt ein Protokoll im zentralen Ledger (W13).** Das Auto-Pruning löschte alte Run-Ordner samt State, Event-Log, Spec/Plan/Contract und Follow-ups; eine zweite Ablage gab es nicht.
+  - **Lauf-Protokoll:** `adw/ledger.py` baut aus `state.json` und dem Event-Log ein deterministisches `run-record.json` (`schema_version: 1`, 0 Tokens): Versionen, Start/Ende, Phase, Gates, Issue-Titel, Eskalationsgrund, Aufrufe, Approvals, summierte Dauer/Kosten/Tokens, Lanes, Review-/Fix-/CI-Zähler, Circuit-Breaker, Agent-Läufe (Modell, Limits, Dauer, Kosten, Usage), Triage-Entscheidungen, Findings je Review-Runde und Anzahl Follow-ups. Fehlende Werte sind `null`, nicht `0`.
+  - **Ledger-Export:** Nach jedem ausgeführten `run`, `resume` und `approve` — `done`, Eskalation, Gate-Pause oder Agent-Fehler — landet der Lauf in `$ADW_LEDGER` (Default `~/.adw/ledger`) unter `runs/<slug>/<run_id>/` mit Protokoll, `events.jsonl.gz`, `final.diff` und den Lauf-Artefakten, committet im Ledger-Klon und fail-open gepusht. Ohne Ledger-Repo und bei Dry-Runs wird übersprungen; der Export ändert nie Exit-Code oder Phase. Jeder Versuch steht als `ledger.export`-Event im Log.
+  - **Prune exportiert zuerst:** Das löschende Prune (manuell und automatisch) exportiert jeden Lauf vor dem Löschen und behält ihn, wenn der Export fehlschlägt (`skipped`, „Ledger-Export fehlgeschlagen"). `--gzip` exportiert nicht.
+  - **Nachtrag:** `adw ledger export [RUN_ID] --repo <pfad>` exportiert vorhandene Läufe, je Lauf eine Zeile, Exit 1 bei einem Fehlschlag.
+
 ## [0.32.1] — 2026-11-08
 
 ### Behoben

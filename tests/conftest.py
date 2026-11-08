@@ -49,6 +49,34 @@ def _isolate_registry(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("ADW_REGISTRY_PATH", str(registry))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_ledger(tmp_path_factory, monkeypatch):
+    """E10: no test may export into the real ~/.adw/ledger. Every test sees a
+    non-existent ledger path (export → skipped); ``ledger`` overrides it."""
+    missing = tmp_path_factory.mktemp("adw-ledger-absent") / "ledger"
+    monkeypatch.setenv("ADW_LEDGER", str(missing))
+
+
+@pytest.fixture
+def ledger(tmp_path: Path, monkeypatch) -> Path:
+    """A real ledger clone with a local bare repo as ``origin`` (upstream set),
+    one initial commit, and ``ADW_LEDGER`` pointing at it."""
+    bare = tmp_path / "ledger-origin.git"
+    git(tmp_path, "init", "--bare", "-b", "main", str(bare))
+    clone = tmp_path / "ledger"
+    clone.mkdir()
+    git(clone, "init", "-b", "main")
+    git(clone, "config", "user.email", "ledger@example.com")
+    git(clone, "config", "user.name", "Ledger")
+    (clone / "README.md").write_text("# ledger\n")
+    git(clone, "add", ".")
+    git(clone, "commit", "-m", "init")
+    git(clone, "remote", "add", "origin", str(bare))
+    git(clone, "push", "-u", "origin", "HEAD")
+    monkeypatch.setenv("ADW_LEDGER", str(clone))
+    return clone
+
+
 @pytest.fixture
 def target_repo(tmp_path: Path) -> Path:
     """Real Git repo with a staging branch, one commit, and a valid .adw/config.yaml."""

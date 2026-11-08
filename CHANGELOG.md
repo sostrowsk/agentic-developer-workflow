@@ -12,6 +12,15 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.33.0] — Unreleased
+
+### Added
+- **Every run leaves a record in a central ledger (W13).** Auto-pruning deleted old run directories including state, event log, spec/plan/contract and follow-ups; there was no second copy.
+  - **Run record:** `adw/ledger.py` builds a deterministic `run-record.json` (`schema_version: 1`, 0 tokens) from `state.json` and the event log: versions, start/end, phase, gates, issue title, escalation reason, invocations, approvals, summed duration/cost/tokens, lanes, review/fix/CI counters, circuit breakers, agent runs (model, limits, duration, cost, usage), triage decisions, findings per review round and follow-up count. Missing values are `null`, not `0`.
+  - **Ledger export:** after every executed `run`, `resume` and `approve` — `done`, escalation, gate pause or agent error — the run goes to `$ADW_LEDGER` (default `~/.adw/ledger`) under `runs/<slug>/<run_id>/` with the record, `events.jsonl.gz`, `final.diff` and the run artifacts, committed in the ledger clone and pushed fail-open. Without a ledger repo, and for dry runs, the export is skipped; it never changes exit code or phase. Every attempt is logged as a `ledger.export` event.
+  - **Prune exports first:** deleting prune (manual and automatic) exports each run before deleting it and keeps the run when the export fails (`skipped`, "Ledger-Export fehlgeschlagen"). `--gzip` does not export.
+  - **Backfill:** `adw ledger export [RUN_ID] --repo <path>` exports existing runs, one line per run, exit 1 if any failed.
+
 ## [0.32.1] — 2026-11-08
 
 ### Fixed

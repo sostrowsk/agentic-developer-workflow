@@ -407,6 +407,10 @@ See §8. `--repo` can be repeated; `--host` must be a loopback address unless
 
 See §11. `--repo` must be the **root** of a git work tree.
 
+### `adw ledger export [RUN_ID]`
+
+Exports one run or all runs of `--repo` into the ledger after the fact, see §11.1.
+
 ### Exit codes
 
 | Code | Meaning | Next step |
@@ -595,6 +599,37 @@ uv run adw runs prune --repo ~/code/shop --gzip              # compress events.j
   or `approve`), ADW deletes old runs beyond `trace.keep_runs` (default 20).
   `keep_runs: 0` switches it off. Failures are reported but never change the
   finished run's result.
+
+### 11.1 Ledger
+
+Pruning deletes a run's state, event log and artifacts. So that this experience
+is not lost, ADW exports every executed run into a central **ledger**: a Git repo
+holding one deterministic run record per run (`run-record.json`, 0 tokens) and the
+case bundle. It is the data basis for later evaluation.
+
+- **Location:** environment variable `ADW_LEDGER`, default `~/.adw/ledger`. It is
+  shared across all target repos; there is no config key. ADW never creates or
+  clones the ledger — clone it once yourself (with a remote). If the path is not a
+  Git repo, the export is skipped with a line on stderr and nothing is created.
+- **When:** after every `run`, `resume` and `approve` that executed — whether it
+  ends `done`, escalated, paused at a gate or with an agent error. Dry runs are
+  never exported. The export never changes the run's exit code or phase; errors
+  are reported on stderr and logged as a `ledger.export` event.
+- **Layout:** `runs/<repo_slug with / → __>/<run_id>/` with `run-record.json`,
+  `events.jsonl.gz`, `final.diff` (`git diff <base_sha>..<lane branch>`) and copies
+  of `issue.md`, `spec.md`, `plan.md`, `contract.yaml`, the summaries,
+  `followups.md`, `escalation.md`, `authoring-*-known-findings.md` and `state.json`
+  (no `drafts/`, no `trees/`). A re-export replaces the folder and commits only on
+  change (`run <run_id> <phase> (<repo_slug>)`), then pushes. A failed push is only a
+  warning; the next export pushes the pending commits. No pull, rebase or force.
+- **Pruning exports first:** a run whose export fails is not deleted (`skipped`,
+  "Ledger-Export fehlgeschlagen"); without a ledger pruning deletes as before.
+  `--gzip` does not export.
+- **Backfill:** `adw ledger export [RUN_ID] --repo <path>` exports one or all runs
+  (in start order), one line `<run_id>: <result>` each; exit 1 if any failed.
+
+> **Keep the ledger private.** It contains issues, prompts, event logs and diffs
+> unredacted.
 
 ---
 

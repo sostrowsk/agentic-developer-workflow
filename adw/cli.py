@@ -16,7 +16,7 @@ from typing import Annotated, get_args
 import typer
 from pydantic import ValidationError
 
-from adw import ci, github, preflight, retention
+from adw import ci, github, ledger, preflight, retention
 from adw import dry_run as dry
 from adw.agents import AgentRunError, RunTotals, SdkAgentRunner
 from adw.codex import CodexRunner
@@ -181,6 +181,15 @@ def _run_span(
             handle.end_payload = {"status": "done", "totals": totals()}
 
 
+def _export_after_execution(repo: Path, run_id: str) -> None:
+    """Ledger export after an execution (E6). Fail-open: never changes exit code or
+    phase, never replaces an exception/typer.Exit that is already propagating."""
+    try:
+        ledger.export_run(repo, run_id)
+    except Exception as exc:  # noqa: BLE001 — export_run never raises; second guard
+        typer.echo(f"Ledger-Export fehlgeschlagen: {exc}", err=True)
+
+
 @app.command()
 def run(
     repo: Annotated[Path, typer.Option("--repo", help="Pfad zum Ziel-Repo")] = Path("."),
@@ -299,14 +308,24 @@ def run(
         # sich überschreibende State-Snapshots). Die run_id ist frisch/zufällig, also
         # gibt es beim Erwerb keine Konkurrenz; gehalten schließt sie jeden zweiten
         # Executor aus, bis der Run fertig ist. state.json entsteht erst im Lock.
-        with _run_execution_lock(repo, state.run_id):
-            with _run_span(emitter, state, config, repo, run_totals) as run_handle:
-                state.save(repo, emitter=emitter, span_id=run_handle.id)
-                ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
-                typer.echo(
-                    f"Run {state.run_id} gestartet (Phase: {state.phase}, Gates: {gate_mode})"
-                )
-                _execute(ctx)
+        executed = False
+        try:
+            with _run_execution_lock(repo, state.run_id):
+                with _run_span(emitter, state, config, repo, run_totals) as run_handle:
+                    state.save(repo, emitter=emitter, span_id=run_handle.id)
+                    ctx = _build_context(
+                        repo, config, state, emitter=emitter, run_totals=run_totals
+                    )
+                    typer.echo(
+                        f"Run {state.run_id} gestartet (Phase: {state.phase}, Gates: {gate_mode})"
+                    )
+                    executed = True
+                    _execute(ctx)
+        finally:
+            # E6: export after every execution (done, escalation, pause, error) —
+            # after the run span and the per-run lock, before auto-prune.
+            if executed:
+                _export_after_execution(repo, state.run_id)
         # Nach erfolgreichem Abschluss (done): automatisches Pruning (D3). Eine
         # Eskalation/Approval-Pause hätte oben eine typer.Exit geworfen und käme hier
         # nicht an. Pruning läuft NACH dem Freigeben des Execution-Locks.
@@ -327,35 +346,45 @@ def resume(
         # Same per-run execution lock as `approve` (P1): a `resume` racing an `approve`
         # (or another `resume`) on the same run must not double-execute the downstream
         # phases. Both commands take THIS lock, so continuations of one run serialize.
-        with _run_execution_lock(repo, run_id):
-            state = _load_state(repo, run_id)  # reload under the lock
-            if state.phase == "escalated":
-                raise _fail(
-                    f"Run {run_id} ist eskaliert — Report unter .adw/runs/{run_id}/escalation.md "
-                    f"lesen und einen neuen Run starten"
+        executed = False
+        try:
+            with _run_execution_lock(repo, run_id):
+                state = _load_state(repo, run_id)  # reload under the lock
+                if state.phase == "escalated":
+                    raise _fail(
+                        f"Run {run_id} ist eskaliert — Report unter "
+                        f".adw/runs/{run_id}/escalation.md lesen und einen neuen Run starten"
+                    )
+                if state.phase == "done":
+                    # Vor Vorflug, Emitter und Auto-Prune: ein fertiger Lauf bekommt
+                    # keine neue Run-Spanne — sein (ggf. komprimiertes) Log bleibt.
+                    typer.echo(f"Run {run_id} ist bereits abgeschlossen")
+                    return
+                config, rebased = _config_for_continuation(repo, state, base_branch)
+                # Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save): eine
+                # Verweigerung lässt den Run-State unverändert und resumierbar (B1).
+                _preflight(
+                    repo, config, state.dry_run,
+                    protect_artifacts=state.authoring_session is not None,
                 )
-            if state.phase == "done":
-                # Vor Vorflug, Emitter und Auto-Prune: ein fertiger Lauf bekommt
-                # keine neue Run-Spanne — sein (ggf. komprimiertes) Log bleibt.
-                typer.echo(f"Run {run_id} ist bereits abgeschlossen")
-                return
-            config, rebased = _config_for_continuation(repo, state, base_branch)
-            # Vorflug VOR jeder State-Mutation (auch vor dem rebased-Save): eine
-            # Verweigerung lässt den Run-State unverändert und resumierbar (B1).
-            _preflight(
-                repo, config, state.dry_run,
-                protect_artifacts=state.authoring_session is not None,
-            )
-            emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
-            run_totals = RunTotals()
-            with _run_span(emitter, state, config, repo, run_totals) as run_handle:
-                if rebased:
-                    # First persistence of this command — inside the run span (E1), so
-                    # its state.saved event is emitted within the span.
-                    state.save(repo, emitter=emitter, span_id=run_handle.id)
-                ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
-                typer.echo(f"Run {state.run_id} wird fortgesetzt (Phase: {state.phase})")
-                _execute(ctx)
+                emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
+                run_totals = RunTotals()
+                with _run_span(emitter, state, config, repo, run_totals) as run_handle:
+                    if rebased:
+                        # First persistence of this command — inside the run span (E1), so
+                        # its state.saved event is emitted within the span.
+                        state.save(repo, emitter=emitter, span_id=run_handle.id)
+                    ctx = _build_context(
+                        repo, config, state, emitter=emitter, run_totals=run_totals
+                    )
+                    typer.echo(f"Run {state.run_id} wird fortgesetzt (Phase: {state.phase})")
+                    executed = True
+                    _execute(ctx)
+        finally:
+            # E6: export after every execution (done, escalation, pause, error) —
+            # after the run span and the per-run lock, before auto-prune.
+            if executed:
+                _export_after_execution(repo, run_id)
         # Reaching done through `resume` is a normal successful completion → same
         # automatic pruning as `run` (D3). An escalation/pause raised above and skips it.
         _maybe_auto_prune(repo, config, state)
@@ -375,62 +404,74 @@ def approve(
         # The whole check/release/execute runs under the per-run execution lock (P1):
         # two concurrent approvals must not both release the same pending gate and each
         # run the downstream phases (a double push at `before_push`).
-        with _run_execution_lock(repo, run_id):
-            # Reload UNDER the lock and revalidate: a concurrent approve/resume that
-            # won the lock first may already have released the gate and advanced the
-            # phase — this loser then rejects cleanly, without a second execution.
-            state = _load_state(repo, run_id)
-            if state.phase not in ("awaiting_approval", "awaiting_spec_approval"):
-                raise _fail(
-                    f"Run {run_id} wartet nicht auf Approval (Phase: {state.phase}) — "
-                    f"für Crash-Fortsetzung `adw resume` benutzen"
+        executed = False
+        try:
+            with _run_execution_lock(repo, run_id):
+                # Reload UNDER the lock and revalidate: a concurrent approve/resume that
+                # won the lock first may already have released the gate and advanced the
+                # phase — this loser then rejects cleanly, without a second execution.
+                state = _load_state(repo, run_id)
+                if state.phase not in ("awaiting_approval", "awaiting_spec_approval"):
+                    raise _fail(
+                        f"Run {run_id} wartet nicht auf Approval (Phase: {state.phase}) — "
+                        f"für Crash-Fortsetzung `adw resume` benutzen"
+                    )
+                # A re-pinned base branch is only mutated in memory here; approve's own save
+                # below (inside the run span) persists it together with the approval grant.
+                config, _rebased = _config_for_continuation(repo, state, base_branch)
+                # Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung lässt die
+                # Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
+                _preflight(
+                    repo, config, state.dry_run,
+                    protect_artifacts=state.authoring_session is not None,
                 )
-            # A re-pinned base branch is only mutated in memory here; approve's own save
-            # below (inside the run span) persists it together with the approval grant.
-            config, _rebased = _config_for_continuation(repo, state, base_branch)
-            # Vorflug VOR dem Setzen/Speichern der Zusage: eine Verweigerung lässt die
-            # Approval-Zusage ungesetzt und den Run unverändert am Gate (B1).
-            _preflight(
-                repo, config, state.dry_run,
-                protect_artifacts=state.authoring_session is not None,
-            )
-            if state.pending_breakpoint is not None:
-                gate = state.pending_breakpoint
-            else:
-                gate = "spec" if state.phase == "awaiting_spec_approval" else "plan"
-            emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
-            run_totals = RunTotals()
-            with _run_span(emitter, state, config, repo, run_totals) as run_handle:
-                breakpoint_release = state.pending_breakpoint is not None
-                if breakpoint_release:
-                    # Breakpoint freigeben: die Phase über die Grenze fortschalten UND
-                    # pending_breakpoint im SELBEN atomaren Save leeren — der freigegebene
-                    # Haltepunkt wird danach nie wieder erreicht (AC7/AC8). Das granted-
-                    # Event NICHT hier emittieren: es entsteht log-geprüft in _execute
-                    # (_catch_up_granted_breakpoints) allein aus dem awaited-Event und
-                    # pending_breakpoint — so überlebt die Freigabe das Crash-Fenster
-                    # zwischen diesem Save und dem Event-Append (AC12), OHNE ein
-                    # zusätzliches State-Feld (Contract: pending_breakpoint ist die
-                    # einzige State-Ergänzung; Plan B2). Der Plan-/Spec-Approval-Pfad
-                    # bleibt unberührt (Regressions-Pin AC2).
-                    state.phase = _breakpoint_resume_phase(state)
-                    state.pending_breakpoint = None
-                elif state.phase == "awaiting_spec_approval":
-                    # Spec approven: in die Plan-Phase übergehen. Der Lauf pausiert danach
-                    # regulär beim Plan-Approval, sofern der Run nicht mit --no-approval lief.
-                    state.spec_approval_granted = True
-                    state.phase = "plan"
+                if state.pending_breakpoint is not None:
+                    gate = state.pending_breakpoint
                 else:
-                    state.approval_granted = True
-                state.save(repo, emitter=emitter, span_id=run_handle.id)
-                if not breakpoint_release:
-                    # spec/plan-Gate: granted wie bisher direkt (der Übergang schließt
-                    # innerhalb von approve ab, kein Crash-Fenster). granted: ein
-                    # tatsächlich eingetretener Produktzustand (AC 9).
-                    emitter.emit("approval", {"gate": gate, "event": "granted"}, span=run_handle.id)
-                ctx = _build_context(repo, config, state, emitter=emitter, run_totals=run_totals)
-                typer.echo(f"Approval erteilt — Run {state.run_id} läuft weiter")
-                _execute(ctx)
+                    gate = "spec" if state.phase == "awaiting_spec_approval" else "plan"
+                emitter = EventEmitter(repo, state.run_id, enabled=config.trace.enabled)
+                run_totals = RunTotals()
+                with _run_span(emitter, state, config, repo, run_totals) as run_handle:
+                    breakpoint_release = state.pending_breakpoint is not None
+                    if breakpoint_release:
+                        # Breakpoint freigeben: die Phase über die Grenze fortschalten UND
+                        # pending_breakpoint im SELBEN atomaren Save leeren — der freigegebene
+                        # Haltepunkt wird danach nie wieder erreicht (AC7/AC8). Das granted-
+                        # Event NICHT hier emittieren: es entsteht log-geprüft in _execute
+                        # (_catch_up_granted_breakpoints) allein aus dem awaited-Event und
+                        # pending_breakpoint — so überlebt die Freigabe das Crash-Fenster
+                        # zwischen diesem Save und dem Event-Append (AC12), OHNE ein
+                        # zusätzliches State-Feld (Contract: pending_breakpoint ist die
+                        # einzige State-Ergänzung; Plan B2). Der Plan-/Spec-Approval-Pfad
+                        # bleibt unberührt (Regressions-Pin AC2).
+                        state.phase = _breakpoint_resume_phase(state)
+                        state.pending_breakpoint = None
+                    elif state.phase == "awaiting_spec_approval":
+                        # Spec approven: in die Plan-Phase übergehen. Der Lauf pausiert danach
+                        # regulär beim Plan-Approval, sofern der Run nicht mit --no-approval lief.
+                        state.spec_approval_granted = True
+                        state.phase = "plan"
+                    else:
+                        state.approval_granted = True
+                    state.save(repo, emitter=emitter, span_id=run_handle.id)
+                    if not breakpoint_release:
+                        # spec/plan-Gate: granted wie bisher direkt (der Übergang schließt
+                        # innerhalb von approve ab, kein Crash-Fenster). granted: ein
+                        # tatsächlich eingetretener Produktzustand (AC 9).
+                        emitter.emit(
+                            "approval", {"gate": gate, "event": "granted"}, span=run_handle.id
+                        )
+                    ctx = _build_context(
+                        repo, config, state, emitter=emitter, run_totals=run_totals
+                    )
+                    typer.echo(f"Approval erteilt — Run {state.run_id} läuft weiter")
+                    executed = True
+                    _execute(ctx)
+        finally:
+            # E6: export after every execution (done, escalation, pause, error) —
+            # after the run span and the per-run lock, before auto-prune.
+            if executed:
+                _export_after_execution(repo, run_id)
         # Reaching done through `approve` is a normal successful completion → same
         # automatic pruning as `run` (D3). A further pause/escalation raised above.
         # Pruning runs AFTER releasing the execution lock (it only touches other runs).
@@ -526,6 +567,8 @@ def gui(
 
 runs_app = typer.Typer(add_completion=False, help="Run-Verzeichnisse verwalten (list, prune)")
 app.add_typer(runs_app, name="runs")
+ledger_app = typer.Typer(add_completion=False, help="Zentrales Lauf-Ledger (export)")
+app.add_typer(ledger_app, name="ledger")
 
 
 def _require_repo(repo: Path) -> Path:
@@ -627,6 +670,30 @@ def runs_prune(
             "Pruning nicht sicher abgeschlossen fuer: "
             + ", ".join(r.run_id for r in failed)
         )
+
+
+@ledger_app.command("export")
+def ledger_export(
+    run_id: Annotated[str | None, typer.Argument(help="Nur diesen Run exportieren")] = None,
+    repo: Annotated[Path, typer.Option("--repo", help="Pfad zum Ziel-Repo")] = Path("."),
+) -> None:
+    """Export runs into the ledger after the fact (all runs in start order)."""
+    repo = _require_repo(repo)
+    # Unter dem Repo-Lock wie ein Lauf: kein gleichzeitiger run/resume/approve
+    # exportiert oder verändert denselben Lauf parallel.
+    with _repo_lock(repo):
+        if run_id is not None:
+            _load_state(repo, run_id)
+            run_ids = [run_id]
+        else:
+            run_ids = [rec.run_id for rec in retention.scan_runs(repo)]
+        outcomes = []
+        for rid in run_ids:
+            outcome = ledger.export_run(repo, rid)
+            outcomes.append(outcome)
+            typer.echo(f"{rid}: {outcome}")
+    if "failed" in outcomes:
+        raise typer.Exit(1)
 
 
 def _maybe_auto_prune(repo: Path, config: AdwConfig, state: RunState) -> None:

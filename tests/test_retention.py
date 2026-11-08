@@ -730,3 +730,45 @@ def test_prune_rereads_the_phase_under_the_run_lock(target_repo, monkeypatch):
     assert f"{rid}: skipped (phase build)" in result.output
     assert rd.is_dir() and (rd / "events.jsonl").is_file()
     assert refs_of(target_repo, rid) != []
+
+
+# --- W13 E7: prune exports first ------------------------------------------------
+
+
+def test_prune_keeps_a_run_whose_ledger_export_failed(target_repo, ledger, monkeypatch):
+    """AC 10: a failed export protects the candidate — run dir and refs stay."""
+    import adw.ledger as ledger_mod
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("record kaputt")
+
+    monkeypatch.setattr(ledger_mod, "build_run_record", boom)
+    rid = "aaaa7777"
+    rd = make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+    add_ref(target_repo, rid, 1)
+
+    result = prune_all(target_repo)
+
+    assert result.exit_code == 0, result.output
+    assert f"{rid}: skipped (Ledger-Export fehlgeschlagen)" in result.output
+    assert rd.is_dir() and (rd / "state.json").is_file()
+    assert refs_of(target_repo, rid) != []
+
+
+def test_prune_exports_before_deleting_but_not_in_gzip_mode(target_repo, ledger):
+    """AC 10: --gzip exports nothing; the deleting prune puts the run into the
+    ledger (slug falls back to the repo dir name without origin), then deletes."""
+    rid = "aaaa6666"
+    make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+
+    compressed = prune_all(target_repo, "--gzip")
+    assert compressed.exit_code == 0, compressed.output
+    assert not (ledger / "runs").exists()
+
+    deleted = prune_all(target_repo)
+    assert deleted.exit_code == 0, deleted.output
+    assert f"{rid}: deleted" in deleted.output
+    assert not run_dir(target_repo, rid).is_dir()
+    exported = ledger / "runs" / target_repo.name / rid
+    assert (exported / "run-record.json").is_file()
+    assert (exported / "events.jsonl.gz").is_file()

@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from adw import ledger
 from adw.git import run_git
 from adw.state import RUN_ID_RE, RUNS_RELPATH, RunState, StateNotFoundError, run_lock
 from adw.state import contained as _contained
@@ -437,6 +438,10 @@ def _prune_locked(repo: Path, rec: RunRecord, runs_root: Path, gzip_mode: bool) 
             return PruneResult(rec.run_id, "skipped", reason=f"phase {phase}")
         if gzip_mode:
             return _compress_run(rec, runs_root)
+        # E7: the ledger copy comes first — a failed export keeps the run; no
+        # ledger (skipped) or a mere push failure deletes as before.
+        if ledger.export_run(repo, rec.run_id) == "failed":
+            return PruneResult(rec.run_id, "skipped", reason="Ledger-Export fehlgeschlagen")
         return _delete_run(repo, rec, runs_root)
 
 

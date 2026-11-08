@@ -416,6 +416,10 @@ außer mit `--i-know`; `--open` öffnet den Browser.
 
 Siehe §11. `--repo` muss die **Wurzel** eines Git-Arbeitsbaums sein.
 
+### `adw ledger export [RUN_ID]`
+
+Exportiert einen oder alle Läufe von `--repo` nachträglich ins Ledger, siehe §11.1.
+
 ### Exit-Codes
 
 | Code | Bedeutung | Nächster Schritt |
@@ -610,6 +614,41 @@ uv run adw runs prune --repo ~/code/shop --gzip              # events.jsonl komp
   `resume` oder `approve`), löscht ADW alte Läufe jenseits von
   `trace.keep_runs` (Default 20). `keep_runs: 0` schaltet es ab. Fehler werden
   gemeldet, ändern aber nie das Ergebnis des fertigen Laufs.
+
+### 11.1 Ledger
+
+Das Pruning löscht State, Event-Log und Artefakte eines Laufs. Damit diese
+Erfahrung nicht verloren geht, exportiert ADW jeden ausgeführten Lauf in ein
+zentrales **Ledger**: ein Git-Repo mit je Lauf einem deterministischen Protokoll
+(`run-record.json`, 0 Tokens) und dem Fall-Bündel. Es ist die Datengrundlage für
+spätere Auswertungen.
+
+- **Ort:** Umgebungsvariable `ADW_LEDGER`, Default `~/.adw/ledger`. Es gilt für alle
+  Ziel-Repos; es gibt kein Config-Feld. ADW legt das Ledger nie an und klont nie —
+  einmalig selbst klonen (mit Remote). Ist der Pfad kein Git-Repo, wird der Export
+  mit einer Zeile auf stderr übersprungen und nichts angelegt.
+- **Wann:** nach jedem `run`, `resume` und `approve`, der ausgeführt hat — egal ob
+  er `done` endet, eskaliert, an einem Gate pausiert oder mit einem Agent-Fehler
+  abbricht. Dry-Runs werden nie exportiert. Der Export ändert nie Exit-Code oder
+  Phase des Laufs; Fehler werden auf stderr gemeldet und als `ledger.export`-Event
+  festgehalten.
+- **Layout:** `runs/<repo_slug mit / → __>/<run_id>/` mit `run-record.json`,
+  `events.jsonl.gz`, `final.diff` (`git diff <base_sha>..<Lane-Branch>`) und Kopien
+  von `issue.md`, `spec.md`, `plan.md`, `contract.yaml`, den Zusammenfassungen,
+  `followups.md`, `escalation.md`, `authoring-*-known-findings.md` und `state.json`
+  (kein `drafts/`, kein `trees/`). Ein erneuter Export ersetzt den Ordner und
+  committet nur bei Änderung (`run <run_id> <phase> (<repo_slug>)`), dann folgt der
+  Push. Ein fehlgeschlagener Push ist nur eine Warnung; der nächste Export pusht die
+  liegengebliebenen Commits mit. Kein Pull, kein Rebase, kein Force.
+- **Prune exportiert zuerst:** Ein Lauf, dessen Export fehlschlägt, wird nicht
+  gelöscht (`skipped`, „Ledger-Export fehlgeschlagen"); ohne Ledger löscht das
+  Pruning wie bisher. `--gzip` exportiert nicht.
+- **Nachtrag:** `adw ledger export [RUN_ID] --repo <pfad>` exportiert einen oder alle
+  Läufe (in Startreihenfolge), je Lauf eine Zeile `<run_id>: <ergebnis>`; Exit 1,
+  wenn einer fehlschlägt.
+
+> **Das Ledger muss privat bleiben.** Es enthält Issues, Prompts, Event-Logs und
+> Diffs ungeschwärzt.
 
 ---
 

@@ -778,7 +778,8 @@ def test_dry_run_points_all_carry_a_non_null_span(target_repo):
     result = cli_run(target_repo, "--no-approval", "--parallel")
     assert result.exit_code == 0, result.output
     _state, records = read_run_events(target_repo)
-    points = [r for r in records if r["kind"] == "point"]
+    # ledger.export (W13) is written after the run span has ended — outside any span.
+    points = [r for r in records if r["kind"] == "point" and r["type"] != "ledger.export"]
     assert points
     offenders = [(r["type"], r["seq"]) for r in points if r["span"] is None]
     assert not offenders, offenders
