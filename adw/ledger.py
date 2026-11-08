@@ -590,14 +590,15 @@ def _read_retro(path: Path) -> dict | None:
 
 def _read_feedback(path: Path) -> list[dict]:
     try:
-        text = path.read_text(encoding="utf-8")
+        data = path.read_bytes()
     except Exception:  # noqa: BLE001 — missing or unreadable: no feedback
         return []
     entries = []
-    for line in text.splitlines():
+    # Decoded per line: one broken line (bad JSON or bad UTF-8) costs only itself.
+    for line in data.splitlines():
         try:
-            entry = json.loads(line)
-        except ValueError:
+            entry = json.loads(line.decode("utf-8"))
+        except ValueError:  # UnicodeDecodeError is a ValueError
             continue
         if isinstance(entry, dict):
             entries.append(entry)
@@ -619,6 +620,8 @@ def _signal_metrics(signals: list[dict]) -> dict:
         last = None
         for entry in signal.get("feedback", []):
             kind, value = entry.get("kind"), entry.get("value")
+            if not isinstance(value, str):  # unhashable values break the lookups below
+                continue
             if kind == "rate" and value in ratings:
                 last = value
             elif kind == "finding" and value in finding_feedback:

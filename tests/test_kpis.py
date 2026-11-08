@@ -387,7 +387,14 @@ def test_unreadable_retro_and_feedback_lines_are_ignored(ledger):
     (run_folder(ledger, "a") / "retro.json").write_bytes(b'{"items": [')
     (run_folder(ledger, "b") / "retro.json").write_text('{"items": 3}', encoding="utf-8")
     write_feedback(ledger, "a", ("rate", "good"), "{kaputt", "[1, 2]", ("finding", "noise"),
-                   ("rate", "meh"))
+                   ("rate", "meh"), '{"kind": "rate", "value": []}',
+                   '{"kind": "finding", "value": {}}')
+    # invalid UTF-8 in one line: its readable neighbours still count
+    (run_folder(ledger, "b") / "feedback.jsonl").write_bytes(
+        b'{"kind": "rate", "value": "bad"}\n'
+        b'{"kind": "rate", "value": "\xff"}\n'
+        b'{"kind": "finding", "value": "valid"}\n'
+    )
 
     res = runner.invoke(app, ["kpis", "--json"])
 
@@ -398,8 +405,8 @@ def test_unreadable_retro_and_feedback_lines_are_ignored(ledger):
     assert result["total"]["runs"] == 2
     assert result["total"]["retro_causes"] == {}
     assert result["total"]["retro_runs"] == 0
-    assert result["total"]["ratings"] == {"good": 1, "bad": 0}
-    assert result["total"]["finding_feedback"] == {"valid": 0, "noise": 1}
+    assert result["total"]["ratings"] == {"good": 1, "bad": 1}
+    assert result["total"]["finding_feedback"] == {"valid": 1, "noise": 1}
     assert runner.invoke(app, ["kpis"]).exit_code == 0
 
 
