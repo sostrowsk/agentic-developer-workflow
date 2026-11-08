@@ -67,3 +67,28 @@ def test_detail_html_shows_problems_unknown_nodes_and_no_external_refs(home, tmp
 
     for forbidden in ("http://", "https://", "//cdn", "integrity="):
         assert forbidden not in generic
+
+
+def test_foreign_host_is_rejected_and_loopback_hosts_are_served(home, tmp_path):
+    """R3/AK6 (E4): DNS-rebinding guard — a foreign ``Host`` gets 400 on the GUI
+    and the API; the loopback names (with or without a port) are served."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    write_run(repo, "aaaa1111", comprehensive_lines())
+    client = TestClient(create_app(repos=[str(repo)]))
+    for path in ("/", "/api/runs"):
+        assert client.get(path, headers={"Host": "evil.example"}).status_code == 400
+        for host in ("127.0.0.1:8765", "localhost", "[::1]:8765"):
+            assert client.get(path, headers={"Host": host}).status_code == 200, (path, host)
+
+
+def test_detail_body_carries_run_status_and_last_seq(home, tmp_path):
+    """R3/E3: <body> names the rendered run status and the highest seq of the loaded
+    log (independent of the Raw/Tools window), so the client can skip the stream
+    for a finished run and otherwise resume after that seq."""
+    import re
+
+    html = _detail_html(tmp_path, "aaaa1111", comprehensive_lines())
+    body = re.search(r"<body[^>]*>", html).group(0)
+    assert 'data-run-status="done"' in body
+    assert 'data-last-seq="18"' in body

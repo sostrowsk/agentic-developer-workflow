@@ -120,9 +120,9 @@
 {% macro window_nav(win, param, focus_seq=none) %}
   {% if win.total > win.shown %}
   <div class="window-nav">
-    {% if win.offset > 0 %}<a class="win-prev" href="?{{ param }}={{ [win.offset - win.shown, 0] | max }}{% if focus_seq is not none %}&amp;focus={{ focus_seq }}{% endif %}">&larr; {{ t.nav_previous }}</a>{% endif %}
+    {% if win.offset > 0 %}<a class="win-prev" href="?{{ nav_qs(param, [win.offset - win.shown, 0] | max, focus_seq) }}">&larr; {{ t.nav_previous }}</a>{% endif %}
     <span class="win-status">{{ win.offset + 1 }}&ndash;{{ win.offset + win.shown }} {{ t.nav_of }} {{ win.total }}</span>
-    {% if win.offset + win.shown < win.total %}<a class="win-next load-more" href="?{{ param }}={{ win.offset + win.shown }}{% if focus_seq is not none %}&amp;focus={{ focus_seq }}{% endif %}">{{ t.nav_more }} &rarr;</a>{% endif %}
+    {% if win.offset + win.shown < win.total %}<a class="win-next load-more" href="?{{ nav_qs(param, win.offset + win.shown, focus_seq) }}">{{ t.nav_more }} &rarr;</a>{% endif %}
   </div>
   {% endif %}
 {% endmacro %}
@@ -355,7 +355,7 @@
 {#- Client-injected chrome hints (A4): delivered with the page so app.js renders
     them in the language the server decided on. Fixed attributes on <body> — no
     per-entry markup, so the bounded entry-node budget is untouched. -#}
-{% if not fragment %}<body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}"{% if focus_seq is not none %} data-focus="{{ focus_seq }}"{% endif %}
+{% if not fragment %}<body data-repo="{{ detail.run.repo }}" data-run-id="{{ detail.run.run_id }}" data-run-status="{{ detail.run.status or '' }}" data-last-seq="{{ last_seq }}"{% if focus_seq is not none %} data-focus="{{ focus_seq }}"{% endif %}
       data-latest-context='{{ detail.latest_context | compact_context | tojson }}'
       data-hint-loading="{{ t.hint_loading }}"
       data-hint-payload-missing="{{ t.hint_payload_missing }}"

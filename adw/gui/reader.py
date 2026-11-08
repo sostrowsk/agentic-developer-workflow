@@ -19,8 +19,9 @@ from dataclasses import dataclass, field
 
 @dataclass
 class ReadProblem:
-    """A problem encountered while reading. ``kind`` is ``"bad_line"`` or
-    ``"seq_gap"``; the affected position is given by ``line_no`` and/or
+    """A problem encountered while reading. ``kind`` is ``"bad_line"``,
+    ``"seq_gap"`` or ``"bad_field"`` (a wrongly typed field, set to None); the
+    affected position is given by ``line_no`` and/or
     ``byte_offset``; ``expected``/``found`` are set only for ``seq_gap``."""
 
     kind: str
@@ -110,6 +111,10 @@ class EventReader:
                 ReadProblem(kind="bad_line", line_no=line_no, byte_offset=byte_offset)
             )
             return
+        if _null_mistyped_fields(record):
+            result.problems.append(
+                ReadProblem(kind="bad_field", line_no=line_no, byte_offset=byte_offset)
+            )
         seq = record.get("seq")
         if isinstance(seq, int):
             # The sequence is gap-free from 1 (§4.2): before any record is seen the
@@ -129,3 +134,29 @@ class EventReader:
             if self._last_seq is None or seq > self._last_seq:
                 self._last_seq = seq
         result.events.append(record)
+
+
+_STRING_FIELDS = ("type", "kind", "span", "parent", "ts")
+
+
+def _null_mistyped_fields(record: dict) -> bool:
+    """R3/E6: the single type check before every projection. A present but wrongly
+    typed ``type``/``kind``/``span``/``parent``/``ts`` (not a string), ``payload``
+    (not a dict) or ``payload.status`` (not a string) is treated as missing: set to
+    None in place. Returns whether anything was nulled."""
+    changed = False
+    for key in _STRING_FIELDS:
+        value = record.get(key)
+        if value is not None and not isinstance(value, str):
+            record[key] = None
+            changed = True
+    payload = record.get("payload")
+    if payload is not None and not isinstance(payload, dict):
+        record["payload"] = None
+        changed = True
+    elif isinstance(payload, dict):
+        status = payload.get("status")
+        if status is not None and not isinstance(status, str):
+            payload["status"] = None
+            changed = True
+    return changed

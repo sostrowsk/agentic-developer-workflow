@@ -277,3 +277,21 @@ def test_heavy_run_reference_has_the_correct_shape(home, tmp_path):
     assert len(tool_nodes) >= 2000                       # node COUNT, the real bottleneck
     results = [e for e in events if e.get("type") == "agent.tool.result"]
     assert max(len(r["payload"].get("content", "")) for r in results) < 1024  # small, not bytes
+
+
+def test_tools_window_navigation_keeps_every_query_parameter(home, tmp_path):
+    """R3/AK9 (E7): the Tools Prev/Next links are the current query string with only
+    ``tools_offset`` replaced — ``limit``, ``raw_q`` and an existing ``focus`` stay."""
+    import html as html_mod
+    import re
+    from urllib.parse import parse_qs
+
+    client, slug = _client(tmp_path, many_tool_entries_lines(600))
+    page = _detail_html(client, slug, focus=2, limit=400, raw_q="foo", tools_offset=200)
+    hrefs = re.findall(r'class="win-(?:prev|next)[^"]*" href="\?([^"]*)"', _tools_sections(page))
+    assert len(hrefs) == 2, hrefs  # both directions exist at offset 200 of 600
+    for href in hrefs:
+        qs = parse_qs(html_mod.unescape(href))
+        assert qs["limit"] == ["400"] and qs["raw_q"] == ["foo"], qs
+        assert qs["focus"] == ["2"], qs
+        assert len(qs["tools_offset"]) == 1 and qs["tools_offset"] != ["200"], qs

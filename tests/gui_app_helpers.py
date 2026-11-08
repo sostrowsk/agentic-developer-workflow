@@ -393,14 +393,18 @@ def problems_lines():
 
 
 def parse_sse(text: str):
-    """Parse an SSE body into frames: [{event, id, data}], one per record block."""
+    """Parse an SSE body into frames: [{event, id, data}], one per record block.
+    Comment-only blocks (``: ping``) are skipped."""
     frames = []
     for block in text.split("\n\n"):
         block = block.strip("\n")
         if not block:
             continue
+        lines = block.split("\n")
+        if all(line.startswith(":") for line in lines):
+            continue  # a comment-only block (the R3 ``: ping`` keep-alive) is no frame
         frame = {"event": None, "id": None, "data": None}
-        for line in block.split("\n"):
+        for line in lines:
             if line.startswith("id:"):
                 frame["id"] = line[len("id:"):].strip()
             elif line.startswith("event:"):

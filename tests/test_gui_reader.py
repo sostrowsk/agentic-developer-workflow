@@ -193,3 +193,31 @@ def test_reader_passes_snapshot_and_unknown_types_through_unchanged(tmp_path):
     assert [e["type"] for e in result.events] == ["run", "snapshot", "brandnew.type"]
     assert result.events[1]["payload"]["ref"] == "refs/adw/run/2"
     assert result.events[2]["payload"] == {"x": 1}
+
+
+def test_mistyped_fields_are_treated_as_missing_with_a_problem(tmp_path):
+    """R3/E6: valid JSON with wrongly typed projection fields (``ts`` a number,
+    ``type``/``span`` lists, ``payload.status`` a list, ``payload`` not a dict)
+    keeps the record, sets each such field to None and reports a problem with the
+    line position. Well-typed records are passed through unchanged."""
+    path = tmp_path / "events.jsonl"
+    good = rec(1, type="run", kind="start", span="R")
+    _write(
+        path,
+        json.dumps(good),
+        line(2, type="run", kind="end", span="R", payload={"status": ["done"]}),
+        json.dumps({**rec(3, span="S"), "ts": 1730000000}),
+        line(4, type=["phase"], span=["S"]),
+        json.dumps({**rec(5), "payload": ["x"]}),
+    )
+    result = EventReader(path).read()
+
+    assert [e["seq"] for e in result.events] == [1, 2, 3, 4, 5]
+    first, end, ts_num, listy, bad_payload = result.events
+    assert first == good
+    assert end["payload"]["status"] is None and end["type"] == "run"
+    assert ts_num["ts"] is None and ts_num["span"] == "S"
+    assert listy["type"] is None and listy["span"] is None
+    assert bad_payload["payload"] is None
+    assert {p.line_no for p in result.problems} >= {2, 3, 4, 5}
+    assert 1 not in {p.line_no for p in result.problems}

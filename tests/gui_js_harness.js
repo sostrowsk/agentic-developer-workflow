@@ -203,10 +203,18 @@ function installGlobals(rootDoc, body, search) {
     // span-pane lazy load must send `X-Requested-With: fetch`, like refresh()).
     deferred.push({ url: String(url), opts: opts || null, resolve, reject });
   });
-  global.EventSource = function EventSource() {
+  global.EventSource = function EventSource(url) {
+    // R3: the URL, the named-event listeners and close() calls are recorded so the
+    // stream-lifecycle scenario can assert the start cursor and when the client closes.
+    const self = this;
+    this.url = String(url);
     this.onmessage = null;
-    this.addEventListener = function () {};
-    this.close = function () {};
+    this.closed = 0;
+    this.named = {};
+    this.addEventListener = function (type, handler) {
+      (self.named[type] = self.named[type] || []).push(handler);
+    };
+    this.close = function () { self.closed++; };
     eventSource = this;
   };
   global.DOMParser = function DOMParser() {
@@ -2141,6 +2149,27 @@ async function runContextFragmentSwap() {
   return { ok: true, before: before, after: after };
 }
 
+async function runStreamLifecycle(status) {
+  // R3 (E1/E3): a page rendered as done/escalated opens NO EventSource; any other
+  // status connects with ?last_id=<data-last-seq>, keeps the connection on a run
+  // end (but still refreshes) and closes only on the terminal `closed` event.
+  const body = el("body", { attrs: { "data-repo": "repo", "data-run-id": "aaaa1111",
+    "data-run-status": status, "data-last-seq": "7" } });
+  const rootDoc = el("html", { children: [body] });
+  installGlobals(rootDoc, body);
+  loadAppJs(APP);
+  if (!eventSource) return { ok: true, opened: false };
+  const url = eventSource.url;
+  const fetchesBefore = deferred.length;
+  eventSource.onmessage({ data: JSON.stringify({ type: "run", kind: "end", seq: 8 }) });
+  await drain(); flushTimers(); await drain();
+  const refreshed = deferred.slice(fetchesBefore).some((d) => d.url.indexOf("/runs/") === 0);
+  const closedAfterEnd = eventSource.closed;
+  (eventSource.named.closed || []).forEach((h) => h({ data: "{}" }));
+  return { ok: true, opened: true, url, refreshed, closed_after_end: closedAfterEnd,
+    closed_after_closed: eventSource.closed };
+}
+
 // ---------------------------------------------------------------------------
 const APP = process.argv[2];
 const SCENARIO = process.argv[3];
@@ -2184,6 +2213,7 @@ const ARG = process.argv[4];
   else if (SCENARIO === "artifact") result = await runArtifact();
   else if (SCENARIO === "recovery-link") result = await runRecoveryLink();
   else if (SCENARIO === "recovery-live") result = await runRecoveryLive();
+  else if (SCENARIO === "stream-lifecycle") result = await runStreamLifecycle(ARG || "running");
   else throw new Error("unknown scenario: " + SCENARIO);
   process.stdout.write(JSON.stringify(result));
 })().catch((err) => {

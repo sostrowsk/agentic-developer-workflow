@@ -11,6 +11,8 @@ unreadable file yields an empty, usable registry; every write is atomic
 previous content intact. ``exists`` is derived on load, never persisted.
 """
 
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -164,24 +166,41 @@ def _write_atomic(data: dict) -> None:
         raise
 
 
+@contextlib.contextmanager
+def _registry_lock():
+    """An exclusive ``flock`` on a stable lock file next to the registry. The lock
+    file is never removed, so every process locks the same inode."""
+    path = _registry_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path.with_name(path.name + ".lock"), "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
+
+
 def register_repo(path) -> RepoEntry:
     """Create or update the entry for ``path`` (refreshing ``last_seen``). At most
     one entry per canonical path; a pre-existing entry keeps its slug."""
     canonical = os.path.normpath(str(Path(path).resolve()))
     now = _utc_now_iso()
-    # _load_raw already deduplicated by path and made slugs unique & URL-safe.
-    repos = _load_raw()["repos"]
+    # R3/E5: one lock over load -> change -> atomic replace, so concurrent
+    # registrations (threads or processes) never lose each other's entry.
+    with _registry_lock():
+        # _load_raw already deduplicated by path and made slugs unique & URL-safe.
+        repos = _load_raw()["repos"]
 
-    for entry in repos:
-        if entry["path"] == canonical:
-            entry["last_seen"] = now
-            slug = entry["slug"]  # keep the existing (already valid, unique) slug
-            break
-    else:
-        slug = _unique_slug(canonical, {e["slug"] for e in repos})
-        repos.append({"path": canonical, "slug": slug, "last_seen": now})
+        for entry in repos:
+            if entry["path"] == canonical:
+                entry["last_seen"] = now
+                slug = entry["slug"]  # keep the existing (already valid, unique) slug
+                break
+        else:
+            slug = _unique_slug(canonical, {e["slug"] for e in repos})
+            repos.append({"path": canonical, "slug": slug, "last_seen": now})
 
-    _write_atomic({"version": REGISTRY_VERSION, "repos": repos})
+        _write_atomic({"version": REGISTRY_VERSION, "repos": repos})
     return RepoEntry(path=canonical, slug=slug, last_seen=now, exists=os.path.isdir(canonical))
 
 

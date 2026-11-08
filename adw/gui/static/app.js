@@ -1331,7 +1331,15 @@
     pending = setTimeout(function () { pending = null; refresh(); }, 200);
   }
 
-  var source = new EventSource(streamUrl);
+  // R3 (E1/E3): a run already finished when the page was rendered has nothing more
+  // to tail. A live run resumes strictly after the seq the page was rendered from;
+  // the server ends a stream with a terminal `closed` event — a `run` end alone does
+  // not close it (a gated run opens another run span in the same log).
+  var runStatus = body.getAttribute("data-run-status");
+  if (runStatus === "done" || runStatus === "escalated") return;
+  var lastSeq = body.getAttribute("data-last-seq");
+  var source = new EventSource(
+    lastSeq ? streamUrl + "?last_id=" + encodeURIComponent(lastSeq) : streamUrl);
 
   source.onmessage = function (event) {
     scheduleRefresh();
@@ -1342,9 +1350,8 @@
       return;
     }
     if (record.type === "run" && record.kind === "end") {
-      // Render the final completed snapshot, then stop tailing.
+      // Render the completed snapshot of this span; the stream stays connected.
       setTimeout(refresh, 250);
-      source.close();
     }
   };
 
@@ -1352,5 +1359,10 @@
   // live problem becomes visible on the next refresh — no separate render path.
   source.addEventListener("problem", function () {
     scheduleRefresh();
+  });
+
+  // The regular end of the stream: stop, so EventSource does not reconnect.
+  source.addEventListener("closed", function () {
+    source.close();
   });
 })();

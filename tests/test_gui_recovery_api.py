@@ -241,7 +241,8 @@ def test_abort_payloads_are_carried_verbatim(home, tmp_path):
 
     # The absent payload (last) is `null`, not `{}`; present values are verbatim.
     assert [a["payload"] for a in rc["aborts"]] == [
-        None, [], {"limit": "fix_cycles", "value": 3, "cap": 3}, None,
+        # R3/E6: a non-dict payload (the list) counts as missing.
+        None, None, {"limit": "fix_cycles", "value": 3, "cap": 3}, None,
     ]
 
 

@@ -93,3 +93,18 @@ def test_core_import_path_does_not_pull_the_web_stack():
         [sys.executable, "-c", code], capture_output=True, text=True, timeout=60
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_gui_i_know_host_is_added_to_the_host_allowlist(home, monkeypatch):
+    """R3/E4/AK6b: with --i-know and another --host that host is allowed in addition
+    to loopback; any other foreign host is still rejected with 400."""
+    from fastapi.testclient import TestClient
+
+    started = []
+    monkeypatch.setattr("uvicorn.run", lambda application, **k: started.append(application))
+    result = cli.invoke(app, ["gui", "--host", "gui.lan", "--i-know"])
+    assert result.exit_code == 0, result.output
+    client = TestClient(started[0])
+    assert client.get("/api/runs", headers={"Host": "gui.lan:8765"}).status_code == 200
+    assert client.get("/api/runs", headers={"Host": "localhost"}).status_code == 200
+    assert client.get("/api/runs", headers={"Host": "evil.example"}).status_code == 400

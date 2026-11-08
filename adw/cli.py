@@ -582,7 +582,10 @@ def gui(
         )
         raise typer.Exit(1) from None
 
-    application = create_app(repos=[str(p) for p in (repo or [])])
+    # R3/E4: the GUI answers loopback hostnames only; an explicit --i-know host is
+    # allowed in addition.
+    extra_host = host if i_know and not _is_loopback(host) else None
+    application = create_app(repos=[str(p) for p in (repo or [])], extra_host=extra_host)
     if open_browser:
         import webbrowser
 

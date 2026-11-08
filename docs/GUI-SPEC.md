@@ -311,6 +311,9 @@ adw gui [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--lang de|en
 
 - Binds to loopback only. `--host` accepting a non-loopback address requires an
   explicit `--i-know` flag — the log contains raw agent output (§9).
+- **Host check (DNS rebinding).** Every request must carry a `Host` of
+  `127.0.0.1`, `localhost`, `::1` or `[::1]` (any port); with `--i-know` and another
+  `--host`, exactly that host is allowed too. Any other host gets 400.
 - Repos come from `~/.adw/repos.json`; **every `adw run` registers its repo
   there automatically** (path + last-seen timestamp). `--repo` adds ad hoc.
   Repos that no longer exist are shown greyed out, never crash the app.
@@ -766,9 +769,21 @@ column widths / label wrapping (AC 6) and the timeline label readability / non-o
   `loadToolBody` safeguards: an in-flight request is shared, a superseded or
   swapped-away answer writes nothing, a loading state shows meanwhile, and a failure
   keeps the last good view and stays re-loadable.
-- Reconnect via `Last-Event-ID` = last `seq` (unchanged). A finished run closes the
-  stream after `run` end (unchanged). A GUI opened later sees no difference — same
-  rendering path.
+- Reconnect via `Last-Event-ID` = last `seq` (unchanged); the page's initial
+  connection passes the last rendered `seq` as `?last_id=` (a valid header wins).
+  The cursor only limits output.
+- **Stream end.** A `run` end ends the stream only if it ends the **last started**
+  run span (matched by span id, after its start — earlier spans of a gated run never
+  end it) and the run state is not waiting for approval (`awaiting_approval`,
+  `awaiting_spec_approval`); a waiting run stays connected, so a later `approve`/
+  `resume` arrives over the same connection. Every regular end — this one, a run
+  without a trace, one pass over a `.gz` archive — sends `event: closed` as the last
+  frame; the client closes its `EventSource` only on `closed` (a `run` end still
+  triggers the final refresh). A page rendered as `done`/`escalated` opens no
+  stream (`data-run-status`, `data-last-seq` on `<body>`).
+- **Idle streams.** The stream is async; every empty poll sends a `: ping` comment,
+  so a client disconnect ends it without holding a worker thread.
+- A GUI opened later sees no difference — same rendering path.
 
 ### 7.4 API
 

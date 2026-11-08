@@ -311,3 +311,43 @@ def test_registry_error_does_not_block_the_run(home, target_repo):
     )
     assert result.exit_code == 0, result.output
     assert RunState.find_latest(target_repo).phase == "done"
+
+
+def test_concurrent_register_repo_keeps_every_entry(home, tmp_path, monkeypatch):
+    """R3/AK7: two concurrent registrations of different repos both survive, next
+    to an existing entry. The load is slowed so both writers overlap; without a
+    lock over load → change → replace one read-modify-write loses the other."""
+    import threading
+    import time
+
+    import adw.gui.registry as registry_mod
+
+    old, a, b = (tmp_path / n for n in ("old", "a", "b"))
+    for p in (old, a, b):
+        p.mkdir()
+    register_repo(old)
+
+    real_load = registry_mod._load_raw
+
+    def slow_load(*args, **kwargs):
+        data = real_load(*args, **kwargs)
+        time.sleep(0.2)
+        return data
+
+    monkeypatch.setattr(registry_mod, "_load_raw", slow_load)
+    errors = []
+
+    def worker(path):
+        try:
+            register_repo(path)
+        except Exception as exc:  # pragma: no cover - surfaced below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(p,)) for p in (a, b)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(10)
+    assert not errors
+    paths = {e["path"] for e in json.loads(registry_file(home).read_text())["repos"]}
+    assert paths == {str(p.resolve()) for p in (old, a, b)}

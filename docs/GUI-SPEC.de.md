@@ -319,6 +319,10 @@ adw gui [--repo PATH]... [--host 127.0.0.1] [--port 8765] [--open] [--lang de|en
 
 - Bindet nur auf Loopback. Ein `--host` mit Nicht-Loopback-Adresse verlangt ein
   explizites `--i-know`-Flag — das Log enthält rohe Agent-Ausgaben (§9).
+- **Host-Prüfung (DNS-Rebinding).** Jede Anfrage muss einen `Host` aus
+  `127.0.0.1`, `localhost`, `::1` oder `[::1]` tragen (beliebiger Port); mit
+  `--i-know` und einem anderen `--host` ist genau dieser Host zusätzlich erlaubt.
+  Jeder andere Host bekommt 400.
 - Repos kommen aus `~/.adw/repos.json`; **jedes `adw run` registriert sein Repo
   dort automatisch** (Pfad + Last-seen-Zeitstempel). `--repo` ergänzt ad hoc.
   Nicht mehr existierende Repos werden ausgegraut angezeigt und bringen die App
@@ -824,9 +828,23 @@ Nichtüberlagerung der Timeline-Beschriftung (AC 7) sind in
   eine laufende Anfrage wird geteilt, eine überholte oder weggetauschte Antwort
   schreibt nichts, währenddessen zeigt ein Ladezustand, und ein Fehlschlag erhält
   die letzte gute Ansicht und bleibt erneut ladbar.
-- Reconnect über `Last-Event-ID` = letzte `seq` (unverändert). Ein fertiger Run
-  schließt den Stream nach dem `run`-Ende (unverändert). Eine später geöffnete GUI
-  merkt keinen Unterschied — gleicher Renderpfad.
+- Reconnect über `Last-Event-ID` = letzte `seq` (unverändert); die erste
+  Verbindung der Seite übergibt die zuletzt gerenderte `seq` als `?last_id=` (ein
+  gültiger Header hat Vorrang). Der Cursor begrenzt nur die Ausgabe.
+- **Stream-Ende.** Ein `run`-Ende beendet den Stream nur, wenn es die **zuletzt
+  gestartete** Run-Spanne beendet (Abgleich über die Span-ID, nach deren Start —
+  frühere Spannen eines Laufs mit Gate beenden ihn nie) und der Run-State nicht auf
+  Approval wartet (`awaiting_approval`, `awaiting_spec_approval`); ein wartender
+  Lauf bleibt verbunden, ein späteres `approve`/`resume` kommt über dieselbe
+  Verbindung. Jedes reguläre Ende — dieses, ein Lauf ohne Trace, ein Durchlauf über
+  ein `.gz`-Archiv — sendet zuletzt `event: closed`; der Client schließt seine
+  `EventSource` nur bei `closed` (ein `run`-Ende löst weiter den finalen Refresh
+  aus). Eine als `done`/`escalated` gerenderte Seite öffnet keinen Stream
+  (`data-run-status`, `data-last-seq` am `<body>`).
+- **Untätige Streams.** Der Stream ist async; jeder leere Poll sendet einen
+  `: ping`-Kommentar, sodass ein Client-Abbruch ihn beendet, ohne einen
+  Worker-Thread zu belegen.
+- Eine später geöffnete GUI merkt keinen Unterschied — gleicher Renderpfad.
 
 ### 7.4 API
 

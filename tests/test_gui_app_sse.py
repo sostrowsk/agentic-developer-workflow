@@ -1,5 +1,6 @@
 """Tests for the SSE live-tail stream."""
 
+import asyncio
 import json
 import threading
 import time
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from adw.gui.app import create_app
 from tests.gui_app_helpers import (
+    _slug_for,
     comprehensive_lines,
     parse_sse,
     problems_lines,
@@ -15,6 +17,7 @@ from tests.gui_app_helpers import (
     run_end_payload,
     run_start_payload,
     write_run,
+    write_state_only_run,
 )
 
 
@@ -125,22 +128,205 @@ def test_stream_incomplete_final_line_is_emitted_once_when_completed(home, tmp_p
     assert ids == ["1", "2", "3", "4"]  # in order, no gap, closed on the run end
 
 
-def test_stream_over_a_gzipped_archive_is_one_pass(tmp_path, monkeypatch):
-    """Regression: a pruned run kept as events.jsonl.gz has no live tail — the
-    stream re-decompressed the whole archive every poll and never ended when the
-    archive lacked a run-end record. One pass, then close."""
+# --- R3: live stream across run spans, keep-alive, terminal ``closed`` -------------
+
+_CLOSED = "event: closed\ndata: {}\n\n"
+
+
+def _span_ab_lines(*, b_ended):
+    """Span A (start/end into awaiting_approval) then span B (start, phase, gate
+    events, optionally its end) — one log of a gated run."""
+    lines = [
+        rec(1, "run", "start", "A", None, sec=1, payload=run_start_payload("Gated")),
+        rec(2, "run", "end", "A", None, sec=2, payload=run_end_payload("awaiting_approval")),
+        rec(3, "run", "start", "B", None, sec=3, payload=run_start_payload("Gated")),
+        rec(4, "phase", "start", "P", "B", sec=4, payload={"name": "build", "from_phase": "build"}),
+        rec(5, "gate", "start", "G", "P", sec=5, payload={"name": "lint"}),
+    ]
+    if b_ended:
+        lines.append(rec(6, "run", "end", "B", None, sec=6, payload=run_end_payload("done")))
+    return lines
+
+
+def _setup(tmp_path, lines, *, phase=None, run_id="aaaa1111"):
+    repo = tmp_path / "repo"
+    repo.mkdir(exist_ok=True)
+    write_run(repo, run_id, lines, phase=phase)
+    return create_app(repos=[str(repo)]), _slug_for(repo), repo / ".adw" / "runs" / run_id
+
+
+def _drive(app, path, *, headers=(), on_chunk=None, timeout=5.0):
+    """Run one GET through the ASGI app on the event loop (no TestClient thread).
+
+    ``on_chunk(text_so_far)`` may append to the log and returns True to make the
+    client disconnect. Returns (status, body, ended_by_server). A stream that
+    neither ends nor reacts to the disconnect within ``timeout`` fails the test."""
+
+    async def main():
+        chunks, status = [], {}
+        disconnect = asyncio.Event()
+        state = {"requested": False, "server_ended": False}
+
+        async def receive():
+            if not state["requested"]:
+                state["requested"] = True
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await disconnect.wait()
+            return {"type": "http.disconnect"}
+
+        async def send(message):
+            if message["type"] == "http.response.start":
+                status["code"] = message["status"]
+            elif message["type"] == "http.response.body":
+                chunks.append(message.get("body", b"").decode("utf-8"))
+                if not message.get("more_body", False):
+                    state["server_ended"] = not disconnect.is_set()
+                elif on_chunk is not None and on_chunk("".join(chunks)):
+                    disconnect.set()
+
+        raw_path, _, query = path.partition("?")
+        scope = {
+            "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "http_version": "1.1", "method": "GET", "scheme": "http",
+            "path": raw_path, "raw_path": raw_path.encode(), "root_path": "",
+            "query_string": query.encode(),
+            "headers": [(b"host", b"127.0.0.1")]
+            + [(k.lower().encode(), v.encode()) for k, v in headers],
+            "client": ("127.0.0.1", 1234), "server": ("127.0.0.1", 80),
+        }
+        await asyncio.wait_for(app(scope, receive, send), timeout)
+        return status.get("code"), "".join(chunks), state["server_ended"]
+
+    return asyncio.run(main())
+
+
+def _seqs(body):
+    return [int(f["id"]) for f in parse_sse(body) if f["event"] is None]
+
+
+def _append(events_dir, *records):
+    with open(events_dir / "events.jsonl", "a", encoding="utf-8") as fh:
+        for r in records:
+            fh.write(json.dumps(r) + "\n")
+
+
+def test_stream_spans_runs_and_closes_after_last_span_end(home, tmp_path):
+    """AK1: both spans' events arrive in order — A's end does not end the stream —
+    and after B's end (run done) exactly one ``event: closed`` is the last frame."""
+    app, slug, _ = _setup(tmp_path, _span_ab_lines(b_ended=True), phase="done")
+    status, body, ended = _drive(app, f"/api/runs/{slug}/aaaa1111/stream")
+    assert status == 200 and ended
+    assert _seqs(body) == [1, 2, 3, 4, 5, 6]
+    assert body.endswith(_CLOSED) and body.count("event: closed") == 1
+
+
+def test_stream_stays_open_after_earlier_span_end(home, tmp_path):
+    """AK1/AK2: with B still open the stream keeps running past A's end (pings, no
+    ``closed``), and an event appended later arrives over the same connection;
+    a ``last_id`` behind A's end filters exactly like ``Last-Event-ID``."""
+    for cursor in ({"headers": [("Last-Event-ID", "2")]}, {"query": "?last_id=2"}):
+        app, slug, run_dir = _setup(tmp_path, _span_ab_lines(b_ended=False), phase="build")
+        appended = {"done": False}
+
+        def on_chunk(text, run_dir=run_dir, appended=appended):
+            if not appended["done"] and ": ping" in text:
+                appended["done"] = True
+                _append(run_dir, rec(6, "gate", "end", "G", "P", sec=6, payload={"name": "lint"}))
+                return False
+            return 6 in _seqs(text)
+
+        status, body, ended = _drive(
+            app, f"/api/runs/{slug}/aaaa1111/stream{cursor.get('query', '')}",
+            headers=cursor.get("headers", ()), on_chunk=on_chunk,
+        )
+        assert status == 200 and not ended, cursor
+        assert _seqs(body) == [3, 4, 5, 6], cursor  # no replay of A, B arrives live
+        assert "event: closed" not in body, cursor
+
+
+def test_stream_cursor_at_final_end_closes_without_replay(home, tmp_path):
+    """AK2b: a cursor on/after the last span's end (run done) yields no records and
+    an immediate ``closed``; a valid header wins over an older ``last_id``."""
+    app, slug, _ = _setup(tmp_path, _span_ab_lines(b_ended=True), phase="done")
+    status, body, ended = _drive(
+        app, f"/api/runs/{slug}/aaaa1111/stream?last_id=1",
+        headers=[("Last-Event-ID", "6")],
+    )
+    assert status == 200 and ended
+    assert _seqs(body) == []
+    assert body.endswith(_CLOSED) and body.count("event: closed") == 1
+
+
+def test_stream_awaiting_approval_stays_open(home, tmp_path):
+    """AK3: after A's end the run waits for approval — no ``closed``; a later
+    approve (new span in the same log) arrives over the same connection."""
+    lines = _span_ab_lines(b_ended=False)[:2]
+    app, slug, run_dir = _setup(tmp_path, lines, phase="awaiting_approval")
+    appended = {"done": False}
+
+    def on_chunk(text):
+        if not appended["done"] and ": ping" in text:
+            appended["done"] = True
+            _append(run_dir, rec(3, "run", "start", "B", None, sec=3,
+                                 payload=run_start_payload("Gated")))
+            return False
+        return 3 in _seqs(text)
+
+    status, body, ended = _drive(app, f"/api/runs/{slug}/aaaa1111/stream", on_chunk=on_chunk)
+    assert status == 200 and not ended
+    assert _seqs(body) == [1, 2, 3]
+    assert "event: closed" not in body
+
+
+def test_idle_stream_pings_async_and_ends_on_disconnect(home, tmp_path, monkeypatch):
+    """AK4: an open log without an end yields ``: ping`` comments, waits without a
+    blocking sleep or a worker thread, and a client disconnect ends it."""
+    import starlette.responses
+
+    def no_thread(*a, **k):
+        raise AssertionError("the stream must be an async generator (no threadpool)")
+
+    def no_sleep(seconds):
+        raise AssertionError("the stream must not block in time.sleep")
+
+    monkeypatch.setattr(starlette.responses, "iterate_in_threadpool", no_thread)
+    monkeypatch.setattr(time, "sleep", no_sleep)
+    lines = _span_ab_lines(b_ended=False)[:1]
+    app, slug, _ = _setup(tmp_path, lines, phase="build")
+    status, body, ended = _drive(
+        app, f"/api/runs/{slug}/aaaa1111/stream",
+        on_chunk=lambda text: text.count(": ping") >= 2,
+    )
+    assert status == 200 and not ended  # finished because the client went away
+    assert body.count(": ping\n\n") >= 2
+    assert "event: closed" not in body
+
+
+def test_stream_without_trace_sends_closed(home, tmp_path):
+    """AK5a: a run without an event log (state only) ends with ``closed``."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    write_state_only_run(repo, "aaaa1111", phase="done")
+    app = create_app(repos=[str(repo)])
+    status, body, ended = _drive(app, f"/api/runs/{_slug_for(repo)}/aaaa1111/stream")
+    assert status == 200 and ended
+    assert body == _CLOSED
+
+
+def test_stream_over_a_gzipped_archive_is_one_pass(home, tmp_path):
+    """AK5b: a pruned run kept as events.jsonl.gz without a run end replays its
+    events once, then ``closed`` (no polling of the archive)."""
     import gzip
 
-    import adw.gui.app as app_mod
-
-    path = tmp_path / "events.jsonl.gz"
-    with gzip.open(path, "wt") as fh:
+    repo = tmp_path / "repo"
+    run_dir = repo / ".adw" / "runs" / "aaaa1111"
+    run_dir.mkdir(parents=True)
+    with gzip.open(run_dir / "events.jsonl.gz", "wt") as fh:
         fh.write(json.dumps(rec(1, "run", "start", "R", payload=run_start_payload())) + "\n")
         fh.write(json.dumps(rec(2, "phase", "start", "P", payload={"name": "spec"})) + "\n")
-
-    def no_poll(seconds):
-        raise AssertionError("a finished .gz archive must not be polled")
-
-    monkeypatch.setattr(app_mod.time, "sleep", no_poll)
-    frames = list(app_mod._stream(path, None))
-    assert len(frames) == 2
+    app = create_app(repos=[str(repo)])
+    status, body, ended = _drive(app, f"/api/runs/{_slug_for(repo)}/aaaa1111/stream")
+    assert status == 200 and ended
+    assert _seqs(body) == [1, 2]
+    assert ": ping" not in body
+    assert body.endswith(_CLOSED) and body.count("event: closed") == 1

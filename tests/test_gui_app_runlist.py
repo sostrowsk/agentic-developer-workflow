@@ -121,3 +121,37 @@ def test_run_list_html_mirrors_the_json_and_shows_missing_repo(home, tmp_path):
     assert "eeee5555" in html  # the run appears
     assert gone_slug in html   # the missing repo is still visible (greyed placeholder)
     assert "http://" not in html and "https://" not in html
+
+
+def test_mistyped_record_does_not_break_the_run_list(home, tmp_path):
+    """R3/AK8: a record with ``payload.status`` as a list (or ``ts`` as a number)
+    no longer turns ``/`` and ``/api/runs`` into a 500 for every repo; the affected
+    run reports a problem, the other run is unchanged."""
+    from tests.gui_app_helpers import rec, run_end_payload
+
+    good_repo, bad_repo = tmp_path / "good", tmp_path / "bad"
+    for r in (good_repo, bad_repo):
+        r.mkdir()
+    write_run(good_repo, "aaaa1111", simple_run_lines("Good run"))
+    reference = _by_id(_client([good_repo]).get("/api/runs").json(), "aaaa1111")
+
+    status_list = simple_run_lines("Bad status")
+    status_list[-1] = rec(4, "run", "end", "R", None, sec=12,
+                          payload={**run_end_payload(), "status": ["done"]})
+    write_run(bad_repo, "bbbb2222", status_list)
+    ts_number = simple_run_lines("Bad ts")
+    ts_number[1] = {**ts_number[1], "ts": 1730000000}
+    write_run(bad_repo, "cccc3333", ts_number)
+
+    client = _client([good_repo, bad_repo])
+    assert client.get("/").status_code == 200
+    resp = client.get("/api/runs")
+    assert resp.status_code == 200
+    entries = resp.json()
+    assert _by_id(entries, "aaaa1111") == reference
+    for run_id in ("bbbb2222", "cccc3333"):
+        entry = _by_id(entries, run_id)
+        assert entry is not None
+        detail = client.get(f"/api/runs/{entry['repo']}/{run_id}")
+        assert detail.status_code == 200
+        assert detail.json()["problems"], run_id

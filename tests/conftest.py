@@ -3,7 +3,25 @@
 import subprocess
 from pathlib import Path
 
+import fastapi.testclient
 import pytest
+import starlette.testclient
+
+_BaseTestClient = starlette.testclient.TestClient
+
+
+class _LoopbackTestClient(_BaseTestClient):
+    """R3/E4: the GUI only answers allow-listed hosts; Starlette's default
+    ``testserver`` is not one. Every test addresses the app as ``127.0.0.1`` unless
+    it passes its own ``base_url`` (or an explicit ``Host`` header)."""
+
+    def __init__(self, app, base_url="http://127.0.0.1", *args, **kwargs):
+        super().__init__(app, base_url, *args, **kwargs)
+
+
+# Installed before the test modules import ``TestClient`` from either package.
+starlette.testclient.TestClient = _LoopbackTestClient
+fastapi.testclient.TestClient = _LoopbackTestClient
 
 DEFAULT_CONFIG = """\
 base_branch: staging

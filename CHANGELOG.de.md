@@ -13,6 +13,18 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.36.1] — Unreleased
+
+### Fixed
+- **Die Live-Ansicht bleibt live — und die GUI hält stand (R3).**
+  - **Stream über Run-Spannen:** Der SSE-Stream (und der Client) enden nicht mehr beim ersten `run`-Ende; nur das Ende der zuletzt gestarteten Spanne beendet ihn, und nicht, solange der Lauf auf Approval wartet. Jedes reguläre Ende sendet zuletzt `event: closed`; erst dann schließt der Client.
+  - **Keine hängenden Threads:** Der Stream ist ein async Generator mit `: ping`-Keep-alives; ein untätiger oder verlassener Stream belegt keinen Worker-Thread mehr und endet beim Client-Abbruch.
+  - **Keine endlosen Reconnects:** Läufe ohne Trace und `.gz`-Logs enden mit `closed`; Seiten fertiger Läufe öffnen keinen Stream, laufende Seiten setzen nach der gerenderten `seq` fort (`?last_id=`).
+  - **Host-Allowlist:** Anfragen mit fremdem `Host`-Header bekommen 400 (Schutz vor DNS-Rebinding); `--i-know --host X` erlaubt `X` zusätzlich.
+  - **Registry:** `register_repo` hält ein `flock` über Laden, Ändern und Ersetzen — gleichzeitige Registrierungen verlieren keine Einträge mehr.
+  - **Falsch typisierte Event-Felder** (`type`, `kind`, `span`, `parent`, `ts`, `payload`, `payload.status`) gelten als fehlend und werden als Problem `bad_field` gemeldet, statt `/` und `/api/runs` in einen 500 zu treiben.
+  - **Tools-Navigation** behält alle Query-Parameter (`limit`, Raw-Filter, `focus`).
+
 ## [0.36.0] — 2026-11-08
 
 ### Added

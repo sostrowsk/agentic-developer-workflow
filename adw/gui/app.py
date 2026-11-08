@@ -12,6 +12,7 @@ The read data layer (``reader``, ``model``, ``registry``) is only consumed by th
 GUI, never modified.
 """
 
+import asyncio
 import json
 import os
 import time
@@ -23,6 +24,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.datastructures import Headers
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import PlainTextResponse
 
 from adw.gui import i18n
 from adw.gui.artifacts import (
@@ -59,6 +63,7 @@ from adw.gui.runs import (
     _events_source,
     _list_runs,
     _load_events,
+    _load_state,
     _phase_timeline,
     _read_events,
     _resolve_repos,
@@ -148,41 +153,82 @@ def _parse_last_event_id(raw):
         return None
 
 
-def _stream(events_path, last_id):
+_SSE_PING = ": ping\n\n"
+_SSE_CLOSED = "event: closed\ndata: {}\n\n"
+_APPROVAL_PHASES = ("awaiting_approval", "awaiting_spec_approval")
+
+
+class _SpanTracker:
+    """The last-started ``run`` span over EVERY record read so far (independent of
+    the output cursor), matched like ``_run_span``: an end counts only for the
+    span id of the latest start and only after that start."""
+
+    def __init__(self):
+        self.span = None
+        self.ended = False
+
+    def see(self, record):
+        if record.get("type") != "run":
+            return
+        if record.get("kind") == "start":
+            self.span, self.ended = record.get("span"), False
+        elif record.get("kind") == "end" and self.span is not None:
+            if record.get("span") == self.span:
+                self.ended = True
+
+
+async def _never_disconnected():
+    return False
+
+
+async def _stream(events_path, last_id, awaiting_approval=lambda: False,
+                  is_disconnected=_never_disconnected):
     """Tail ``events.jsonl`` by byte offset (a single reader carries the offset in
     memory — no cursor on disk). Emit each new accepted event with a valid integer
     seq as ``id:``/``data:``; surface reader problems (and records without a valid
-    seq) as ``event: problem`` without an id; close after the run end event."""
+    seq) as ``event: problem`` without an id.
+
+    R3: async, so an idle stream holds no worker thread; every empty poll sends a
+    ``: ping`` comment so a client disconnect is noticed. The stream ends — with a
+    final ``event: closed`` — only when the last-started run span has ended and the
+    run is not waiting for approval, for a run without a trace, or after one pass
+    over a gzipped archive."""
     if events_path is None:
-        return  # nothing safe to tail (missing or escaping events log)
+        yield _SSE_CLOSED  # nothing safe to tail (missing or escaping events log)
+        return
     reader = EventReader(events_path)
+    spans = _SpanTracker()
     while True:
         result = reader.read()
-        for problem in result.problems:
-            yield _sse_problem(asdict(problem))
+        out = [_sse_problem(asdict(problem)) for problem in result.problems]
         for record in result.events:
+            spans.see(record)
             seq = record.get("seq")
-            is_end = record.get("type") == "run" and record.get("kind") == "end"
             if not isinstance(seq, int):
-                yield _sse_problem(
+                out.append(_sse_problem(
                     {"kind": "bad_seq", "line_no": None, "byte_offset": None,
                      "message": "record without a valid integer seq"}
-                )
+                ))
                 continue
             if last_id is not None and seq <= last_id:
-                # Already replayed — but the run end still closes the stream, so a
-                # reconnect at/after the final seq does not poll the file forever.
-                if is_end:
-                    return
-                continue
-            yield _sse_event(record)
-            if is_end:
-                return
+                continue  # already delivered; only the output is limited by the cursor
+            out.append(_sse_event(record))
+        for frame in out:
+            yield frame
+        # The whole batch is evaluated first: a later start in it makes an end historic.
+        if spans.ended and not awaiting_approval():
+            yield _SSE_CLOSED
+            return
         if os.fspath(events_path).endswith(".gz"):
             # A gzipped log is a pruned, finished run: nothing more will arrive,
             # and every read would decompress the whole archive again.
+            yield _SSE_CLOSED
             return
-        time.sleep(_POLL_SECONDS)
+        if not out:
+            yield _SSE_PING
+        await asyncio.sleep(_POLL_SECONDS)
+        if await is_disconnected():
+            return  # the client went away: stop polling, no terminal frame
 
 
 class _RevalidatingStatic(StaticFiles):
@@ -207,8 +253,40 @@ class _RevalidatingStatic(StaticFiles):
 # --- app factory ----------------------------------------------------------------
 
 
-def create_app(repos=None) -> FastAPI:
+_ALLOWED_HOSTS = ["127.0.0.1", "localhost", "::1", "[::1]"]
+
+
+class _HostAllowlist(TrustedHostMiddleware):
+    """Starlette's ``TrustedHostMiddleware`` with IPv6-aware port stripping: the
+    stock check cuts ``Host`` at the first ``:``, turning ``[::1]:8765`` into ``[``.
+    Allowed list and 400 response are the stock ones."""
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        host = _strip_port(Headers(scope=scope).get("host", ""))
+        if host in self.allowed_hosts or f"[{host}]" in self.allowed_hosts:
+            await self.app(scope, receive, send)
+            return
+        await PlainTextResponse("Invalid host header", status_code=400)(scope, receive, send)
+
+
+def _strip_port(host: str) -> str:
+    if host.startswith("["):
+        end = host.find("]")
+        return host[1:end] if end != -1 else host
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def create_app(repos=None, extra_host=None) -> FastAPI:
     app = FastAPI(title="ADW Read-only GUI")
+    # R3/E4: DNS-rebinding guard — a loopback bind alone still answers a foreign
+    # hostname resolving to 127.0.0.1. ``extra_host`` is the explicit --i-know host.
+    allowed = list(_ALLOWED_HOSTS)
+    if extra_host and extra_host not in allowed:
+        allowed.append(extra_host)
+    app.add_middleware(_HostAllowlist, allowed_hosts=allowed)
     static_dir = _HERE / "static"
     if static_dir.is_dir():
         app.mount("/static", _RevalidatingStatic(directory=str(static_dir)), name="static")
@@ -312,11 +390,21 @@ def create_app(repos=None) -> FastAPI:
 
     @app.get("/api/runs/{repo}/{run_id}/stream")
     def api_run_stream(repo: str, run_id: str, request: Request):
-        _, run_dir, runs_root = require_run(repo, run_id)
+        ref, run_dir, runs_root = require_run(repo, run_id)
         events_file = _events_source(run_dir, runs_root)
+        # A valid header wins: a browser reconnect carries the advanced cursor in the
+        # header while the URL still holds the page's initial ``last_id``.
         last_id = _parse_last_event_id(request.headers.get("last-event-id"))
+        if last_id is None:
+            last_id = _parse_last_event_id(request.query_params.get("last_id"))
+
+        def awaiting_approval():
+            state = _load_state(run_dir, runs_root, ref.path, run_id)
+            return state is not None and state.phase in _APPROVAL_PHASES
+
         return StreamingResponse(
-            _stream(events_file, last_id), media_type="text/event-stream"
+            _stream(events_file, last_id, awaiting_approval, request.is_disconnected),
+            media_type="text/event-stream",
         )
 
     @app.get("/", response_class=HTMLResponse)
@@ -435,10 +523,24 @@ def create_app(repos=None) -> FastAPI:
             "timeline": _timeline(events, has_trace=has_trace),
             "artifacts": _artifacts_listing(run_dir),
             "t": t, "lang": lang, "switch_qs": switch_qs,
+            "last_seq": max((e["seq"] for e in events if isinstance(e.get("seq"), int)),
+                            default=0),
+            "nav_qs": lambda param, value, focus=None: _nav_qs(request, param, value, focus),
         })
         return _apply_lang_cookie(request, HTMLResponse(html))
 
     return app
+
+
+def _nav_qs(request: Request, param: str, value: int, focus=None) -> str:
+    """The current query string with only ``param`` replaced (E7) — like
+    ``switch_qs`` it keeps limit/raw filters; an existing ``focus`` is kept,
+    otherwise ``focus`` (if given) is added."""
+    params = dict(request.query_params)
+    params[param] = str(value)
+    if "focus" not in params and focus is not None:
+        params["focus"] = str(focus)
+    return urlencode(params)
 
 
 # --- i18n request plumbing (Aufgabe A) -----------------------------------------
