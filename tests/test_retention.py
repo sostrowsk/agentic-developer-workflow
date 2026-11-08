@@ -795,3 +795,30 @@ def test_prune_keeps_a_run_when_the_ledger_probe_times_out(target_repo, ledger, 
     assert result.exit_code == 0, result.output
     assert f"{rid}: skipped (Ledger-Export fehlgeschlagen)" in result.output
     assert rd.is_dir() and (rd / "state.json").is_file()
+
+
+def test_prune_keeps_a_run_when_the_ledger_probe_is_refused(target_repo, ledger, monkeypatch):
+    """Review P1: an existing ledger whose probe git refuses (exit 128, e.g. dubious
+    ownership) is an export failure — run dir and snapshot refs stay."""
+    import adw.ledger as ledger_mod
+
+    real_run_git = ledger_mod.run_git
+
+    def refused_probe(cwd, *args, **kwargs):
+        if "--show-toplevel" in args:
+            return subprocess.CompletedProcess(
+                ["git", *args], 128, "", "fatal: detected dubious ownership in repository"
+            )
+        return real_run_git(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(ledger_mod, "run_git", refused_probe)
+    rid = "aaaa4444"
+    rd = make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+    add_ref(target_repo, rid, 1)
+
+    result = prune_all(target_repo)
+
+    assert result.exit_code == 0, result.output
+    assert f"{rid}: skipped (Ledger-Export fehlgeschlagen)" in result.output
+    assert rd.is_dir() and (rd / "state.json").is_file()
+    assert refs_of(target_repo, rid) != []

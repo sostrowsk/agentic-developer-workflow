@@ -278,15 +278,20 @@ def build_run_record(repo, run_id: str) -> dict:
 def _ledger_path() -> Path | None:
     """The ledger clone, or None when ADW_LEDGER is no Git work tree root.
 
-    Only a genuinely absent or non-repository path is "no ledger". A probe that
-    times out or cannot run propagates: the export then fails, and the prune
-    keeps the run instead of deleting it unarchived."""
+    Only a genuinely absent or non-repository path — no directory, or no ``.git``
+    entry in it — is "no ledger". Once ``.git`` exists the path IS the ledger: a
+    probe that times out, cannot run, is refused (exit ≠ 0, e.g. dubious
+    ownership) or reports another top level raises, the export then fails and
+    the prune keeps the run instead of deleting it unarchived. Decided from the
+    file system, not from git's (localised) error text."""
     path = Path(os.environ.get("ADW_LEDGER", _DEFAULT_LEDGER)).expanduser()
-    if not path.is_dir():
+    if not path.is_dir() or not os.path.lexists(path / ".git"):
         return None
     result = run_git(path, "rev-parse", "--show-toplevel", timeout=_GIT_TIMEOUT)
-    if result.returncode != 0 or Path(result.stdout.strip()).resolve() != path.resolve():
-        return None
+    if result.returncode != 0:
+        raise RuntimeError(f"Ledger {path} nicht lesbar: {result.stderr.strip()}")
+    if Path(result.stdout.strip()).resolve() != path.resolve():
+        raise RuntimeError(f"Ledger {path} ist nicht die Wurzel eines Git-Arbeitsbaums")
     return path
 
 
