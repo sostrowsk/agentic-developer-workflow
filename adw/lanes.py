@@ -196,8 +196,8 @@ def _build_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             # Snapshot the worktree BEFORE the agent run; after_agent only on a
             # NORMAL return (an agent exception skips it — the before_agent
             # snapshot stays as the diff basis, GUI-SPEC §5, AC 10).
-            _check_abort(ctx)
             snapshots.capture(ctx, worktree, "before_agent")
+            _check_abort(ctx)  # unmittelbar vor dem Agent-Lauf
             result = _agent_run(
                 ctx, spec, task, cwd=worktree, resume=resume, deny_read_paths=deny,
                 on_session_id=lambda sid: _checkpoint_lane_session(ctx, lane_state, sid),
@@ -213,7 +213,11 @@ def _build_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             _restore_approved_artifacts(
                 ctx, worktree, lane_state.base_sha or ctx.config.base_branch
             )
-            if lane_state.gate_iterations == 1 and not _worktree_dirty(ctx, worktree):
+            dirty = _worktree_dirty(ctx, worktree)
+            if dirty:
+                with ctx.state_lock:
+                    ctx.changed_lanes.add(lane)  # Fortschritt VOR dem Commit erfassen
+            if lane_state.gate_iterations == 1 and not dirty:
                 _handle_idle_agent_run(ctx, lane, dispatch_findings)
             # Kein Save zwischen Gates und Feedback-Persistenz — jeder Checkpoint
             # nach einem Gate-Fail muss pending_task/last_failures bereits tragen.
@@ -392,9 +396,9 @@ def _run_test_only_pass(
         f"Do NOT write or modify any production code. You do not commit.\n\n"
         f"Issue:\n{ctx.state.issue}"
     )
-    _check_abort(ctx)
     # This is a build-lane agent run too — snapshot before and after it (§5).
     snapshots.capture(ctx, worktree, "before_agent")
+    _check_abort(ctx)  # unmittelbar vor dem Agent-Lauf
     result = _agent_run(
         ctx, spec, task, cwd=worktree, resume=lane_state.session_id, deny_read_paths=deny,
         on_session_id=lambda sid: _checkpoint_lane_session(ctx, lane_state, sid),
@@ -741,27 +745,23 @@ def _dispatch_lane_fixes(
             lane_state.pending_findings = list(items)
             lane_state.gate_iterations = 0
         ctx.save()  # EIN Save: Staging aller Lanes + mutate_staged atomar
-    heads = {
-        lane: _git(ctx, Path(ctx.state.lanes[lane].worktree), "rev-parse", "HEAD").strip()
-        for lane in decision.fix_tasks
-    }
+    with ctx.state_lock:
+        ctx.changed_lanes.difference_update(decision.fix_tasks)
     for lane in decision.fix_tasks:
         _run_lane(ctx, lane, lanes)
     if ctx.abort.is_set():
         return
     # Fan-out-Leerlauf ist nur dann kein Fehler, wenn eine andere Ziel-Lane in
-    # dieser Runde etwas geändert (= committet) hat; reine P3 bleiben Follow-ups.
-    changed = any(
-        _git(ctx, Path(ctx.state.lanes[lane].worktree), "rev-parse", "HEAD").strip() != head
-        for lane, head in heads.items()
-    )
+    # dieser Runde etwas geändert hat (Agent-Änderungen, keine Seed-Commits);
+    # reine P3 bleiben Follow-ups.
+    changed = bool(ctx.changed_lanes.intersection(decision.fix_tasks))
     blocking = any(
         item.severity != "P3" for items in decision.fix_tasks.values() for item in items
     )
     if blocking and not changed:
         raise escalate(
             ctx,
-            f"Build-Agents (Lanes {', '.join(heads)}) haben keine Änderungen im "
+            f"Build-Agents (Lanes {', '.join(decision.fix_tasks)}) haben keine Änderungen im "
             f"Worktree hinterlassen — Fix-Dispatch ohne Wirkung",
         )
 

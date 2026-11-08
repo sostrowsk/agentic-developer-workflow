@@ -4893,3 +4893,37 @@ def test_parallel_lane_stops_after_the_first_escalation(pctx, target_repo):
     assert "Lane backend" in report
     assert "## Weitere Eskalation" not in report  # frontend eskaliert nicht selbst
     assert RunState.load(pctx.repo, pctx.state.run_id).phase == "escalated"
+
+
+def test_abort_set_during_the_before_agent_snapshot_starts_no_agent(ctx, monkeypatch):
+    """R5/E2: abort is checked immediately before the agent run — an escalation
+    elsewhere during the (slow) before_agent snapshot must not start the agent."""
+    import adw.lanes as lanes
+    from adw.lanes import _run_lane
+
+    prepare_approved(ctx)
+    original = lanes.snapshots.capture
+
+    def capture(c, worktree, label):
+        original(c, worktree, label)
+        if label == "before_agent":
+            c.abort.set()
+
+    monkeypatch.setattr(lanes.snapshots, "capture", capture)
+    _run_lane(ctx, "backend", ["backend"])
+    assert [c for c in ctx.agents.calls if c.agent == "build_agent"] == []
+
+
+def test_fanout_artifact_refresh_alone_is_no_fix_progress(pctx):
+    """R5/B1: progress = changes of the fix agents in this round, not HEAD — a
+    re-seeded approved artifact commit must not hide an all-idle fan-out round."""
+    from adw.lanes import _dispatch_lane_fixes
+
+    def writes(cwd):
+        return {f"{cwd.name}.py": f"# {cwd.name}\n"} if _calls_in(pctx, cwd) <= 1 else {}
+
+    prepare_built_parallel(pctx, lane_files=writes, build_responses=4)
+    plan = pctx.run_dir / "plan.md"
+    plan.write_text(plan.read_text() + "\nNachgeschärft.\n")  # Seed-Commit beim Dispatch
+    with pytest.raises(EscalationError, match="keine Änderungen"):
+        _dispatch_lane_fixes(pctx, [_fanout_finding()], ["backend", "frontend"], "Review")

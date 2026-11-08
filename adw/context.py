@@ -166,6 +166,9 @@ class RunContext:
     # Kooperatives Ende paralleler Lanes: escalate() setzt es, _run_lane prüft es
     # vor jeder Gate-Iteration und jedem Agent-Lauf. Nicht persistiert.
     abort: threading.Event = field(default_factory=threading.Event)
+    # Lanes, deren Agent in der laufenden Fix-Runde den Worktree geändert hat —
+    # flüchtige Dispatch-Daten für die Fan-out-Bewertung, nicht persistiert.
+    changed_lanes: set[str] = field(default_factory=set)
 
     @property
     def run_dir(self) -> Path:
