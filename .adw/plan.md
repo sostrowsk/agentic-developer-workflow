@@ -1,172 +1,224 @@
-# Plan — R5: Parallele Lanes enden sauber, Eingaben scheitern früh
+# Plan — W15: `adw improve`, der wöchentliche Verbesserungsbericht
 
-Basis: `.adw/spec.md`, gemergter Stand **0.36.2** (nach R4). Die Vorentscheidungen E1–E7
-des Issues sind bindend. Single-Lane: ein Workstream `backend`, kein Frontend. Vor dem
-Bauen jede genannte Stelle gegen den aktuellen Code abgleichen; Zeilen sind Orientierung
-(Stand 2026-11-08).
+Basis: `.adw/spec.md`, gemergter Stand **0.36.3** (nach R5). Die Vorentscheidungen
+E1–E8 sind bindend. `.adw/config.yaml` enthält ausschließlich die Lane `backend`; es
+gibt keinen Frontend-Workstream.
 
-`.adw/contract.yaml` pinnt ausschließlich die CLI-Fehlerfälle, den Aufbau von
-`escalation.md` und die Häufigkeit der Events `escalation` und `triage.decision`.
-Interne Helper-Signaturen sind kein Contract. Es entstehen keine HTTP-Routen, Templates
-oder neuen Event-Typen.
+Contract: `.adw/contract.yaml` (Single-Lane). Er pinnt nur beobachtbares Verhalten: CLI
+mit Optionen, Exits und stdout; Dateien unter `reports/`; Abschnitte und feste Sätze des
+Berichts; Brief-Bedingungen, Pflichtüberschriften und Lebenszyklus; Ledger-Commit mit
+Nachricht und Push-Verhalten; Timer-Units. Agentenkonfiguration, JSON-Antwortschema und
+Git-Staging sind Umsetzungsdetails dieses Plans (B3, B4), kein Contract. Keine
+HTTP-Routen, keine Events, keine internen Helper-Signaturen.
 
-## Workstream: backend
+## Workstreams
 
-Verantwortung: A1–A6, Akzeptanzkriterien 1–9. Betroffen: `adw/lanes.py`,
-`adw/context.py`, `adw/gates.py`, `adw/codex.py`, `adw/cli.py`, `adw/phases.py`, die
-zugehörigen bestehenden Testmodule und beide Changelogs. `adw/triage.py` und
-`adw/ledger.py` bleiben unverändert.
+- **backend** — gesamte Umsetzung (CLI, Bericht, Agent, Ablage, Units, Doku, Tests).
+- **frontend** — entfällt (keine Lane).
 
-### B1 — Fan-out-Leerlauf auf Dispatch-Ebene bewerten (A1, AK 1)
+## Workstream backend
 
-- `_dispatch_lane_fixes` (`adw/lanes.py:665`) hält je Ziel-Lane fest, welche Findings
-  ihr direkt zugeordnet sind und welche Fan-out sind (`unknown` oder inaktive Lane).
-  Das Routing in `adw/triage.py` bleibt unverändert.
-- Leerlauf-Prüfung je Lane (`_handle_idle_agent_run`, `:448`): Besteht der Dispatch
-  der Lane **nur** aus Fan-out-Findings und hat sie nichts geändert, wird nicht
-  eskaliert; die Lane gilt für diese Runde als fertig und verlässt den Lane-Pfad so,
-  dass kein `pending_task` zurückbleibt und `completed` wieder gesetzt ist (bestehender
-  Lane-Pfad oder direkter Abschluss, ohne neuen persistenten Zustand). Enthält der
-  Dispatch ein direkt zugeordnetes P1/P2-Finding, gilt die bisherige Eskalation.
-  Initialer Build ohne Änderungen und reine P3-Follow-ups behalten ihr Verhalten.
-- **Eine** Stelle nach dem Dispatch (heute die `_run_lane`-Schleife am Ende von
-  `_dispatch_lane_fixes`, `:715`) bewertet den Fortschritt über alle Ziel-Lanen:
-  hat keine etwas geändert, eskaliert der Lauf wie heute; hat mindestens eine etwas
-  geändert, geht er weiter. Maßgeblich sind Änderungen dieser Fix-Runde gegenüber dem
-  Stand vor dem Dispatch, in der Lane erfasst **bevor** `_finalize_lane` committet
-  (danach ist der Worktree sauber), nicht frühere Build-Änderungen. Nur flüchtige
-  Daten je Dispatch, keine neuen Felder im `RunState`.
-- Die Bewertung ist reihenfolgeunabhängig und gilt sequentiell wie parallel. Der
-  Fix-Dispatch läuft heute auch in parallelen Läufen sequentiell; eine neue
-  Parallelisierung gehört nicht zum Umfang. Bereits vertagte P3-Findings dürfen über
-  die Gesamtauswertung keine zusätzliche Eskalation auslösen; eine bereits erfolgte
-  Eskalation darf nicht um eine zweite Leerlauf-Eskalation ergänzt werden.
+Verantwortung: A1–A5 und Akzeptanzkriterien 1–11.
 
-### B2 — Kooperatives Ende und erster Eskalationsgrund (A2, AK 2–3)
+Betroffene Dateien:
 
-- `RunContext` (`adw/context.py`) bekommt ein nicht persistiertes
-  `abort: threading.Event` (`field(default_factory=...)`, kein Teil von `RunState`).
-  `escalate` (`:186`) setzt es unter dem `state_lock`.
-- `_run_lane` (`adw/lanes.py:80`) prüft das Signal am Anfang jeder Gate-Iteration und
-  unmittelbar vor jedem Agenten-Lauf, einschließlich des Test-only-Agenten des
-  RED-Pfads (`_run_test_only_pass`). Gesetzt → Rückkehr ohne weitere Arbeit und ohne
-  eigene Eskalation; ein Abbruch im RED-/Agenten-Unterpfad beendet auch den
-  aufrufenden Lane-Pfad. Bereits laufende Agenten und Gates laufen zu Ende, ihre
-  Timeouts bleiben der Backstop. Die Eskalation der ersten Lane propagiert wie heute
-  über `future.result()`; der Lauf bleibt `escalated`.
-- `escalate` serialisiert unter dem bestehenden `state_lock` Existenzprüfung und
-  Schreibvorgang: Fehlt `escalation.md`, wird sie wie heute angelegt (Titel, Issue,
-  Phase, Lanes, `## Grund`). Existiert sie, wird **nur** ein durch Leerzeile
-  getrennter Abschnitt `## Weitere Eskalation (<Lane/Phase>)` mit dem Grund angehängt;
-  bestehender Inhalt bleibt unverändert. `<Lane/Phase>` bezeichnet die Herkunft der
-  weiteren Eskalation (Lane-Name, sonst Phase); die Durchreichung ist
-  Implementierungsdetail, kein persistenter Zustand.
-- Das `escalation`-Event wird weiterhin für jede Eskalation geschrieben. Eine Lane,
-  die nur wegen `abort` zurückkehrt, erzeugt kein Event. `adw/ledger.py` bleibt
-  unverändert und liest weiterhin den ersten Absatz unter `## Grund`.
+- Neu: `adw/improve.py` (Auswertung, Bericht, Brief-Koordination, Ablage, Git).
+- Bestehend: `adw/cli.py` (Subcommand) und `adw/agents.py` (`improve_agent` in `REGISTRY`).
+- Neu: `tests/test_improve.py`.
+- Neu: `examples/systemd/adw-improve.service`, `examples/systemd/adw-improve.timer`.
+- Bestehend: `docs/ADW-HANDBOOK.md`, `docs/ADW-HANDBOOK.de.md`, `CHANGELOG.md`,
+  `CHANGELOG.de.md`.
 
-### B3 — Ausgabepuffer stabil auswerten (A3, AK 4)
+Wiederverwendet werden `_ledger_path`, `_read_ledger_runs`, `compute_kpis`, `run_git`,
+`_PUSH_TIMEOUT` (`adw/ledger.py`, `adw/git.py`), das `flock`-Muster von `_repo_lock`
+(`adw/cli.py:1170`) und `SdkAgentRunner`. Export, Retro, Feedback, KPI-Semantik und
+Dateischemata bleiben unverändert.
 
-- `adw/gates.py`: `_LineTail` (Zeilen-Deque **und** `dropped`-Zähler) bekommt ein
-  `threading.Lock`; `_pump_stream` hält es beim Anhängen. `adw/codex.py`: je ein
-  Lock für `out_tail` und `err_tail`; `_pump` hält ihn beim Anhängen. Ein gemeinsamer
-  Helper für beide Pfade ist zulässig.
-- Nach Prozessgruppen-Beendigung und `join(timeout=5)` (`gates.py:143`,
-  `codex.py:590`) schließt der Parent die Pipes, **dann** wird unter dem Lock ein
-  Snapshot kopiert (beim Gate-Puffer samt `dropped`) und ausschließlich dieser
-  dekodiert bzw. formatiert. Ein noch lebender Reader verändert das Ergebnis danach
-  nicht.
-- Locks nicht während blockierender `readline`/`read`-Aufrufe, `join` oder
-  Pipe-Schließung halten; das Reader-Ende durch geschlossene Pipe sauber behandeln.
-- Ausgabegrenzen, Timeouts, Prozessgruppen-Kill unverändert. Keine neue Abhängigkeit,
-  kein allgemeiner Umbau der Prozessverwaltung.
+### B1 — CLI, Ledger, Lock und Zeitfenster (A1; AK 1, 4, 8)
 
-### B4 — CLI-Eingaben vor Run-Mutationen ablehnen (A4, AK 5–6)
+1. `adw improve` in `adw/cli.py` registrieren: `--since` (int, Default 7),
+   `--repo-slug` (optional), `--no-brief` (Flag).
+2. Ledger über `_ledger_path` auflösen (`ADW_LEDGER`, sonst `~/.adw/ledger`, Wurzel
+   eines Git-Arbeitsbaums). Fehlendes oder nicht nutzbares Ledger → Meldung, Exit 1.
+   Kein Ziel-Repo, kein `.adw/runs/` als Ersatz.
+3. Vor jedem Lesen, Schreiben und Agentenaufruf exklusiven, nicht blockierenden `flock`
+   auf `<ledger>/.improve.lock` nehmen (Muster `_repo_lock`, ohne den Repo-Lock selbst
+   aufzurufen). Belegt → sofort Exit 1 mit Meldung, nichts geschrieben, kein
+   Agentenaufruf. Lock bis nach den Git-Schritten halten, zuverlässig freigeben, nie
+   stagen.
+4. Aufrufzeitpunkt `t` einmal erfassen. Aktuelles Fenster
+   `t − since Tage ≤ started_at ≤ t`; Vorzeitraum
+   `t − 2·since Tage ≤ started_at < t − since Tage`. Zukünftige Läufe gehören zu
+   keinem Fenster.
+5. Records und Signale gemeinsam über `_read_ledger_runs` lesen; beim Filtern die
+   Zuordnung Record ↔ Signale erhalten. `--repo-slug` auf beide Fenster und alle daraus
+   abgeleiteten Berichtsteile einschließlich Brief-Auswahl anwenden.
+6. **Vorgefilterte** Records samt Signalen an `compute_kpis(..., since=None)` übergeben.
+   Dessen eigener `since`-Filter rechnet relativ zu `datetime.now()` und hat keine
+   obere Grenze; er darf für den Vorzeitraum nicht benutzt werden. KPI-Semantik bleibt
+   unverändert.
+7. Nach geschriebenem Bericht: Berichtspfad und je **tatsächlich ausgegebenem**
+   Abschnitt eine Zeile mit Anzahl auf stdout (Läufe im Zeitraum, Problemgruppen,
+   wiederkehrende Findings, Regressionsfall-Kandidaten, Gruppen mit Hebel). Im
+   verkürzten Bericht nur die Laufzahl. Exit 0 auch ohne Brief und bei Commit-/
+   Push-Fehlern.
 
-- `adw/cli.py` `run`: nach dem Laden der Config und **vor** `RunState.new` (`:287`)
-  `parallel` gegen `config.is_parallel_capable` prüfen. Nicht parallelfähig →
-  verständliche Meldung zu `--parallel` und den konfigurierten Lanes, Exit 1; kein
-  Run-Ordner, kein gespeicherter eskalierter Lauf. Die Prüfung in
-  `adw/context.py:_validate_lanes` (`:309`) bleibt als zweite Sicherung; die Bedeutung
-  von `is_parallel_capable` bleibt.
-- `adw/cli.py` `runs prune` (`:668`): den bestehenden Zweig `older_than < 0` um eine
-  stderr-Meldung im Stil der `--keep`-Meldung ergänzen, z. B.
-  `Fehler: --older-than muss mindestens 0 sein.` Exit 2 bleibt, Prüfung bleibt vor
-  jeder Änderung an Run-Daten.
-- Keine weiteren CLI-Validierungen.
+### B2 — Deterministischer Markdown-Bericht (A2; AK 1–4)
 
-### B5 — Finale Triage nur einmal protokollieren (A5, AK 7)
+Code, 0 Modell-Tokens. Überschriften exakt wie im Contract, Reihenfolge fix:
 
-- `_dispatch_lane_fixes` bekommt `record_triage: bool = True`; nur bei `True` geht der
-  Emitter an `triage_final_review` (`lanes.py:679`). Routing und Triage-Ergebnis
-  bleiben gleich.
-- Nur der Aufruf aus Phase 6 (`adw/phases.py:510`, nach eigener Triage `:472`)
-  übergibt `record_triage=False`. Die Aufrufer `:164`, `:400`, `:623` bleiben
-  unverändert. Weder Zahl noch Routing der Fix-Dispatches ändern sich.
-- Keine Deduplizierung in `adw/ledger.py`, keine Korrektur historischer Event-Logs
-  oder Run-Records.
+1. **Kennzahlen:** Versionsgruppen und Gesamtzeile aus `compute_kpis` für das aktuelle
+   Fenster; die W14-Signale (`retro_causes`, `retro_runs`, `ratings`,
+   `finding_feedback`) so, wie `total` sie heute liefert, ohne Verteilung auf
+   Versionsgruppen. Vom Vorzeitraum **nur die Gesamtzeile**.
+2. **Problemgruppen aus Retros:** alle Retro-Einträge der aktuellen Läufe nach `cause`
+   gruppieren. Je Gruppe Anzahl Einträge, Anzahl **verschiedener** Läufe, Summe
+   `cost_usd` dieser Läufe (ein Lauf zählt je Gruppe einmal, auch bei mehreren
+   Einträgen). Sortierung absteigend nach Läufe × Kostensumme, Gleichstand stabil nach
+   `cause`-Name; Eintragsreihenfolge ebenfalls deterministisch. Je Eintrag `problem`,
+   `better`, `lever`, Run-ID und `evidence`; jedes Textfeld einschließlich einzelner
+   Belege auf höchstens 300 Zeichen gekürzt (Kürzungszeichen zählt zum Limit).
+3. **Wiederkehrende Findings:** Vorkommen je (Lauf, `finding_key`) deduplizieren. Nur
+   Schlüssel aus mindestens zwei verschiedenen aktuellen Läufen, höchstens 20, sortiert
+   nach Laufzahl absteigend, dann Schlüssel. Je Eintrag Schlüssel, Laufzahl, Severity
+   und Feedback `valid`/`noise`, zugeordnet über Lauf und `finding_key`;
+   Mehrfachvorkommen vervielfachen Feedback nicht.
+4. **Regressionsfall-Kandidaten:** aktuelle Läufe mit `phase == "escalated"` oder
+   letzter gültiger `rate`-Bewertung `bad`. Maßgeblich ist die Dateireihenfolge der
+   gültigen Zeilen, nicht der Zeitstempel; `bad` gefolgt von `good` zählt nicht. Je
+   Kandidat einmal Run-ID, `issue_title`, Grund (bei Eskalation und `bad` beide
+   Gründe). **Nicht** die weiter gefassten `candidates` von `compute_kpis` übernehmen.
+5. **Hebel je Gruppe:** nur vorhandene Gruppen, feste Zuordnung aus dem Contract
+   (`prompt`/`model` → Hill Climbing W7; `orchestrator`/`gate` → Brief für einen
+   ADW-Lauf; `context_missing`/`target_repo` → Expertise W9; `issue_quality` →
+   Brief-Vorlage schärfen).
 
-### B6 — Changelogs (A6, AK 8)
+Weniger als 3 aktuelle Läufe (nach Repo-Filter) → ausschließlich Abschnitt 1 und der
+Satz **„Zu wenige Läufe für eine Auswertung"**; dieser Satz ist zugleich der Grund für
+den fehlenden Brief. Kein Agentenaufruf, Exit 0.
 
-- `CHANGELOG.md` und `CHANGELOG.de.md`: oberhalb von 0.36.2 die Sektion
-  `## [0.36.3] — Unreleased` mit `### Fixed`, inhaltlich deckungsgleich, zu A1–A5
-  (Fan-out-Leerlauf, kooperatives Ende und Erhalt der Eskalationsgründe, stabile
-  Ausgabepuffer, frühe CLI-Fehler, einmalige finale Triage).
-- `pyproject.toml` bleibt `0.36.2`.
+### B3 — `improve_agent` und genau ein Brief-Entwurf (A3; AK 5–6)
 
-### Tests und Abnahme (AK 1–9)
+1. `REGISTRY`-Eintrag in `adw/agents.py` analog `retro_agent`: `model=FABLE`,
+   `tools=READ_ONLY_TOOLS`, `allowed_tools=SCOPED_READ_RULES`, `max_turns=120`,
+   `timeout_s=1800`, Effort Default. Ausführung über `SdkAgentRunner`; Runner für Tests
+   injizierbar.
+2. `cwd` = Wurzelverzeichnis des laufenden ADW-Quellcodes, aus dem Paketpfad
+   abgeleitet; nicht Shell-Verzeichnis, Ledger oder Ziel-Repo. Der Agent schreibt keine
+   Dateien.
+3. Aufruf nur, wenn **alle** Bedingungen gelten: nicht `--no-brief`; ≥ 3 aktuelle
+   Läufe; mindestens eine Gruppe mit `cause` ∈ {`orchestrator`, `gate`, `prompt`}.
+   Gewählt wird die erste berechtigte Gruppe der sortierten Liste. `prompt` ist
+   briefberechtigt trotz W7-Hebel; `model` allein nicht. Sonst kein Aufruf und ein
+   kurzer Grund im Bericht.
+4. Auftrag: Bericht-Abschnitt der gewählten Gruppe, Inhalt von `docs/briefs/README.md`
+   und `docs/briefs/r2-log-integritaet.md`. Antwort ausschließlich JSON
+   `{"title": str, "brief_markdown": str}`.
+5. Validierung im Code: JSON, Feldtypen, fünf Pflichtüberschriften („Ausgangslage",
+   „Aufgabe", „Vorentscheidungen", „Deferred", „Akzeptanzkriterien"). Fehlschlag →
+   kein Brief, Vermerk **„Brief-Entwurf verworfen: <Grund>"**.
+6. Vorlagen-/Beispielzugriff, Runner-Aufruf und Validierung stehen unter einer
+   Fehlerbehandlung: jede Ausnahme (auch Timeout, unlesbare Referenzdatei) → kein
+   Brief, Vermerk mit Grund, Bericht entsteht trotzdem, Exit 0. Kein Retry, kein
+   zweiter Agent, keine eigene nummerierte Berichtssektion für den Vermerk.
 
-Bestehende Fixtures, Mock-Runner, Emitter und CLI-Helfer wiederverwenden. Für Threads
-Events/Barrieren und kontrollierte Fakes statt zeitabhängiger Sleeps. Richtwert 8–11
-neue Tests; parametrisierte Fälle zählen einzeln.
+### B4 — Wochenartefakte, Commit und Push (A4; AK 6–7)
 
-1. **Fan-out mit Fortschritt** (`tests/test_phases.py`, AK 1): zwei aktive Lanes, P2
-   mit `unknown`, nur eine Lane ändert etwas; B zuerst bearbeitet; sequentiell und
-   parallel → keine Eskalation, Lauf geht weiter. (parametrisiert, ~2)
-2. **Fan-out ohne Fortschritt** (`tests/test_phases.py`, AK 1): keine Ziel-Lane
-   ändert etwas → Eskalation nach der Ziel-Lane-Bearbeitung. (~1)
-3. **Kooperatives Ende** (`tests/test_phases.py`, AK 2): parallele Lanes, synchroner
-   Mock-Runner; A eskaliert in Iteration 1 → B startet keinen weiteren Agenten-Lauf
-   und keine Gate-Iteration, eskaliert nicht; Lauf `escalated`. (1)
-4. **Mehrere Eskalationen** (`tests/test_instrumentation.py`, AK 3): zwei
-   Eskalationen; erster Bericht bleibt unveränderter Präfix, zweiter Grund im
-   angehängten Abschnitt, zwei `escalation`-Events, Ledger liefert den ersten Grund.
-   Im Konkurrenzfall keine feste Gewinner-Lane voraussetzen. (1)
-5. **Gate-Puffer** (`tests/test_gates.py`, AK 4): gefakter Stream, Reader schreibt
-   nach dem Join-Timeout weiter → kein `RuntimeError`, Ergebnis = Snapshot und bleibt
-   danach unverändert. (1)
-6. **Codex-Puffer** (`tests/test_codex.py`, AK 4): gleicher Fall für stdout/stderr
-   ohne echtes Timeout-Warten; entfällt, wenn ein gemeinsamer Helper getestet wird. (1)
-7. **Ungültiges `--parallel`** (`tests/test_cli.py`, AK 5): Single-Lane-Config → Exit
-   1, Meldung, kein neuer Run-Ordner. (1)
-8. **Negatives `--older-than`** (`tests/test_runs_cli.py`, AK 6): Exit 2, stderr nennt
-   Option und Wertebereich, Run-Daten unverändert. (1)
-9. **Finale Triage** (`tests/test_instrumentation.py` oder `tests/test_phases.py`,
-   AK 7): ein Finding im finalen Review → genau ein `triage.decision`-Event, ein
-   Fix-Dispatch, `findings` in `run-record.json` = 1. (1)
-10. *Optional, nur falls kein bestehender Test es belegt:* ein anderer
-    Dispatch-Aufrufer protokolliert ohne `record_triage=False` weiterhin. (≤1)
+1. ISO-Jahr und zweistellige ISO-Woche des erfassten Aufrufdatums bestimmen;
+   `reports/` bei Bedarf anlegen.
+2. Bericht nach `<ledger>/reports/<YYYY>-W<WW>.md`, gültigen Brief nach
+   `<ledger>/reports/<YYYY>-W<WW>-brief.md`; erneuter Aufruf derselben Woche
+   überschreibt.
+3. Entsteht kein gültiger Brief (aus welchem Grund auch immer), einen vorhandenen
+   `…-brief.md` derselben Woche entfernen; der Bericht nennt den Grund.
+4. Erst den lokalen Zielzustand herstellen, dann gemeinsam committen: `run_git`
+   (Hooks aus). Berichtspfad immer per `git add -A --` stagen; Briefpfad nur, wenn die
+   Datei existiert oder im Index getrackt ist (`git ls-files --error-unmatch`), dann
+   ebenfalls `git add -A -- <pfad>` (erfasst Löschung). Ein nie vorhandener Brief wird
+   nicht als Pathspec übergeben.
+5. Commit nur bei gestagten Änderungen (`diff --cached --quiet`), Nachricht
+   `improve <YYYY>-W<WW>`. Push mit `_PUSH_TIMEOUT`.
+6. Commit- und Push-Fehler fail-open: Warnung, lokaler Artefaktzustand bleibt, Exit 0.
+   Kein Fehlerstatus auf Platte, keine Warteschlange, keine Wiederholung.
 
-Keine zusätzliche Testmatrix für unveränderte P3-Regel, Limits oder Routing; das
-belegen die bestehenden Tests. AK 8 durch Prüfung beider Changelogs und der
-Projektversion. Gates (AK 9, E7):
+### B5 — Timer-Units, Handbuch, Changelog (A5; AK 9–10)
+
+1. `examples/systemd/adw-improve.service`: `[Unit]`, `[Service]` mit `Type=oneshot`
+   und `ExecStart=uv run --project <ADW-Pfad> adw improve`; Platzhalter für ADW-Pfad
+   und optional `Environment=ADW_LEDGER=<Ledger-Pfad>` klar markiert.
+2. `examples/systemd/adw-improve.timer`: `[Unit]`, `[Timer]` mit
+   `OnCalendar=Mon *-*-* 07:00` und `Persistent=true`, `[Install]` mit
+   `WantedBy=timers.target`. ADW installiert oder aktiviert nichts.
+3. Handbuch EN+DE, Abschnitt 11.1 „Ledger": Aufruf, Optionen, Exits, Zeiträume,
+   Berichtsaufbau, Brief-Entwurf und menschliche Entscheidung, Ablage unter `reports/`
+   mit Überschreiben, Timer-Einrichtung mit Pfadanpassung und
+   `systemctl --user enable --now adw-improve.timer`. Inhaltlich synchron.
+4. `CHANGELOG.md` / `CHANGELOG.de.md`: `## [0.37.0] — Unreleased` mit `### Added`.
+   `pyproject.toml` bleibt `0.36.3`.
+
+### B6 — Tests (`tests/test_improve.py`, Richtwert 10–14; AK 1–9)
+
+Temporäres Git-Ledger über `ADW_LEDGER`, festes `now`, gefakter Runner; Push gefaked
+oder gegen ein temporäres lokales Bare-Repo. Kein Netz, kein Modell, kein
+`~/.adw/ledger`. Muster aus `tests/test_kpis.py`, `tests/test_ledger.py`,
+`tests/test_retro.py` wiederverwenden. Zusatzvarianten gehören in die Fixture, nicht in
+neue Dateien. Zielbild 12 Fälle:
+
+1. Fixture 5 aktuelle + 2 ältere Läufe: fünf Abschnitte in Reihenfolge, Zahlen,
+   Vergleichs-Gesamtzeile nur mit den 2 älteren Läufen, Sortierung Läufe × Kosten,
+   Dedup Lauf je Gruppe, Hebel, Kürzung auf 300 Zeichen (AK 1).
+2. Wiederkehrendes Finding mit Anzahl 2, Severity, Feedback; Einzellauf-Finding trotz
+   Duplikaten nicht (AK 2).
+3. Regressionskandidaten: eskaliert und `bad` mit Run-ID, `issue_title`, Grund;
+   `bad`→`good` nicht (AK 3).
+4. < 3 Läufe: nur Kennzahlen und exakter Hinweissatz, stdout nur Laufzahl, kein Agent,
+   Exit 0 (AK 4).
+5. Gruppe `orchestrator`, gültige Antwort: genau ein Aufruf, `cwd` = ADW-Quelle,
+   `…-brief.md` geschrieben; höchstsortierte berechtigte Gruppe gewählt (AK 5).
+6. Ungültiges JSON, falscher Feldtyp oder fehlende Pflichtüberschrift: kein Brief,
+   „Brief-Entwurf verworfen: …", Exit 0 (AK 5).
+7. Agentenausnahme (inkl. Timeout): kein Brief, Vermerk mit Grund, kein Retry, Exit 0
+   (AK 5).
+8. `--no-brief` → kein Agent, Bericht committet ohne je vorhandenen Brief; keine
+   berechtigte Gruppe (nur `model`/`context_missing`) → kein Agent (AK 6).
+9. Gleiche ISO-Woche: Pfade, genau ein Commit `improve <YYYY>-W<WW>` mit Bericht und
+   Brief; Überschreiben; Folgeaufruf ohne Brief entfernt alten Brief als Git-Löschung
+   und nennt den Grund; unveränderte Artefakte → kein leerer Commit (AK 7).
+10. Simulierter Push-Fehler: Warnung, Exit 0, Artefakte lokal erhalten (AK 7).
+11. Belegter Lock → Exit 1 ohne Warten, nichts geschrieben, kein Agent; fehlendes
+    Ledger → Exit 1 mit Meldung (AK 8).
+12. Timer-Units: Sektionen, `Type`, `ExecStart`, `OnCalendar`, `Persistent`,
+    `WantedBy` (AK 9).
+
+### Gates
 
 - `uv run ruff check .`
 - `uv run pytest -x -q`
 
-Abnahme: AK 1–9 erfüllt, Non-Goals der Spec unverändert, keine neue Abhängigkeit, kein
-neuer persistenter Zustand, Doppelprotokollierung an der Quelle behoben.
+AK 10 per Dateiprüfung (beide Handbücher, beide Changelogs, `pyproject.toml` auf
+`0.36.3`). Bestehende Tests grün; keine neue Abhängigkeit; kein neuer persistenter
+Zustand außer `reports/` und `.improve.lock`.
 
 ## Non-Goals
 
-Wie in `.adw/spec.md`: keine Versionsänderung; kein Abbruch laufender Agenten/Gates;
-Routing bekannter Lanes, P3-Leerlauf-Regel, Fix-Zyklus- und Gate-Limits, Timeouts,
-Ausgabegrenzen und der erste Teil von `escalation.md` bleiben; kein neuer persistenter
-Zustand; keine Ledger-Deduplizierung; keine neuen Abhängigkeiten; kein Contract für
-interne Helper.
+- Änderungen an `adw kpis`, Export, Retro, `adw rate`/`adw feedback` oder an den
+  Schemata von `run-record.json`, `retro.json`, `feedback.jsonl`.
+- Nachträgliche Reparatur oder Migration vorhandener Laufdaten.
+- Version in `pyproject.toml` ändern.
+- Repo-Lock oder Ziel-Repo-Bezug für `adw improve`.
+- Neuer persistenter Zustand außer den Dateien unter `reports/` und der Lock-Datei.
+- Neue Abhängigkeiten.
+- Contract-Zusagen für interne Helper-Signaturen.
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-- Abbruch laufender Agenten oder Gates bei Eskalation einer anderen Lane.
-- Intelligentere Zuordnung von `unknown`-Findings (z. B. nach Dateipfad).
-- Weitere Eingabeprüfungen der CLI.
+- Automatisches Starten eines ADW-Laufs aus dem Brief, Auto-Merge.
+- Semantisches Clustering der Retro-Texte (W12).
+- Hill Climbing (W7), Expertise-Datei (W9).
+- Benachrichtigung per Mail/Slack/Desktop.
+- Installation des Timers durch ADW.
+- Retry oder Reparatur-Lauf bei verworfenem Brief; inhaltliche Qualitätsprüfung über
+  JSON- und Überschriftencheck hinaus.
+- Historie/Archiv mehrerer Berichte je Woche (Überschreiben ist gewollt).
+- Persistente Warteschlangen oder Wochenstatus für Agenten- und Push-Fehler; Warnung,
+  Vermerk im Bericht und erneuter Aufruf reichen.
