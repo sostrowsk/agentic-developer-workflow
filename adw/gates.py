@@ -38,16 +38,22 @@ class _LineTail:
     def __init__(self) -> None:
         self.lines: collections.deque[bytes] = collections.deque(maxlen=MAX_OUTPUT_LINES)
         self.dropped = 0
+        # Der Reader hängt unter dem Lock an; gelesen wird nur ein Snapshot —
+        # ein Reader, der join(timeout) überlebt, kann so nichts zerreißen.
+        self.lock = threading.Lock()
 
     def append(self, line: bytes) -> None:
-        if len(self.lines) == MAX_OUTPUT_LINES:
-            self.dropped += 1
-        self.lines.append(line[:_MAX_LINE_BYTES])
+        with self.lock:
+            if len(self.lines) == MAX_OUTPUT_LINES:
+                self.dropped += 1
+            self.lines.append(line[:_MAX_LINE_BYTES])
 
     def text(self) -> str:
-        body = b"\n".join(self.lines).decode("utf-8", errors="replace").strip("\n")
-        if self.dropped:
-            return f"… ({self.dropped} Zeilen gekappt)\n{body}"
+        with self.lock:
+            lines, dropped = list(self.lines), self.dropped
+        body = b"\n".join(lines).decode("utf-8", errors="replace").strip("\n")
+        if dropped:
+            return f"… ({dropped} Zeilen gekappt)\n{body}"
         return body
 
 
@@ -141,6 +147,9 @@ def _execute_gate(gate: Gate, cwd: Path, env: dict[str, str]) -> GateFailure | N
         # hinterlassen, die Ports/Worktree für den nächsten Loop blockieren.
         kill_group(proc)
         pump.join(timeout=5)
+        # Ein überlebendes Enkelkind kann die Pipe offen halten: der Parent
+        # schließt sie, gelesen wird danach nur der Snapshot (tail.text()).
+        close_pipe(proc.stdout)
     if timed_out:
         return GateFailure(
             gate=gate.name,
@@ -151,6 +160,14 @@ def _execute_gate(gate: Gate, cwd: Path, env: dict[str, str]) -> GateFailure | N
     if returncode != 0:
         return GateFailure(gate=gate.name, exit_code=returncode, output=tail.text())
     return None
+
+
+def close_pipe(stream) -> None:
+    """Close a pipe even while a reader thread still blocks in it: the raw
+    file, not the buffered wrapper — its close would wait for the reader's
+    buffer lock and hang as long as a surviving child keeps the pipe open."""
+    with contextlib.suppress(OSError, ValueError):
+        getattr(stream, "raw", stream).close()
 
 
 def kill_group(proc: subprocess.Popen) -> None:
@@ -165,6 +182,14 @@ _MAX_LINE_BYTES = 4096
 
 
 def _pump_stream(stream, tail: "_LineTail") -> None:
+    try:
+        _pump_lines(stream, tail)
+    except (OSError, ValueError):
+        pass  # Pipe vom Parent geschlossen — der Snapshot ist bereits gelesen
+    close_pipe(stream)
+
+
+def _pump_lines(stream, tail: "_LineTail") -> None:
     partial = b""
     discarding = False
     while chunk := stream.read(_CHUNK_BYTES):
@@ -185,4 +210,3 @@ def _pump_stream(stream, tail: "_LineTail") -> None:
             discarding = True
     if partial and not discarding:
         tail.append(partial)
-    stream.close()

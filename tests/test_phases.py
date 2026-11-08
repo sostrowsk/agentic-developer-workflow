@@ -4793,3 +4793,103 @@ def test_changed_files_lists_few_deletions_individually(ctx, target_repo):
     git(target_repo, "rm", "-q", "old.py")
     git(target_repo, "commit", "-m", "drop old")
     assert _changed_files(ctx, target_repo) == ["old.py"]
+
+
+# --- R5: Fan-out-Leerlauf und kooperatives Ende paralleler Lanes ------------
+
+
+def _fanout_finding(issue: str = "Ursache unklar") -> Finding:
+    return Finding(
+        severity="P2", lane="unknown", file="irgendwo.py", issue=issue,
+        remediation_plan=["fixen"], category="implementation",
+    )
+
+
+def _calls_in(pctx, cwd) -> int:
+    return len([c for c in pctx.agents.calls if c.agent == "build_agent" and c.cwd == cwd])
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_fanout_finding_idle_lane_does_not_escalate_when_another_lane_changed(pctx, parallel):
+    """R5/AK 1 (E1): a P2 with lane 'unknown' goes to both Lanes; backend (handled
+    first) rightly changes nothing, frontend fixes it → no escalation."""
+    from adw.lanes import _dispatch_lane_fixes
+
+    def writes(cwd):
+        if _calls_in(pctx, cwd) <= 1:  # initialer Build
+            return {f"{cwd.name}.py": f"# {cwd.name}\n"}
+        return {"fix.js": "gefixt\n"} if cwd.name == "frontend" else {}
+
+    prepare_built_parallel(pctx, lane_files=writes, build_responses=4)
+    pctx.state.parallel = parallel
+    _dispatch_lane_fixes(pctx, [_fanout_finding()], ["backend", "frontend"], "Review")
+    assert RunState.load(pctx.repo, pctx.state.run_id).phase != "escalated"
+    assert not (pctx.run_dir / "escalation.md").exists()
+    for lane in ("backend", "frontend"):
+        lane_state = pctx.state.lanes[lane]
+        assert lane_state.completed and lane_state.pending_task is None
+    frontend = pctx.repo / ".adw" / "runs" / pctx.state.run_id / "trees" / "frontend"
+    assert (frontend / "fix.js").is_file()
+
+
+def test_fanout_finding_escalates_when_no_target_lane_changed(pctx):
+    """R5/AK 1 (E1): no target Lane changed anything → escalation as before."""
+    from adw.lanes import _dispatch_lane_fixes
+
+    def writes(cwd):
+        return {f"{cwd.name}.py": f"# {cwd.name}\n"} if _calls_in(pctx, cwd) <= 1 else {}
+
+    prepare_built_parallel(pctx, lane_files=writes, build_responses=4)
+    with pytest.raises(EscalationError, match="keine Änderungen"):
+        _dispatch_lane_fixes(pctx, [_fanout_finding()], ["backend", "frontend"], "Review")
+    fix_runs = [c.cwd.name for c in pctx.agents.calls if c.agent == "build_agent"][2:]
+    assert sorted(fix_runs) == ["backend", "frontend"]  # erst nach beiden Ziel-Lanes
+    assert RunState.load(pctx.repo, pctx.state.run_id).phase == "escalated"
+
+
+ABORT_CONFIG = """\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - {name: pass-gate, cmd: "true", timeout: 10}
+  frontend:
+    gates:
+      - {name: rot, cmd: "sh -c 'echo IMMER-ROT; exit 1'", timeout: 10}
+ci:
+  provider: gitlab
+  staging_job: deploy-staging
+"""
+
+
+def test_parallel_lane_stops_after_the_first_escalation(pctx, target_repo):
+    """R5/AK 2 (E2): backend escalates in iteration 1 (idle initial build); the
+    frontend agent of iteration 1 finishes, but frontend starts no further agent
+    run and no further gate iteration and does not escalate itself."""
+    assert isinstance(pctx.abort, threading.Event)
+    write_config(target_repo, ABORT_CONFIG)
+    pctx.config = AdwConfig.load(target_repo)
+    pctx.agents.script("spec_synthesis", "Spec")
+    pctx.agents.script("plan_synthesis", "Plan")
+    pctx.codex.script(OK, OK)
+    run_spec_and_plan(pctx)
+
+    def writes(cwd):
+        if cwd.name == "backend":
+            return {}  # Leerlauf → Eskalation in Iteration 1
+        pctx.abort.wait(10)  # synchron: erst nach der backend-Eskalation fertig
+        return {f"fe-{_calls_in(pctx, cwd)}.js": "v\n"}
+
+    pctx.agents.file_writes["build_agent"] = writes
+    pctx.agents.script("build_agent", *["gebaut"] * 4)
+    with pytest.raises(EscalationError, match="keine Änderungen"):
+        run_build_phase(pctx)
+    frontend_calls = [
+        c for c in pctx.agents.calls if c.agent == "build_agent" and c.cwd.name == "frontend"
+    ]
+    assert len(frontend_calls) == 1
+    assert pctx.state.lanes["frontend"].gate_iterations == 1
+    report = (pctx.run_dir / "escalation.md").read_text()
+    assert "Lane backend" in report
+    assert "## Weitere Eskalation" not in report  # frontend eskaliert nicht selbst
+    assert RunState.load(pctx.repo, pctx.state.run_id).phase == "escalated"

@@ -37,7 +37,7 @@ from adw.findings import (
     ReviewResult,
     extract_review_result,
 )
-from adw.gates import kill_group
+from adw.gates import close_pipe, kill_group
 
 CODEX_TIMEOUT = 900
 # Relative to codex's PROCESS cwd (a private per-call workdir), not to -C: the
@@ -245,10 +245,20 @@ def _feed(stream, data: bytes) -> None:
             stream.close()
 
 
-def _pump(stream, tail: collections.deque) -> None:
-    while chunk := stream.read(_CHUNK_BYTES):
-        tail.append(chunk)
-    stream.close()
+def _pump(stream, tail: collections.deque, lock: threading.Lock) -> None:
+    try:
+        while chunk := stream.read(_CHUNK_BYTES):
+            with lock:
+                tail.append(chunk)
+    except (OSError, ValueError):
+        pass  # Pipe vom Parent geschlossen — der Snapshot ist bereits gelesen
+    close_pipe(stream)
+
+
+def _snapshot(tail: collections.deque, lock: threading.Lock) -> str:
+    with lock:
+        data = b"".join(tail)
+    return data.decode("utf-8", errors="replace")
 
 
 def _isolated_codex_home() -> tuple[Path, Path, bytes | None]:
@@ -569,9 +579,10 @@ class CodexRunner:
         # finale JSON am Ende des Outputs.
         out_tail: collections.deque[bytes] = collections.deque(maxlen=_STDOUT_TAIL_CHUNKS)
         err_tail: collections.deque[bytes] = collections.deque(maxlen=_STDERR_TAIL_CHUNKS)
+        out_lock, err_lock = threading.Lock(), threading.Lock()
         pumps = [
-            threading.Thread(target=_pump, args=(proc.stdout, out_tail), daemon=True),
-            threading.Thread(target=_pump, args=(proc.stderr, err_tail), daemon=True),
+            threading.Thread(target=_pump, args=(proc.stdout, out_tail, out_lock), daemon=True),
+            threading.Thread(target=_pump, args=(proc.stderr, err_tail, err_lock), daemon=True),
             # In a thread: a codex that never reads stdin must not block us past
             # the timeout — the process-group kill breaks the pipe and ends it.
             threading.Thread(target=_feed, args=(proc.stdin, prompt.encode()), daemon=True),
@@ -588,8 +599,12 @@ class CodexRunner:
             kill_group(proc)
             for pump in pumps:
                 pump.join(timeout=5)
-        stdout = b"".join(out_tail).decode("utf-8", errors="replace")
-        stderr = b"".join(err_tail).decode("utf-8", errors="replace")
+            # Überlebende Kinder können die Pipes offen halten: schließen, dann
+            # nur Snapshots unter dem Lock lesen.
+            close_pipe(proc.stdout)
+            close_pipe(proc.stderr)
+        stdout = _snapshot(out_tail, out_lock)
+        stderr = _snapshot(err_tail, err_lock)
         if returncode != 0:
             reason = _json_errors(stdout) or stderr.strip()
             raise CodexError(f"codex exec: Exit {returncode} — {reason[:2000]}")

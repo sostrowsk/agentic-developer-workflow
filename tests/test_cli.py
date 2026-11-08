@@ -1335,3 +1335,16 @@ def test_effort_is_pinned_at_run_start(
     assert approved.exit_code == 0, approved.output
     build = _agent_starts(target_repo, run_id, "build_agent")
     assert build and {p["effort"] for p in build} == {expected_build}
+
+
+def test_parallel_flag_with_single_lane_config_fails_before_creating_a_run(target_repo):
+    """R5/AK 5: --parallel without a second Lane is refused BEFORE RunState.new —
+    exit 1 with a message, no (escalated) run directory left behind."""
+    before = _run_dirs(target_repo)
+    result = runner.invoke(
+        app,
+        ["run", "--repo", str(target_repo), "--issue", "Demo", "--dry-run", "--parallel"],
+    )
+    assert result.exit_code == 1, result.output
+    assert "--parallel" in result.output
+    assert _run_dirs(target_repo) == before

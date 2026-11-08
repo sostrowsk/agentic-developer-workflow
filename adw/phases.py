@@ -513,6 +513,7 @@ def run_final_review_phase(ctx: RunContext) -> None:
                 lanes,
                 source="Final-Review",
                 mutate_staged=_bump_fix_cycles,
+                record_triage=False,  # Phase 6 hat bereits selbst triagiert
             )
             with ctx.state_lock:
                 # Erst NACH dem Fix-Dispatch fortschreiben — wie in Phase 4/5. Der

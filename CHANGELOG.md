@@ -12,6 +12,16 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.36.3] — Unreleased
+
+### Fixed
+- **Parallel Lanes end cleanly, inputs fail early (R5).**
+  - **Fan-out idleness (C24):** a Lane that changes nothing for a Finding it only received by fan-out (`unknown` or inactive Lane) no longer escalates; the run escalates only if no target Lane changed anything in that fix round.
+  - **Cooperative end (C27):** after the first escalation, parallel Lanes start no further agent run or Gate iteration (running agents/Gates finish). `escalation.md` keeps the first reason under `## Grund`; every further escalation appends `## Weitere Eskalation (<Lane/Phase>)`.
+  - **Stable output buffers (C28):** Gate and Codex output is read only as a snapshot under a lock after the parent closed the pipes — a reader kept alive by a surviving child no longer aborts the orchestrator with `deque mutated during iteration`.
+  - **Early CLI errors (C29):** `adw run --parallel` with a single-Lane config fails with exit 1 and a message before any run is created; `adw runs prune --older-than -1` prints an error on stderr (exit 2).
+  - **Final triage logged once (C30):** each final-review Finding yields exactly one `triage.decision` event (and one ledger entry); the fix dispatch no longer logs it a second time.
+
 ## [0.36.2] — 2026-11-08
 
 ### Fixed

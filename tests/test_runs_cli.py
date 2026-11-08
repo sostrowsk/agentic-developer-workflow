@@ -181,3 +181,15 @@ def test_prune_reports_a_git_failure_with_the_runs_already_processed(
     assert str(error) in result.output  # … and the cause
     assert not (target_repo / ".adw" / "runs" / "aaaa0001").exists()  # no rollback
     assert (target_repo / ".adw" / "runs" / "aaaa0002").is_dir()
+
+
+def test_prune_rejects_negative_older_than_with_a_message(home, tmp_path):
+    """R5/AK 6: --older-than < 0 → exit 2 WITH a stderr message naming the option."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    write_run(repo, "aaaa1111", _done_lines(), phase="done")
+    result = cli.invoke(app, ["runs", "prune", "--repo", str(repo), "--older-than", "-1"])
+    assert result.exit_code == 2, result.output
+    assert "--older-than" in result.stderr
+    assert "0" in result.stderr
+    assert (repo / ".adw" / "runs" / "aaaa1111").is_dir()

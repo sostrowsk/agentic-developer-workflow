@@ -76,8 +76,25 @@ def run_build_phase(ctx: RunContext) -> None:
     ctx.save()
 
 
+class _LaneAborted(Exception):
+    """Another Lane escalated (ctx.abort): stop without further work and
+    without an own escalation — the first escalation propagates."""
+
+
+def _check_abort(ctx: RunContext) -> None:
+    if ctx.abort.is_set():
+        raise _LaneAborted
+
+
 @_lane_span
 def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
+    try:
+        _build_lane(ctx, lane, all_lanes)
+    except _LaneAborted:
+        return
+
+
+def _build_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
     existing = ctx.state.lanes.get(lane)
     worktree = create_lane_worktree(ctx.repo, ctx.state.run_id, lane, ctx.config.base_branch)
     if existing is not None and existing.completed:
@@ -148,6 +165,7 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
     # ob ein wirkungsloser Agent-Lauf eskaliert wird — siehe _handle_idle_agent_run.
     dispatch_findings = list(lane_state.pending_findings)
     while True:
+        _check_abort(ctx)  # Anfang jeder Gate-Iteration
         current_head = _git(ctx, worktree, "rev-parse", "HEAD").strip()
         with ctx.state_lock:
             _require_expected_head(ctx, lane, lane_state, current_head)
@@ -178,6 +196,7 @@ def _run_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             # Snapshot the worktree BEFORE the agent run; after_agent only on a
             # NORMAL return (an agent exception skips it — the before_agent
             # snapshot stays as the diff basis, GUI-SPEC §5, AC 10).
+            _check_abort(ctx)
             snapshots.capture(ctx, worktree, "before_agent")
             result = _agent_run(
                 ctx, spec, task, cwd=worktree, resume=resume, deny_read_paths=deny,
@@ -373,6 +392,7 @@ def _run_test_only_pass(
         f"Do NOT write or modify any production code. You do not commit.\n\n"
         f"Issue:\n{ctx.state.issue}"
     )
+    _check_abort(ctx)
     # This is a build-lane agent run too — snapshot before and after it (§5).
     snapshots.capture(ctx, worktree, "before_agent")
     result = _agent_run(
@@ -467,6 +487,11 @@ def _handle_idle_agent_run(ctx: RunContext, lane: str, findings: list[Finding]) 
             f"Lane {lane}: Fix-Lauf ohne Worktree-Änderungen bei ausschließlich "
             f"P3-Findings — als Follow-up vermerkt statt eskaliert",
         )
+        return
+    if findings and all(item.lane != lane for item in findings if item.severity != "P3"):
+        # Fan-out (unknown/inaktive Lane): die Lane ist womöglich zu Recht
+        # unbeteiligt — ob überhaupt eine Ziel-Lane etwas geändert hat, prüft
+        # _dispatch_lane_fixes über alle Ziel-Lanes.
         return
     raise escalate(
         ctx,
@@ -668,6 +693,7 @@ def _dispatch_lane_fixes(
     lanes: list[str],
     source: str,
     mutate_staged: Callable[[list[str]], None] | None = None,
+    record_triage: bool = True,
 ) -> None:
     """Hand Findings per Lane as a fix task into the regular Lane loop —
     every fix takes the validated path (Gates, commit, no special route).
@@ -675,13 +701,16 @@ def _dispatch_lane_fixes(
     ``mutate_staged`` runs under the same lock and is persisted with the same
     save as the staging — counters (e.g. fix_cycles) and the staged
     fix task are thus atomic; a crash cannot burn a cycle
-    without the corresponding fix being caught up on resume."""
+    without the corresponding fix being caught up on resume.
+
+    ``record_triage=False``: the caller already emitted the triage decisions
+    (final review) — no second ``triage.decision`` per Finding."""
     decision = triage_final_review(
         ReviewResult(verdict="needs_fixes", findings=findings)
         if findings
         else ReviewResult(verdict="ok", findings=[]),
         active_lanes=lanes,
-        emitter=ctx.emitter,
+        emitter=ctx.emitter if record_triage else None,
         span_id=ctx.emitter.current_span_id(),
     )
     with ctx.state_lock:
@@ -712,8 +741,29 @@ def _dispatch_lane_fixes(
             lane_state.pending_findings = list(items)
             lane_state.gate_iterations = 0
         ctx.save()  # EIN Save: Staging aller Lanes + mutate_staged atomar
+    heads = {
+        lane: _git(ctx, Path(ctx.state.lanes[lane].worktree), "rev-parse", "HEAD").strip()
+        for lane in decision.fix_tasks
+    }
     for lane in decision.fix_tasks:
         _run_lane(ctx, lane, lanes)
+    if ctx.abort.is_set():
+        return
+    # Fan-out-Leerlauf ist nur dann kein Fehler, wenn eine andere Ziel-Lane in
+    # dieser Runde etwas geändert (= committet) hat; reine P3 bleiben Follow-ups.
+    changed = any(
+        _git(ctx, Path(ctx.state.lanes[lane].worktree), "rev-parse", "HEAD").strip() != head
+        for lane, head in heads.items()
+    )
+    blocking = any(
+        item.severity != "P3" for items in decision.fix_tasks.values() for item in items
+    )
+    if blocking and not changed:
+        raise escalate(
+            ctx,
+            f"Build-Agents (Lanes {', '.join(heads)}) haben keine Änderungen im "
+            f"Worktree hinterlassen — Fix-Dispatch ohne Wirkung",
+        )
 
 
 def _resume_pending_lanes(ctx: RunContext, lanes: list[str]) -> None:

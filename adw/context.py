@@ -163,6 +163,9 @@ class RunContext:
     # sonst kann ein Save einen halb mutierten Zustand persistieren. RLock:
     # escalate() läuft teils unter bereits gehaltenem Lock.
     state_lock: threading.RLock = field(default_factory=threading.RLock)
+    # Kooperatives Ende paralleler Lanes: escalate() setzt es, _run_lane prüft es
+    # vor jeder Gate-Iteration und jedem Agent-Lauf. Nicht persistiert.
+    abort: threading.Event = field(default_factory=threading.Event)
 
     @property
     def run_dir(self) -> Path:
@@ -187,19 +190,28 @@ def escalate(ctx: RunContext, reason: str, span_id: str | None = None) -> Escala
     """Write the escalation report, mark the state, return the error to be raised.
 
     ``span_id`` lets an off-main-thread caller (draft-pool worker) pass its
-    enclosing span so the escalation point is never attributed to null."""
+    enclosing span so the escalation point is never attributed to null.
+    An existing report is never overwritten (the first reason stays): a further
+    escalation appends a section labelled with the Lane running in this thread,
+    else the phase."""
     with ctx.state_lock:  # RLock: auch unter bereits gehaltenem Lock aufrufbar
         origin_phase = ctx.state.phase  # capture BEFORE marking escalated
+        ctx.abort.set()
         ctx.run_dir.mkdir(parents=True, exist_ok=True)
         report = ctx.run_dir / "escalation.md"
-        report.write_text(
-            f"# Eskalation — Run {ctx.state.run_id}\n\n"
-            f"- Issue: {ctx.state.issue}\n"
-            f"- Phase: {ctx.state.phase}\n"
-            f"- Lanes: {', '.join(ctx.state.lanes) or '—'}\n\n"
-            f"## Grund\n\n{reason}\n",
-            encoding="utf-8",
-        )
+        if report.exists():
+            with report.open("a", encoding="utf-8") as handle:
+                label = getattr(_current_lane, "name", None) or origin_phase
+                handle.write(f"\n## Weitere Eskalation ({label})\n\n{reason}\n")
+        else:
+            report.write_text(
+                f"# Eskalation — Run {ctx.state.run_id}\n\n"
+                f"- Issue: {ctx.state.issue}\n"
+                f"- Phase: {ctx.state.phase}\n"
+                f"- Lanes: {', '.join(ctx.state.lanes) or '—'}\n\n"
+                f"## Grund\n\n{reason}\n",
+                encoding="utf-8",
+            )
         # Resolve the enclosing span ONCE so both state.saved (inside ctx.save)
         # and the escalation point carry the same non-null span — critical for a
         # draft-pool worker whose thread-local stack is empty.
@@ -256,6 +268,10 @@ def _phase_span(name: str):
     return deco
 
 
+# Lane of the running _run_lane in this thread — labels a further escalation.
+_current_lane = threading.local()
+
+
 def _lane_span(fn):
     """Wrap ``_run_lane`` in a ``lane`` span. Under --parallel this runs in a
     ThreadPool worker whose thread-local span stack is empty, so the span
@@ -274,9 +290,12 @@ def _lane_span(fn):
         }
         with ctx.emitter.span("lane", start_payload, phase=ctx.state.phase, lane=lane) as handle:
             handle.end_payload = {"completed": False, "gate_iterations": 0, "fix_cycles": 0}
+            outer = getattr(_current_lane, "name", None)
+            _current_lane.name = lane
             try:
                 return fn(ctx, lane, all_lanes)
             finally:
+                _current_lane.name = outer
                 # Advance the end payload from the PERSISTED counters on EVERY
                 # exit (contract payload_end_on_exception): an escalation after N
                 # gate iterations / fix cycles must not report 0/0. No except —

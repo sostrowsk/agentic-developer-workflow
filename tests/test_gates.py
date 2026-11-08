@@ -211,3 +211,58 @@ def test_extra_env_is_merged(tmp_path):
         extra_env={"BACKEND_PORT": "9101"},
     )
     assert report.passed
+
+
+class _LiveStream:
+    """Pipe stand-in whose writer outlives the process: delivers ``first``, then
+    keeps producing lines until the PARENT closes it (records who closed it)."""
+
+    def __init__(self, first: bytes) -> None:
+        import threading
+
+        self._first = first
+        self._closed = threading.Event()
+        self.closed_by: list[str] = []
+
+    def read(self, _size: int = -1) -> bytes:
+        if self._first:
+            chunk, self._first = self._first, b""
+            return chunk
+        if self._closed.wait(0.005):
+            raise ValueError("I/O operation on closed file")
+        return b"spaet\n"
+
+    def close(self) -> None:
+        import threading
+
+        self.closed_by.append(threading.current_thread().name)
+        self._closed.set()
+
+
+def test_gate_output_is_a_stable_snapshot_while_the_reader_still_writes(tmp_path, monkeypatch):
+    """R5/AK 4: a reader still alive after join(timeout) — the parent closes the
+    pipe first and reads a snapshot; no RuntimeError, the early output is kept."""
+    import threading
+
+    import adw.gates as gates
+
+    stream = _LiveStream(b"FRUEH-1\nFRUEH-2\n")
+
+    class FakeProc:
+        pid = 4242
+        stdout = stream
+
+        def wait(self, timeout=None):
+            return 1
+
+    original_join = threading.Thread.join
+    monkeypatch.setattr(
+        threading.Thread, "join", lambda self, timeout=None: original_join(self, 0.05)
+    )
+    monkeypatch.setattr(gates.subprocess, "Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(gates, "kill_group", lambda proc: None)
+    report = run_gates([gate("live", "irrelevant")], cwd=tmp_path)
+    assert not report.passed
+    output = report.failures[0].output
+    assert "FRUEH-1" in output and "FRUEH-2" in output
+    assert threading.current_thread().name in stream.closed_by  # Parent schließt die Pipe

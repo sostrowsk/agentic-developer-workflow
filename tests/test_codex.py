@@ -784,3 +784,61 @@ def test_build_context_passes_the_configured_reasoning_effort(target_repo, tmp_p
         target_repo, AdwConfig.load(target_repo), RunState.new(issue="x", parallel=False)
     )
     assert _effort_pair(ctx.codex.effective_argv("code", ["diff"], tmp_path), "low")
+
+
+class _LiveStream:
+    """Pipe stand-in whose writer outlives the process (see test_gates)."""
+
+    def __init__(self, first: bytes) -> None:
+        import threading
+
+        self._first = first
+        self._closed = threading.Event()
+        self.closed_by: list[str] = []
+
+    def read(self, _size: int = -1) -> bytes:
+        if self._first:
+            chunk, self._first = self._first, b""
+            return chunk
+        if self._closed.wait(0.005):
+            raise ValueError("I/O operation on closed file")
+        return b"spaet\n"
+
+    def write(self, data: bytes) -> int:
+        return len(data)
+
+    def close(self) -> None:
+        import threading
+
+        self.closed_by.append(threading.current_thread().name)
+        self._closed.set()
+
+
+def test_codex_output_is_a_stable_snapshot_while_readers_still_write(tmp_path, monkeypatch):
+    """R5/AK 4: stdout/stderr readers still alive after join(timeout) — the
+    parent closes both pipes, then decodes snapshots; no RuntimeError."""
+    import threading
+
+    import adw.codex as codex
+
+    out, err = _LiveStream(b'{"verdict": "ok"}\n'), _LiveStream(b"warnung\n")
+
+    class FakeProc:
+        pid = 4242
+        stdin = _LiveStream(b"")
+        stdout = out
+        stderr = err
+
+        def wait(self, timeout=None):
+            return 0
+
+    original_join = threading.Thread.join
+    monkeypatch.setattr(
+        threading.Thread, "join", lambda self, timeout=None: original_join(self, 0.05)
+    )
+    monkeypatch.setattr(codex.subprocess, "Popen", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(codex, "kill_group", lambda proc: None)
+    stdout = CodexRunner()._execute(["codex"], {}, tmp_path, "prompt")
+    assert stdout.startswith('{"verdict": "ok"}')
+    main = threading.current_thread().name
+    assert main in out.closed_by and main in err.closed_by

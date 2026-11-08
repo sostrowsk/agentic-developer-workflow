@@ -13,6 +13,16 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.36.3] — Unreleased
+
+### Fixed
+- **Parallele Lanes enden sauber, Eingaben scheitern früh (R5).**
+  - **Fan-out-Leerlauf (C24):** Eine Lane, die für ein nur per Fan-out erhaltenes Finding (`unknown` oder inaktive Lane) nichts ändert, eskaliert nicht mehr; der Lauf eskaliert nur, wenn in dieser Fix-Runde keine Ziel-Lane etwas geändert hat.
+  - **Kooperatives Ende (C27):** Nach der ersten Eskalation starten parallele Lanes keinen weiteren Agenten-Lauf und keine weitere Gate-Iteration (laufende Agenten/Gates laufen zu Ende). `escalation.md` behält den ersten Grund unter `## Grund`; jede weitere Eskalation hängt `## Weitere Eskalation (<Lane/Phase>)` an.
+  - **Stabile Ausgabepuffer (C28):** Gate- und Codex-Ausgabe wird erst nach dem Schließen der Pipes durch den Parent und nur als Snapshot unter einem Lock gelesen — ein von einem überlebenden Kind am Leben gehaltener Reader bricht den Orchestrator nicht mehr mit `deque mutated during iteration` ab.
+  - **Frühe CLI-Fehler (C29):** `adw run --parallel` mit Single-Lane-Config scheitert mit Exit 1 und Meldung, bevor ein Lauf angelegt wird; `adw runs prune --older-than -1` meldet einen Fehler auf stderr (Exit 2).
+  - **Finale Triage einmal protokolliert (C30):** Jedes Finding des finalen Reviews ergibt genau ein `triage.decision`-Event (und einen Ledger-Eintrag); der Fix-Dispatch protokolliert es nicht mehr ein zweites Mal.
+
 ## [0.36.2] — 2026-11-08
 
 ### Fixed

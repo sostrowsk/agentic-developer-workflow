@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 
 import pytest
 from claude_agent_sdk import (
@@ -1130,3 +1131,60 @@ def test_existing_call_forms_without_emitter_are_unchanged(target_repo):
     # No event log was created by any of the emitter-less calls.
     assert read_events(target_repo, state.run_id) == []
     assert list((target_repo / ".adw").glob("runs/*/events.jsonl")) == []
+
+
+# --- R5: escalation.md bleibt erhalten, finale Triage einmal -----------------
+
+
+def test_second_escalation_appends_and_keeps_the_first_reason(target_repo):
+    """R5/AK 3 (E3): the first report stays an unchanged prefix, the second
+    reason lands in an appended '## Weitere Eskalation (…)' section; both
+    escalations emit an event and the ledger still reads the first reason."""
+    from adw.config import AdwConfig
+    from adw.context import RunContext, escalate
+    from adw.ledger import _escalation_reason
+
+    state = RunState.new(issue="R5: zwei Eskalationen", parallel=False)
+    ctx = RunContext(
+        repo=target_repo,
+        config=AdwConfig.load(target_repo),
+        state=state,
+        agents=MockAgentRunner(),
+        codex=MockCodexRunner(),
+        emitter=EventEmitter(target_repo, state.run_id),
+    )
+    escalate(ctx, "Erster Grund: Lane backend ohne Änderungen")
+    report = ctx.run_dir / "escalation.md"
+    first = report.read_text(encoding="utf-8")
+    escalate(ctx, "Zweiter Grund: Lane frontend Circuit-Breaker")
+    text = report.read_text(encoding="utf-8")
+    assert text.startswith(first)
+    rest = text[len(first):]
+    assert re.search(r"\n## Weitere Eskalation \([^)\n]+\)\n\nZweiter Grund", rest)
+    assert "Erster Grund" in text.split("## Grund", 1)[1].split("## Weitere", 1)[0]
+    assert len(of_type(read_events(target_repo, state.run_id), "escalation")) == 2
+    assert _escalation_reason(ctx.run_dir) == "Erster Grund: Lane backend ohne Änderungen"
+
+
+def test_final_review_finding_is_triaged_and_recorded_exactly_once(target_repo):
+    """R5/AK 6a (E6): phase 6 triages itself — the fix dispatch must not emit a
+    second triage.decision; the fix runs once, run-record counts one finding."""
+    from adw.ledger import build_run_record
+    from tests.run_helpers import finding, prepare_final_review, review_json
+
+    ctx = prepare_final_review(target_repo)
+    ctx.emitter = EventEmitter(ctx.repo, ctx.state.run_id)
+    builds_before = len([c for c in ctx.agents.calls if c.agent == "build_agent"])
+    ctx.agents.file_writes["build_agent"] = {"src.py": "print('gefixt')\n"}
+    ctx.agents.script(
+        "final_reviewer",
+        review_json([finding("Input wird nicht validiert", "implementation")]),
+        review_json([]),
+    )
+    run_final_review_phase(ctx)
+    decisions = of_type(read_events(ctx.repo, ctx.state.run_id), "triage.decision")
+    assert len(decisions) == 1
+    builds = len([c for c in ctx.agents.calls if c.agent == "build_agent"])
+    assert builds - builds_before == 1
+    record = build_run_record(ctx.repo, ctx.state.run_id)
+    assert len(record["findings"]) == 1

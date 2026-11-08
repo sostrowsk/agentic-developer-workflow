@@ -272,6 +272,12 @@ def run(
     # Config ZUERST validieren (fail fast) — kein Forge-Netzaufruf für ein
     # Repo, das ohnehin keine gültige .adw/config.yaml hat.
     config = _load_config(repo, base_branch)
+    if parallel and not config.is_parallel_capable:
+        # Vor RunState.new: kein eskalierter Leichen-Lauf (C29).
+        raise _fail(
+            "--parallel verlangt eine zweite Lane in .adw/config.yaml "
+            f"— konfiguriert: {', '.join(config.lanes)}"
+        )
     # Repo-Lock VOR dem Vorflug (C3): kein zweites ADW-Kommando heilt oder
     # schreibt parallel im Haupt-Checkout.
     with _repo_lock(repo):
@@ -666,6 +672,7 @@ def runs_prune(
         typer.echo("Fehler: --keep muss mindestens 1 sein (der neueste Lauf bleibt).", err=True)
         raise typer.Exit(2)
     if older_than is not None and older_than < 0:
+        typer.echo("Fehler: --older-than muss mindestens 0 sein.", err=True)
         raise typer.Exit(2)
     repo = _require_repo(repo)
 
