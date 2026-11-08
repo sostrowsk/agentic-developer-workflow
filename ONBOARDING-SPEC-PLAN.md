@@ -1,7 +1,28 @@
 # ADW weiterentwickeln: Review-Befunde, TAC, Claude 5.x, Selbstverbesserung — Onboarding, Spec, Plan
 
-Stand: 2026-11-08 · Basis: ADW 0.31.1 (`main`, `7c4aa7d`) · Baseline: `uv run ruff check .` grün,
-`uv run pytest -q` → **1362 grün, 1 Skip**
+Stand: 2026-11-08, 14:10 · Basis jetzt: ADW **0.34.0** · Baseline: `uv run ruff check .` grün,
+`uv run pytest -q` → **1462 grün, 1 Skip** (Ausgangspunkt war 0.31.1 mit 1362)
+
+## 0. Fortschritt
+
+| Schritt | Paket | Lauf | Release | Dauer | Kosten | Codex-Review |
+|---|---|---|---|---|---|---|
+| 1 | R1 Sicherheit (C1–C4) | `8ef18a8a` | 0.31.2 | 33 min | $19,6 | 1 P3, behoben |
+| 2 | R2 Log-Integrität (C6–C12) | `cba8f982` | 0.31.3 | 26 min | $11,8 | ohne Befund |
+| 4 | W1 Agent-Grenzen (+C26) | `2a392321` | 0.32.0 | 30 min | $12,6 | 1 P2 + 1 P3, behoben |
+| 5 | W4 Normalisierte Schlüssel (+C25) | `418c3347` | 0.32.1 | 25 min | $11,9 | ohne Befund |
+| 6 | W13 Lauf-Protokoll + Ledger | `00432093` | 0.33.0 | 51 min | $28,8 | 3 Runden, 3 P1 + 2 P2, behoben |
+| 7 | W3 `adw kpis` (+ Datenfehler aus W13) | `f1e8d455` | 0.34.0 | 30 min | $11,0 | ohne Befund |
+
+Alle sechs Läufe mit `--gates none`, keine Eskalation. Die Briefs liegen unter
+`docs/briefs/` (`r1-…`, `r2-…`, `w1-…`, `w4-…`, `w13-…`, `w3-…`).
+
+**Ledger in Betrieb:** `addvendo/adw-ledger` (privat), Klon `~/.adw/ledger`. Alle 21 Läufe
+dieses Repos sind exportiert; W3 ist der erste Lauf, der sich am Ende selbst exportiert hat.
+`adw kpis` wertet das Ledger aus.
+
+**Als Nächstes** (siehe Abschnitt 6): W14 Retro-Agent (D8 entschieden: bei jedem Lauf),
+W2 Effort inkl. Codex (F17), R3 GUI, R4 CI/Forge, R5 Robustheit, W0 Prompt-Audit, W15.
 
 Dieses Dokument bündelt vier Quellen und ist die Grundlage für eine Reihe einzelner ADW-Läufe,
 nicht für einen großen Lauf:
@@ -57,6 +78,8 @@ messen (Regel aus `docs/briefs/README.md`).
 | F13 | **Widerspruch im Build-Auftrag:** der Build-Agent soll RED selbst bestätigen, obwohl der Orchestrator RED in einem eigenen reinen Test-Lauf beweist | `adw/agents.py` `build_agent.system_append` („using TDD (test first, confirm RED, …)"), `adw/lanes.py:141` („TDD: test first, confirm RED"); dagegen `adw/lanes.py:367` („Write ONLY the tests") + `_confirm_red` | genau das Muster „Verifikationsritual + widersprüchliche Regel" aus dem Vortrag: zusätzliche Tokens, mögliche Verwirrung |
 | F14 | **Kostenverteilung und Cache gemessen** (15 vorhandene Runs, `cost_usd` aus dem SDK, bei Abo-Login ein Rechenwert) | `agent.run`-End-Events in `.adw/runs/*/events.jsonl` | `build_agent` $414 von $615 (67 %, 2,3 Mio. Output-Tokens); Synthese-Agents $110; Cache-Trefferquote 80–96 % → **Cache ist kein Hebel, Effort beim Build-Agent schon** |
 | F15 | Prompts jedes Agent-Laufs liegen vollständig im Event-Log | `adw/agents.py:194` (`"prompt": task` im `agent.run`-Start), Snapshots vor/nach jedem Agenten | einzelne Agentenschritte lassen sich mit identischer Eingabe wiederholen → Grundlage für Evals (W7) |
+| F17 | **Codex läuft in ADW ohne Reasoning-Effort-Einstellung** | `adw/codex.py:254` `_isolated_codex_home` (CODEX_HOME nur mit `auth.json`, keine `config.toml` → `model_reasoning_effort = "high"` aus `~/.codex` greift nicht); `codex exec`-argv ohne `-c model_reasoning_effort=…` | Code-Review von R1: 216k Input-Tokens, **259 Reasoning-Tokens**, 44 s — Codex reviewt auf dem Default-Effort; gehört in W2 |
+| F18 | Ledger-Push hat 60 s Timeout | `adw/ledger.py` (E5 aus W13) | beim Neu-Export aller 21 Läufe (≈10 MB) lief der Push in den Timeout; Commits blieben lokal und gingen mit dem nächsten Push raus — fail-open wie vorgesehen, für Massenexporte manuell `git -C ~/.adw/ledger push` |
 | F16 | Das ADW-Repo auf GitHub ist **öffentlich** | `github.com:sostrowsk/agentic-developer-workflow` | Retros/Ledger mit Kundencode dürfen **nicht** ins ADW-Repo (→ D6) |
 
 ---
@@ -138,8 +161,8 @@ vollständig, Severity-Schwellen der Review-Runden und Reihenfolge der Crash-Sav
 | D5 | Default-Effort pro Agent | W2 | offen · Empfehlung: `build_agent` und Entwurfs-Agents `low`, `final_reviewer` und Synthese vorerst Default; Änderung nur mit Messung (W3/W7) |
 | D6 | Wo liegt das Ledger (Retros, Kennzahlen, Fälle)? | W13–W15 | **entschieden:** eigenes **privates GitLab-Repo**. Das ADW-Repo (öffentlich, F16) bekommt nur Ergebnisse: Prompt-Änderungen, bereinigte Eval-Fälle, Changelog |
 | D7 | Wie selbstständig ist die Wochenschleife? | W15 | **entschieden:** **Bericht mit Brief.** Kein automatischer ADW-Lauf, kein Auto-Merge; du gibst frei |
-| D8 | Retro-Agent bei jedem Lauf oder nur bei eskalierten/schlechten? | W14 | offen · Empfehlung: **bei jedem Lauf** (ca. $0,20–1 gegenüber ~$40 pro Lauf); glatte Läufe liefern die Gegenbeispiele |
-| D9 | Name/Pfad des Ledger-Repos und lokaler Klon | W13 | offen · Vorschlag: `<gitlab-gruppe>/adw-ledger`, lokal `~/.adw/ledger/`; Anlage per `glab` |
+| D8 | Retro-Agent bei jedem Lauf oder nur bei eskalierten/schlechten? | W14 | **entschieden:** bei jedem Lauf |
+| D9 | Name/Pfad des Ledger-Repos und lokaler Klon | W13 | **entschieden und umgesetzt:** `addvendo/adw-ledger` (privat), lokal `~/.adw/ledger` |
 
 ---
 
@@ -246,7 +269,10 @@ Jeder Bugfix bekommt einen Regressionstest, der vor dem Fix RED ist.
 - **Problem:** F3, F14. Lance Martin: stärkeres Modell auf niedriger Stufe ist oft günstiger und
   besser als schwächeres auf hoher. Der Build-Agent trägt 67 % der Kosten.
 - **Lösung:** `effort` in `AgentSpec`, Default aus D5; Übersteuerung in `.adw/config.yaml`
-  (strikt validiert wie der Rest der Config).
+  (strikt validiert wie der Rest der Config). **Dazu F17:** Codex-Aufrufe setzen den
+  Reasoning-Effort ausdrücklich (`-c model_reasoning_effort=…`), je Aufrufart (Authoring,
+  Code-Review) eigener Wert; Messung vorher/nachher über `adw kpis` und die
+  `reasoning_output_tokens` im `codex.review`-End-Event.
 - **AC:** Wert erscheint im `agent.run`-Start-Event und im Lauf-Protokoll (W13); ungültiger Wert in
   der Config → Abbruch beim Start.
 - **Aufwand:** S · **Abhängigkeit:** D5 · **Gate:** `none`
