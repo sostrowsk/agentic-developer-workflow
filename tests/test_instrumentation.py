@@ -413,21 +413,30 @@ def test_poll_pipeline_emits_ci_wait_span_and_poll_points(target_repo):
 
 
 def test_ci_wait_end_status_timeout_on_citimeout(target_repo):
-    # timeout must be > 0 per CiConfig; a never-terminal pipeline + no-op sleep
-    # exhausts the budget after one nap and raises CiTimeoutError.
+    # timeout must be > 0 per CiConfig; with a fake clock advanced by the sleep,
+    # one 1 s nap reaches the deadline and the second, non-final fetch raises
+    # CiTimeoutError — no real waiting, no busy loop.
     cfg = CiConfig(provider="gitlab", staging_job=None, timeout=1, poll_interval=1)
+    now = [0.0]
+
+    def fake_sleep(seconds):
+        now[0] += seconds
+
     with pytest.raises(CiTimeoutError):
         poll_pipeline(
             target_repo,
             "adw/x/backend",
             cfg,
             run_glab=_make_glab("running"),
-            sleep=lambda _s: None,
+            sleep=fake_sleep,
             sha=_SHA,
             emitter=EventEmitter(target_repo, RUN_ID),
+            clock=lambda: now[0],
         )
-    (end,) = of_type(read_events(target_repo), "ci.wait", "end")
+    records = read_events(target_repo)
+    (end,) = of_type(records, "ci.wait", "end")
     assert end["payload"]["status"] == "timeout"
+    assert len(of_type(records, "ci.poll")) == 2
 
 
 # --- state.py: state.saved after successful persistence (B2, AC 9) ----------
