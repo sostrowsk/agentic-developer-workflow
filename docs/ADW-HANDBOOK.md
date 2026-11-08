@@ -750,7 +750,7 @@ if it is held, or there is no usable ledger → message on stderr, exit 1.
   `orchestrator`, `gate` or `prompt`, the read-only `improve_agent` (cwd = ADW source
   tree) drafts one brief for the top group after `docs/briefs/README.md`. It answers in
   plain Markdown (first line an H1 = title; one enclosing ```` ```markdown ```` block is
-  tolerated). Without the H1 or without all headings (Ausgangslage, Aufgabe,
+  tolerated; code blocks inside it need a language tag, e.g. ```` ```python ````). Without the H1 or without all headings (Ausgangslage, Aufgabe,
   Vorentscheidungen, Deferred, Akzeptanzkriterien) the draft is dropped, its raw answer
   is kept unchanged as `reports/<YYYY>-W<WW>-brief.rejected.md`, and the report notes
   "Brief-Entwurf verworfen: <reason>" plus that file. On an agent error the draft is

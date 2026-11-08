@@ -313,8 +313,9 @@ def test_markdown_brief_is_accepted_with_h1_title(ledger, agent, answer):
     ("````\n```\n" + BRIEF_MD + "````\n", "H1"),
     ('{"title": "T", "brief_markdown": "# T"}\n', "H1"),
     ("```markdown\n" + BRIEF_MD + "```\n\nProsa\n\n```python\nprint(1)\n```\n", "H1"),
+    ("```markdown\n" + BRIEF_MD + "\n```\nprint(1)\n```\n```\n", "Sprachangabe"),
 ], ids=["missing-h1", "missing-heading", "combined-heading", "fenced", "long-fence",
-        "json", "two-separate-blocks"])
+        "json", "two-separate-blocks", "markdown-fence-inner-bare-block"])
 def test_invalid_brief_answer_is_rejected_and_saved(ledger, agent, answer, reason):
     install(ledger)
     calls = agent(answer)
@@ -365,6 +366,24 @@ def test_agent_exception_is_noted_without_retry(ledger, agent, exc):
     assert not rejected_path(ledger).exists()
     assert str(exc) in report(ledger)
     assert all(h in report(ledger) for h in SECTIONS)
+
+
+@pytest.mark.parametrize("second", [RuntimeError("Agent kaputt"), "--no-brief"],
+                         ids=["agent-error", "no-brief"])
+def test_later_call_without_rejection_removes_stale_rejected_file(ledger, agent, second):
+    install(ledger)
+    agent(BRIEF_MD.replace("## Deferred", "## X"))
+    assert improve().exit_code == 0
+    assert rejected_path(ledger).exists()
+
+    if second == "--no-brief":
+        assert improve("--no-brief").exit_code == 0
+    else:
+        agent(second)
+        assert improve().exit_code == 0
+    assert not rejected_path(ledger).exists()
+    status = git(ledger, "show", "--no-renames", "--name-status", "--format=", "HEAD")
+    assert f"D\treports/{WEEK}-brief.rejected.md" in status
 
 
 def test_no_brief_flag_or_no_eligible_group_calls_no_agent(ledger, agent):

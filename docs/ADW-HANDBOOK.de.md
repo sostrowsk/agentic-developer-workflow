@@ -775,7 +775,8 @@ Exit 1.
   `orchestrator`, `gate` oder `prompt` entwirft der nur lesende `improve_agent`
   (cwd = ADW-Quellcode) einen Brief für die höchste solche Gruppe nach
   `docs/briefs/README.md`. Er antwortet in reinem Markdown (erste Zeile eine H1 = Titel;
-  ein umschließender ```` ```markdown ````-Block wird toleriert). Fehlt die H1 oder eine
+  ein umschließender ```` ```markdown ````-Block wird toleriert; Codeblöcke darin brauchen eine Sprachangabe, z. B.
+  ```` ```python ````). Fehlt die H1 oder eine
   Pflichtüberschrift (Ausgangslage, Aufgabe, Vorentscheidungen, Deferred,
   Akzeptanzkriterien), wird der Entwurf verworfen, seine Rohantwort unverändert als
   `reports/<JJJJ>-W<WW>-brief.rejected.md` abgelegt, und der Bericht vermerkt

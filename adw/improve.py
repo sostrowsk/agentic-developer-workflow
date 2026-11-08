@@ -250,7 +250,9 @@ _OUTER_OPEN = re.compile(r"^```markdown[ \t]*$")
 
 def _unwrap(raw: str) -> str:
     """Strip one ```markdown block that encloses the whole trimmed answer — only if
-    its closing fence is the last line (inner blocks with an info string nest)."""
+    its closing fence is the last line. Inner blocks nest only with an info string;
+    a bare inner ``` closes the outer block (deliberate: otherwise two separate blocks
+    would be unwrapped as one), so such an answer stays wrapped and is rejected."""
     lines = raw.strip().splitlines()
     if len(lines) < 2 or not _OUTER_OPEN.match(lines[0]):
         return raw
@@ -288,6 +290,11 @@ def _brief(group: dict, group_text: str) -> tuple[str | None, str, str | None]:
     markdown = _unwrap(raw)
     titles = [m.group(1) for line in _outside_fences(markdown) if (m := _H1.match(line))]
     if not titles:
+        first = raw.strip().splitlines()[:1]
+        if markdown is raw and first and _OUTER_OPEN.match(first[0]):
+            return None, ("Brief-Entwurf verworfen: H1-Überschrift fehlt außerhalb von "
+                          "Codeblöcken (umschließender ```markdown-Block nicht entpackt: "
+                          "innere Codeblöcke brauchen eine Sprachangabe)"), raw
         return None, "Brief-Entwurf verworfen: H1-Überschrift fehlt", raw
     missing = _missing_headings(markdown)
     if missing:
@@ -409,7 +416,7 @@ def _improve(path: Path, since: int, repo_slug: str | None, no_brief: bool) -> l
         brief_path.unlink(missing_ok=True)
     if raw is not None:
         rejected_path.write_text(raw, encoding="utf-8", newline="")
-    elif brief is not None:
+    else:
         rejected_path.unlink(missing_ok=True)
     _commit(path, week, [f"reports/{week}.md", f"reports/{week}-brief.md",
                          f"reports/{week}-brief.rejected.md"])
