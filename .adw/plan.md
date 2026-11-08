@@ -1,321 +1,235 @@
-# Plan — W14: Jeder Lauf bekommt einen Rückblick — und du ein Urteil
+# Plan — W2: Effort pro Agent — und Codex denkt wieder mit
 
-Maßgeblich ist `.adw/spec.md` (Scope §1–§9, AC 1–11). Single-Lane-Projekt
+Maßgeblich ist `.adw/spec.md` (Scope A1–A4, AC 1–9). Single-Lane-Projekt
 (`.adw/config.yaml`): nur der Workstream **backend**; er umfasst Code, Tests, beide
-Handbücher und beide Changelogs. Kein Frontend-Workstream, keine Übergabe.
+Handbücher, `examples/config.yaml` und beide Changelogs. Kein Frontend-Workstream.
+Dieser Plan beschreibt die Implementierung; er implementiert nichts.
 
 ## Ausgangslage
 
-Basis: Stand **0.34.0** (`e4e7522`), am 2026-11-08 gegen den Code geprüft. Vor dem
+Basis: Stand **0.35.0** (`a18ecdf`), am 2026-11-08 gegen den Code geprüft. Vor dem
 Bauen gegen den dann aktuellen Stand erneut prüfen.
 
-- `adw/cli.py`: `_EXIT_STATUS` `:144`; `_run_span` `:148` setzt `end_payload` erst im
-  `except`/`else` um das `yield` und ruft dort `totals()` neu auf — Kosten eines
-  Agentenlaufs, der noch im `with`-Körper läuft, landen also in `totals`.
-  `_export_after_execution` `:185`. `_execute(ctx)` im `with _run_span(...)` bei `run`,
-  `resume`, `approve`. `resume` kehrt bei Phase `done` vor der Spanne zurück und lehnt
-  `escalated` mit `_fail` ab — für einen fertigen Lauf entsteht ohnehin keine neue Spanne.
-  `_execute` `:914`: Gate-Pause → `typer.Exit(2)`, Eskalation → `typer.Exit(1)` mit Phase
-  `escalated`, `AgentRunError` → `typer.Exit(1)` mit unveränderter Phase. **Exit 1 ist
-  mehrdeutig**; ob die Retro läuft, entscheidet die Phase im State.
-  `_build_context` `:1124` (Dry-Run: `_dry_run_runners`, sonst
-  `SdkAgentRunner(emitter, totals=run_totals)`). `_require_repo` `:580`, `_repo_lock`
-  `:1057`, `_fail` `:53`, `ledger_export` `:682`, `kpis` `:776` (`--since`,
-  `--repo-slug`, `--json`), `_format_kpis` `:748`.
-- `adw/agents.py`: `OPUS = "claude-opus-5-5"` `:23`, `READ_ONLY_TOOLS` `:28`,
-  `SCOPED_READ_RULES` `:34`, `REGISTRY`, `final_reviewer` `:346` als Muster.
-- `adw/context.py:66` `_agent_run(ctx, agent, task, cwd, …)` erzeugt den
-  `agent.run`-Span am Aufrufort (Mock und echter Runner gleich).
-- `adw/findings.py`: `FindingsParseError` `:68`, `_last_json_fence_content` `:182`,
-  `extract_review_result` `:226` (strikter Parser: letzter ```` ```json ````-Fence, sonst
-  ganzer Text; Duplikat-Schlüssel, Nicht-Objekt, Tiefe → `FindingsParseError`).
-- `adw/ledger.py`: `_ARTIFACTS` `:38`, `_repo_slug` `:183`, `build_run_record` `:247`
-  (`findings[].finding_key`), `_ledger_path` `:315`, `_git_ok` `:341`, `_write_bundle`
-  `:364`, `_push` `:390`, `_export` `:402` (Pfad-Wächter, `rmtree` `:419`),
-  `_read_ledger_records` `:498`, `compute_kpis` `:607`.
-- `adw/mock.py:22` `MockAgentRunner`: `script(agent_name, *responses)`, zeichnet jeden
-  Aufruf in `calls` (Agent, Task, `cwd`) auf.
-- Tests: autouse `_isolate_ledger`, Fixtures `ledger` (echter Klon mit bare `origin`)
-  und `target_repo` (`tests/conftest.py`); Läufe über `--dry-run` mit gepatchtem
-  `cli_mod._dry_run_runners` (z. B. `tests/test_cli.py:400`).
-- Handbuch: §7 „CLI reference" (`docs/ADW-HANDBOOK.md:350`, DE `:357`), §11.1 „Ledger"
-  (`:610`, DE `:625`). Changelog oben `## [0.34.0] — 2026-11-08`.
+- `adw/agents.py`: `AgentSpec` `:158` (frozen dataclass, kein `effort`);
+  `agent_run_start_payload` `:198` baut den `agent.run`-Start-Payload; `REGISTRY` `:232`
+  (neun Agenten, `retro_agent` `:361`); `SdkAgentRunner` `:540` baut
+  `ClaudeAgentOptions` `:564`. **Importkette:** `agents.py` → `adw.events` (`:20`) →
+  `adw.state` (`events.py:23`) → `adw.config` (`state.py:14`). Ein Modul-Level-Import
+  von `REGISTRY` in `config.py` wäre daher ein Zyklus (partially initialized module
+  beim CLI-Start); der Zugriff muss lokal in der Validator-Funktion erfolgen.
+- SDK (`claude_agent_sdk/types.py`): `ClaudeAgentOptions.effort:
+  Literal["low","medium","high","xhigh","max"] | None = None`.
+- `adw/context.py:66` `_agent_run(ctx, agent, …)`: **einzige** Aufrufstelle aller
+  Agentenläufe (Authoring, Phasen, Lanes, Retro); baut den Start-Payload und ruft
+  `ctx.agents.run(agent, …)` — Mock und echter Runner gleich.
+- `adw/codex.py`: `CodexRunner.__init__(emitter, timeout, totals)` `:362`;
+  `effective_argv` `:373` und `effective_author_argv` liefern `self._argv(...)`, der
+  ausgeführte argv entsteht aus demselben `_argv`; `_argv` `:466` ist `@staticmethod`,
+  pinnt nur `-m CODEX_MODEL` und `-c mcp_servers={}`. Start-Events setzen `argv` in
+  `context.py:87` (review) und `authoring.py:464` (author).
+- `adw/mock.py:115` `MockCodexRunner`: `effective_argv`/`effective_author_argv` liefern
+  einen festen Platzhalter-argv („exact content is not contract-pinned"); Konstruktion
+  ohne Config in `adw/dry_run.py:112`.
+- `adw/config.py`: `CodexConfig` `:97` (nur `timeout`), `AdwConfig` `:115`
+  (`extra="forbid"`), `load` `:135` hebt `ValidationError` als `ConfigError`.
+- `adw/state.py:147` `pinned_breakpoints: list[...] | None = None` (leere Liste =
+  echte Pinnung, `None` = Alt-State); Pin in `adw/cli.py:302`, Anwendung in
+  `_config_for_continuation` `:1104`/`:1124` per `model_copy(update=…)`.
+  `_build_context` `:1215` baut `CodexRunner(...)` `:1245`.
+- `adw/ledger.py:230` `_agent` setzt `"effort": None` (`:241`); `build_run_record` `:251`.
+  Golden: `tests/fixtures/ledger/expected-run-record.json` (aus
+  `tests/fixtures/ledger/a1b2c3d4/events.jsonl`; die dortigen `codex.review`-Starts
+  `seq 8/21/27` tragen kein `argv`).
+- Tests: `captured_query`-Fixture in `tests/test_agents.py` für den Options-Bau; exakte
+  argv-Vergleiche in `tests/test_codex.py:622/626`; exakte Start-Payload-Vergleiche
+  möglich in `tests/test_instrumentation.py`, `tests/test_codex_author_span.py`;
+  Pinning-Muster in `tests/test_breakpoints.py`.
+- Doku: Handbuch §3.1 Config-Tabelle (`docs/ADW-HANDBOOK.md:143`, DE `:146`; Zeile
+  `codex.timeout` `:163`/`:166`), §5.4 „Pinned settings" (`:273`, DE `:280`);
+  `examples/config.yaml` (Breakpoints-Block `:30` als Stilvorbild); Changelog oben
+  `## [0.35.0] — 2026-11-08`.
 
-Betroffene Dateien (abschließend): `adw/agents.py`, neu `adw/retro.py`, `adw/cli.py`,
-`adw/ledger.py`, ggf. `adw/findings.py` (nur Herauslösen des JSON-Objekt-Parsers, B2);
-neu `tests/test_retro.py`, neu `tests/test_feedback.py`, `tests/test_kpis.py` (neue
-Tests + Anpassung der zwei bestehenden exakten `total`-Vergleiche), `tests/test_ledger.py`
-(Export-Test); `docs/ADW-HANDBOOK.md`, `docs/ADW-HANDBOOK.de.md`, `CHANGELOG.md`,
-`CHANGELOG.de.md`. GUI, `run-record.json`-Schema (Version 1), Phasen/Gates/Exit-Codes,
-`adw/dry_run.py` und `pyproject.toml` (bleibt `0.34.0`) unverändert.
+Betroffene Dateien (abschließend): `adw/agents.py`, `adw/context.py`, `adw/config.py`,
+`adw/state.py`, `adw/cli.py`, `adw/codex.py`, `adw/ledger.py`;
+`tests/test_agents.py`, `tests/test_config.py`, `tests/test_codex.py`,
+`tests/test_ledger.py`, `tests/test_cli.py`, `tests/fixtures/ledger/…` (Golden +
+Fixture-Events) sowie bestehende Tests mit exakten Payload-/argv-Vergleichen;
+`docs/ADW-HANDBOOK.md`, `docs/ADW-HANDBOOK.de.md`, `examples/config.yaml`,
+`CHANGELOG.md`, `CHANGELOG.de.md`.
+Unverändert: Modelle, `max_turns`/`timeout_s`, `codex.timeout`, Phasen/Gates,
+`adw/mock.py`, `adw/dry_run.py`, GUI, `schema_version` 1, `pyproject.toml`.
 
-Contract: `.adw/contract.yaml` pinnt nur extern beobachtbare Flächen (CLI `adw rate` /
-`adw feedback`, `retro.json`, `retro.md`, `feedback.jsonl`, `retro`-Event,
-Ledger-Commit-Nachricht, neue `total`-Felder von `adw kpis --json`). Modul-, Helfer-
-und Parameternamen in diesem Plan sind Empfehlungen.
+Contract: `.adw/contract.yaml` pinnt nur die extern beobachtbaren Flächen (Config-
+Schlüssel, `agent.run`-Start-Payload `effort`, argv-Paar in `codex.review`/
+`codex.author`-Starts, `run-record.json`-Felder). Helfer- und Feldnamen im State sowie
+der Bau von `ClaudeAgentOptions` (Keyword nur bei konkretem Wert, B3.4) sind
+Planvorgaben, keine Vertragsbestandteile.
 
 ## Workstream backend
 
-### B1 — Retro-Agent in der Registry (Scope §1)
+### B1 — `AgentSpec.effort` und Registry-Defaults (A1, E1)
 
-`adw/agents.py`, neuer `REGISTRY`-Eintrag nach `final_reviewer`:
+`adw/agents.py`:
+1. `ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]`.
+2. `AgentSpec` erhält `effort: ClaudeEffort | None = None` (am Ende, mit Default, damit
+   bestehende Konstruktionen gültig bleiben).
+3. `REGISTRY`: `effort="low"` für `build_agent`, `spec_agent`, `plan_agent`,
+   `retro_agent`; die übrigen fünf bleiben ohne Angabe (`None`). Das ist die einzige
+   Default-Tabelle; `REGISTRY` wird nirgends mutiert.
 
-```python
-"retro_agent": AgentSpec(
-    name="retro_agent", model=OPUS, max_turns=60, timeout_s=900,
-    tools=READ_ONLY_TOOLS, allowed_tools=SCOPED_READ_RULES,
-    system_append=(...), permission_mode="default",
-),
-```
+### B2 — Config-Schlüssel und Validierung (A1, A2, E2, E3; AC 3, 6)
 
-Rollentext (englisch wie die übrigen, kurz): bewertet einen abgeschlossenen ADW-Lauf
-strikt lesend, ändert nichts, antwortet nur mit dem JSON nach Schema, jeder Eintrag
-braucht Belege (`seq:<n>` aus `events.jsonl` oder relativer Dateipfad im Run-Ordner).
-Kein Effort-Feld. Keine Änderung an Deny-Regeln (`.adw/runs/**` bleibt gesperrt; die
-Retro-Dateien schreibt ausschließlich der Orchestrator).
+`adw/config.py`:
+1. `EffortSetting = Literal["low", "medium", "high", "xhigh", "max", "default"]`;
+   `CodexEffort = Literal["low", "medium", "high", "xhigh"]`.
+2. `AdwConfig.effort: dict[str, EffortSetting] = Field(default_factory=dict)` plus
+   `field_validator("effort")`: jeder Schlüssel muss in `REGISTRY` stehen, sonst
+   `ValueError` mit dem Namen (→ `ConfigError` über `load`). **Kein** Modul-Level-Import
+   von `adw.agents` in `config.py` (Zyklus über `events` → `state` → `config`, siehe
+   Ausgangslage): `from adw.agents import REGISTRY` steht lokal im Validator-Body und
+   läuft damit erst nach der Modulinitialisierung, zur Ladezeit der Config. Kurzer
+   Kommentar am Import, warum er lokal ist. Unbekannte Stufe, Nicht-Mapping
+   (`effort: 3`, `effort:` leer = `None`) scheitern an der Typisierung.
+3. `CodexConfig.reasoning_effort: CodexEffort = "high"` (`default`/`max` damit
+   unzulässig).
+4. Validierung läuft beim Config-Laden vor `RunState.new` — kein Run-Ordner, kein State.
+   `extra="forbid"` bleibt auf allen Modellen.
+5. Startkontrolle: `uv run adw --help` und die bestehenden CLI-/Config-Tests müssen nach
+   B2 ohne Import-Fehler laufen (deckt den Zyklus ab); kein neuer Test dafür.
 
-### B2 — Modul `adw/retro.py`: Schema, Beleg-Prüfung, Dateien (Scope §3–§5)
+### B3 — Eine Stelle für den wirksamen `AgentSpec` (A1, E4, E5; AC 1, 2, 4)
 
-1. **Antwortschema** (pydantic, beide Modelle `model_config = ConfigDict(extra="forbid")`):
-   - `RetroItem`: `problem: str`, `resolution: str`, `better: str`,
-     `cause: Literal["prompt", "context_missing", "gate", "orchestrator",
-     "issue_quality", "model", "target_repo"]`, `lever: str`,
-     `evidence: list[str] = []` (fehlender Schlüssel ist kein Schemafehler, sondern
-     „keine Belege" → Schritt 3).
-   - `RetroAnswer`: `summary: str`, `items: list[RetroItem] = Field(max_length=10)`.
-   - Mehr als 10 Einträge, unbekannte Schlüssel, unbekannte `cause`, kein parsebares
-     JSON → Fehlschlag nach Schritt 6.
-2. **Parsen ohne neuen Parser-Stil:** aus `extract_review_result` den Teil bis
-   einschließlich „ist ein dict / nicht zu tief" als `extract_json_object(text) -> dict`
-   in `adw/findings.py` herauslösen; `extract_review_result` ruft ihn auf und validiert
-   danach wie bisher (Verhalten unverändert, bestehende Tests bleiben grün). `retro.py`:
-   `RetroAnswer.model_validate(extract_json_object(text))`. `FindingsParseError` und
-   `ValidationError` sind Fehlschläge nach Schritt 6.
-3. **Beleg-Prüfung** `_valid_evidence(run_dir, seqs, ev) -> bool`:
-   - `re.fullmatch(r"seq:(\d+)", ev)` → gültig, wenn `int(n)` in der Menge der `seq`
-     aller parsebaren Zeilen von `run_dir/events.jsonl` (`isinstance(seq, int)`; Datei
-     fehlt/unlesbar → leere Menge; unparsebare Zeilen ignorieren). Menge einmal je
-     Retro lesen.
-   - sonst Pfad: `PurePosixPath(ev)`; ungültig bei leerem String, `is_absolute()` oder
-     `".." in parts`; gültig, wenn `(run_dir / ev).is_file()`.
-   - Eintrag behalten, wenn mindestens ein Beleg gültig ist; sonst verwerfen
-     (inkl. `evidence == []`). `dropped = len(answer.items) - len(kept)`. Behaltene
-     Einträge unverändert (alle Belege, wie geliefert). Keine inhaltliche Belegprüfung.
-4. **`retro.json`** (Run-Ordner): `{"schema_version": 1, "run_id", "phase", "summary",
-   "items": [item.model_dump() …], "dropped", "model": REGISTRY["retro_agent"].model}`,
-   `json.dumps(..., sort_keys=True, indent=2) + "\n"`, UTF-8. `phase` ist die Endphase
-   `done` oder `escalated`.
-5. **`retro.md`** deterministisch aus genau diesem Dict gerendert: `# Retro <run_id>
-   (<phase>)`, Zusammenfassung, je Eintrag `## <n>. <problem>` mit allen sechs Feldern
-   (Belege als Liste); bei `items: []` eine Zeile „keine Einträge". Kein Agententext
-   außer den Feldwerten.
-6. **Ablauf** `run_retro(ctx) -> None` (aufgerufen aus B3):
-   - Vorbedingungen (sonst sofort `return`, kein Event): `ctx.state.phase in ("done",
-     "escalated")`, `not ctx.state.dry_run`, `not (run_dir / "retro.json").exists()`.
-     `run_dir = ctx.repo / RUNS_RELPATH / ctx.state.run_id`.
-   - `try:` Auftrag = kurzer Einleitungstext + `json.dumps(build_run_record(ctx.repo,
-     run_id), ensure_ascii=False, indent=2)` + Hinweis, Details per Grep in
-     `events.jsonl` dieses Ordners zu suchen, + Schema-Beschreibung (Felder, erlaubte
-     `cause`-Werte, max. 10 Einträge, Belegformen). `result = _agent_run(ctx, spec,
-     task, cwd=run_dir)`; parsen, Belege prüfen, `retro.json` schreiben, `retro.md`
-     schreiben, dann Punkt-Event `retro` `{"outcome": "written", "items": len(kept)}`
-     mit `span=ctx.emitter.current_span_id()`.
-   - **Dateien dieses Versuchs verfolgen:** vor dem Schreiben `created: list[Path] = []`;
-     unmittelbar vor jedem `write_text` den Zielpfad (`retro.json`, dann `retro.md`)
-     anhängen, sodass auch eine teilweise geschriebene Datei erfasst ist.
-   - `except Exception as exc:` — in dieser Reihenfolge, jeder Schritt einzeln gegen
-     Ausnahmen abgeschirmt, damit nie eine Ausnahme aus `run_retro` herausläuft und
-     den `typer.Exit` aus `_execute` ersetzt:
-     1. **Bereinigung:** für jeden Pfad in `created` `path.unlink(missing_ok=True)` in
-        eigenem `try/except Exception: pass` (beide Dateien oder keine; nur Dateien
-        dieses Versuchs, kein Recovery-System). Ein fehlgeschlagenes Löschen wird dem
-        `reason` als Zusatz angehängt (z. B. `"; cleanup failed: <name>"`).
-     2. Meldung auf stderr (`typer.echo(..., err=True)`) in `try/except Exception: pass`.
-     3. Event `retro` `{"outcome": "failed", "reason": str(exc) or type(exc).__name__}`
-        in `try/except Exception: pass`.
-   - Keine Änderung an `ctx.state`, kein `state.save`.
+1. `adw/agents.py` (Empfehlung): `effective_spec(spec, overrides) -> AgentSpec`:
+   ohne Eintrag `spec` unverändert; `"default"` → `dataclasses.replace(spec,
+   effort=None)`; sonst `replace(spec, effort=<stufe>)`.
+2. `adw/context.py` `_agent_run`: als erste Zeile
+   `agent = effective_spec(agent, ctx.config.effort)` — Start-Payload und Runner
+   erhalten denselben wirksamen Spec. Keine Änderung an den Aufrufern; damit sind
+   Authoring/Synthese, Build, Review, Triage, Analyse und Retro inklusive Mock
+   abgedeckt.
+3. `agent_run_start_payload`: zusätzliches Feld `"effort": agent.effort`
+   (Stufe oder `None` → JSON `null`, niemals der String `default`). Da der Payload an
+   der Aufrufstelle entsteht, gilt das für `SdkAgentRunner` und `MockAgentRunner`
+   gleich; `adw/mock.py` bleibt unverändert.
+4. `SdkAgentRunner.run`: `effort` nur bei konkretem Wert übergeben, z. B.
+   `**({"effort": agent.effort} if agent.effort is not None else {})` in
+   `ClaudeAgentOptions(...)`; bei `None` fehlt das Keyword vollständig.
 
-### B3 — Auslösung in `run`/`resume`/`approve` (Scope §2; AC 1–3, 5)
+### B4 — Codex-Reasoning-Effort im argv (A2, E3; AC 6)
 
-`adw/cli.py`, an den drei Stellen `_execute(ctx)` ersetzen durch
+`adw/codex.py`:
+1. `CodexRunner.__init__(…, reasoning_effort: str = "high")` → `self._reasoning_effort`.
+2. `_argv` wird Instanzmethode; nach `"-c", "mcp_servers={}"` zusätzlich
+   `"-c", f"model_reasoning_effort={self._reasoning_effort}"` (kurzer Kommentar: wirkt
+   unabhängig von einer Nutzer-Config, das isolierte `CODEX_HOME` hat keine). Damit
+   enthalten `effective_argv`, `effective_author_argv` und der ausgeführte argv das Paar
+   identisch — für Authoring (Spec und Plan) und Code-Review.
+3. `adw/cli.py` `_build_context`: `CodexRunner(…, reasoning_effort=config.codex.reasoning_effort)`.
+   `MockCodexRunner` bleibt unverändert: sein argv ist laut Docstring nicht gepinnt, er
+   führt kein `codex exec` aus, und AC 6 betrifft den `codex exec`-argv. Dry-Run-Läufe
+   haben daher `codex_effort: null` im Run-Record.
 
-```python
-try:
-    _execute(ctx)
-finally:
-    retro.run_retro(ctx)
-```
+### B5 — Pinning im Run-State (Validierung und Pinning; AC 5)
 
-— innerhalb des `with _run_span(...)`, sodass die Reihenfolge Ausführung → Retro →
-Ende der `run`-Spanne (Totals inkl. Retro-Kosten über `RunTotals`) →
-`_export_after_execution` → Auto-Prune entsteht. Ein `typer.Exit` aus `_execute`
-propagiert unverändert, weil `run_retro` nie wirft; Phase, Exit-Code und
-`run`-End-`status` bleiben unverändert. Die Retro nutzt den bestehenden Kontext
-(Runner, Emitter, `RunTotals`); `_EXIT_STATUS`, `_run_span`, `_execute`, Export und
-Auto-Prune bleiben unverändert. Die bestehende Rückkehr/Ablehnung für fertige Läufe in
-`resume` bleibt — kein nachträglicher Retro-Lauf. Kein Eintrag für `retro_agent` in
-`adw/dry_run.py` (Dry-Run ruft nie).
+1. `adw/state.py` (Empfehlung): `pinned_effort: dict[str, EffortSetting] | None = None`
+   und `pinned_codex_reasoning_effort: CodexEffort | None = None`, kommentiert wie
+   `pinned_breakpoints`: das leere Mapping ist eine echte Pinnung („keine
+   Übersteuerung"); `None` = Alt-State von vor W2, dann gilt weiterhin die Config.
+2. `adw/cli.py` `run` neben `:302`: `state.pinned_effort = dict(config.effort)`,
+   `state.pinned_codex_reasoning_effort = config.codex.reasoning_effort` — vor dem
+   ersten `state.save`. Auch ein leeres `effort`-Mapping wird gepinnt, damit später
+   hinzugefügte Config-Einträge einen laufenden Run nicht verändern.
+3. `_config_for_continuation` neben `:1124`: bei nicht-`None`-Pins
+   `config.model_copy(update={"effort": dict(state.pinned_effort)})` bzw.
+   `codex=config.codex.model_copy(update={"reasoning_effort": …})`. Docstring um die
+   beiden Pins ergänzen. `resume` und `approve` gehen beide über diese Funktion; ein
+   neuer `run` liest die aktuelle Config. Bestehende States ohne die neuen Felder laden
+   weiterhin (optionale Felder mit Default `None`).
 
-### B4 — Export: Retro-Dateien und Erhalt von `feedback.jsonl` (Scope §6; AC 6, 7)
+### B6 — Ledger (A3; AC 7)
 
 `adw/ledger.py`:
-1. `_ARTIFACTS` um `"retro.json"`, `"retro.md"` ergänzen.
-2. `_export`: vor `shutil.rmtree(dest)` `kept = (dest / "feedback.jsonl").read_bytes()`
-   falls `is_file()`, sonst `None`; nach `_write_bundle(...)` bei `kept is not None`
-   `(dest / "feedback.jsonl").write_bytes(kept)`. Keine Kopie im lokalen Run-Ordner.
-   Sonst nichts (Commit-Text, Push, `unchanged`-Erkennung, Dry-Run-Skip bleiben).
+1. `_agent`: `"effort": begin.get("effort")` (Kommentar „not recorded until W2" weg);
+   fehlt das Feld (Altlauf) → `None`.
+2. `build_run_record`: neues Feld `"codex_effort"` (z. B. direkt nach `"agents"`):
+   erstes Event in Dateireihenfolge mit `type in ("codex.review", "codex.author")` und
+   `kind == "start"`; aus dessen `payload.argv` (nur wenn Liste) den Wert des ersten
+   `str`-Elements mit Präfix `model_reasoning_effort=`; fehlt der Start, das `argv` oder
+   das Element → `None`. Nur der erste Start zählt, keine weitere Suche zu späteren
+   Starts; keine Ersatzwerte aus Config, Registry oder State.
+3. `SCHEMA_VERSION` bleibt 1.
+4. Golden: in `tests/fixtures/ledger/a1b2c3d4/events.jsonl` einem `agent.run`-Start
+   `"effort": "low"` und dem ersten `codex.review`-Start (`seq 8`) ein `argv` mit
+   `-c model_reasoning_effort=high` geben; `expected-run-record.json` entsprechend
+   (`agents[].effort`, `"codex_effort": "high"`).
 
-### B5 — `adw rate` und `adw feedback` (Scope §7; AC 7–9)
+### B7 — Doku und Changelog (A4; AC 8)
 
-Ledger-Seite in `adw/ledger.py`, CLI in `adw/cli.py` (Top-Level-Kommandos).
-
-1. **Ledger-Helfer** (Empfehlung) `ledger_run_dir(repo, run_id) -> (ledger, rel, dest)`:
-   `_ledger_path()`; `None` → Fehler „kein Ledger"; `RuntimeError`/`OSError`/
-   `subprocess.SubprocessError` → Fehler „Ledger nicht lesbar". `rel = Path("runs") /
-   _repo_slug(repo).replace("/", "__") / run_id`; Pfad-Wächter wie `_export`
-   (`dest.resolve()` innerhalb `runs/`, nicht gleich `runs/`). `dest.is_dir()` falsch
-   → Fehler „Lauf <id> nicht im Ledger (erst exportieren)". Kein `mkdir`.
-2. **`append_feedback(ledger, rel, entry, kind)`:** eine Zeile
-   `json.dumps(entry, ensure_ascii=False) + "\n"` im Modus `"a"` an
-   `dest/feedback.jsonl`; endet eine vorhandene Datei nicht auf `\n`, vorher `\n`
-   schreiben (bestehende Zeilen unangetastet). Dann `_git_ok(ledger, "add", "--",
-   (rel / "feedback.jsonl").as_posix())`, `_git_ok(ledger, "commit", "-m",
-   f"feedback {run_id} {kind}")`, `_push(ledger)` (Ergebnis ignoriert, fail-open:
-   Push-Fehler ändert weder Exit 0 noch den lokalen Commit). Ein Fehler bei add/commit
-   → Meldung auf stderr, Exit 1 (die Zeile bleibt lokal).
-3. **Einträge:** `ts` = `datetime.now(UTC).isoformat()` (enthält `+00:00`), Schlüssel
-   genau `ts, kind, value, note` plus `finding_key` nur bei `kind == "finding"`;
-   `note` `None` ohne `--note`.
-4. **CLI:**
-   - `adw rate RUN_ID VALUE [--note] [--repo .]`, `VALUE` als `Enum("good","bad")`
-     → Typer lehnt andere Werte mit Exit 2 ab, bevor etwas passiert.
-   - `adw feedback RUN_ID VALUE --finding PRÄFIX [--note] [--repo .]`, `VALUE` als
-     `Enum("valid","noise")`, `--finding` Pflicht.
-   - Beide: `repo = _require_repo(repo)` (wie `ledger export`), dann
-     `with _repo_lock(repo):` Ledger-Auflösung (B5.1) → bei Fehler `_fail(...)` (Exit 1,
-     nichts geschrieben, kein Ordner, kein Commit).
-   - `feedback`: `run-record.json` aus `dest` lesen (unlesbar → `_fail`); Kandidaten =
-     **eindeutige** `str`-`finding_key` aus `findings[]`, die mit dem Präfix beginnen
-     (wiederholte Vorkommen desselben Keys sind ein Kandidat). Genau einer → voller
-     Key; 0 oder > 1 → `_fail` mit Meldung und höchstens den ersten 5 Kandidaten
-     (sortiert) plus „…" — nichts geschrieben.
-   - Erfolg: kurze Bestätigung auf stdout, Exit 0. Kein Modellaufruf.
-
-### B6 — `adw kpis` um Retro und Feedback (Scope §8; AC 10)
-
-`adw/ledger.py` und `adw/cli.py`.
-
-1. **Lesen** (Empfehlung): `_read_ledger_runs(ledger) -> (records, signals)` über
-   denselben sortierten Glob wie `_read_ledger_records` (diese bleibt bzw. ruft den
-   neuen Helfer); je Lauf-Ordner `signals[i] = {"retro": <dict|None>, "feedback":
-   [<dict> …]}`:
-   - `retro.json`: `json.loads`; nur ein Objekt mit `items` als Liste gilt als
-     lesbar, sonst `None` (jede Ausnahme → `None`).
-   - `feedback.jsonl`: Zeilen einzeln `json.loads`; nur `dict`-Zeilen behalten,
-     unlesbare Zeilen überspringen (lesbare weitere Zeilen zählen); unlesbare Datei → `[]`.
-2. **`compute_kpis(records, since=None, repo_slug=None, signals=None)`**: `signals`
-   parallel zu `records` (fehlend → keine Signale). Die Filterung (`--since`,
-   `--repo-slug`, ungültige Records) arbeitet auf Paaren, damit dieselben Läufe zählen.
-   Nur in `total` (nicht in `_metrics`, `groups[]` unverändert) zusätzlich:
-   - `retro_causes`: `Counter` über `item["cause"]` (nur `dict`-Items mit
-     `str`-`cause`) aller lesbaren Retros → `dict`;
-   - `retro_runs`: Anzahl Läufe mit lesbarem `retro.json` (auch `items: []`);
-   - `ratings`: `{"good": 0, "bad": 0}`; je Lauf die letzte Zeile in Dateireihenfolge
-     mit `kind == "rate"` und `value in ("good", "bad")` zählt;
-   - `finding_feedback`: `{"valid": 0, "noise": 0}` über alle Zeilen mit
-     `kind == "finding"` und `value in ("valid", "noise")`.
-   Leeres Ergebnis: `{}`, `0`, Nullzähler. `skipped` (nur ungültige `run-record.json`),
-   `candidates`, Gruppen unverändert.
-3. **CLI** `kpis`: neuen Lese-Helfer nutzen, `signals` übergeben. `_format_kpis`: direkt
-   nach der Tabelle (unter der `gesamt`-Zeile) eine Zeile mit `retro_runs`,
-   `retro_causes` (sortierte `k=v`), `ratings`, `finding_feedback` — nur Formatierung,
-   Layout nicht gepinnt. Weiterhin keine Schreibzugriffe.
-
-### B7 — Doku und Changelog (Scope §9)
-
-- Beide Handbücher synchron (EN englisch, DE deutsch, inhaltlich gleich), §11.1
-  „Ledger": Retro (Auslösung nur bei Endphase `done`/`escalated`, nicht bei Gate-Pause,
-  `AgentRunError`, Dry-Run oder vorhandenem `retro.json`; Schema von `retro.json`,
-  `cause`-Werte, max. 10 Einträge, Beleg-Regel, `retro.md`, `retro`-Event mit
-  `written`/`failed`, Fehlerverhalten ohne Einfluss auf Exit/Phase, Kosten in
-  `totals`); `adw rate`/`adw feedback` (Aufruf, `feedback.jsonl`-Zeilenformat,
-  Exit-Codes, Ledger-Voraussetzung „erst exportieren", Commit-Nachricht, Push
-  fail-open, Überleben beim Re-Export); `adw kpis`-Felder `retro_causes`,
-  `retro_runs`, `ratings` („letzte Bewertung je Lauf zählt"), `finding_feedback`.
-  §7 um `adw rate` und `adw feedback` mit Verweis auf §11.1.
-- `CHANGELOG.md`/`.de.md`: oberste Sektion `## [0.35.0] — Unreleased` mit
-  `### Added` (Retro-Agent, `adw rate`, `adw feedback`, neue `kpis`-Felder), im Stil
-  der vorhandenen Einträge. `pyproject.toml` unverändert.
+- `docs/ADW-HANDBOOK.md` / `.de.md` synchron: §3.1-Tabelle um `effort.<agent>`
+  (Registry-Defaults E1, Werte `low|medium|high|xhigh|max|default`, `default` = SDK-
+  Default auch für `low`-Agenten, nicht aufgeführte behalten Default) und
+  `codex.reasoning_effort` (`low|medium|high|xhigh`, Default `high`, Authoring und
+  Review, als `-c model_reasoning_effort=…`); Validierungsabsatz um unbekannten
+  Agentennamen/unzulässige Stufe ergänzen; §5.4 um beide Pins (`resume`/`approve`
+  verwenden die Start-Werte, ein neuer Run die geänderte Config). Sichtbarkeit: Feld
+  `effort` im `agent.run`-Start, argv in `codex.*`-Starts, `agents[].effort`/
+  `codex_effort` im Run-Record — ein Satz, wo der Run-Record beschrieben ist.
+- `examples/config.yaml`: auskommentierter Block im Stil von `breakpoints` mit dem
+  `effort:`-Beispiel aus der Spec und `codex: reasoning_effort: high`.
+- `CHANGELOG.md` / `.de.md`: oberste Sektion `## [0.36.0] — Unreleased` mit
+  `### Added` (Config `effort`, `codex.reasoning_effort`, Ledger-Felder) und
+  `### Changed` (Build-, Spec-, Plan-, Retro-Agent laufen jetzt auf `low`; Codex läuft
+  ausdrücklich auf `high` — behebt F17). `pyproject.toml` bleibt `0.35.0`.
 
 ## Reihenfolge
 
 B1 → B2 → B3 → B4 → B5 → B6 → B7. Jeden neuen Test zuerst rot sehen.
 
-## Tests (Richtwert 12–16 neue Tests; geplant 14)
+## Tests (Richtwert 8–12 neue Tests; geplant 10)
 
-Hermetik: kein echtes Modell, kein `~/.adw/ledger` (`_isolate_ledger` autouse, für
-Ledger-Tests die bestehende Fixture `ledger`). CLI über `typer.testing.CliRunner`.
-
-**Seam für Läufe mit Retro** (Retro läuft nie im Dry-Run): Test-Helfer in
-`tests/test_retro.py`, der `cli_mod._build_context` per `monkeypatch` durch eine
-Funktion ersetzt, die für einen **Nicht**-Dry-Run-State denselben Kontext wie der
-Dry-Run baut (`dry.config(config)`, `cli_mod._dry_run_runners()` mit zusätzlich
-`agents.script("retro_agent", <Antwort>)` bzw. einem Runner, der für `retro_agent`
-`AgentRunError` wirft, `dry.glab`/`dry.gh`, `sleep=lambda s: None`, übergebener
-`emitter`). Lauf mit `adw run --issue … --gates none --repo <target_repo>`. Aufrufe
-(Agent, `cwd`) über `MockAgentRunner.calls` prüfen; den Runner dafür im Helfer
-festhalten. Eskalation/`AgentRunError`/Gate-Pause wie in den bestehenden
-`tests/test_cli.py`-Tests über gepatchte Runner bzw. `--gates plan` erzeugen. Reicht
-ein schmalerer Seam (z. B. direkter Aufruf von `retro.run_retro(ctx)` innerhalb einer
-echten `run`-Spanne) für einzelne Fälle, ist das zulässig — AC 1–3 und 5 müssen aber
-über den CLI-Pfad laufen.
+Hermetik: kein echtes Modell, kein echtes `codex`; Options-Bau über die bestehende
+`captured_query`-Fixture, CLI über `typer.testing.CliRunner` mit `--dry-run`.
 
 | AC | Test (Kurzbeschreibung) | Ort |
 |----|-------------------------|-----|
-| 1 | Lauf bis `done`: `retro_agent` genau einmal, `cwd` = Run-Ordner; `retro.json` mit allen §5-Schlüsseln (`schema_version 1`, `phase "done"`, `model == OPUS`), `retro.md` vorhanden und enthält alle Feldwerte; `agent.run`-Span der Retro hat `parent` = `run`-Span-ID und liegt vor dessen End-Event; Event `retro` `{"outcome": "written", "items": n}` | `tests/test_retro.py` |
-| 2 | Eskalierter Lauf → Retro mit `phase "escalated"`, Exit 1 (der `typer.Exit` propagiert) | dto. |
-| 2 | Parametrisiert: Gate-Pause (Exit 2) und `AgentRunError` im Build (Exit 1, Phase bleibt) → kein `retro_agent`-Aufruf, kein `retro.json` | dto. |
-| 3 | Parametrisiert: Retro wirft `AgentRunError` / liefert Nicht-JSON / 11 Einträge / unbekannte `cause` / Zusatzschlüssel / `retro.md`-Schreiben scheitert nach teilweisem Schreiben (gepatchter Renderer bzw. `write_text`, `retro.json` liegt schon) / Schreiben scheitert **und** `unlink` wirft (gepatcht) → Exit-Code und Phase wie beim Lauf ohne Retro-Fehler, `run`-End-`status` unverändert, Event `retro` `failed` mit `reason` (im Unlink-Fall mit Bereinigungs-Zusatz), stderr-Meldung, weder `retro.json` noch `retro.md` vorhanden (im Unlink-Fall: Lauf endet trotzdem normal) | dto. |
-| 3 | Eskalierter Lauf mit fehlschlagender Retro → Exit 1, Phase `escalated`, `status "escalated"` | dto. |
-| 4 | Beleg-Prüfung direkt: Einträge mit existierender/nicht existierender `seq`, existierendem/nicht existentem/absolutem/`..`-Pfad, ohne Belege, gemischt (ein gültiger reicht) → richtige Einträge behalten, `dropped` stimmt; alle verworfen → `items: []`, Event `written` mit `items 0` | dto. |
-| 5 | Dry-Run bis `done` → kein `retro_agent`-Aufruf, kein `retro.json` | dto. |
-| §2 | Vorhandenes `retro.json` → kein zweiter Aufruf, Datei byte-gleich (z. B. Lauf bis Plan-Gate, `retro.json` vorlegen, `approve` bis `done`) | dto. |
-| 6 | Export eines Laufs mit `retro.json`/`retro.md` im Run-Ordner → beide im Ledger-Bündel | `tests/test_ledger.py` |
-| 7 | `adw rate <id> bad --note x` nach Export: genau eine Zeile mit `ts` (UTC), `kind "rate"`, `value "bad"`, `note "x"`, ohne `finding_key`; Ledger-HEAD-Nachricht `feedback <id> rate`; erneuter Export → `feedback.jsonl` byte-gleich; zweites `rate` hängt an (zwei Zeilen) | `tests/test_feedback.py` |
-| 8 | `adw feedback` mit eindeutigem Präfix → voller `finding_key`, `kind "finding"`, Commit `feedback <id> finding`; parametrisiert mehrdeutig/unbekannt → Exit 1, `feedback.jsonl` nicht angelegt bzw. unverändert, kein neuer Commit | dto. |
-| 9 | Parametrisiert: Lauf nicht exportiert / kein Ledger → Exit 1, kein Lauf-Ordner, keine Datei, kein Commit; ungültiger Wert (`rate … meh`) → Exit ≠ 0, nichts geschrieben | dto. |
-| 10 | Fixture-Ledger (Läufe mit Retro inkl. `items: []`, ohne Retro/Feedback, mehrfache `rate`-Zeilen good→bad, `finding`-Zeilen) → `--json` `total.retro_causes`, `retro_runs`, `ratings` (letzte zählt), `finding_feedback` exakt; Textausgabe enthält die Werte; `groups[]`-Schlüssel unverändert | `tests/test_kpis.py` |
-| 10 | Unlesbares `retro.json` und kaputte `feedback.jsonl`-Zeile (lesbare Zeilen daneben zählen) → ignoriert, Exit 0, `skipped` unverändert | dto. |
-| 11 | `uv run ruff check .`, `uv run pytest -x -q` | Gate |
+| 1 | Options-Bau: `REGISTRY["build_agent"]` → `options.effort == "low"`; `REGISTRY["final_reviewer"]` → `options.effort is None` (kein Keyword übergeben). Dazu eine Dict-Gleichheit `{name: spec.effort}` über `REGISTRY` gegen die E1-Tabelle (eine Assertion, keine Matrix) | `tests/test_agents.py` |
+| 2 | `effective_spec` parametrisiert mit `{build_agent: medium, final_reviewer: high, retro_agent: default}`: `medium`, `high`, `None`; nicht aufgeführter `spec_agent` bleibt `low`, `e2e_triage` bleibt `None`; übrige Felder unverändert | dto. |
+| 3, 6 | `AdwConfig.load` parametrisiert → `ConfigError`: unbekannter Agentenname, unbekannte Claude-Stufe, `effort` kein Mapping / `null`, `codex.reasoning_effort` `max` / `default` / unbekannt; Gegenprobe: ohne Schlüssel `effort == {}` und `codex.reasoning_effort == "high"` | `tests/test_config.py` |
+| 3 | CLI `adw run --dry-run` mit unbekanntem Agentennamen unter `effort:` → Exit ≠ 0, kein Run-Ordner/State angelegt | `tests/test_cli.py` |
+| 4 | Dry-Run bis `done` (Mock-Runner): `agent.run`-Start von `build_agent` hat `effort "low"`, von `final_reviewer` `effort null` | dto. |
+| 4 | `_agent_run` mit `SdkAgentRunner` (`captured_query`) und Config-Übersteuerung `build_agent: high`: Start-Payload `effort "high"` und `options.effort == "high"` | `tests/test_agents.py` |
+| 5 | Dry-Run mit `effort: {build_agent: medium}` und `codex.reasoning_effort: low` bis Plan-Gate; Config auf `high`/`xhigh` ändern; `adw approve` → `build_agent`-Start `effort "medium"`; `_config_for_continuation(...)` liefert `effort` und `codex.reasoning_effort` gepinnt (`medium`/`low`). Zweiter Fall: Run ohne `effort:` gestartet, Config danach um `build_agent: high` ergänzt → Fortsetzung bleibt bei `low` (leeres Mapping gepinnt) | `tests/test_cli.py` |
+| 6 | Parametrisiert: `CodexRunner()` / `CodexRunner(reasoning_effort="xhigh")` → `effective_argv` und `effective_author_argv` enthalten das benachbarte Paar `-c`, `model_reasoning_effort=high` bzw. `=xhigh`; ausgeführter argv (`captured_run`) identisch; `_build_context` (Nicht-Dry-Run) reicht `config.codex.reasoning_effort` an den Runner | `tests/test_codex.py` |
+| 7 | Parametrisiert über Events: kein Codex-Start → `null`; erster Start ohne Paar, späterer mit → `null`; erster `codex.author` mit `low`, späterer Review mit `high` → `"low"`; `agents[].effort` aus Payload (`"low"`, explizit `null`, fehlendes Feld → `null`) | `tests/test_ledger.py` |
+| 7 | Golden-File angepasst (B6.4) — bestehender Test, kein neuer | dto. |
+| 8 | Sichtprüfung Handbuch EN/DE, `examples/config.yaml`, Changelogs, `pyproject.toml` | — |
+| 9 | `uv run ruff check .`, `uv run pytest -x -q` | Gate |
 
-Bestehende Tests in `tests/test_kpis.py`, die `total` exakt vergleichen
-(`test_metrics_per_version_and_total_match_hand_computed_values`,
-`test_empty_ledger_gives_empty_result_without_invented_values`), um die vier neuen
-Schlüssel mit Leerwerten ergänzen — keine neuen Tests. Keine weiteren Tests (keine
-Matrix über Rollentext, `retro.md`-Layout, Zeitzonen, Push-Fehler oder einzelne
-Feldtypen).
+Bestehende exakte Vergleiche anpassen statt neue Tests: argv in
+`tests/test_codex.py:622/626` (und weitere, die `_argv` exakt prüfen), exakte
+`agent.run`-Start-Payload-Schlüssel (z. B. `tests/test_instrumentation.py`,
+`tests/test_codex_author_span.py`), ggf. `AgentSpec`-Gleichheiten. Keine weiteren
+Tests (keine Matrix über alle Stufen oder alle Agenten im Options-Bau).
 
 ## Gates / Definition of Done
 
 - `uv run ruff check .` und `uv run pytest -x -q` grün (in Build-Sandboxes ggf. direkt
   `.venv/bin/python -m pytest -x -q`); bestehende Suite grün.
-- AC 1–11 durch Tests belegt; kein Test ruft ein echtes Modell oder berührt
-  `~/.adw/ledger`.
-- Retro ändert nie Exit-Code, Phase oder `run`-End-`status`; keine neue Dependency.
-- Handbücher und Changelogs EN/DE synchron; `pyproject.toml` unverändert; GUI,
-  `run-record.json`-Schema und Kontrollfluss unverändert.
+- AC 1–7 durch Tests belegt, AC 8 durch Sichtprüfung.
+- Keine zweite Default-Tabelle; Modelle, `max_turns`/`timeout_s`, `codex.timeout`,
+  Phasen/Gates/Review-Entscheidungen/Retro-Zeitpunkt, `pyproject.toml`-Version
+  unverändert; `schema_version` bleibt 1; keine neue KPI-/GUI-Darstellung.
+- Handbücher und Changelogs EN/DE inhaltlich synchron.
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-- Wochenschleife `adw improve` (W15), Gruppierung/Clustering der Retros.
-- Retro bei Gate-Pause, Retro nachträglich für alte Läufe, Retro neu erzeugen
-  (Überschreiben eines vorhandenen `retro.json`).
-- Effort für den Retro-Agenten (W2).
-- Feedback in der GUI, Feedback ohne Ledger (z. B. im Run-Ordner).
-- Neue Spalten pro Version in `adw kpis`.
-- Validierung, dass Belege inhaltlich zum Eintrag passen; Prüfung über Existenz von
-  `seq` bzw. Datei hinaus.
-- Bearbeiten oder Löschen von Feedback-Zeilen, Deduplizierung von Feedback.
-- Retry-Queues, persistente Abschlussmarker oder ein Transaktions-/Recovery-System für
-  Retro oder Ledger-Schreibvorgänge. Agentenlimits (W1), Events, Repo-Lock und der
-  fail-open Export sind die vorgesehenen Backstops.
+- Effort je Phase oder je Runde (z. B. höher in Fix-Runden).
+- Automatische Effort-Wahl, Hill Climbing (W7).
+- Modellwechsel je Agent per Config.
+- Hervorhebung des Effort in der GUI (steht im Start-Payload und ist dort sichtbar).
+- Nachträgliches Befüllen von `effort`/`codex_effort` für Altläufe im Ledger (bleiben `null`).
+- Überwachungs-, Retry- oder Fallback-Mechanismen, die eine bestimmte Reasoning-Tokenzahl
+  oder Kostenersparnis erzwingen. Gates, unabhängiges Review, Limits und Events bleiben
+  die Backstops.
+- Zusätzliche persistente Effort-Historien neben dem Pinning im vorhandenen Run-State,
+  den Events und den Ledger-Feldern.

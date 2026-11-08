@@ -1,258 +1,126 @@
-# Interface contract — W14: Jeder Lauf bekommt einen Rückblick — und du ein Urteil
+# Interface contract — W2: Effort pro Agent — und Codex denkt wieder mit
 #
-# Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec (DoD)
-# pinnt dieser Contract ausschließlich extern beobachtbare Flächen:
-#   1. CLI `adw rate` und `adw feedback` (Argumente, Optionen, Exit-Codes, Seiteneffekte),
-#   2. Dateien `retro.json`, `retro.md` (Struktur) und `feedback.jsonl` (Zeilenschema),
-#   3. das Punkt-Event `retro` (Typ und Payload) und wann die Retro läuft,
-#   4. die neuen Felder im `total`-Objekt von `adw kpis --json`,
-#   5. Ledger-Bündel und Commit-Nachricht des Feedbacks.
+# Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec pinnt dieser
+# Contract ausschließlich extern beobachtbare Flächen — additiv zu den bestehenden:
+#   1. Config-Schlüssel `effort` und `codex.reasoning_effort` (Werte, Defaults, Validierung, Pinning),
+#   2. das Feld `effort` im `agent.run`-Start-Payload,
+#   3. das argv-Paar in den `codex.review`-/`codex.author`-Start-Events,
+#   4. die run-record.json-Felder `agents[].effort` und `codex_effort`.
 #
-# NICHT Teil des Contracts: interne Helfer, Module und Signaturen (z. B. run_retro,
-# compute_kpis-Parameter), Rollentext und Auftragstext des Agenten, exaktes
-# Textlayout (retro.md, `adw kpis` ohne --json, stderr-Meldungen — nur ihr
-# Vorhandensein). Keine HTTP-Routen, kein Config-Feld.
+# NICHT Teil des Contracts: interne Helfer und Signaturen (z. B. effective_spec,
+# CodexRunner-Parameter, _argv), der Bau von ClaudeAgentOptions (steht im Plan, B3),
+# Namen der State-Felder für die Pins, Position des Paars im argv, argv des
+# Mock-Codex-Runners. Keine HTTP-Routen, keine Templates, kein neuer Event-Typ.
+# Unveränderte Felder der beschriebenen Flächen bleiben gültig.
 
 version: 1
-scope: W14
+scope: W2
 workstreams:
   - backend
 
-ledger:
-  root: "$ADW_LEDGER; Default ~/.adw/ledger (~ expandiert)"
-  run_directory: "runs/<slug>/<run_id>/"
-  slug: "Repository-Slug wie beim Export; '/' wird im Verzeichnisnamen durch '__' ersetzt"
-  bundle_adds: ["retro.json", "retro.md"]    # sofern im Run-Ordner vorhanden
-  feedback_survives_export: "eine vorhandene feedback.jsonl im Ledger-Lauf-Ordner bleibt beim (Re-)Export byte-gleich"
-  commit_message_feedback: "feedback <run_id> rate | feedback <run_id> finding"
-  export_unchanged: "sonstige Export-Mechanik (Commit-Text, fail-open Push, Idempotenz, Dry-Run-Skip)"
+types:
+  ClaudeEffortOverride:                        # Wert im Config-Mapping `effort`
+    type: string
+    enum: [low, medium, high, xhigh, max, default]
+  ClaudeEffectiveEffort:                       # wirksamer Wert in Payload und Run-Record
+    type: [string, "null"]
+    enum: [low, medium, high, xhigh, max, null]
+  CodexReasoningEffort:                        # Config-Wert; default und max unzulässig
+    type: string
+    enum: [low, medium, high, xhigh]
+  RecordedCodexEffort:                         # Run-Record; aus dem argv gelesen, nicht validiert
+    type: [string, "null"]
 
-retro:
-  agent:                                      # sichtbar im agent.run-Span-Start-Payload
-    name: retro_agent
-    model: claude-opus-5-5                    # agents.OPUS
-    max_turns: 60
-    timeout_s: 900
-    tools: [Read, Grep, Glob]
-    cwd: ".adw/runs/<run_id>/"
-  trigger:
-    commands: [run, resume, approve]
-    when: "nach _execute, innerhalb der run-Spanne (agent.run.parent = run-Span), auch wenn _execute mit typer.Exit endet"
-    condition: "state.phase in {done, escalated} UND kein Dry-Run UND kein retro.json im Run-Ordner"
-    never: "Gate-Pause (Exit 2), AgentRunError (Exit 1, Phase fortsetzbar), Dry-Run, vorhandenes retro.json, erneuter CLI-Aufruf für einen bereits fertigen Lauf"
-    order: "Ausführung → Retro (inkl. Punkt-Event) → Ende der run-Spanne (totals enthalten Retro-Kosten/Tokens) → Ledger-Export"
-    invariants: "Exit-Code, Phase und run-End-status sind mit und ohne Retro (auch fehlgeschlagene) identisch; ein anstehender typer.Exit propagiert unverändert"
-  failure: "jede Ausnahme (AgentRunError, kein parsebares JSON, Schemaverletzung, IO) → Meldung auf stderr + Event retro outcome=failed; weder retro.json noch retro.md bleiben zurück (auch bei teilweise geschriebener Datei); scheitert die Bereinigung selbst, ändert auch das weder Exit-Code noch Phase; kein zusätzlicher Logging-Kanal, kein persistenter Fehlerzustand"
-
-  answer_schema:                              # Antwort des Agenten; strikt (extra keys verboten auf beiden Ebenen)
-    summary: str
-    items: "list[item], 0..10"               # > 10, unbekannte Schlüssel, unbekannte cause, kein JSON → Fehlschlag
-    item:
-      problem: str
-      resolution: str
-      better: str
-      cause: "#/schemas/cause"
-      lever: str
-      evidence: "list[str], optional (Default [])"   # fehlend/leer/ungültig ist KEIN Schemafehler → evidence_rule
-  evidence_rule:
-    valid_if_any:
-      - "'seq:<n>' und events.jsonl des Laufs enthält einen Record mit seq == n"
-      - "relativer Pfad (nicht absolut, keine '..'-Komponente), der im Run-Ordner als Datei existiert"
-    item_kept: "mindestens ein gültiger Beleg; Eintrag bleibt dann vollständig (auch ungültige Belege darin); sonst verworfen (zählt in dropped)"
-    all_dropped: "erfolgreiche Retro mit items: [] (Event outcome=written, items 0)"
-    not_checked: "inhaltliche Passung der Belege"
-
-files:
-  retro_json:
-    local_path: ".adw/runs/<run_id>/retro.json"
-    ledger_path: "runs/<slug>/<run_id>/retro.json"
-    schema: "#/schemas/retro"
-    formatting: {sorted_keys: true, indent: 2, encoding: UTF-8}
-  retro_md:
-    local_path: ".adw/runs/<run_id>/retro.md"
-    ledger_path: "runs/<slug>/<run_id>/retro.md"
-    rendering: "deterministisch vom Code aus retro.json; kein zweiter Agententext"
-    structure:
-      - "Überschrift mit run_id und phase"
-      - "Zusammenfassung (summary)"
-      - "je behaltenem Eintrag ein Abschnitt mit problem, resolution, better, cause, lever, evidence"
-    exact_layout: unspecified
-  feedback_jsonl:
-    ledger_path: "runs/<slug>/<run_id>/feedback.jsonl"   # nur im Ledger, keine lokale Kopie
-    format: "JSON Lines; genau ein Objekt je erfolgreichem Aufruf; nur anhängen, bestehende Zeilen bleiben"
-    creation: "bei Bedarf im vorhandenen Ledger-Lauf-Ordner angelegt; nie ein Ordner"
-    line_schema:
-      oneOf:
-        - $ref: "#/schemas/rate_feedback"
-        - $ref: "#/schemas/finding_feedback"
+config:
+  file: .adw/config.yaml
+  effort:
+    location: top-level
+    optional: true
+    type: "mapping <agent_name> -> ClaudeEffortOverride"
+    agent_name:
+      enum: [build_agent, spec_agent, plan_agent, retro_agent, spec_synthesis, plan_synthesis, final_reviewer, e2e_triage, log_analyst]
+      description: "registrierte Agentennamen (REGISTRY)"
+    semantics:
+      omitted: "keine Übersteuerung; Registry-Defaults gelten"
+      unlisted_agent: "behält seinen Registry-Default"
+      default_value: "SDK-Default: der Agent läuft ohne expliziten Effort; beobachtbar als null im agent.run-Start-Payload und im Run-Record — auch für Agenten mit Registry-Default low"
+      concrete_value: "der Agent läuft mit dieser Stufe; beobachtbar als Stufe im agent.run-Start-Payload und im Run-Record"
+    registry_defaults:                         # einzige Default-Tabelle (REGISTRY)
+      build_agent: low
+      spec_agent: low
+      plan_agent: low
+      retro_agent: low
+      spec_synthesis: null
+      plan_synthesis: null
+      final_reviewer: null
+      e2e_triage: null
+      log_analyst: null
+    example: {build_agent: medium, final_reviewer: high, retro_agent: default}
+  codex_reasoning_effort:
+    key: codex.reasoning_effort
+    optional: true
+    type: CodexReasoningEffort
+    default: high
+    applies_to: [authoring, code_review]       # Spec-/Plan-Authoring und jedes Review
+  validation:
+    error: ConfigError
+    timing: "beim Start (run/resume/approve), bevor ein Run angelegt wird; kein Run-Ordner, kein State"
+    rejects:
+      - "unbekannter Agentenname unter effort"
+      - "unzulässige Stufe unter effort oder in codex.reasoning_effort (dort auch default und max)"
+      - "falsche Struktur oder Typ, einschließlich null statt Mapping oder Stufe"
+      - "unbekannte Schlüssel (AdwConfig/CodexConfig bleiben extra=forbid)"
+  pinning:
+    when: "beim Run-Start (adw run), im bestehenden Run-State, analog pinned_breakpoints"
+    pinned: [effort, codex.reasoning_effort]
+    empty_mapping: "ein leeres oder fehlendes effort-Mapping wird als leeres Mapping gepinnt (echte Pinnung)"
+    continuation: "resume und approve verwenden die gepinnten Werte, auch nach Änderung der config.yaml"
+    new_run: "ein neuer adw run verwendet die aktuelle Config"
+    legacy_state: "State ohne Pins (vor W2) folgt der Config"
 
 events:
-  retro:
-    type: retro
-    kind: point                               # im events.jsonl des Laufs, innerhalb der run-Spanne
-    envelope: "bestehendes Event-Format unverändert"
-    payload:
-      oneOf:
-        - type: object
-          additionalProperties: false
-          required: [outcome, items]
-          properties:
-            outcome: {const: written}
-            items: {type: integer, minimum: 0, maximum: 10, description: "Anzahl behaltener Einträge"}
-        - type: object
-          additionalProperties: false
-          required: [outcome, reason]
-          properties:
-            outcome: {const: failed}
-            reason: {type: string}
+  agent_run_start:
+    type: agent.run
+    kind: start
+    added_payload_fields:
+      effort:
+        type: ClaudeEffectiveEffort
+        required: true
+        description: "wirksamer Effort dieses Laufs = Registry-Default, übersteuert durch den gepinnten effort-Eintrag; SDK-Default als JSON-null, niemals als String default"
+    runners: "identisch beim echten SdkAgentRunner und beim Mock-Runner (Dry-Run)"
+    unchanged: "alle bisherigen Payload-Felder"
+  codex_start:
+    types: [codex.review, codex.author]
+    kind: start
+    argv_contains:
+      pair: ["-c", "model_reasoning_effort=<wirksamer codex.reasoning_effort>"]
+      adjacent: true                           # "-c" direkt gefolgt vom Wert
+      position: unspecified
+    scope: "echter CodexRunner (jeder codex exec); der Start-argv ist identisch mit dem ausgeführten argv"
+    mock: "argv des Mock-Codex-Runners ist nicht gepinnt und trägt das Paar nicht"
+    unchanged: "übrige argv-Elemente (Modell, Sandbox, mcp_servers, …) und Payload-Felder"
 
-cli:
-  rate:
-    usage: "adw rate <RUN_ID> good|bad [--note TEXT] [--repo PFAD]"
-    level: top-level
-    arguments:
-      RUN_ID: {type: string, required: true}
-      VALUE: {type: string, enum: [good, bad], required: true}
-    options:
-      --note: {type: string, default: null}
-      --repo: {type: path, default: "aktuelles Verzeichnis; bestimmt den Ledger-Slug wie beim Export"}
-    success:
-      exit_code: 0
-      append: "genau eine Zeile gemäß #/schemas/rate_feedback an feedback.jsonl"
-      commit_message: "feedback <run_id> rate"
-  feedback:
-    usage: "adw feedback <RUN_ID> --finding <PRÄFIX> valid|noise [--note TEXT] [--repo PFAD]"
-    level: top-level
-    arguments:
-      RUN_ID: {type: string, required: true}
-      VALUE: {type: string, enum: [valid, noise], required: true}
-    options:
-      --finding: {type: string, required: true, description: "Präfix, der genau einen finding_key aus findings[] des run-record.json im Ledger-Lauf-Ordner trifft (wiederholte Vorkommen desselben Keys = ein Kandidat); gespeichert wird der volle Key"}
-      --note: {type: string, default: null}
-      --repo: "wie bei adw rate"
-    success:
-      exit_code: 0
-      append: "genau eine Zeile gemäß #/schemas/finding_feedback an feedback.jsonl"
-      commit_message: "feedback <run_id> finding"
-    prefix_error:
-      condition: "Präfix trifft 0 oder > 1 finding_key"
-      exit_code: 1
-      stderr: "Meldung mit gekürzter Kandidatenliste"
-      effects: "nichts geschrieben; feedback.jsonl unverändert bzw. weiterhin nicht vorhanden; kein Commit"
-  common:
-    ledger: "Auflösung wie beim Export (ADW_LEDGER, Default ~/.adw/ledger); Ziel runs/<slug>/<run_id>/"
-    lock: "Repo-Lock wie die übrigen Kommandos; kein Modellaufruf"
-    missing_ledger_or_run:
-      exit_code: 1
-      stderr: "Meldung (kein/unlesbares Ledger bzw. Lauf nicht exportiert)"
-      effects: "nichts geschrieben, kein Ordner angelegt, kein Commit"
-    invalid_value:
-      exit_code: "ungleich 0"
-      effects: "nichts geschrieben"
-    push:
-      behavior: "nach dem Commit Push wie beim Export"
-      failure: "fail-open: lokaler Commit bleibt, Exit-Code bleibt 0"
-
-kpis:
-  command: "adw kpis [--since N] [--repo-slug SLUG] [--json]"
-  json_additions:
-    location: total                           # nur hier; groups[] ohne neue Felder
-    schema: "#/schemas/kpi_total_additions"
-  source: "optionale retro.json und feedback.jsonl im Ledger-Lauf-Ordner jedes ausgewerteten Laufs"
-  filters: "dieselben --since/--repo-slug-Filter wie für die Run-Records; Läufe ohne diese Dateien bleiben auswertbar"
-  aggregation:
-    retro_causes: "Anzahl aller Retro-Einträge je cause über alle lesbaren retro.json"
-    retro_runs: "Anzahl Läufe mit lesbarem retro.json, einschließlich items: []"
-    ratings: "je Lauf zählt nur die letzte lesbare rate-Zeile in Dateireihenfolge"
-    finding_feedback: "alle lesbaren finding-Zeilen zählen; keine Letzte-zählt-Regel"
-  unreadable: "unlesbares retro.json und unlesbare feedback-Zeilen werden ignoriert (lesbare Zeilen daneben zählen); kein Traceback, Exit unverändert; skipped zählt weiterhin nur ungültige run-record.json"
-  text_output: "neue Kennzahlen unter der Gesamtzeile; exaktes Layout nicht festgelegt"
-  unchanged: "groups[], candidates, bestehende Kennzahlen; adw kpis schreibt nichts"
-
-schemas:
-  cause:
-    type: string
-    enum: [prompt, context_missing, gate, orchestrator, issue_quality, model, target_repo]
-
-  retro_item:                                 # behaltener Eintrag in retro.json (Antwortschema, unverändert)
-    type: object
-    additionalProperties: false
-    required: [problem, resolution, better, cause, lever, evidence]
-    properties:
-      problem: {type: string}
-      resolution: {type: string}
-      better: {type: string}
-      cause: {$ref: "#/schemas/cause"}
-      lever: {type: string}
-      evidence:
-        type: array
-        items: {type: string}
-        description: "wie geliefert; mindestens ein Beleg ist gültig nach evidence_rule"
-
-  retro:
-    type: object
-    additionalProperties: false
-    required: [schema_version, run_id, phase, summary, items, dropped, model]
-    properties:
-      schema_version: {const: 1}
-      run_id: {type: string}
-      phase: {type: string, enum: [done, escalated]}
-      summary: {type: string}
-      items:
-        type: array
-        maxItems: 10
-        items: {$ref: "#/schemas/retro_item"}
-      dropped: {type: integer, minimum: 0, description: "wegen fehlender gültiger Belege verworfene Einträge"}
-      model: {type: string, description: "Modell des retro_agent"}
-
-  rate_feedback:
-    type: object
-    additionalProperties: false
-    required: [ts, kind, value, note]
-    properties:
-      ts: {type: string, format: date-time, description: "ISO-8601, UTC"}
-      kind: {const: rate}
-      value: {type: string, enum: [good, bad]}
-      note: {type: [string, "null"]}
-
-  finding_feedback:
-    type: object
-    additionalProperties: false
-    required: [ts, kind, value, note, finding_key]
-    properties:
-      ts: {type: string, format: date-time, description: "ISO-8601, UTC"}
-      kind: {const: finding}
-      value: {type: string, enum: [valid, noise]}
-      note: {type: [string, "null"]}
-      finding_key: {type: string, description: "vollständiger finding_key"}
-
-  kpi_total_additions:                        # nur die neuen Felder; bestehende total-Felder bleiben
-    type: object
-    required: [retro_causes, retro_runs, ratings, finding_feedback]
-    properties:
-      retro_causes:
-        type: object
-        additionalProperties: {type: integer, minimum: 0}
-        description: "{<cause>: Anzahl}; leer {} ohne Retros"
-      retro_runs: {type: integer, minimum: 0}
-      ratings:
-        type: object
-        additionalProperties: false
-        required: [good, bad]
-        properties:
-          good: {type: integer, minimum: 0}
-          bad: {type: integer, minimum: 0}
-      finding_feedback:
-        type: object
-        additionalProperties: false
-        required: [valid, noise]
-        properties:
-          valid: {type: integer, minimum: 0}
-          noise: {type: integer, minimum: 0}
+run_record:
+  file: run-record.json
+  schema_version: 1                            # additiv, unverändert
+  fields:
+    agents[].effort:
+      type: ClaudeEffectiveEffort
+      required: true
+      source: "Feld effort des jeweiligen agent.run-Start-Payloads"
+      null_when: "Feld fehlt (Altlauf) oder ist null"
+    codex_effort:
+      type: RecordedCodexEffort
+      required: true
+      source: "Wert von model_reasoning_effort=<wert> im payload.argv des ERSTEN Events mit kind=start und type codex.review oder codex.author, in Ereignisreihenfolge"
+      null_when: "kein solcher Start, oder sein argv fehlt bzw. enthält kein model_reasoning_effort"
+      selection_rule: "ausschließlich der erste passende Start; fehlt dort die Einstellung, keine Suche in späteren Starts"
+      no_backfill: "keine heutigen Config-, Registry- oder State-Werte als Ersatz; Altläufe bleiben null"
 
 unchanged:
-  - run-record.json (schema_version 1)
-  - Phasen, Gates, Review-Loops, Exit-Codes
-  - Export-Mechanik außer bundle_adds und feedback_survives_export
-  - GUI
-  - pyproject.toml-Version (0.34.0)
+  - Modelle je Agent (REGISTRY)
+  - max_turns, timeout_s, codex.timeout
+  - Phasen, Gates, Review-Entscheidungen, Retro-Zeitpunkt
+  - GUI, KPI-Auswertung
+  - run-record.json schema_version (1)
+  - pyproject.toml-Version (0.35.0)
