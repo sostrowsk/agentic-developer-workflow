@@ -52,9 +52,9 @@ def folder(ledger: Path, run_id: str, slug: str = "acme/widget") -> Path:
 
 
 def add_run(ledger, run_id, days, cost, *, phase="done", findings=(), causes=(),
-            feedback=(), slug="acme/widget", problem=None):
+            feedback=(), slug="acme/widget", problem=None, schema=1, **extra):
     record = {
-        "schema_version": 1, "run_id": run_id, "repo_slug": slug,
+        **extra, "schema_version": schema, "run_id": run_id, "repo_slug": slug,
         "issue_title": f"Issue {run_id}", "adw_version": "0.36.3",
         "started_at": ago(days), "phase": phase, "cost_usd": cost,
         "findings": [
@@ -92,6 +92,8 @@ def install(ledger: Path) -> None:
     model 1×3=3. ``a.py|Bug`` recurs in r1/r2; ``b.py|Solo`` only in r3 (twice).
     r2 escalated, r3 rated bad, r4 bad→good (not a candidate)."""
     add_run(ledger, "r1", 1, 10.0, causes=["orchestrator", "orchestrator"], problem=LONG,
+            circuit_breakers=3, approvals=2, review_rounds=4,
+            agents=[{"agent": "build_agent", "cost_usd": 10.0}],
             findings=[("a.py|Bug", "P1"), ("a.py|Bug", "P1")],
             feedback=[("finding", "valid", "a.py|Bug")])
     add_run(ledger, "r2", 2, 1.0, phase="escalated", causes=["gate"],
@@ -104,6 +106,9 @@ def install(ledger: Path) -> None:
     add_run(ledger, "r5", 5, 4.0, causes=["prompt"])
     add_run(ledger, "o1", 9, 50.0, phase="escalated", causes=["target_repo"])
     add_run(ledger, "o2", 10, 60.0)
+    # unsupported schema: excluded from every section, not only from the KPIs
+    add_run(ledger, "s9", 1, 999.0, schema=999, phase="escalated", causes=["issue_quality"],
+            findings=[("b.py|Solo", "P2")])
     commit_all(ledger)
 
 
@@ -187,6 +192,11 @@ def test_report_has_five_sections_with_sorted_groups_and_truncation(ledger, agen
     assert "Kandidat für Hill Climbing (W7)" in levers
     assert "Wissen für das Ziel-Repo" not in levers  # target_repo only in older run
     assert "Brief-Vorlage schärfen" not in levers
+    assert "issue_quality" not in text and "s9" not in text
+    kpis = section(text, SECTIONS[0])
+    for needle in ["done/esc/sonst", "Runden med/max", "4/4", "CB", "Appr. med",
+                   "build_agent=", "P1=", "fix="]:
+        assert needle in kpis, needle
     # stdout: report path, then one count per section in contract order
     assert f"{WEEK}.md" in res.stdout
     counts = [int(re.search(r"\d+", line).group()) for line in res.stdout.splitlines()[-5:]]
@@ -259,7 +269,11 @@ def test_orchestrator_group_gets_one_brief_from_adw_source(ledger, agent):
     "kein json",
     json.dumps({"title": "T", "brief_markdown": 42}),
     json.dumps({"title": "T", "brief_markdown": BRIEF_MD.replace("## Deferred", "## X")}),
-], ids=["invalid-json", "wrong-type", "missing-heading"])
+    json.dumps({"title": "T", "brief_markdown":
+                "## Ausgangslage Aufgabe Vorentscheidungen Deferred Akzeptanzkriterien\n"}),
+    json.dumps({"title": "T", "brief_markdown": BRIEF_MD.replace(
+        "## Deferred\n\nx\n", "```\n## Deferred\n```\n")}),
+], ids=["invalid-json", "wrong-type", "missing-heading", "combined-heading", "fenced"])
 def test_invalid_brief_answer_is_rejected_and_noted(ledger, agent, answer):
     install(ledger)
     calls = agent(answer)
@@ -310,6 +324,8 @@ def test_no_brief_flag_or_no_eligible_group_calls_no_agent(ledger, agent):
 def test_one_commit_per_call_overwrite_and_brief_removal(ledger, agent):
     install(ledger)
     before = commits(ledger)
+    (ledger / "fremd.txt").write_text("staged by someone else\n", encoding="utf-8")
+    git(ledger, "add", "fremd.txt")
 
     assert improve().exit_code == 0
     assert commits(ledger) == before + 1
@@ -332,7 +348,7 @@ def test_one_commit_per_call_overwrite_and_brief_removal(ledger, agent):
 
     assert improve("--no-brief").exit_code == 0
     assert commits(ledger) == before + 3  # unchanged artifacts: no empty commit
-    assert git(ledger, "status", "--porcelain") == ""
+    assert git(ledger, "status", "--porcelain") == "A  fremd.txt"  # stays staged only
 
 
 def test_push_failure_warns_and_keeps_local_artifacts(ledger, agent, tmp_path):
@@ -353,12 +369,15 @@ def test_push_failure_warns_and_keeps_local_artifacts(ledger, agent, tmp_path):
 
 def test_held_lock_or_missing_ledger_exits_1(ledger, agent, tmp_path, monkeypatch):
     install(ledger)
+    exclude = ledger / ".git" / "info" / "exclude"
+    exclude_before = exclude.read_bytes() if exclude.exists() else None
     with open(ledger / ".improve.lock", "w") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         res = improve()
     assert res.exit_code == 1
     assert res.stderr.strip()
     assert not (ledger / "reports").exists()
+    assert (exclude.read_bytes() if exclude.exists() else None) == exclude_before
     assert FakeRunner.calls == []
 
     monkeypatch.setenv("ADW_LEDGER", str(tmp_path / "kein-ledger"))

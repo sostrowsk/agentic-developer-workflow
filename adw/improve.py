@@ -5,6 +5,7 @@ report and brief land under ``<ledger>/reports/`` and are committed fail-open.""
 import contextlib
 import fcntl
 import json
+import re
 import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -42,21 +43,26 @@ class ImproveError(Exception):
 def _improve_lock(path: Path):
     """Non-blocking flock on ``<ledger>/.improve.lock`` (pattern of ``_repo_lock``),
     kept out of the ledger's commits via ``.git/info/exclude``."""
-    exclude = path / ".git" / "info" / "exclude"
-    with contextlib.suppress(OSError):
-        lines = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
-        if LOCK_FILE not in lines:
-            exclude.parent.mkdir(parents=True, exist_ok=True)
-            exclude.write_text("".join(f"{x}\n" for x in [*lines, LOCK_FILE]), encoding="utf-8")
     with open(path / LOCK_FILE, "a+", encoding="utf-8") as fh:
         try:
             fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ImproveError("adw improve läuft bereits für dieses Ledger") from None
         try:
+            _exclude_lock_file(path)
             yield
         finally:
             fcntl.flock(fh, fcntl.LOCK_UN)
+
+
+def _exclude_lock_file(path: Path) -> None:
+    """Only under the held lock: no writes on contention, no racing rewrites."""
+    exclude = path / ".git" / "info" / "exclude"
+    with contextlib.suppress(OSError):
+        lines = exclude.read_text(encoding="utf-8").splitlines() if exclude.exists() else []
+        if LOCK_FILE not in lines:
+            exclude.parent.mkdir(parents=True, exist_ok=True)
+            exclude.write_text("".join(f"{x}\n" for x in [*lines, LOCK_FILE]), encoding="utf-8")
 
 
 def _cut(value) -> str:
@@ -78,7 +84,9 @@ def _cost(record: dict) -> float:
 def _window(records, signals, start, end, repo_slug, *, include_end) -> list[tuple]:
     pairs = []
     for record, signal in zip(records, signals, strict=True):
-        if not isinstance(record, dict):
+        # Same eligibility as compute_kpis, so no section sees runs the KPIs skip.
+        if not isinstance(record, dict) or type(record.get("schema_version")) is not int \
+                or record["schema_version"] != ledger.SCHEMA_VERSION:
             continue
         ts = ledger._parse_ts(record.get("started_at"))
         if ts is None or ts < start or (ts > end if include_end else ts >= end):
@@ -93,33 +101,34 @@ def _kpis(pairs: list[tuple]) -> dict:
     return ledger.compute_kpis([r for r, _ in pairs], signals=[s for _, s in pairs])
 
 
-def _kpi_line(label: str, m: dict) -> str:
-    return (
-        f"- {label}: Läufe {m['runs']}, Eskalationsanteil {_num(m['escalation_share'])}, "
-        f"Runden med {_num(m['review_rounds']['median'])}, "
-        f"Fix-Zyklen med {_num(m['fix_cycles']['median'])}, "
-        f"Gate-Iterationen med {_num(m['gate_iterations']['median'])}, "
-        f"Dauer med {_num(m['duration_s']['median'])} s, "
-        f"Kosten sum {_num(m['cost_usd']['sum'])} / med {_num(m['cost_usd']['median'])} USD"
-    )
-
-
-def _pairs(values: dict) -> str:
-    return ", ".join(f"{k}={values[k]}" for k in sorted(values)) or "-"
-
-
 def _kpi_section(current: dict, previous: dict) -> list[str]:
+    """The full ``adw kpis`` table (versions + total) and its breakdowns; of the
+    previous period only the total row."""
+    from adw.cli import _KPI_COLUMNS, _kpi_num, _kpi_pairs, _kpi_pct, _kpi_row
+
+    def table(labelled: list[tuple]) -> list[str]:
+        rows = [list(_KPI_COLUMNS)] + [_kpi_row(label, m) for label, m in labelled]
+        return ["| " + " | ".join(row) + " |" for row in rows[:1]] + [
+            "|" + "---|" * len(_KPI_COLUMNS)
+        ] + ["| " + " | ".join(row) + " |" for row in rows[1:]]
+
+    labelled = [(_kpi_num(g["adw_version"]), g) for g in current["groups"]]
+    labelled.append(("gesamt", current["total"]))
     total = current["total"]
-    lines = ["## Kennzahlen", ""]
-    lines += [_kpi_line(f"Version {_num(g['adw_version'])}", g) for g in current["groups"]]
-    lines.append(_kpi_line("gesamt", total))
+    lines = ["## Kennzahlen", "", *table(labelled), ""]
     lines.append(
-        f"- Retros {total['retro_runs']}: {_pairs(total['retro_causes'])} | "
-        f"Bewertungen {_pairs(total['ratings'])} | "
-        f"Finding-Feedback {_pairs(total['finding_feedback'])}"
+        f"- Retros {total['retro_runs']}: {_kpi_pairs(total['retro_causes'], str)} | "
+        f"Bewertungen {_kpi_pairs(total['ratings'], str)} | "
+        f"Finding-Feedback {_kpi_pairs(total['finding_feedback'], str)}"
     )
+    lines += [
+        f"- {label}: Kosten-Anteile {_kpi_pairs(m['agent_cost_shares'], _kpi_pct)}"
+        f" | Severity {_kpi_pairs(m['findings_by_severity'], str)}"
+        f" | Action {_kpi_pairs(m['findings_by_action'], str)}"
+        for label, m in labelled
+    ]
     lines += ["", "Vorzeitraum (gleich lang, davor):", "",
-              _kpi_line("gesamt", previous["total"]), ""]
+              *table([("gesamt", previous["total"])]), ""]
     return lines
 
 
@@ -203,6 +212,29 @@ def _regressions(pairs: list[tuple]) -> list[tuple]:
     return sorted(out, key=lambda x: str(x[0].get("run_id")))
 
 
+_HEADING = re.compile(r"^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+def _missing_headings(markdown: str) -> list[str]:
+    """Required section names without their own ATX heading outside code fences.
+    A heading counts for a name if it starts with it (template suffixes such as
+    "Akzeptanzkriterien (messbar)" are fine) — one heading covers one name only."""
+    titles, fence = [], None
+    for line in markdown.splitlines():
+        if (m := _FENCE.match(line)) and (fence is None or m.group(1)[0] == fence):
+            fence = None if fence else m.group(1)[0]
+            continue
+        if fence is None and (m := _HEADING.match(line)):
+            titles.append(m.group(1))
+
+    def covers(title: str, name: str) -> bool:
+        rest = title[len(name):] if title.startswith(name) else None
+        return rest is not None and (not rest or not rest[0].isalnum())
+
+    return [n for n in REQUIRED_HEADINGS if not any(covers(t, n) for t in titles)]
+
+
 def _brief(group: dict, group_text: str) -> tuple[str | None, str]:
     """(brief markdown or None, note for the report). Never raises."""
     try:
@@ -224,11 +256,7 @@ def _brief(group: dict, group_text: str) -> tuple[str | None, str]:
         if not isinstance(answer, dict) or not isinstance(answer.get("title"), str) \
                 or not isinstance(answer.get("brief_markdown"), str):
             return None, "Brief-Entwurf verworfen: Felder title/brief_markdown fehlen oder falsch"
-        headings = {
-            line.lstrip("#").strip()
-            for line in answer["brief_markdown"].splitlines() if line.startswith("#")
-        }
-        missing = [h for h in REQUIRED_HEADINGS if not any(h in x for x in headings)]
+        missing = _missing_headings(answer["brief_markdown"])
         if missing:
             return None, f"Brief-Entwurf verworfen: Überschriften fehlen: {', '.join(missing)}"
         title = _cut(answer["title"])
@@ -238,21 +266,26 @@ def _brief(group: dict, group_text: str) -> tuple[str | None, str]:
 
 
 def _commit(path: Path, week: str, paths: list[str]) -> None:
+    """Commit exactly the report artifacts; whatever else is staged stays staged
+    and out of this commit. No change to the artifacts → no commit."""
     def git(*args):
         return run_git(path, *args, timeout=ledger._GIT_TIMEOUT)
 
     try:
-        staged = [p for p in paths if (path / p).exists()
-                  or git("ls-files", "--error-unmatch", "--", p).returncode == 0]
-        if staged:
-            add = git("add", "-A", "--", *staged)
-            if add.returncode != 0:
-                raise RuntimeError(add.stderr.strip())
-        if git("diff", "--cached", "--quiet").returncode == 0:
+        present = [p for p in paths if (path / p).exists()
+                   or git("ls-files", "--error-unmatch", "--", p).returncode == 0]
+        if not present:
             return
-        commit = git("commit", "-m", f"improve {week}")
-        if commit.returncode != 0:
-            raise RuntimeError(commit.stderr.strip())
+        status = git("status", "--porcelain", "--", *present)
+        if status.returncode != 0:
+            raise RuntimeError(status.stderr.strip())
+        if not status.stdout.strip():
+            return
+        for args in (("add", "-A", "--", *present),
+                     ("commit", "-m", f"improve {week}", "--only", "--", *present)):
+            result = git(*args)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip())
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         ledger._warn(f"Ledger-Commit fehlgeschlagen (Bericht bleibt lokal): {exc}")
         return
