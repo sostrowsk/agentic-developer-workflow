@@ -1,197 +1,211 @@
-# Plan — W1: Jeder Agent-Lauf hat eine Grenze, jeder Abbruch eine Ursache
+# Plan — W4: Gleicher Fehler, gleicher Schlüssel
 
-Maßgeblich ist `.adw/spec.md` (Scope 1–5, AC 1–9). Single-Lane-Projekt
+Maßgeblich ist `.adw/spec.md` (Scope 1–6, AC 1–10). Single-Lane-Projekt
 (`.adw/config.yaml`): nur der Workstream **backend**; er umfasst Code, Tests und beide
-Changelogs. Die Vorentscheidungen E1–E8 des Issues sind bindend.
+Changelogs. Kein Frontend-Workstream. Die Vorentscheidungen E1–E7 des Issues sind bindend.
 
-Basis: Stand **0.31.3** (`4a7f958`). Die Code-Stellen der Spec sind am 2026-11-08 erneut
-geprüft und stimmen: `adw/agents.py:146` (`AgentSpec`, frozen dataclass, Defaults ab
-`permission_mode`), `:183` (`agent_run_start_payload`), `:215–328` (`REGISTRY`, acht
-Einträge), `:502–561` (`SdkAgentRunner.run`, `ClaudeAgentOptions` ohne `max_turns`),
-`:563–584` (`_collect_into`, Default-End-Payload + Kosten im `finally`), `:586–639`
-(`_collect`, `staticmethod`, kennt weder Agentname noch `timeout_s`), `adw/phases.py:344–353`
-(Codex-Code-Review fängt nur `FindingsParseError`/`ValidationError`),
-`adw/context.py:359–366` (`_git`, nur Returncode), `adw/cli.py:805–823` (Handler für
-`EscalationError`/`AgentRunError`). `AgentSpec(...)` wird nur in `adw/agents.py`
-konstruiert (keine Test-Konstruktionen). Vor dem Bauen gegen den dann aktuellen Stand
-prüfen.
+Basis: Stand **0.32.0** (`420af78`). Die Code-Stellen der Spec sind am 2026-11-08 geprüft
+und stimmen: `adw/lanes.py:207` und `adw/phases.py:154` (Gate-Schlüssel
+`f"{f.gate}|{f.exit_code}|{f.output}"`), `adw/review_policy.py:15` (`_finding_key`),
+`adw/triage.py:63` (Formatkopie im `triage.decision`-Event), `adw/triage.py:88`
+(`check_progress`, exakter Listenvergleich), `adw/context.py:52` (`_require_progress`,
+emittiert `circuit_breaker` mit `keys=failures`). Codex-Code-Review-Breaker:
+`adw/phases.py:303–319` (`_advance_review_round` persistiert die Basis im Save des
+gestagten Fixes), `:391–412` (Vergleich, danach Basis über `_circuit_breaker_keys`).
+Authoring-Breaker: `adw/authoring.py:616`, `:721–727`, `:754`. Vertagen:
+`adw/lanes.py:462`. Importkette `review_policy → context → triage` bestätigt. Vor dem
+Bauen gegen den dann aktuellen Stand prüfen.
 
-Betroffene Dateien (abschließend): `adw/agents.py`, `adw/phases.py`, `adw/context.py`,
-Tests unter `tests/`, `CHANGELOG.md`, `CHANGELOG.de.md`. `adw/cli.py` bleibt unverändert
-(die bestehenden Handler decken alle Pfade ab). `pyproject.toml` bleibt `0.31.3`.
+Betroffene Dateien (abschließend): `adw/triage.py`, `adw/review_policy.py`,
+`adw/lanes.py`, `adw/phases.py`, `adw/authoring.py`, Tests unter `tests/`,
+`CHANGELOG.md`, `CHANGELOG.de.md`. `adw/state.py` bleibt unverändert (die betroffenen
+Felder sind bereits `list[str]`, keine neuen Felder), `pyproject.toml` bleibt `0.32.0`.
 
 Contract: `.adw/contract.yaml` pinnt nur die extern beobachtbaren Flächen aus der Spec
-(Start-/End-Payload von `agent.run`, Meldungstexte, CLI-Verhalten). Helfernamen,
-Signaturen und Ablageorte in diesem Plan sind Empfehlungen, keine Vertragsfläche.
+(`circuit_breaker`-Event, `finding_key` im `triage.decision`- und `followup`-Payload,
+persistierte Schlüsselformate im State). Helfernamen, Signaturen und Ablageorte in
+diesem Plan sind Empfehlungen, keine Vertragsfläche — mit Ausnahme von
+`normalize_key_text` in `adw/triage.py`, den die Spec (DoD) namentlich festlegt.
 
 ## Workstream backend
 
-### B1 — Grenzen je Agent (Scope 1, AC 1, 2)
+### B1 — `normalize_key_text` (Scope 1, AC 7)
 
-Datei: `adw/agents.py`.
+Datei: `adw/triage.py`.
 
-1. `AgentSpec`: Pflichtfelder `max_turns: int` und `timeout_s: int` ohne Default, vor
-   `permission_mode` (Dataclass-Reihenfolge: keine Pflichtfelder nach Defaults). Fehlt
-   eines → `TypeError` aus der Dataclass, kein eigener Check.
-2. Jeder der acht `REGISTRY`-Einträge setzt beide Werte ausdrücklich laut Tabelle:
+1. `normalize_key_text(text: str) -> str`, reine Funktion, keine I/O, keine Konfiguration,
+   keine Klasse, kein neues Modul. Regeln als vorkompilierte Regex auf Modulebene,
+   angewendet in genau der Reihenfolge 1–8 der Spec-Tabelle. Keine Kleinschreibung,
+   keine weiteren Regeln.
+2. Regel 1 als eigene kleine Funktion bzw. eigene Regex (z. B.
+   `_strip_worktree_prefix`), weil B3 sie isoliert auf `file` anwendet. Das Präfix kommt
+   in drei Formen vor und muss in allen entfernt werden: absolut
+   (`/repo/.adw/runs/1234abcd/trees/backend/src/foo.py`), mit relativem Repo-Pfad
+   (`../repo/.adw/runs/…/trees/backend/src/foo.py`) und **nackt relativ**
+   (`.adw/runs/1234abcd/trees/backend/src/foo.py`, Form aus Spec AC 1). Der Teil vor
+   `.adw` ist deshalb optional: Muster sinngemäß
+   `(?:\S*/)?\.adw/runs/[0-9a-f]{8}/trees/[^/\s]+/` → `""`; der relative Rest
+   (`src/foo.py`) bleibt. Ein Muster, das einen Slash vor `.adw` verlangt, lässt die
+   Run-ID in der nackten Form stehen und der Gate-Breaker verfehlt AC 1.
+3. Umsetzungshinweise, damit die festgelegte Reihenfolge die Beispiele der Spec trifft:
+   - Regel 3: zuerst ISO-Zeitstempel komplett
+     (`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?`), danach die
+     reine Uhrzeit — ergibt ein einziges `<ts>`, nicht `2026-11-08T<ts>`.
+   - Regel 4: die Zahl am Wortanfang verankern (`\b\d+…`), damit Bezeichner wie
+     `test_1s` nicht zu `<dur>` werden (sonst könnten unterschiedliche Testnamen
+     zusammenfallen, AC 2). Das präzisiert Regel 4 (eine Dauer ist ein eigenes Token),
+     fügt keine Regel hinzu.
+   - Regel 6: die Dateiendung muss mit einem Buchstaben beginnen (z. B.
+     `(\.[A-Za-z]\w*):\d+(:\d+)?` → `\1:<n>`), sonst ersetzt Regel 6 den Port in
+     `127.0.0.1:8000` vor Regel 7 und das Spec-Beispiel `<host>:<port>` wird nie
+     erreicht. `line \d+` → `line <n>`.
+   - Regel 8: `\s+` → `" "`, dann `strip()`.
 
-   | Agent | `max_turns` | `timeout_s` |
-   |---|---:|---:|
-   | `build_agent` | 400 | 3600 |
-   | `final_reviewer` | 250 | 1200 |
-   | `spec_agent`, `plan_agent` | 150 | 1200 |
-   | `spec_synthesis`, `plan_synthesis` | 100 | 1200 |
-   | `e2e_triage`, `log_analyst` | 50 | 600 |
+### B2 — Gemeinsame Gate-Schlüssel (Scope 2, AC 1, 2)
 
-   Keine Config-Felder.
-3. `SdkAgentRunner.run`: `max_turns=agent.max_turns` an `ClaudeAgentOptions`.
-   `resolve_model_alias` (`max_turns=1`) unverändert.
+Dateien: `adw/triage.py` (Helfer), `adw/lanes.py:207`, `adw/phases.py:154`.
 
-### B2 — Zeitlimit und benannte Ursache (Scope 2, AC 3, 4)
+1. Eine gemeinsame Schlüsselbildung neben `normalize_key_text`, Empfehlung
+   `gate_failure_keys(report: GateReport) -> list[str]` mit
+   `f"{f.gate}|{f.exit_code}|{normalize_key_text(f.output)}"` je Failure. Gate-Name und
+   Exit-Code bleiben unverändert Teil der Identität. Keine neue Datei.
+2. Beide Formatkopien (Lane-Gate-Loop in `_run_lane`, `_integration_loop`) durch den
+   Aufruf ersetzen. Fortschrittsprüfung, Event-Ausgabe, Eskalationspfade und
+   Speicherzeitpunkte bleiben, wie sie sind.
+3. `_gate_failure_text(report)` für Agent-Task und Eskalation bleibt unverändert
+   (unnormalisiert, gekürzt auf `MAX_OUTPUT_LINES` wie heute).
+4. Persistiert werden in `last_failures` / `integration_last_failures` die normalisierten
+   Schlüssel (Format sonst gleich). Keine Migration alter Einträge.
 
-Datei: `adw/agents.py`.
+### B3 — Gemeinsame Finding-Schlüssel (Scope 3, 4; AC 3, 6)
 
-1. Agentname und `timeout_s` müssen `_collect` erreichen: `run` reicht `agent` (bzw.
-   Name + `timeout_s`) über `_collect_into` an `_collect` weiter. Die Signaturen sind
-   intern und keine Vertragsfläche.
-2. Meldungen an **einem** Ort erzeugen (Empfehlung: zwei kleine Modul-Funktionen oder
-   Format-Konstanten neben `AgentRunError`):
-   `"<agent>: Zeitlimit <timeout_s> s überschritten"` und
-   `"<agent>: max_turns <n> erreicht"`. Keine neue Ausnahmeklasse.
-3. In `_collect` die `async for`-Iteration in `with anyio.fail_after(timeout_s):`
-   einschließen. Der lokale Zustand (`session_id`, `usage_raw`, `cost_usd`, Texte) wird
-   wie heute laufend gesammelt. Keine zusätzliche Spanne eröffnen; die Span-Verantwortung
-   bleibt am Call-Site (`adw/context.py:75`).
-4. `TimeoutError` (aus `fail_after`) → End-Payload mit den **bis dahin gesammelten**
-   Werten (nicht die leeren Defaults aus `_collect_into`), `is_error: True`,
-   `error: <Zeitlimit-Meldung>` auf `handle.end_payload` setzen, dann
-   `raise AgentRunError(<Meldung>) from exc`. Die Session-ID wurde bereits beim ersten
-   Auftreten über `on_session_id` persistiert (unverändert); die Kosten-Aufsummierung im
-   `finally` von `_collect_into` liest das gesetzte End-Payload (unverändert).
-5. Result mit `is_error=True` und `subtype == "error_max_turns"` (per
-   `getattr(message, "subtype", None)` beim Result-Message festhalten) → Meldung
-   `"<agent>: max_turns <n> erreicht"` mit `n = options.max_turns`; End-Payload wie
-   heute plus `error: <Meldung>`; `AgentRunError(<Meldung>)`. Keine Eskalation.
-6. Übrige `is_error`-Results: Verhalten und Meldung (`"Agent-Lauf fehlgeschlagen: …"`)
-   unverändert. Ob dort ebenfalls `error` im End-Payload steht, ist nicht gefordert —
-   nicht ergänzen.
+Dateien: `adw/triage.py`, `adw/review_policy.py`.
 
-### B3 — SDK-Ausnahmen ohne Traceback (Scope 3 SDK, AC 5)
+1. In `adw/triage.py` eine öffentliche Schlüsselbildung, Empfehlung
+   `finding_key(item: Finding) -> str` =
+   `f"{_strip_worktree_prefix(item.file)}|{normalize_key_text(item.issue)}"` — auf
+   `file` **nur** Regel 1; Zeilennummern und Leerraum in `file` bleiben unterscheidend.
+   Keine Rückimporte von `triage` nach `review_policy` oder `context`, damit die
+   Importkette `review_policy → context → triage` zyklenfrei bleibt.
+2. `triage_final_review` nutzt sie für `finding_key` im `triage.decision`-Payload; die
+   Formatkopie `f"{item.file}|{item.issue}"` entfällt. Übrige Payload-Felder
+   (`severity`, `action`, `reason`) unverändert.
+3. `review_policy._finding_key` delegiert an diese Funktion (Name `_finding_key` bleibt
+   wegen der bestehenden Importe in `lanes.py`, `phases.py`, `authoring.py`). Damit
+   normalisieren ohne weitere Änderung: `_finding_keys`, `_circuit_breaker_keys`,
+   `_without_deferred`, Vertagen in `lanes.py:462`, Dedupe-Menge `seen` in
+   `_write_followups`, `finding_key` im `followup`-Event.
+4. Unverändert: der Rohtext-Vergleich `recorded = … in existing` in `_write_followups`
+   (Deferred), `text` im `followup`-Event, alle an Agenten/Eskalation/Report gehenden
+   Texte (`_findings_text`, `_disposition_line`, Report-Einträge), die Finding-Objekte.
 
-Datei: `adw/agents.py`, `_collect`.
+### B4 — C25: Vergleich an der Schwelle der aktuellen Runde (Scope 5, AC 4, 5, 8)
 
-1. Um die Iteration (innerhalb von `_collect`, außerhalb von `fail_after`, damit B2.4
-   zuerst greift): `except AgentRunError: raise` (Meldung bleibt); `except Exception as
-   exc:` → End-Payload mit gesammelten Werten, `is_error: True`,
-   `error: f"{type(exc).__name__}: {exc}"`, dann
-   `raise AgentRunError(f"{type(exc).__name__}: {exc}") from exc`.
-2. `Exception` statt `BaseException`: `KeyboardInterrupt`/`SystemExit` bleiben unberührt.
-   `_collect` läuft direkt unter `anyio.run` ohne Task-Gruppe; der Fang sieht die
-   Originalausnahme aus `query()`, keine `ExceptionGroup`.
-3. End-Payload-Bau für B2/B3 in einem kleinen gemeinsamen Helfer, damit die fünf
-   bestehenden Felder überall gleich befüllt werden.
-4. **Bestandstest anpassen:** `tests/test_agents.py:85–100` (Stream wirft nach früher
-   Session-Meldung `RuntimeError`) erwartet heute `pytest.raises(RuntimeError)`; künftig
-   `AgentRunError`, dessen Meldung `RuntimeError` und den Ursachentext enthält. Die
-   Assertion `seen == ["sess-frueh"]` bleibt.
+Dateien: `adw/review_policy.py` (Helfer), `adw/phases.py` (Codex-Code-Review),
+`adw/authoring.py` (Authoring).
 
-### B4 — `CodexError` im Code-Review ist resumierbar (Scope 3 Codex, AC 6)
+1. Zwei kleine Helfer neben `_actionable_severities` (Namen sind Empfehlung):
+   - `_severity_keys(findings) -> list[str]`: sortiert `f"{item.severity}|{_finding_key(item)}"`.
+   - `_baseline_for_round(previous: list[str] | None, round_no: int) -> list[str] | None`:
+     `None` bleibt `None`. Sonst je Eintrag: beginnt er mit `P1|`/`P2|`/`P3|` (nur dieses
+     führende Präfix wird erkannt und abgetrennt), wird er nur übernommen, wenn die
+     Severity in `_actionable_severities(round_no)` liegt, und ohne Präfix zurückgegeben;
+     Einträge ohne Präfix (alter State) werden unverändert übernommen und passen damit
+     zu jeder Schwelle. Keine Migration, keine nachträgliche Normalisierung.
+2. **Codex-Code-Review** (`run_codex_review_phase`):
+   - Vergleich: `current = _finding_keys(review)` (`review` ist an dieser Stelle bereits
+     auf die actionable Findings der Runde gefiltert, Schlüssel ohne Präfix);
+     `_require_progress(ctx, _baseline_for_round(previous, round_no), current, …)`.
+     Damit trägt `circuit_breaker.keys` wie bisher Finding-Schlüssel ohne Präfix.
+   - Persistieren: `_advance_review_round(..., failures)` erhält
+     `_severity_keys(review.findings)` (Checkpoint im selben Save wie der Fix-Task);
+     die Basis nach dem Dispatch wird `_severity_keys(_without_deferred(ctx, review.findings))`
+     (Ausnahme vertagter Findings bleibt erhalten). Das lokale `previous` hält das
+     präfixierte Format. Atomare Saves und Reihenfolge wie heute.
+3. **Authoring** (`_authoring_loop`, `adw/authoring.py:721–754`): gleiches Muster —
+   Vergleich `_require_progress(ctx, _baseline_for_round(previous_failures, round_no),
+   _finding_keys(review), …)`; `previous_failures` und `authoring_last_findings` erhalten
+   `_severity_keys(review.findings)` und werden am bestehenden Checkpoint zusammen mit
+   Pending-Task, Rundenzähler und Findings-Verlauf gespeichert.
+4. Unverändert: Final-Review-Breaker (`adw/phases.py:477`, `:515`,
+   `final_review_last_failures`: normalisierte Schlüssel ohne Präfix, kein Filter —
+   die gemeinsame Nutzung von `_circuit_breaker_keys` dort darf dessen Format nicht
+   ändern), Gate-/Integration-Breaker, `check_progress`, `_require_progress`, Schwellen,
+   Rundenlimits, Behandlung leerer/actionable Findings, Deferred-P3-Semantik.
 
-Datei: `adw/phases.py`, `run_codex_review_phase`.
+### B5 — Changelog (Scope 6, AC 9)
 
-1. Den bestehenden `try` um `_codex_review(...)` (Zeile 344–353) um
-   `except CodexError as exc: raise AgentRunError(f"Codex-Code-Review: {exc}") from exc`
-   ergänzen. `CodexError` aus `adw.codex` importieren; `CodexAuthorError` ist Unterklasse
-   und wird mit abgedeckt. Die vorhandene Behandlung von
-   `FindingsParseError`/`ValidationError` bleibt.
-2. Kein `escalate`, kein Save: der Lauf bleibt am Checkpoint, die CLI gibt über den
-   bestehenden `AgentRunError`-Handler (`adw/cli.py:811`) den Resume-Hinweis aus, Exit 1.
-   Der `round`-Span endet wie bei jeder Ausnahme mit `outcome: aborted`.
-3. `_changed_files` (git) steht im selben `try`, wirft aber `EscalationError` — davon
-   nicht betroffen. Authoring-Pfad (`adw/authoring.py:478`) und Codex-Timeout (900 s)
-   unverändert.
-
-### B5 — git-Timeout/OSError in `context._git` eskaliert (Scope 3 git, AC 7)
-
-Datei: `adw/context.py`, `_git`.
-
-1. `run_git(...)` in `try`; `except (subprocess.TimeoutExpired, OSError) as exc:`
-   `raise escalate(ctx, f"git {' '.join(args)} in {cwd} fehlgeschlagen: {exc}") from exc`
-   — gleicher Meldungsaufbau wie der Returncode-Pfad (Kommando + Ursache).
-2. Returncode-Pfad und `timeout=120` unverändert. `_git`-Helfer in
-   `worktrees.py`/`retention.py` nicht anfassen (Deferred).
-
-### B6 — Grenzen im Start-Payload (Scope 4, AC 8)
-
-Datei: `adw/agents.py`, `agent_run_start_payload`.
-
-1. Zusätzlich `"max_turns": agent.max_turns` und `"timeout_s": agent.timeout_s`;
-   bestehende Felder unverändert. Gilt automatisch für echten und Mock-Runner
-   (Call-Site `adw/context.py:75`).
-2. Die beiden Bestandstests, die die exakte Schlüsselmenge festschreiben
-   (`tests/test_instrumentation.py:166–168`, `tests/test_span_relocation.py:75–77`), um
-   die zwei Schlüssel erweitern. GUI-Fixtures (`tests/fixtures/contract_baseline_*.json`,
-   `tests/gui_app_helpers.py`) sind feste Aufnahmen und bleiben unverändert.
-
-### B7 — Changelog (Scope 5)
-
-- `CHANGELOG.md` und `CHANGELOG.de.md` synchron: neue oberste Sektion
-  `## [0.32.0] — Unreleased` mit `### Added` (Grenzen je Agent `max_turns`/`timeout_s`;
-  benannte Ursache im `agent.run`-End-Event via `error`; Start-Payload-Felder) und
-  `### Fixed` (C26: SDK-Ausnahme, `CodexError` im Code-Review, git-Timeout/OSError in
-  `context._git` enden ohne Traceback), jeweils in der Sprache und im Stil der Datei,
-  inhaltlich gleich in beiden Sprachen.
-- `pyproject.toml` bleibt `0.31.3`.
+- `CHANGELOG.md` und `CHANGELOG.de.md` synchron: neue Sektion `## [0.32.1] — Unreleased`
+  oberhalb von `## [0.32.0] — 2026-11-08`, mit `### Fixed` im Stil der vorhandenen
+  Einträge (fette Kopfzeile, Unterpunkte, jeweilige Sprache). Inhalt: Gate-Breaker konnte
+  bei pytest praktisch nie auslösen (Laufzeit in der Zusammenfassung) → normalisierte
+  Gate-Schlüssel; normalisierte Finding-Schlüssel (Zeilennummern, Pfadpräfix, Leerraum)
+  inkl. `triage.decision`; C25 (Basis und aktuelle Findings an der Schwelle der
+  aktuellen Runde).
+- `pyproject.toml` bleibt `0.32.0`.
 
 ## Reihenfolge
 
-B1 zuerst (Pflichtfelder brechen sonst den Import). B2 vor B3 (gleiche Stelle in
-`_collect`, Fang-Reihenfolge). B4, B5, B6 unabhängig. B7 zuletzt. Jeden neuen Test zuerst
-gegen den Ausgangsstand rot sehen.
+B1 → B2 und B3 (beide brauchen `normalize_key_text`) → B4 (baut auf `_finding_key` aus
+B3) → B5. Jeden neuen Test zuerst gegen den Ausgangsstand rot sehen.
 
-## Tests (Richtwert 8–12 neue Tests + 3 angepasste)
+## Tests (Richtwert 8–12 neue Tests)
 
-Bestehende Fixtures wiederverwenden (`captured_query`, `fake_stored_login` in
-`tests/test_agents.py`; `ctx`/`target_repo` in `tests/test_phases.py`/`tests/test_cli.py`;
-die `AgentRunError`-CLI-Tests ab `tests/test_cli.py:559` als Vorlage). Fake-`query()` als
-Async-Generator per Monkeypatch; keine echten SDK-/Codex-Aufrufe. Kleine Grenzwerte im
-Test über `dataclasses.replace(REGISTRY[...], timeout_s=1)`. Die Tabelle ergibt 9 neue
-Tests.
+Bestehende Fixtures und Muster wiederverwenden: `ctx`/`pctx`/`target_repo`,
+`prepare_reviewable`, `ctx.codex.script(code_findings(...))`, `ctx.agents.script` in
+`tests/test_phases.py`; Emitter-Erfassung wie in `test_authoring_circuit_breaker_emits_the_event`
+(`tests/test_phases.py:4474`). Vorlagen für die Breaker-Szenarien:
+`test_identical_gate_failures_trigger_circuit_breaker` (`:639`),
+`test_identical_e2e_failures_trigger_circuit_breaker` (`:2263`),
+`test_circuit_breaker_ignores_findings_below_the_threshold` (`:2591`). Keine echten
+Codex-/SDK-Aufrufe.
 
 | AC | Test (Kurzbeschreibung) | Ort |
 |----|-------------------------|-----|
-| 1 | `REGISTRY`-Werte exakt laut Tabelle (ein Test mit Soll-Dict); `AgentSpec(...)` ohne `max_turns` bzw. ohne `timeout_s` → `TypeError` (parametrisiert) | `tests/test_agents.py` |
-| 2 | Options-Bau: `captured_query` sieht `options.max_turns == agent.max_turns` | dto. |
-| 3 | Fake-Stream meldet Session-ID, hängt dann (`anyio.sleep`) länger als ein kleines `timeout_s`: `AgentRunError` mit „Zeitlimit" und Agentname; `on_session_id` mit der ID aufgerufen; Span-Handle-End-Payload hat `is_error: True`, `error` und die bereits gemeldete `session_id` | dto. |
-| 4 | Fake-Result `is_error=True`, `subtype="error_max_turns"`: `AgentRunError` mit „max_turns", Agentname, Wert; End-Payload trägt `error` | dto. |
-| 5a | Fake-`query()` wirft `RuntimeError("boom")`: `AgentRunError` mit `RuntimeError` und `boom`; End-Payload trägt `error` (ersetzt/erweitert den Bestandstest aus B3.4) | dto. |
-| 5b | CLI: Runner wirft `AgentRunError` aus SDK-Ausnahme → stderr Resume-Hinweis, Exit 1, kein Traceback, Phase nicht `escalated`, kein `escalation.md` | `tests/test_cli.py` (neben den bestehenden `AgentRunError`-Tests) |
-| 6 | Codex-Client wirft `CodexError` in der Code-Review-Phase: über die CLI Resume-Hinweis, Exit 1, Phase nicht `escalated`, kein `escalation.md` | `tests/test_cli.py` bzw. `tests/test_phases.py` (Phase wirft `AgentRunError`) |
-| 7 | `run_git` wirft `subprocess.TimeoutExpired` (ggf. parametrisiert mit `OSError`) in `context._git`: `EscalationError`, `escalation.md` nennt git-Kommando und Ursache | `tests/test_phases.py` |
-| 8 | `agent_run_start_payload` enthält `max_turns`/`timeout_s` des übergebenen Agents; bestehende Felder bleiben — durch Erweiterung der zwei Schlüsselmengen-Tests plus Wert-Assertion | `tests/test_instrumentation.py:166`, `tests/test_span_relocation.py:75` |
-| 9 | `uv run ruff check .`, `uv run pytest -x -q` | Gate |
+| 7 | Parametrisiert: je Regel 1–8 mindestens ein Paar für `normalize_key_text`, darunter Regel 1 sowohl mit absolutem Präfix als auch nackt relativ (`.adw/runs/1234abcd/trees/backend/src/foo.py` → `src/foo.py`), jeweils mit erhaltenem relativem Rest; ISO-Zeitstempel als ein `<ts>`; Groß-/Kleinschreibung bleibt | `tests/test_triage.py` |
+| 1 | Zwei pytest-Outputs, die sich nur in `in 36.02s`/`in 1.65s`, `/tmp/pytest-of-x/pytest-3/…`/`…/pytest-7/…` und Run-ID im Worktree-Pfad unterscheiden — die Worktree-Pfade in der **nackten relativen** Form `.adw/runs/<id1>/trees/backend/…` vs. `.adw/runs/<id2>/trees/backend/…`: zwei rote Lane-Gate-Iterationen → `circuit_breaker`-Event, Eskalation, keine dritte Iteration | `tests/test_phases.py` |
+| 2 | Gleiche Outputs, aber anderer fehlschlagender Testname → kein Breaker nach zwei Iterationen | dto. |
+| Scope 2 | Integration/E2E: Bestandstest `:2263` so erweitern, dass sich die beiden Outputs nur volatil unterscheiden (Dauer, Temp-Pfad) → Breaker greift weiterhin (Erweiterung, kein neuer Test) | dto. |
+| 3 | P3-Finding in `deferred_findings`, neues Finding mit gleichem `file`, `issue` nur in `foo.py:12`/`foo.py:15` und Leerraum verschieden → `_without_deferred` filtert es; Follow-up-Report enthält den Text einmal, unnormalisiert | `tests/test_phases.py` |
+| 4 | Codex-Code-Review: Runde 1 {A:P1, B:P3}, Fix ohne Wirkung, Runde 2 {A:P1} → Breaker in Runde 2, kein zweiter Fix-Dispatch | dto. |
+| 4 | Authoring-Loop: dasselbe Szenario → Breaker in Runde 2 | dto. |
+| 5 | Runde 1 {A:P1, C:P2}, Runde 2 {A':P1} mit auch normalisiert geändertem Text → kein Breaker (ein Loop genügt, Codex-Code-Review) | dto. |
+| 6 | `triage.decision`-`finding_key` == `_finding_key(item)` für ein Finding mit Worktree-Präfix im `file` und Zeilennummer im `issue`; Zeilennummer im `file` bleibt unterscheidend | `tests/test_instrumentation.py` (neben `:471`) |
+| 8 | Nach einer Runde mit Fix-Dispatch: `review_last_failures` (Checkpoint und Basis nach Dispatch) besteht aus `<P1\|P2\|P3>\|<finding_key>`; ein State mit präfixlosem Alt-Eintrag wird geladen und gegen Runde 2 verglichen (Alt-Eintrag passt zu jeder Schwelle → Breaker bei gleichem Schlüssel) | `tests/test_phases.py` (ggf. Erweiterung von `:2565`) |
+| 9 | Changelogs: kein eigener Test, Prüfung im Review | — |
+| 10 | `uv run ruff check .`, `uv run pytest -x -q` | Gate |
 
-Keine zusätzliche Testmatrix, keine Tests für Verhalten außerhalb des Scopes (kein
-eigener Test für `KeyboardInterrupt`/`SystemExit`).
+Bestandstests, die das exakte alte Schlüsselformat pinnen, werden angepasst statt
+dupliziert. Keine Testmatrix für bewusst ausgeschlossene Erweiterungen (Deferred).
+Bestehende Tests zur unveränderten Weitergabe von Texten bleiben grün.
 
 ## Gates / Definition of Done
 
 - `uv run ruff check .` und `uv run pytest -x -q` grün (in Build-Sandboxes ggf. direkt
-  `.venv/bin/python -m pytest -x -q`); die gesamte bestehende Suite bleibt grün. Keine
-  weiteren Linter/Typechecker (E8).
-- AC 1–9 erfüllt und durch Tests belegt.
-- Changelogs EN/DE synchron mit `## [0.32.0] — Unreleased`, Version unverändert `0.31.3`.
-- Unverändert: Session-Checkpoint, Kosten-Aufsummierung, Codex-/Gate-/CI-Timeouts,
-  Authoring-`CodexError`-Pfad, Modell-Check, andere `_git`-Helfer, CLI-Handler. Keine
-  neuen Ausnahmeklassen, persistenten Zustände oder Überwachungsmechanismen.
+  `.venv/bin/python -m pytest -x -q`); die gesamte bestehende Suite bleibt grün. Kein
+  flake8, isort, black, mypy (E7).
+- AC 1–10 erfüllt und durch Tests belegt.
+- `normalize_key_text` existiert genau einmal in `adw/triage.py`; Lane-Gate,
+  Integration-Gate, `_finding_key` und Triage-Event nutzen sie, keine Formatkopie bleibt.
+- Neue Review-/Authoring-Basen tragen Severity; beide Seiten werden an der aktuellen
+  Rundenschwelle ohne Severity verglichen. Alt-State bleibt ladbar, ohne Migration.
+- An Agenten, Eskalationen, Reports und Event-Payloads (außer `finding_key`) gehende
+  Texte unverändert; `MAX_OUTPUT_LINES` unverändert.
+- Changelogs EN/DE synchron mit `## [0.32.1] — Unreleased`; `pyproject.toml` unverändert.
+- Keine neuen State-Felder, keine Konfigurationsoptionen, keine Migration, kein
+  geändertes `circuit_breaker`-Event-Format.
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-- Grenzen in `.adw/config.yaml` überschreibbar machen.
-- Budget-Grenzen in USD (`max_budget_usd`) — Abrechnung läuft über den Plan.
-- Automatischer Retry nach Timeout oder `max_turns`.
-- Effort pro Agent (Lauf W2).
-- Dieselbe `TimeoutExpired`/`OSError`-Härtung für die `_git`-Helfer in
-  `worktrees.py` und `retention.py` — kein Befund mit realem Schaden im Issue.
-
-Die Vorentscheidungen E1–E8 des Issues sind bindend und kein Finding-Gegenstand.
+- Semantische Duplikat-Erkennung, Umformulierungen (W12).
+- Normalisierung des an Agenten übergebenen Textes.
+- Weitere Normalisierungsregeln über E2 hinaus (z. B. Kleinschreibung, UUIDs,
+  PIDs, Hashes ohne `0x`-Präfix).
+- Migration alter Schlüssel in States.
+- Severity-Präfix oder Schwellenfilter für den Final-Review-Breaker: dort gibt es
+  keine Rundenschwelle, kein beobachteter Schaden.
+- Schlüsselbasierte Dedupe gegen bereits in `followups.md` stehende Einträge aus
+  **früheren** Schreibvorgängen (heute Rohtext-Vergleich in `_write_followups`).
+  Bräuchte Report-Parsing oder einen neuen persistenten Schlüsselsatz; der Fall
+  des Issues (AC 3) ist über `_without_deferred` abgedeckt, weil ein vertagtes
+  Finding den Report gar nicht mehr erreicht.

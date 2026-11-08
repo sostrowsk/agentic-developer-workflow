@@ -1,73 +1,68 @@
-# Interface contract — W1: Jeder Agent-Lauf hat eine Grenze, jeder Abbruch eine Ursache
+# Interface contract — W4: Gleicher Fehler, gleicher Schlüssel
 #
 # Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec
-# („Contract (Single-Lane, nur extern beobachtbare Flächen)") pinnt dieser
-# Contract ausschließlich:
-#   1. das `agent.run`-Start-Payload (zwei neue Felder),
-#   2. das `agent.run`-End-Payload bei Grenz-/Ursachen-Abbruch,
-#   3. die Ursachen-Meldungstexte,
-#   4. das CLI-Verhalten bei AgentRunError und bei git-Fehlern in context._git.
+# („Contract (Single-Lane)") pinnt dieser Contract ausschließlich extern
+# beobachtbare Flächen:
+#   1. das `circuit_breaker`-Event (Format unverändert, neue Auslöse-Semantik),
+#   2. `finding_key` im `triage.decision`- und `followup`-Payload,
+#   3. die persistierten Schlüsselformate im Run-State.
 #
-# NICHT Teil des Contracts: interne Helfer und ihre Signaturen (`_collect`,
-# `_collect_into`, Meldungs-/Payload-Helfer, `context._git`), die Grenzwerte
-# je Agent (bindend über .adw/spec.md Scope 1 / Issue E1, aber keine
-# Vertragsfläche), Ausnahmeklassen. Keine HTTP-Routen, keine neuen Event-Typen.
+# NICHT Teil des Contracts: interne Helfer und ihre Signaturen
+# (`_finding_key`, Gate-Schlüssel-Helfer, Baseline-/Severity-Helfer), die
+# einzelnen Regex. Die Normalisierungsregeln 1–8 sind über .adw/spec.md Scope 1
+# bindend; hier steht nur ihre Wirkung auf die Schlüssel. Keine HTTP-Routen,
+# keine neuen Event-Typen, keine neuen State-Felder.
 
 version: 1
-scope: W1
+scope: W4
 workstreams:
   - backend
 
+key_formats:
+  normalized_text: "Text nach den Regeln 1–8 aus .adw/spec.md Scope 1 (Reihenfolge fest, keine Kleinschreibung)"
+  gate_key: "<gate>|<exit_code>|<normalized_text(output)>"     # Gate-Name und Exit-Code unverändert
+  finding_key: "<file ohne Worktree-Präfix (nur Regel 1)>|<normalized_text(issue)>"
+  severity_key: "<P1|P2|P3>|<finding_key>"
+
 events:
-  agent.run:
-    start:
-      added_fields:
-        max_turns: {type: integer, required: true, source: AgentSpec.max_turns}
-        timeout_s: {type: integer, required: true, source: AgentSpec.timeout_s}
-      existing_fields: unchanged  # agent, model, tools, allowed_tools, cwd, resume_session, prompt, system_append
-      applies_to: [real runner, mock runner]
-    end:
-      on_cause_abort:
-        triggers: [timeout, max_turns, sdk_exception]
-        emitted: true
-        is_error: true
-        added_fields:
-          error: {type: string, required: true, value: identisch mit der AgentRunError-Meldung}
-        existing_fields: unchanged  # session_id, result_text, usage, cost_usd, is_error
-        partial_data: bereits gemeldete session_id sowie bis dahin bekannte usage/cost_usd bleiben erhalten (keine leeren Defaults)
-      otherwise: unchanged
+  circuit_breaker:
+    payload: unchanged          # {keys: list[str], scope: str}
+    emitted_when: aktuelle Schlüssel == Basis der Vorrunde nach Normalisierung (bestehender Breaker, bestehende Eskalation)
+    keys:
+      gates: gate_key           # scope lane:<lane> bzw. integration
+      codex_review: finding_key # ohne Severity-Präfix; Basis und aktuelle Findings auf Schwelle der aktuellen Runde gefiltert
+      authoring: finding_key    # dto.
+      final_review: finding_key # kein Schwellenfilter
+  triage.decision:
+    payload:
+      finding_key: finding_key  # identisch mit dem Schlüssel aller übrigen Breaker-/Dedupe-Stellen
+      other_fields: unchanged   # severity, action, reason
+  followup:
+    payload:
+      finding_key: finding_key
+      text: unchanged           # unnormalisierter issue-Text
+    emission: unchanged         # nur nach tatsächlich neu geschriebenem Reporteintrag
 
-messages:
-  timeout: "<agent>: Zeitlimit <timeout_s> s überschritten"
-  max_turns: "<agent>: max_turns <n> erreicht"   # n = max_turns des Agents
-  sdk_exception: "<ExceptionTypeName>: <exception text>"  # Typname und Text der Ursache; bestehende AgentRunError-Meldung unverändert
-  codex_code_review:
-    contains: [Ursache des CodexError, einschließlich Codex-Timeout]
-  git_execution:
-    applies_to: context._git   # nur dieser Helfer
-    contains: [ausgeführtes git-Kommando, Ursache]
+state:
+  review_last_failures:
+    items: severity_key         # Checkpoint mit dem Fix-Task und Basis nach dem Dispatch (ohne vertagte Findings)
+    legacy_items_without_prefix: tolerated   # nur führendes P1|/P2|/P3| gilt als Präfix; ohne Präfix passt zu jeder Schwelle
+  authoring_last_findings:
+    items: severity_key
+    legacy_items_without_prefix: tolerated
+  comparison_in_round_n:
+    filter: Basis und aktuelle Findings auf die Severities der Runde N (1: P1/P2/P3, 2: P1/P2, ab 3: P1)
+    compared: finding_key ohne Severity-Präfix
+  deferred_findings: {items: finding_key}
+  final_review_last_failures: {items: finding_key}
+  integration_last_failures: {items: gate_key}
+  lanes.<lane>.last_failures: {items: gate_key}
+  new_fields: none
+  migration: none               # alte Einträge werden weder umgeschrieben noch normalisiert
 
-cli:
-  agent_run_error:
-    triggers: [timeout, max_turns, sdk_exception, codex_error_in_code_review]
-    stream: stderr
-    message: |-
-      Agent-Lauf abgebrochen (z. B. Plan-Limit erschöpft): <Ursache>
-      Der Run <run_id> bleibt in Phase '<phase>' — später fortsetzen mit: adw resume <run_id>
-    exit_code: 1
-    traceback: false
-    escalation_md_created: false
-    phase_changed: false        # insbesondere nicht `escalated`
-    resumable: true             # zuvor gemeldete session_id wird fortgesetzt
-    automatic_retry: false
-  git_error_in_orchestrator:
-    triggers: [subprocess.TimeoutExpired, OSError]  # nur context._git
-    stream: stderr
-    message: |-
-      Eskalation: <Ursache>
-      Report: .adw/runs/<run_id>/escalation.md
-    cause_contains: [git-Kommando, Ursache]
-    exit_code: 1
-    traceback: false
-    escalation_md_created: true
-    phase: escalated
+unchanged:
+  - Texte an Agenten, escalation.md, Follow-up-Report und Event-Payloads außer finding_key (unnormalisiert)
+  - Rohtext-Vergleich gegen bestehende Einträge in followups.md
+  - Kürzung des Gate-Outputs auf MAX_OUTPUT_LINES (200)
+  - Severity-Schwellen, Runden- und Iterationslimits, Deferred-P3-Semantik
+  - pyproject.toml-Version (0.32.0)
