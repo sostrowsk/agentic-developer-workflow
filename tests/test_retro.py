@@ -362,10 +362,22 @@ def _all_invalid(cwd: Path) -> str:
     return answer(item(1, ["seq:999999"]), item(2, ["../../config.yaml"]), item(3, []))
 
 
+def _malformed_evidence(cwd: Path) -> str:
+    """Malformed evidence is invalid evidence, no schema error: only its item drops."""
+    return answer(
+        item(1, ["seq:1"]),                                # keep: valid neighbour
+        {**item(2), "evidence": None},                     # drop: null
+        {**item(3), "evidence": "seq:1"},                  # drop: no list
+        item(4, [42]),                                     # drop: no string
+        item(5, ["x" * 300]),                              # drop: name too long for the OS
+        item(6, ["seq:" + "9" * 5000]),                    # drop: absurd seq
+    )
+
+
 @pytest.mark.parametrize(
     ("make_answer", "kept", "dropped"),
-    [(_mixed_evidence, [1, 3, 9], 6), (_all_invalid, [], 3)],
-    ids=["mixed", "all-dropped"],
+    [(_mixed_evidence, [1, 3, 9], 6), (_all_invalid, [], 3), (_malformed_evidence, [1], 5)],
+    ids=["mixed", "all-dropped", "malformed"],
 )
 def test_items_without_valid_evidence_are_dropped(repo, monkeypatch, make_answer, kept, dropped):
     seen = {}

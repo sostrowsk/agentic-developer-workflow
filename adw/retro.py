@@ -10,7 +10,7 @@ exit code and phase stay exactly as without the retro.
 import json
 import re
 from pathlib import Path, PurePosixPath
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 import typer
 from pydantic import BaseModel, ConfigDict, Field
@@ -38,8 +38,15 @@ class RetroItem(BaseModel):
     better: str
     cause: Cause
     lever: str
-    # Missing evidence is no schema error — such an item is dropped (E4).
-    evidence: list[str] = []
+    # Missing or malformed evidence is no schema error — it is invalid evidence,
+    # and an item without valid evidence is dropped (E4).
+    evidence: Any = []
+
+    def evidence_strings(self) -> list[str]:
+        """The string entries of the evidence list; anything else counts as none."""
+        if not isinstance(self.evidence, list):
+            return []
+        return [ev for ev in self.evidence if isinstance(ev, str)]
 
 
 class RetroAnswer(BaseModel):
@@ -81,13 +88,18 @@ def _event_seqs(run_dir: Path) -> set[int]:
 
 
 def _valid_evidence(run_dir: Path, seqs: set[int], evidence: str) -> bool:
-    match = _SEQ.fullmatch(evidence)
-    if match:
-        return int(match.group(1)) in seqs
-    path = PurePosixPath(evidence)
-    if not evidence or path.is_absolute() or ".." in path.parts:
+    """Whether one evidence string holds; a value the OS or ``int`` cannot handle
+    (over-long name, NUL byte, absurd digit count) is simply invalid."""
+    try:
+        match = _SEQ.fullmatch(evidence)
+        if match:
+            return int(match.group(1)) in seqs
+        path = PurePosixPath(evidence)
+        if not evidence or path.is_absolute() or ".." in path.parts:
+            return False
+        return (run_dir / evidence).is_file()
+    except (OSError, ValueError):
         return False
-    return (run_dir / evidence).is_file()
 
 
 def render_markdown(retro: dict) -> str:
@@ -135,14 +147,15 @@ def run_retro(ctx) -> None:
         seqs = _event_seqs(run_dir)
         kept = [
             item for item in answer.items
-            if any(_valid_evidence(run_dir, seqs, ev) for ev in item.evidence)
+            if any(_valid_evidence(run_dir, seqs, ev) for ev in item.evidence_strings())
         ]
         retro = {
             "schema_version": SCHEMA_VERSION,
             "run_id": state.run_id,
             "phase": state.phase,
             "summary": answer.summary,
-            "items": [item.model_dump() for item in kept],
+            # retro.json keeps evidence as list[str]: non-string entries are left out
+            "items": [{**item.model_dump(), "evidence": item.evidence_strings()} for item in kept],
             "dropped": len(answer.items) - len(kept),
             "model": spec.model,
         }
