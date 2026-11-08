@@ -276,14 +276,15 @@ def build_run_record(repo, run_id: str) -> dict:
 
 
 def _ledger_path() -> Path | None:
-    """The ledger clone, or None when ADW_LEDGER is no Git work tree root."""
+    """The ledger clone, or None when ADW_LEDGER is no Git work tree root.
+
+    Only a genuinely absent or non-repository path is "no ledger". A probe that
+    times out or cannot run propagates: the export then fails, and the prune
+    keeps the run instead of deleting it unarchived."""
     path = Path(os.environ.get("ADW_LEDGER", _DEFAULT_LEDGER)).expanduser()
     if not path.is_dir():
         return None
-    try:
-        result = run_git(path, "rev-parse", "--show-toplevel", timeout=_GIT_TIMEOUT)
-    except (subprocess.TimeoutExpired, OSError):
-        return None
+    result = run_git(path, "rev-parse", "--show-toplevel", timeout=_GIT_TIMEOUT)
     if result.returncode != 0 or Path(result.stdout.strip()).resolve() != path.resolve():
         return None
     return path
@@ -328,6 +329,10 @@ def _write_bundle(repo: Path, state: RunState, record: dict, dest: Path) -> None
         kept = [
             line for line in lines if (_parse(line) or {}).get("type") != _EXPORT_EVENT
         ]
+        if kept and not kept[-1].endswith(b"\n"):
+            # Same bytes before and after an export event lands behind a log
+            # without final newline (it then starts on a fresh line).
+            kept[-1] += b"\n"
         (dest / "events.jsonl.gz").write_bytes(gzip.compress(b"".join(kept), mtime=0))
     diff = _final_diff(repo, state)
     if diff is not None:
@@ -380,8 +385,12 @@ def _export(repo: Path, run_id: str) -> tuple[str, bool | None, str | None]:
 
 def _append_gz_event(gz: Path, payload: dict) -> None:
     """Append the event as a further gzip member — a new events.jsonl next to the
-    .gz would overwrite it at the next --gzip prune."""
-    seqs = [e.get("seq") for e in map(_parse, _log_lines(gz.parent) or []) if e]
+    .gz would overwrite it at the next --gzip prune. Like the emitter, the record
+    starts on a fresh line when the log lacks a final newline (complete last
+    record or crash-truncated fragment), so neither is merged with it."""
+    lines = _log_lines(gz.parent) or []
+    seqs = [e.get("seq") for e in map(_parse, lines) if e]
+    prefix = b"\n" if lines and not lines[-1].endswith(b"\n") else b""
     now = datetime.now(UTC)
     record = {
         "seq": max([s for s in seqs if isinstance(s, int)], default=0) + 1,
@@ -396,7 +405,7 @@ def _append_gz_event(gz: Path, payload: dict) -> None:
         "payload": payload,
     }
     with gzip.open(gz, "ab") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False).encode("utf-8") + b"\n")
+        fh.write(prefix + json.dumps(record, ensure_ascii=False).encode("utf-8") + b"\n")
 
 
 def _record_event(repo: Path, run_id: str, payload: dict) -> None:

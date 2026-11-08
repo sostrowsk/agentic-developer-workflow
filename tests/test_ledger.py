@@ -380,3 +380,59 @@ def test_ledger_export_command_rejects_unknown_run_id(repo, ledger):
     res = runner.invoke(app, ["ledger", "export", "deadbeef", "--repo", str(repo)])
     assert res.exit_code == 1, res.output
     assert not (ledger / "runs").exists()
+
+
+# --- review findings --------------------------------------------------------------
+
+
+def test_backfill_export_holds_the_run_lock_against_a_concurrent_prune(repo, ledger, monkeypatch):
+    """Review P2: while ``adw ledger export`` exports a run, a manual prune must not
+    export and delete the same run — otherwise the backfill overwrites the ledger
+    bundle with one missing state, events and artifacts."""
+    install_fixture_run(repo)
+    _done_run(repo, "ffff0001", "2099-01-01T00:00:00.000Z")  # newest: the kept guard
+    real_build = ledger_mod.build_run_record
+    prune_results = []
+    pruned = []
+
+    def build_then_prune(repo_, run_id):
+        record = real_build(repo_, run_id)
+        if run_id == RUN_ID and not pruned:
+            pruned.append(True)  # once: the prune's own export re-enters here
+            prune_results.append(retention.prune(repo_, keep=1))
+        return record
+
+    monkeypatch.setattr(ledger_mod, "build_run_record", build_then_prune)
+    res = runner.invoke(app, ["ledger", "export", RUN_ID, "--repo", str(repo)])
+
+    assert res.exit_code == 0, res.output
+    [results] = prune_results
+    assert [(r.run_id, r.action, r.reason) for r in results] == [
+        (RUN_ID, "skipped", "läuft noch")
+    ]
+    assert (repo / ".adw" / "runs" / RUN_ID / "state.json").is_file()
+    files = {p.name for p in ledger_dir(ledger).iterdir()}
+    assert BUNDLE <= files
+
+
+@pytest.mark.parametrize(
+    "tail", [b"", b'{"seq": 23, "ts": "2026-09-15T09:3'], ids=["complete", "truncated"]
+)
+def test_gzip_event_append_starts_on_a_fresh_line(repo, ledger, tail):
+    """Review P2: a .gz log without a final newline (complete last record or a
+    crash-truncated fragment) must not swallow the appended ledger.export event;
+    the bundle stays stable across re-exports."""
+    run_dir = install_fixture_run(repo)
+    plain = run_dir / "events.jsonl"
+    data = plain.read_bytes().rstrip(b"\n") + (b"\n" + tail if tail else b"")
+    (run_dir / "events.jsonl.gz").write_bytes(gzip.compress(data))
+    plain.unlink()
+    before = list(retention._iter_events(run_dir))
+
+    assert ledger_mod.export_run(repo, RUN_ID) == "exported"
+
+    after = list(retention._iter_events(run_dir))
+    assert after[:-1] == before
+    assert after[-1]["type"] == "ledger.export"
+    assert after[-1]["payload"]["outcome"] == "exported"
+    assert ledger_mod.export_run(repo, RUN_ID) == "unchanged"

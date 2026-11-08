@@ -183,9 +183,14 @@ def _run_span(
 
 def _export_after_execution(repo: Path, run_id: str) -> None:
     """Ledger export after an execution (E6). Fail-open: never changes exit code or
-    phase, never replaces an exception/typer.Exit that is already propagating."""
+    phase, never replaces an exception/typer.Exit that is already propagating.
+
+    Re-takes the per-run lock (after the execution released it; same order repo
+    lock → run lock): a concurrent manual prune must not export and delete the run
+    while this export copies it."""
     try:
-        ledger.export_run(repo, run_id)
+        with run_lock(repo, run_id):
+            ledger.export_run(repo, run_id)
     except Exception as exc:  # noqa: BLE001 — export_run never raises; second guard
         typer.echo(f"Ledger-Export fehlgeschlagen: {exc}", err=True)
 
@@ -689,7 +694,10 @@ def ledger_export(
             run_ids = [rec.run_id for rec in retention.scan_runs(repo)]
         outcomes = []
         for rid in run_ids:
-            outcome = ledger.export_run(repo, rid)
+            # Per-run lock as in prune (which holds no repo lock): a run cannot be
+            # pruned while its bundle is being copied.
+            with run_lock(repo, rid):
+                outcome = ledger.export_run(repo, rid)
             outcomes.append(outcome)
             typer.echo(f"{rid}: {outcome}")
     if "failed" in outcomes:

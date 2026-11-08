@@ -772,3 +772,26 @@ def test_prune_exports_before_deleting_but_not_in_gzip_mode(target_repo, ledger)
     exported = ledger / "runs" / target_repo.name / rid
     assert (exported / "run-record.json").is_file()
     assert (exported / "events.jsonl.gz").is_file()
+
+
+def test_prune_keeps_a_run_when_the_ledger_probe_times_out(target_repo, ledger, monkeypatch):
+    """Review P1: a configured but temporarily unreachable ledger is an export
+    failure, not "no ledger" — the candidate must not be deleted unarchived."""
+    import adw.ledger as ledger_mod
+
+    real_run_git = ledger_mod.run_git
+
+    def slow_probe(cwd, *args, **kwargs):
+        if "--show-toplevel" in args:
+            raise subprocess.TimeoutExpired(["git", *args], kwargs.get("timeout", 0))
+        return real_run_git(cwd, *args, **kwargs)
+
+    monkeypatch.setattr(ledger_mod, "run_git", slow_probe)
+    rid = "aaaa5555"
+    rd = make_run(target_repo, rid, _iso(datetime(2026, 8, 1)))
+
+    result = prune_all(target_repo)
+
+    assert result.exit_code == 0, result.output
+    assert f"{rid}: skipped (Ledger-Export fehlgeschlagen)" in result.output
+    assert rd.is_dir() and (rd / "state.json").is_file()
