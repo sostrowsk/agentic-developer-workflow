@@ -165,9 +165,10 @@ def test_agent_run_span_start_payload_fields(target_repo, patched_query):
     (start,) = of_type(read_events(target_repo), "agent.run", "start")
     assert set(start["payload"]) == {
         "agent", "model", "tools", "allowed_tools", "cwd",
-        "resume_session", "prompt", "system_append", "max_turns", "timeout_s",
+        "resume_session", "prompt", "system_append", "max_turns", "timeout_s", "effort",
     }
     assert start["payload"]["agent"] == "spec_agent"
+    assert start["payload"]["effort"] == "low"
     assert start["payload"]["max_turns"] == REGISTRY["spec_agent"].max_turns
     assert start["payload"]["timeout_s"] == REGISTRY["spec_agent"].timeout_s
     assert start["payload"]["model"] == REGISTRY["spec_agent"].model

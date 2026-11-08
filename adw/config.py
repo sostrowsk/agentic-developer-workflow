@@ -4,7 +4,14 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+)
 
 NonBlankStr = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
 # strict=True: YAML-Booleans (true/false) sind keine gültigen Sekundenwerte.
@@ -52,6 +59,10 @@ LaneName = Literal["backend", "frontend"]
 # sind überall zulässig, wo ein Breakpoint benannt wird: die Config-Liste, das
 # State-Feld pending_breakpoint und der approval-Event-`gate`.
 BreakpointName = Literal["before_integration", "before_push"]
+# Claude effort override per agent; `default` = SDK default (no effort passed).
+EffortSetting = Literal["low", "medium", "high", "xhigh", "max", "default"]
+# Codex reasoning effort (`-c model_reasoning_effort=…`); no default/max.
+CodexEffort = Literal["low", "medium", "high", "xhigh"]
 
 
 class ConfigError(Exception):
@@ -100,6 +111,9 @@ class CodexConfig(BaseModel):
     # Effektives Zeitlimit der codex-exec-Subprozesse (Autor UND Review teilen
     # den Wert). Fehlt der Key, bleibt es beim bisherigen Default von 900s.
     timeout: PositiveSeconds = 900
+    # Reasoning-Effort aller codex-exec-Aufrufe (Authoring und Review). Das
+    # isolierte CODEX_HOME hat keine config.toml — ohne Wert dächte Codex kaum.
+    reasoning_effort: CodexEffort = "high"
 
 
 class TraceConfig(BaseModel):
@@ -126,6 +140,21 @@ class AdwConfig(BaseModel):
     # ValidationError und wird von load() als ConfigError gehoben. Reihenfolge
     # und Mehrfachnennung sind bedeutungslos: die Haltepunkte wirken als Menge.
     breakpoints: list[BreakpointName] = Field(default_factory=list)
+    # Effort-Übersteuerung je Agent (Agentenname → Stufe oder `default`).
+    # Nicht aufgeführte Agenten behalten ihren REGISTRY-Default.
+    effort: dict[str, EffortSetting] = Field(default_factory=dict)
+
+    @field_validator("effort")
+    @classmethod
+    def _known_agents(cls, value: dict[str, str]) -> dict[str, str]:
+        # Lokal importiert: agents → events → state → config wäre auf
+        # Modulebene ein Importzyklus.
+        from adw.agents import REGISTRY
+
+        unknown = sorted(set(value) - set(REGISTRY))
+        if unknown:
+            raise ValueError(f"unbekannte Agenten unter effort: {', '.join(unknown)}")
+        return value
 
     @property
     def is_parallel_capable(self) -> bool:

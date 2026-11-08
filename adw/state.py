@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from adw.config import BreakpointName
+from adw.config import BreakpointName, CodexEffort, EffortSetting
 from adw.findings import Finding
 
 RUN_ID_RE = re.compile(r"^[0-9a-f]{8}$")
@@ -145,6 +145,11 @@ class RunState(BaseModel):
     # Haltepunkte"); None heißt "Alt-State von vor der Pinnung", dann gilt
     # weiterhin die Config.
     pinned_breakpoints: list[BreakpointName] | None = None
+    # Ebenso gepinnt (W2): die effort-Übersteuerung und der Codex-Reasoning-
+    # Effort. Das leere Mapping ist eine echte Pinnung ("keine Übersteuerung");
+    # None = Alt-State von vor W2, dann gilt weiterhin die Config.
+    pinned_effort: dict[str, EffortSetting] | None = None
+    pinned_codex_reasoning_effort: CodexEffort | None = None
     # Runden-Zähler der Integration/E2E-Phase — persistiert, damit ein Crash
     # das 10-Runden-Limit nicht zurücksetzt. last_failures ist die
     # Circuit-Breaker-Basis (wird erst NACH dem Fix-Dispatch fortgeschrieben).

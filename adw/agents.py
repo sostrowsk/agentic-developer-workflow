@@ -3,9 +3,9 @@
 import os
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 import anyio
 from claude_agent_sdk import (
@@ -24,6 +24,8 @@ OPUS = "claude-opus-5-5"
 SONNET = "claude-sonnet-5-5"
 
 _IS_MACOS = sys.platform == "darwin"
+
+ClaudeEffort = Literal["low", "medium", "high", "xhigh", "max"]
 
 READ_ONLY_TOOLS = ("Read", "Grep", "Glob")
 WRITER_TOOLS = ("Read", "Grep", "Glob", "Write", "Edit")
@@ -170,6 +172,8 @@ class AgentSpec:
     timeout_s: int
     permission_mode: str = "default"
     sandbox_bash: bool = False
+    # None = SDK default (no effort passed to the options).
+    effort: ClaudeEffort | None = None
 
 
 @dataclass(frozen=True)
@@ -210,6 +214,7 @@ def agent_run_start_payload(agent: AgentSpec, task: str, cwd, resume: str | None
         "system_append": agent.system_append,
         "max_turns": agent.max_turns,
         "timeout_s": agent.timeout_s,
+        "effort": agent.effort,
     }
 
 
@@ -235,6 +240,7 @@ REGISTRY: dict[str, AgentSpec] = {
         model=OPUS,
         max_turns=150,
         timeout_s=1200,
+        effort="low",
         tools=WRITER_TOOLS,
         allowed_tools=(*SCOPED_READ_RULES, *SPEC_WRITE_RULES),
         system_append=(
@@ -249,6 +255,7 @@ REGISTRY: dict[str, AgentSpec] = {
         model=OPUS,
         max_turns=150,
         timeout_s=1200,
+        effort="low",
         tools=WRITER_TOOLS,
         allowed_tools=(*SCOPED_READ_RULES, *PLAN_WRITE_RULES),
         system_append=(
@@ -301,6 +308,7 @@ REGISTRY: dict[str, AgentSpec] = {
         model=OPUS,
         max_turns=400,
         timeout_s=3600,
+        effort="low",
         tools=BUILDER_TOOLS,
         # Schreiben nur worktree-relativ (./**) statt pauschal; Bash läuft
         # sandboxed (sandbox_bash) — kein Ausbruch in Haupt-Checkout/Lanes.
@@ -363,6 +371,7 @@ REGISTRY: dict[str, AgentSpec] = {
         model=OPUS,
         max_turns=60,
         timeout_s=900,
+        effort="low",
         tools=READ_ONLY_TOOLS,
         allowed_tools=SCOPED_READ_RULES,
         system_append=(
@@ -375,6 +384,16 @@ REGISTRY: dict[str, AgentSpec] = {
         permission_mode="default",
     ),
 }
+
+
+def effective_spec(spec: AgentSpec, overrides: dict[str, str]) -> AgentSpec:
+    """The one place that turns a REGISTRY default plus the run's pinned
+    ``effort`` override into the spec that actually runs (``default`` = SDK
+    default, i.e. None). REGISTRY itself is never mutated."""
+    if spec.name not in overrides:
+        return spec
+    level = overrides[spec.name]
+    return replace(spec, effort=None if level == "default" else level)
 
 
 def _sanitized_env_overrides() -> dict[str, str]:
@@ -569,6 +588,8 @@ class SdkAgentRunner:
             allowed_tools=list(agent.allowed_tools),
             permission_mode=agent.permission_mode,
             max_turns=agent.max_turns,
+            # Only a concrete level is passed; None leaves the SDK default.
+            **({"effort": agent.effort} if agent.effort is not None else {}),
             env=_env_overrides(),
             # Isolation: keine repo-kontrollierten Settings/Hooks/MCP-Server —
             # das Ziel-Repo darf die Agent-Permissions nicht aufweichen.

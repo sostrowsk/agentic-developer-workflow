@@ -161,13 +161,16 @@ Defaults are those in `adw/config.py`. Unknown keys are rejected everywhere.
 | `ci.timeout` | no | `2700` | Total budget for waiting on CI (45 min). |
 | `ci.staging_job` | no | — | Job that must additionally be green (e.g. `deploy-staging`). |
 | `codex.timeout` | no | `900` | Time limit in seconds for every `codex exec` call (author and review share it). |
+| `codex.reasoning_effort` | no | `high` | Reasoning effort of every `codex exec` call (authoring and review): `low`, `medium`, `high` or `xhigh`. Passed as `-c model_reasoning_effort=…`, independent of your own Codex config. |
 | `trace.enabled` | no | `true` | Write the event log `events.jsonl`. `false` = no event log at all (the GUI then has nothing to show for that run). |
 | `trace.keep_runs` | no | `20` | Automatic pruning after a successful run keeps the newest N runs. `0` = never prune automatically. |
 | `breakpoints[]` | no | `[]` | Extra holds: `before_integration` and/or `before_push`. See §6. |
+| `effort.<agent>` | no | registry | Claude effort per agent: `low`, `medium`, `high`, `xhigh`, `max` or `default` (= SDK default, no effort passed — also for agents that default to `low`). Defaults: `build_agent`, `spec_agent`, `plan_agent`, `retro_agent` → `low`; all others → SDK default. Unlisted agents keep their default. |
 
 Validation is strict and fail-fast: a missing file, invalid YAML, a duplicate
 key, an unknown key, a lane without gates, a gate without timeout, a non-boolean
-`tdd` or an unknown breakpoint abort **before** anything happens, with the file
+`tdd`, an unknown breakpoint, an unknown agent name under `effort` or an
+unsupported effort level abort **before** anything happens, with the file
 path and the reason. Apart from the documented defaults, nothing is guessed.
 
 **Your gates are your quality boundary.** ADW only accepts a build when *all*
@@ -273,8 +276,9 @@ suite.
 ### 5.4 Pinned settings
 
 At run start ADW pins the effective **base branch** (config or
-`--base-branch`), the **gate mode** and the **breakpoint set** into the run
-state. Editing `.adw/config.yaml` mid-run does not move a running run.
+`--base-branch`), the **gate mode**, the **breakpoint set** and the **effort settings**
+(`effort`, `codex.reasoning_effort`) into the run state; `resume`/`approve` use
+the start values, a new run reads the current config. Editing `.adw/config.yaml` mid-run does not move a running run.
 `--base-branch` on `resume`/`approve` can still change the base, but only
 until lanes exist.
 
@@ -618,7 +622,9 @@ uv run adw runs prune --repo ~/code/shop --gzip              # compress events.j
 Pruning deletes a run's state, event log and artifacts. So that this experience
 is not lost, ADW exports every executed run into a central **ledger**: a Git repo
 holding one deterministic run record per run (`run-record.json`, 0 tokens) and the
-case bundle. It is the data basis for later evaluation.
+case bundle. The effort a run actually used is visible as `effort` in each
+`agent.run` start event, in the argv of the `codex.*` start events, and as
+`agents[].effort` and `codex_effort` in the run record. It is the data basis for later evaluation.
 
 - **Location:** environment variable `ADW_LEDGER`, default `~/.adw/ledger`. It is
   shared across all target repos; there is no config key. ADW never creates or

@@ -758,3 +758,75 @@ def test_agent_specs_are_truly_immutable():
     for spec in REGISTRY.values():
         assert isinstance(spec.tools, tuple), spec.name
         assert isinstance(spec.allowed_tools, tuple), spec.name
+
+
+# --- W2: effort per agent ------------------------------------------------------
+
+EXPECTED_EFFORT = {
+    "build_agent": "low",
+    "spec_agent": "low",
+    "plan_agent": "low",
+    "retro_agent": "low",
+    "spec_synthesis": None,
+    "plan_synthesis": None,
+    "final_reviewer": None,
+    "e2e_triage": None,
+    "log_analyst": None,
+}
+
+
+def test_registry_effort_defaults_reach_the_options(captured_query, tmp_path):
+    """AC 1/E1: build_agent runs on low; final_reviewer gets no effort at all
+    (SDK default)."""
+    assert {name: spec.effort for name, spec in REGISTRY.items()} == EXPECTED_EFFORT
+    SdkAgentRunner().run(REGISTRY["build_agent"], "task", cwd=tmp_path)
+    assert captured_query["options"].effort == "low"
+    SdkAgentRunner().run(REGISTRY["final_reviewer"], "task", cwd=tmp_path)
+    assert captured_query["options"].effort is None
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("build_agent", "medium"),
+        ("final_reviewer", "high"),
+        ("retro_agent", None),  # `default` = SDK default, even for a low agent
+        ("spec_agent", "low"),  # unlisted keeps its registry default
+        ("e2e_triage", None),
+    ],
+)
+def test_effective_spec_applies_the_overrides(name, expected):
+    """AC 2/E4: one place combines registry default and override."""
+    from adw.agents import effective_spec
+
+    overrides = {"build_agent": "medium", "final_reviewer": "high", "retro_agent": "default"}
+    spec = REGISTRY[name]
+    effective = effective_spec(spec, overrides)
+    assert effective.effort == expected
+    assert dataclasses.replace(effective, effort=spec.effort) == spec  # nothing else changes
+    assert REGISTRY[name] == spec  # the registry is not mutated
+
+
+def test_agent_run_call_site_records_and_passes_the_override(
+    captured_query, target_repo
+):
+    """AC 4: with the real runner the start payload and the options carry the
+    same effective (overridden) effort."""
+    from types import SimpleNamespace
+
+    from adw.config import AdwConfig
+    from adw.context import _agent_run
+    from adw.events import EventEmitter
+    from tests.conftest import DEFAULT_CONFIG, write_config
+    from tests.run_helpers import RUN_ID, of_type, read_events
+
+    write_config(target_repo, DEFAULT_CONFIG + "effort:\n  build_agent: high\n")
+    ctx = SimpleNamespace(
+        config=AdwConfig.load(target_repo),
+        emitter=EventEmitter(target_repo, RUN_ID),
+        agents=SdkAgentRunner(),
+    )
+    _agent_run(ctx, REGISTRY["build_agent"], "task", target_repo)
+    (start,) = of_type(read_events(target_repo), "agent.run", "start")
+    assert start["payload"]["effort"] == "high"
+    assert captured_query["options"].effort == "high"

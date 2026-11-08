@@ -13,6 +13,19 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.36.0] — Unreleased
+
+### Added
+- **Effort pro Agent — und Codex denkt wieder mit (W2).**
+  - **`effort:` in `.adw/config.yaml`:** optionales Mapping Agentenname → `low`, `medium`, `high`, `xhigh`, `max` oder `default` (= SDK-Default, kein Effort übergeben). Nicht aufgeführte Agenten behalten ihren Registry-Default. Unbekannter Agentenname oder unbekannte Stufe ist beim Start ein `ConfigError`; es wird kein Run angelegt.
+  - **`codex.reasoning_effort`:** `low`, `medium`, `high` oder `xhigh` (Default `high`), gilt für Authoring und Code-Review gleichermaßen; jeder `codex exec` bekommt `-c model_reasoning_effort=<wert>`.
+  - Beide Einstellungen werden beim Run-Start im Run-State gepinnt; `resume`/`approve` behalten die Start-Werte auch nach einer Config-Änderung.
+  - Der wirksame Effort steht im `agent.run`-Start-Payload (`effort`, echter und Mock-Runner) und im argv der `codex.review`/`codex.author`-Start-Events. Der Run-Record füllt `agents[].effort` jetzt aus dem Start-Payload und ergänzt `codex_effort` (aus dem argv des ersten Codex-Starts, sonst `null`).
+
+### Changed
+- **Der Build-Agent läuft jetzt auf Effort `low`**, ebenso Spec-, Plan- und Retro-Agent; Synthese, Final-Reviewer, E2E-Triage und Log-Analyst behalten den SDK-Default.
+- **Codex läuft jetzt ausdrücklich auf Reasoning-Effort `high`** (F17): das isolierte `CODEX_HOME` hat keine `config.toml`, ein `model_reasoning_effort` aus der eigenen Codex-Config griff daher nie.
+
 ## [0.35.0] — 2026-11-08
 
 ### Hinzugefügt

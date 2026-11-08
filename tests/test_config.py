@@ -366,3 +366,45 @@ def test_codex_config_forbids_unknown_keys(target_repo):
     write_config(target_repo, _BASE_CONFIG + "codex:\n  tiemout: 120\n")
     with pytest.raises(ConfigError, match="tiemout|codex"):
         AdwConfig.load(target_repo)
+
+
+# --- W2: effort / codex.reasoning_effort ---------------------------------------
+
+
+def test_effort_keys_default_without_config(target_repo):
+    """E2/E3: no `effort:` → no override; Codex defaults to high."""
+    write_config(target_repo, _BASE_CONFIG)
+    cfg = AdwConfig.load(target_repo)
+    assert cfg.effort == {}
+    assert cfg.codex.reasoning_effort == "high"
+    write_config(
+        target_repo,
+        _BASE_CONFIG
+        + "effort:\n  build_agent: medium\n  final_reviewer: high\n  retro_agent: default\n"
+        + "codex:\n  reasoning_effort: xhigh\n",
+    )
+    cfg = AdwConfig.load(target_repo)
+    assert cfg.effort == {
+        "build_agent": "medium", "final_reviewer": "high", "retro_agent": "default",
+    }
+    assert cfg.codex.reasoning_effort == "xhigh"
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "effort:\n  bulid_agent: low\n",  # unknown agent name
+        "effort:\n  build_agent: extreme\n",  # unknown Claude level
+        "effort: 3\n",  # not a mapping
+        "effort:\n",  # null instead of a mapping
+        "effort:\n  build_agent:\n",  # null instead of a level
+        "codex:\n  reasoning_effort: max\n",
+        "codex:\n  reasoning_effort: default\n",
+        "codex:\n  reasoning_effort: turbo\n",
+    ],
+)
+def test_invalid_effort_settings_raise_config_error(target_repo, block):
+    """AC 3/6: unknown agent, unknown level or wrong type fail at load time."""
+    write_config(target_repo, _BASE_CONFIG + block)
+    with pytest.raises(ConfigError):
+        AdwConfig.load(target_repo)

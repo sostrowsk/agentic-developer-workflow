@@ -300,6 +300,10 @@ def run(
         # Ebenso die Haltepunkte pinnen: der Lauf hält an genau der Menge, die beim
         # Start konfiguriert war — eine spätere Config-Änderung verschiebt sie nicht.
         state.pinned_breakpoints = list(config.breakpoints)
+        # Effort ebenso (W2) — auch das leere Mapping, damit später ergänzte
+        # Einträge einen laufenden Run nicht verändern.
+        state.pinned_effort = dict(config.effort)
+        state.pinned_codex_reasoning_effort = config.codex.reasoning_effort
         # SOFORT persistieren: crasht der allererste Agent-Lauf, muss die
         # angezeigte run_id per `adw resume` auffindbar sein.
         ensure_runs_gitignored(repo)
@@ -1108,7 +1112,8 @@ def _config_for_continuation(
 
     Run-start pins beat the file: the base branch comes from
     ``state.pinned_base_branch`` and the breakpoints from
-    ``state.pinned_breakpoints``, so editing ``.adw/config.yaml`` mid-run can
+    ``state.pinned_breakpoints`` (likewise ``pinned_effort`` and
+    ``pinned_codex_reasoning_effort``), so editing ``.adw/config.yaml`` mid-run can
     neither move existing Lanes nor add/remove a future hold.
 
     Validate first (config loading stays OUTSIDE the run span, contract excludes),
@@ -1126,6 +1131,13 @@ def _config_for_continuation(
         # aus der (womöglich zwischenzeitlich editierten) config.yaml. None wäre
         # ein State von vor der Pinnung — der folgt weiter der Config.
         config = config.model_copy(update={"breakpoints": list(state.pinned_breakpoints)})
+    if state.pinned_effort is not None:
+        config = config.model_copy(update={"effort": dict(state.pinned_effort)})
+    if state.pinned_codex_reasoning_effort is not None:
+        codex = config.codex.model_copy(
+            update={"reasoning_effort": state.pinned_codex_reasoning_effort}
+        )
+        config = config.model_copy(update={"codex": codex})
     if cli_override is not None and cli_override != state.pinned_base_branch:
         if state.lanes:
             raise _fail(
@@ -1242,7 +1254,12 @@ def _build_context(
         config=config,
         state=state,
         agents=SdkAgentRunner(emitter=emitter, totals=run_totals),
-        codex=CodexRunner(emitter=emitter, timeout=config.codex.timeout, totals=run_totals),
+        codex=CodexRunner(
+            emitter=emitter,
+            timeout=config.codex.timeout,
+            totals=run_totals,
+            reasoning_effort=config.codex.reasoning_effort,
+        ),
         emitter=emitter,
     )
 

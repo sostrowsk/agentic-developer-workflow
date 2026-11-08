@@ -359,7 +359,10 @@ def _extract_blocks(stdout: str, names: tuple[str, ...], marker_id: str) -> dict
 class CodexRunner:
     """Invokes the Codex CLI as a read-only subprocess and parses strictly."""
 
-    def __init__(self, emitter=None, timeout: int = CODEX_TIMEOUT, totals=None):
+    def __init__(
+        self, emitter=None, timeout: int = CODEX_TIMEOUT, totals=None,
+        reasoning_effort: str = "high",
+    ):
         # Accepted for construction symmetry with SdkAgentRunner. The codex.review
         # span is owned by the phases.py call site (GUI-SPEC §6, E4), so the runner
         # no longer emits anything itself — it only fills the handle it is handed.
@@ -369,6 +372,8 @@ class CodexRunner:
         self._timeout = timeout
         # A RunTotals: Codex tokens join the run-end totals (cost stays with Claude).
         self._totals = totals
+        # Config-driven (codex.reasoning_effort); shared by author and review.
+        self._reasoning_effort = reasoning_effort
 
     def effective_argv(
         self, kind: ReviewKind, content_refs: list[str], cwd: Path, context: str | None = None
@@ -462,8 +467,7 @@ class CodexRunner:
         handle.end_payload["parse_ok"] = True
         return files
 
-    @staticmethod
-    def _argv(cwd: Path, schema: bool = False) -> list[str]:
+    def _argv(self, cwd: Path, schema: bool = False) -> list[str]:
         return [
             "codex",
             "exec",
@@ -477,6 +481,10 @@ class CodexRunner:
             # beschränkt nur Shell-Kommandos, nicht MCP-Prozesse.
             "-c",
             "mcp_servers={}",
+            # Reasoning-Effort ausdrücklich setzen: das isolierte CODEX_HOME hat
+            # keine config.toml, ein model_reasoning_effort des Nutzers griffe nie.
+            "-c",
+            f"model_reasoning_effort={self._reasoning_effort}",
             # Keine Session-Dateien; Events als JSONL (Token-Verbrauch); die finale
             # Antwort als Datei statt aus dem stdout-Transkript gefischt.
             "--ephemeral",

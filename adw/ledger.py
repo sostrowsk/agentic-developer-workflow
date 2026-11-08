@@ -238,7 +238,7 @@ def _agent(start: dict, end: dict | None) -> dict:
     return {
         "agent": begin.get("agent"),
         "model": begin.get("model"),
-        "effort": None,  # not recorded until W2
+        "effort": begin.get("effort"),
         "max_turns": begin.get("max_turns"),
         "timeout_s": begin.get("timeout_s"),
         "duration_s": duration,
@@ -246,6 +246,28 @@ def _agent(start: dict, end: dict | None) -> dict:
         "usage": finish.get("usage") if end is not None else None,
         "is_error": finish.get("is_error") if end is not None else None,
     }
+
+
+_CODEX_EFFORT_PREFIX = "model_reasoning_effort="
+
+
+def _codex_effort(events: list[dict]) -> str | None:
+    """The reasoning effort in the argv of the FIRST codex.review/codex.author
+    start — no search in later starts, no fallback (old runs stay null)."""
+    first = next(
+        (
+            e for e in events
+            if e.get("type") in ("codex.review", "codex.author") and e.get("kind") == "start"
+        ),
+        None,
+    )
+    argv = _payload(first).get("argv")
+    if not isinstance(argv, list):
+        return None
+    for item in argv:
+        if isinstance(item, str) and item.startswith(_CODEX_EFFORT_PREFIX):
+            return item[len(_CODEX_EFFORT_PREFIX):]
+    return None
 
 
 def build_run_record(repo, run_id: str) -> dict:
@@ -293,6 +315,7 @@ def build_run_record(repo, run_id: str) -> dict:
         "fix_cycles": sum(lane.fix_cycles for lane in state.lanes.values()),
         "circuit_breakers": sum(1 for e in events if e.get("type") == "circuit_breaker"),
         "agents": [_agent(start, end) for start, end in _spans(events, "agent.run")],
+        "codex_effort": _codex_effort(events),
         "findings": [
             {
                 "finding_key": _payload(e).get("finding_key"),

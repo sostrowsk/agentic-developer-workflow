@@ -744,3 +744,43 @@ def test_review_prompt_stays_under_codex_input_limit(captured_run, tmp_path):
     assert len(prompt) < 1_000_000
     assert "truncated" in prompt
     assert prompt.rstrip().endswith("all fields are mandatory.")  # schema instruction kept
+
+
+# --- W2 / F17: reasoning effort is set explicitly on every codex exec ------------
+
+
+def _effort_pair(argv, value):
+    """True iff argv holds the ADJACENT pair ``-c model_reasoning_effort=<value>``."""
+    pair = ["-c", f"model_reasoning_effort={value}"]
+    return any(argv[i : i + 2] == pair for i in range(len(argv) - 1))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "value"), [({}, "high"), ({"reasoning_effort": "xhigh"}, "xhigh")]
+)
+def test_codex_argv_sets_the_reasoning_effort(captured_run, tmp_path, kwargs, value):
+    """AC 6/E3: review and authoring argv — effective and executed — carry the pair."""
+    codex = CodexRunner(**kwargs)
+    review_argv = codex.effective_argv("code", ["diff"], tmp_path)
+    assert _effort_pair(review_argv, value)
+    codex.review("code", ["diff"], cwd=tmp_path)
+    assert captured_run["argv"] == review_argv
+    author_argv = codex.effective_author_argv("spec", "task", tmp_path, "abc123")
+    assert _effort_pair(author_argv, value)
+    captured_run["stdout"] = _blocks(**{"spec.md": "x"})
+    codex.author("spec", "task", cwd=tmp_path)
+    assert _effort_pair(captured_run["argv"], value)
+
+
+def test_build_context_passes_the_configured_reasoning_effort(target_repo, tmp_path):
+    """AC 6: the real (non-dry-run) context hands config.codex.reasoning_effort on."""
+    from adw.cli import _build_context
+    from adw.config import AdwConfig
+    from adw.state import RunState
+    from tests.conftest import DEFAULT_CONFIG, write_config
+
+    write_config(target_repo, DEFAULT_CONFIG + "codex:\n  reasoning_effort: low\n")
+    ctx = _build_context(
+        target_repo, AdwConfig.load(target_repo), RunState.new(issue="x", parallel=False)
+    )
+    assert _effort_pair(ctx.codex.effective_argv("code", ["diff"], tmp_path), "low")

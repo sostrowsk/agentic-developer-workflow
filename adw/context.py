@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from adw import ci, github
-from adw.agents import AgentRunner, agent_run_start_payload
+from adw.agents import AgentRunner, agent_run_start_payload, effective_spec
 from adw.codex import CodexClient
 from adw.config import AdwConfig
 from adw.env import safe_env
@@ -72,7 +72,11 @@ def _agent_run(ctx, agent, task, cwd, resume=None, deny_read_paths=None, on_sess
 
     ``on_session_id`` (F5) is invoked by the runner as soon as the session id
     first appears in the stream, so a mid-run abort still leaves it checkpointed
-    for a later resume."""
+    for a later resume.
+
+    The effective spec (registry default + the run's pinned ``effort``
+    override, W2) is formed HERE, so start payload and runner see the same."""
+    agent = effective_spec(agent, ctx.config.effort)
     with ctx.emitter.span("agent.run", agent_run_start_payload(agent, task, cwd, resume)) as handle:
         return ctx.agents.run(
             agent, task, cwd=cwd, resume=resume, deny_read_paths=deny_read_paths,

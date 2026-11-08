@@ -500,3 +500,76 @@ def test_gzip_event_append_starts_on_a_fresh_line(repo, ledger, tail):
     assert after[-1]["type"] == "ledger.export"
     assert after[-1]["payload"]["outcome"] == "exported"
     assert ledger_mod.export_run(repo, RUN_ID) == "unchanged"
+
+
+# --- W2: agents[].effort and codex_effort ---------------------------------------
+
+
+def _rewrite_events(run_dir: Path, rewrite) -> None:
+    path = run_dir / "events.jsonl"
+    lines = path.read_text(encoding="utf-8").splitlines()
+    out = []
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            out.append(line)  # keep the fixture's truncated line as is
+            continue
+        event = rewrite(event)
+        if event is not None:
+            out.append(json.dumps(event))
+    path.write_text("\n".join(out) + "\n", encoding="utf-8")
+
+
+def _codex_start(seq, type_, argv=None):
+    payload = {"kind": "code"} if argv is None else {"kind": "code", "argv": argv}
+    return {"seq": seq, "ts": "2026-09-15T09:29:30.000Z", "type": type_, "kind": "start",
+            "span": f"x{seq}", "parent": None, "phase": None, "lane": None, "round": None,
+            "payload": payload}
+
+
+def _pair(value):
+    return ["codex", "exec", "-c", f"model_reasoning_effort={value}", "-"]
+
+
+@pytest.mark.parametrize(
+    ("starts", "expected"),
+    [
+        ([], None),  # no codex start at all
+        ([("codex.review", None), ("codex.review", _pair("high"))], None),  # first only
+        ([("codex.review", ["codex", "exec", "-"])], None),  # argv without the setting
+        ([("codex.author", _pair("low")), ("codex.review", _pair("high"))], "low"),
+    ],
+)
+def test_codex_effort_comes_from_the_first_codex_start_only(repo, starts, expected):
+    """AC 7: codex_effort is read from the argv of the FIRST codex.* start; no
+    fallback to later starts or to config/registry values."""
+    run_dir = install_fixture_run(repo)
+    _rewrite_events(
+        run_dir,
+        lambda e: None if e.get("type", "").startswith("codex.") and e.get("kind") == "start"
+        else e,
+    )
+    with (run_dir / "events.jsonl").open("a", encoding="utf-8") as fh:
+        for i, (type_, argv) in enumerate(starts, 200):
+            fh.write(json.dumps(_codex_start(i, type_, argv)) + "\n")
+    assert ledger_mod.build_run_record(repo, RUN_ID)["codex_effort"] == expected
+
+
+@pytest.mark.parametrize(
+    ("payload_update", "expected"),
+    [({"effort": "medium"}, "medium"), ({"effort": None}, None), ({}, None)],
+)
+def test_agent_effort_comes_from_the_start_payload(repo, payload_update, expected):
+    """AC 7: agents[].effort mirrors the agent.run start payload; missing → null."""
+    run_dir = install_fixture_run(repo)
+
+    def rewrite(event):
+        if event.get("type") == "agent.run" and event.get("kind") == "start":
+            event["payload"].pop("effort", None)
+            event["payload"].update(payload_update)
+        return event
+
+    _rewrite_events(run_dir, rewrite)
+    agents = ledger_mod.build_run_record(repo, RUN_ID)["agents"]
+    assert [a["effort"] for a in agents] == [expected] * len(agents)

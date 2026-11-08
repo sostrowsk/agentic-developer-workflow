@@ -35,3 +35,18 @@ ci:
 # breakpoints:
 #   - before_integration   # nach allen Build-Lanes, vor Integration/Review
 #   - before_push          # nach dem finalen Review, vor Push/CI
+
+# effort: optionale Übersteuerung des Claude-Effort je Agent (Stufe low |
+# medium | high | xhigh | max, oder default = SDK-Default ohne Effort).
+# Defaults: build_agent, spec_agent, plan_agent, retro_agent → low; alle
+# übrigen → SDK-Default. Nicht aufgeführte Agenten behalten ihren Default.
+# Wird beim Run-Start gepinnt (resume/approve nutzen den Start-Wert).
+# effort:
+#   build_agent: medium
+#   final_reviewer: high
+#   retro_agent: default
+
+# codex: reasoning_effort gilt für Authoring und Code-Review (low | medium |
+# high | xhigh, Default high); ebenfalls beim Run-Start gepinnt.
+# codex:
+#   reasoning_effort: high

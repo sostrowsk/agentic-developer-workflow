@@ -164,13 +164,16 @@ Defaults wie in `adw/config.py`. Unbekannte Keys werden überall abgelehnt.
 | `ci.timeout` | nein | `2700` | Gesamtbudget fürs Warten auf CI (45 min). |
 | `ci.staging_job` | nein | — | Job, der zusätzlich grün sein muss (z. B. `deploy-staging`). |
 | `codex.timeout` | nein | `900` | Zeitlimit in Sekunden für jeden `codex exec`-Aufruf (Autor und Review teilen es). |
+| `codex.reasoning_effort` | nein | `high` | Reasoning-Effort jedes `codex exec`-Aufrufs (Authoring und Review): `low`, `medium`, `high` oder `xhigh`. Wird als `-c model_reasoning_effort=…` übergeben, unabhängig von deiner eigenen Codex-Config. |
 | `trace.enabled` | nein | `true` | Ereignis-Log `events.jsonl` schreiben. `false` = gar kein Ereignis-Log (die GUI hat für diesen Lauf dann nichts zu zeigen). |
 | `trace.keep_runs` | nein | `20` | Automatisches Pruning nach einem erfolgreichen Lauf behält die neuesten N Läufe. `0` = nie automatisch prunen. |
 | `breakpoints[]` | nein | `[]` | Zusätzliche Halte: `before_integration` und/oder `before_push`. Siehe §6. |
+| `effort.<agent>` | nein | Registry | Claude-Effort je Agent: `low`, `medium`, `high`, `xhigh`, `max` oder `default` (= SDK-Default, kein Effort übergeben — auch für Agenten mit Default `low`). Defaults: `build_agent`, `spec_agent`, `plan_agent`, `retro_agent` → `low`; alle übrigen → SDK-Default. Nicht aufgeführte Agenten behalten ihren Default. |
 
 Die Validierung ist strikt und fail-fast: fehlende Datei, ungültiges YAML,
 doppelter Key, unbekannter Key, Lane ohne Gates, Gate ohne Timeout,
-nicht-boolesches `tdd` oder unbekannter Haltepunkt brechen **ab, bevor**
+nicht-boolesches `tdd`, unbekannter Haltepunkt, unbekannter Agentenname unter
+`effort` oder unzulässige Effort-Stufe brechen **ab, bevor**
 irgendetwas passiert — mit Dateipfad und Grund. Außer den dokumentierten
 Defaults wird nichts geraten.
 
@@ -280,8 +283,10 @@ jede Lane mit Testsuite.
 ### 5.4 Gepinnte Einstellungen
 
 Beim Start pinnt ADW den effektiven **Base-Branch** (Config oder
-`--base-branch`), den **Gate-Modus** und die **Haltepunkt-Menge** in den
-Run-State. Eine Änderung an `.adw/config.yaml` während des Laufs verschiebt einen
+`--base-branch`), den **Gate-Modus**, die **Haltepunkt-Menge** und die
+**Effort-Einstellungen** (`effort`, `codex.reasoning_effort`) in den Run-State;
+`resume`/`approve` verwenden die Start-Werte, ein neuer Lauf liest die aktuelle
+Config. Eine Änderung an `.adw/config.yaml` während des Laufs verschiebt einen
 laufenden Lauf nicht. `--base-branch` bei `resume`/`approve` kann die Basis noch
 ändern — aber nur, solange noch keine Lanes existieren.
 
@@ -634,7 +639,9 @@ Das Pruning löscht State, Event-Log und Artefakte eines Laufs. Damit diese
 Erfahrung nicht verloren geht, exportiert ADW jeden ausgeführten Lauf in ein
 zentrales **Ledger**: ein Git-Repo mit je Lauf einem deterministischen Protokoll
 (`run-record.json`, 0 Tokens) und dem Fall-Bündel. Es ist die Datengrundlage für
-spätere Auswertungen.
+spätere Auswertungen. Der tatsächlich genutzte Effort steht als `effort` in jedem
+`agent.run`-Start-Event, im argv der `codex.*`-Start-Events sowie als
+`agents[].effort` und `codex_effort` im Run-Record.
 
 - **Ort:** Umgebungsvariable `ADW_LEDGER`, Default `~/.adw/ledger`. Es gilt für alle
   Ziel-Repos; es gibt kein Config-Feld. ADW legt das Ledger nie an und klont nie —

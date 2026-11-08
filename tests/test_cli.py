@@ -1252,3 +1252,86 @@ def test_resume_mid_authoring_still_refuses_foreign_dirty_files(target_repo, mon
     assert res.exit_code == 1, res.output
     assert plan.read_text() == "# Plan (reviewte Zwischenfassung)\n"
     assert readme.read_text() == "# target\n\nFREMD DIRTY\n"
+
+
+# --- W2: effort per agent and codex.reasoning_effort ---------------------------
+
+
+def _commit_config(repo, extra=""):
+    """Write and COMMIT the config — the worktree preflight needs a clean checkout."""
+    from tests.conftest import DEFAULT_CONFIG
+
+    write_config(repo, DEFAULT_CONFIG + extra)
+    git(repo, "add", ".adw/config.yaml")
+    git(repo, "commit", "--allow-empty", "-m", "effort config")
+
+
+def _agent_starts(repo, run_id, agent):
+    path = repo.resolve() / ".adw" / "runs" / run_id / "events.jsonl"
+    records = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    return [
+        r["payload"] for r in records
+        if r["type"] == "agent.run" and r["kind"] == "start" and r["payload"]["agent"] == agent
+    ]
+
+
+def _dry_run(repo, *extra):
+    return runner.invoke(
+        app, ["run", "--repo", str(repo), "--issue", "Effort", "--dry-run", *extra]
+    )
+
+
+def test_unknown_effort_agent_fails_before_a_run_exists(target_repo):
+    """AC 3: ConfigError at start — no run directory, no state."""
+    _commit_config(target_repo, "effort:\n  bulid_agent: low\n")
+    result = _dry_run(target_repo, "--no-approval")
+    assert result.exit_code != 0
+    runs = target_repo / ".adw" / "runs"
+    assert not runs.exists() or not [p for p in runs.iterdir() if p.is_dir()]
+
+
+def test_dry_run_start_payloads_carry_the_effective_effort(target_repo):
+    """AC 4/E5: the mock runner sees the same start payload as the real one."""
+    result = _dry_run(target_repo, "--no-approval")
+    assert result.exit_code == 0, result.output
+    run_id = RunState.find_latest(target_repo).run_id
+    build = _agent_starts(target_repo, run_id, "build_agent")
+    review = _agent_starts(target_repo, run_id, "final_reviewer")
+    assert build and {p["effort"] for p in build} == {"low"}
+    assert review and all(p["effort"] is None for p in review)
+
+
+@pytest.mark.parametrize(
+    ("at_start", "later", "expected_build", "expected_codex"),
+    [
+        (
+            "effort:\n  build_agent: medium\ncodex:\n  reasoning_effort: low\n",
+            "effort:\n  build_agent: high\ncodex:\n  reasoning_effort: xhigh\n",
+            "medium",
+            "low",
+        ),
+        # an empty mapping is a real pin: entries added later do not apply
+        ("", "effort:\n  build_agent: high\n", "low", "high"),
+    ],
+)
+def test_effort_is_pinned_at_run_start(
+    target_repo, at_start, later, expected_build, expected_codex
+):
+    """AC 5: changing the config after the run started does not change effort."""
+    from adw.cli import _config_for_continuation
+
+    _commit_config(target_repo, at_start)
+    assert _dry_run(target_repo).exit_code == 2  # plan gate
+    run_id = RunState.find_latest(target_repo).run_id
+    _commit_config(target_repo, later)
+
+    config, _ = _config_for_continuation(
+        target_repo, RunState.load(target_repo, run_id), None
+    )
+    assert config.effort.get("build_agent", "low") == expected_build
+    assert config.codex.reasoning_effort == expected_codex
+
+    approved = runner.invoke(app, ["approve", run_id, "--repo", str(target_repo)])
+    assert approved.exit_code == 0, approved.output
+    build = _agent_starts(target_repo, run_id, "build_agent")
+    assert build and {p["effort"] for p in build} == {expected_build}
