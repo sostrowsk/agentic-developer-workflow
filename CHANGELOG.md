@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [0.36.0] — Unreleased
+## [0.36.0] — 2026-11-08
 
 ### Added
 - **Effort per agent — and Codex thinks again (W2).**
@@ -1171,6 +1171,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.36.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.1...v0.33.0
