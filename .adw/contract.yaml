@@ -1,92 +1,57 @@
-# Contract — R4: ADW liest das CI-Ergebnis richtig (Single-Lane).
-# Bindet nur extern beobachtbares Phase-7-Verhalten: done/Eskalation, Meldungen,
-# bestehendes ci.wait-End-Payload. Keine HTTP-Routen, Templates oder neuen Event-Typen.
-# Interne Helper-Signaturen (poll_until, _evaluate, _jobs, _failed_logs, ...) sind kein Contract.
+# Interface contract — R5 (Single-Lane). Nur extern beobachtbare Flächen;
+# interne Helper-Signaturen (record_triage, abort-Event, Puffer-Locks) sind kein Contract.
 version: 1
-scope: phase7-ci
-workstreams: [backend]
+scope: r5-cli-escalation
+workstreams:
+  - backend
 
-phase_7:
-  github:
-    workflow_runs:
-      green_conclusions: [success, skipped, neutral]   # unverändert, nur für Runs
-      subsequent_pages: >-
-        Runs auf Folgeseiten zählen gleichwertig: ein roter Run macht das Ergebnis rot,
-        ein laufender Run verhindert den vorzeitigen Abschluss.
-    staging_job:
-      applies_when: ci.staging_job ist konfiguriert
-      matching: exakte Gleichheit des Jobnamens (Jobs auf Folgeseiten zählen mit)
-      green_only_if: conclusion == "success"
-      not_green_includes: [skipped, neutral]
-      on_not_green: wie roter Staging-Job heute (Log-Auszug der Runs, kein done)
-    pagination:
-      collections: [workflow_runs, jobs_per_run]
-      filters: head_sha bzw. branch bleiben auf jeder Seite erhalten
-      max_pages: 10
-      on_limit_exceeded:
-        outcome: escalated
-        message_prefix: "CI-Monitoring fehlgeschlagen: "
-        message_requirement: nennt das Seitenlimit; kein done aus Teildaten
-    log_evidence:
-      usable: Log-Inhalt ist nach strip() nicht leer
-      empty_or_whitespace_log: Run trägt nichts bei (keine Überschrift)
-      log_fetch_error: Run wird übersprungen, übrige rote Runs werden gesammelt, poll_ci scheitert nicht
-      all_empty:
-        excerpt: ""
-        condition: rotes Ergebnis, Re-Entry-Budget noch nicht verbraucht
-        outcome: escalated
-        message: "Pipeline rot ohne verwertbare Job-Logs (Pipeline <ID>) — Mensch übernimmt"
-        log_analyst: false
-        reentry: false
+cli:
+  run_parallel_invalid:
+    command: "adw run --parallel"
+    condition: Die geladene Config ist nicht parallelfähig (config.is_parallel_capable ist false).
+    exit_code: 1
+    message:
+      required: true
+      semantics: Erklärt, dass --parallel mit der konfigurierten Lane-Auswahl nicht möglich ist.
+      exact_wording: nicht festgelegt
+    effects:
+      new_run_directory: false
+      persisted_escalated_run: false
 
-  timeout:
-    providers: [github, gitlab]
-    budget: ci.timeout
-    measurement: monotone Deadline ab Beginn des Wartens (Fetch + Auswertung + Schlaf)
-    sleep_cap: jede Schlafdauer ist auf die unmittelbar davor verbleibende Restzeit begrenzt
-    non_final_after_deadline:
-      outcome: escalated
-      message_prefix: "CI-Timeout: "
-      further_fetch: false
-      further_sleep: false
-    final_after_deadline: wird ausgewertet, nicht als Timeout gemeldet
-    running_cli_call: wird nicht hart abgebrochen; _CLI_TIMEOUT (120 s) bleibt der Backstop
+  prune_negative_older_than:
+    command: "adw runs prune --older-than <n>"
+    condition: n < 0
+    exit_code: 2
+    message:
+      stream: stderr
+      required: true
+      semantics: Benennt --older-than und den zulässigen Wertebereich (n >= 0).
+      style: Wie die vorhandene Fehlermeldung zu --keep.
+      exact_wording: nicht festgelegt
+    effects:
+      run_data_modified: false
 
-  gitlab_manual:
-    trigger: Pipeline-Status manual
-    final: true
-    outcome: escalated
-    message_with_job: "Pipeline wartet auf einen manuellen Job (<Name>) — Mensch übernimmt"
-    message_without_job: "Pipeline wartet auf einen manuellen Job — Mensch übernimmt"
-    job_name: aus einem Pipeline-Job mit Status manual, soweit ermittelbar
-    permitted_prefix: "CI-Monitoring fehlgeschlagen: "   # falls über den bestehenden CiError-Handler
-    further_polling: false
-    timeout_message: false
-    log_analyst: false
-    reentry: false
+artifacts:
+  escalation.md:
+    location: Im jeweiligen Run-Verzeichnis.
+    first_escalation:
+      behavior: Datei nur anlegen, wenn sie noch nicht existiert.
+      format: Unverändert gegenüber 0.36.2 (Titel, Issue, Phase, Lanes).
+      reason_heading: "## Grund"
+      reason: Der erste Eskalationsgrund steht unter dieser Überschrift.
+    subsequent_escalations:
+      behavior: Pro weiterer Eskalation einen Abschnitt anhängen.
+      preserve_existing_content: true
+      heading_template: "## Weitere Eskalation (<Lane/Phase>)"
+      heading_context: "<Lane/Phase> bezeichnet die Herkunft der weiteren Eskalation."
+      body: Der Grund dieser weiteren Eskalation.
+      separation: Leerzeile vor der neuen Abschnittsüberschrift und vor ihrem Grund.
+    concurrent_escalations: Kein bereits geschriebener Grund wird überschrieben oder geht verloren.
+    ledger_reason: Weiterhin der erste Absatz unter "## Grund" (der erste Grund).
 
 events:
-  ci.wait:
-    kind: end
-    payload:
-      status: {type: string, description: bestehender Ergebnisstatus; bei Timeout "timeout"}
-      polls: {type: integer, description: Anzahl der abgeschlossenen Fetches (unverändert)}
-      duration:
-        type: number
-        unit: seconds
-        description: >-
-          Mit der monotonen Uhr gemessene Gesamtzeit bis zum Verlassen der Spanne
-          (Fetches, Auswertung, Schlafen), auch bei Timeout oder Eskalation.
-          Feldname bleibt duration.
-    compatibility: Event-Hülle, ci.poll-Punkte und übrige Event-Strukturen unverändert
-
-files:
-  CHANGELOG.md: "## [0.36.2] — Unreleased / ### Fixed (je ein Eintrag C19–C23)"
-  CHANGELOG.de.md: inhaltlich synchron zu CHANGELOG.md
-  pyproject.toml: version bleibt 0.36.1
-
-preserved:
-  - Phase-7-Ablauf (Push, Polling, Log-Analyst, höchstens ein Re-Entry, dann Mensch); Ausnahme nur gitlab_manual
-  - SHA-Bindung des Pollings an den gepushten Commit
-  - Bedeutung und Defaults von ci.timeout, ci.poll_interval, ci.staging_job
-  - bestehende GitLab-Jobs-Pagination und Forge-Erkennung
+  escalation:
+    emitted: Genau einmal pro tatsächlicher Eskalation, auch für jede weitere.
+    not_emitted: Für eine Lane, die nur wegen des Abbruchsignals zurückkehrt.
+  triage.decision:
+    emitted: Genau einmal pro Finding des finalen Reviews (kein zweites Event aus dem Fix-Dispatch).
