@@ -4,7 +4,6 @@ report and brief land under ``<ledger>/reports/`` and are committed fail-open.""
 
 import contextlib
 import fcntl
-import json
 import re
 import subprocess
 from datetime import UTC, datetime, timedelta
@@ -213,11 +212,9 @@ _HEADING = re.compile(r"^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$")
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 
 
-def _missing_headings(markdown: str) -> list[str]:
-    """Required section names without their own ATX heading outside code fences.
-    A heading counts for a name if it starts with it (template suffixes such as
-    "Akzeptanzkriterien (messbar)" are fine) — one heading covers one name only."""
-    titles, fence = [], None
+def _outside_fences(markdown: str):
+    """Lines of ``markdown`` that lie outside fenced code blocks (CommonMark)."""
+    fence = None
     for line in markdown.splitlines():
         if m := _FENCE.match(line):
             marker, rest = m.groups()
@@ -229,8 +226,16 @@ def _missing_headings(markdown: str) -> list[str]:
                     and not rest.strip():
                 fence = None
                 continue
-        if fence is None and (m := _HEADING.match(line)):
-            titles.append(m.group(1))
+        if fence is None:
+            yield line
+
+
+def _missing_headings(markdown: str) -> list[str]:
+    """Required section names without their own ATX heading outside code fences.
+    A heading counts for a name if it starts with it (template suffixes such as
+    "Akzeptanzkriterien (messbar)" are fine) — one heading covers one name only."""
+    titles = [m.group(1) for line in _outside_fences(markdown)
+              if (m := _HEADING.match(line))]
 
     def covers(title: str, name: str) -> bool:
         rest = title[len(name):] if title.startswith(name) else None
@@ -239,8 +244,13 @@ def _missing_headings(markdown: str) -> list[str]:
     return [n for n in REQUIRED_HEADINGS if not any(covers(t, n) for t in titles)]
 
 
-def _brief(group: dict, group_text: str) -> tuple[str | None, str]:
-    """(brief markdown or None, note for the report). Never raises."""
+_H1 = re.compile(r"^ {0,3}#\s+(.+?)\s*#*\s*$")
+_OUTER = re.compile(r"\A```markdown[ \t]*\n(.*)\n```\Z", re.DOTALL)
+
+
+def _brief(group: dict, group_text: str) -> tuple[str | None, str, str | None]:
+    """(brief markdown or None, note for the report, raw answer if rejected on its
+    content). Never raises."""
     try:
         briefs = ADW_SOURCE / "docs" / "briefs"
         task = (
@@ -250,23 +260,20 @@ def _brief(group: dict, group_text: str) -> tuple[str | None, str]:
             f"{(briefs / 'README.md').read_text(encoding='utf-8')}\n\n"
             "# Beispiel (docs/briefs/r2-log-integritaet.md)\n\n"
             f"{(briefs / 'r2-log-integritaet.md').read_text(encoding='utf-8')}\n\n"
-            'Antworte NUR mit JSON: {"title": str, "brief_markdown": str}.'
+            "Antworte mit dem Brief als reinem Markdown, kein JSON, kein Codeblock um die "
+            "ganze Antwort; die erste Zeile ist eine H1-Überschrift mit dem Titel."
         )
-        result = SdkAgentRunner().run(REGISTRY["improve_agent"], task, ADW_SOURCE)
-        try:
-            answer = json.loads(result.text)
-        except ValueError:
-            return None, "Brief-Entwurf verworfen: Antwort ist kein JSON"
-        if not isinstance(answer, dict) or not isinstance(answer.get("title"), str) \
-                or not isinstance(answer.get("brief_markdown"), str):
-            return None, "Brief-Entwurf verworfen: Felder title/brief_markdown fehlen oder falsch"
-        missing = _missing_headings(answer["brief_markdown"])
-        if missing:
-            return None, f"Brief-Entwurf verworfen: Überschriften fehlen: {', '.join(missing)}"
-        title = _cut(answer["title"])
-        return answer["brief_markdown"], f"Brief-Entwurf ({group['cause']}): {title}"
+        raw = SdkAgentRunner().run(REGISTRY["improve_agent"], task, ADW_SOURCE).text
     except Exception as exc:  # noqa: BLE001 — the report always comes into being
-        return None, f"Brief-Entwurf verworfen: {type(exc).__name__}: {exc}"
+        return None, f"Brief-Entwurf verworfen: {type(exc).__name__}: {exc}", None
+    markdown = m.group(1) if (m := _OUTER.match(raw.strip())) else raw
+    titles = [m.group(1) for line in _outside_fences(markdown) if (m := _H1.match(line))]
+    if not titles:
+        return None, "Brief-Entwurf verworfen: H1-Überschrift fehlt", raw
+    missing = _missing_headings(markdown)
+    if missing:
+        return None, f"Brief-Entwurf verworfen: Überschriften fehlen: {', '.join(missing)}", raw
+    return markdown, f"Brief-Entwurf ({group['cause']}): {_cut(titles[0])}", None
 
 
 def _commit(path: Path, week: str, paths: list[str]) -> None:
@@ -326,7 +333,7 @@ def _improve(path: Path, since: int, repo_slug: str | None, no_brief: bool) -> l
              ""]
     lines += _kpi_section(current_kpis, _kpis(previous))
     out = [f"Läufe im Zeitraum: {runs}"]
-    brief = None
+    brief = raw = None
     if runs < MIN_RUNS:
         lines += [TOO_FEW, ""]
     else:
@@ -361,7 +368,9 @@ def _improve(path: Path, since: int, repo_slug: str | None, no_brief: bool) -> l
         elif not eligible:
             note = "Kein Brief-Entwurf: keine Gruppe mit cause orchestrator, gate oder prompt"
         else:
-            brief, note = _brief(eligible[0], texts[eligible[0]["cause"]])
+            brief, note, raw = _brief(eligible[0], texts[eligible[0]["cause"]])
+            if raw is not None:
+                note += f" (Rohantwort: reports/{week}-brief.rejected.md)"
         lines += [note, ""]
         out += [
             f"Problemgruppen: {len(groups)}",
@@ -373,10 +382,16 @@ def _improve(path: Path, since: int, repo_slug: str | None, no_brief: bool) -> l
     reports.mkdir(exist_ok=True)
     report_path = reports / f"{week}.md"
     brief_path = reports / f"{week}-brief.md"
+    rejected_path = reports / f"{week}-brief.rejected.md"
     report_path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
     if brief is not None:
         brief_path.write_text(brief.rstrip("\n") + "\n", encoding="utf-8")
     else:
         brief_path.unlink(missing_ok=True)
-    _commit(path, week, [f"reports/{week}.md", f"reports/{week}-brief.md"])
+    if raw is not None:
+        rejected_path.write_text(raw, encoding="utf-8", newline="")
+    elif brief is not None:
+        rejected_path.unlink(missing_ok=True)
+    _commit(path, week, [f"reports/{week}.md", f"reports/{week}-brief.md",
+                         f"reports/{week}-brief.rejected.md"])
     return [str(report_path), *out]

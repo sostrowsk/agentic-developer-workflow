@@ -394,7 +394,8 @@ REGISTRY: dict[str, AgentSpec] = {
             "You are the improve agent (strictly read-only). From one problem group of "
             "the weekly ADW report you draft a brief in the format of docs/briefs/ and "
             "check its premises against the ADW source code. You change nothing. "
-            'Respond ONLY with JSON: {"title": str, "brief_markdown": str}.'
+            "Respond with the brief as plain Markdown, no JSON, no code fence around the "
+            "whole answer; the first line is an H1 heading with the title."
         ),
         permission_mode="default",
     ),

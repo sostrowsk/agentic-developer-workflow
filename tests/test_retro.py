@@ -438,3 +438,12 @@ def test_existing_retro_json_is_never_overwritten(repo, monkeypatch):
     assert seam.retro_calls() == []
     assert retro_json.read_bytes() == b'{"schema_version": 1, "vorhanden": true}\n'
     assert retro_events(state.run_dir(repo)) == []
+
+
+def test_retro_task_names_the_top_level_event_seq():
+    from adw.retro import _task
+
+    task = _task({"run_id": "r1"})
+    assert '{"seq": <n>' in task
+    assert "top-level" in task.lower()
+    assert "payload" in task and "state.saved" in task

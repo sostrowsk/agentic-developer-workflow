@@ -66,7 +66,10 @@ def _task(record: dict) -> str:
         'object: {"summary": str, "items": [{"problem": str, "resolution": str, '
         '"better": str, "cause": str, "lever": str, "evidence": [str, ...]}]} — at most '
         f"{MAX_ITEMS} items, cause one of {', '.join(CAUSES)}. Evidence is 'seq:<n>' of "
-        "an event in events.jsonl or a relative file path in this folder; items without "
+        "an event in events.jsonl or a relative file path in this folder; <n> is the "
+        "top-level field seq of the event record (every line of events.jsonl begins with "
+        '{"seq": <n>, …), seq values inside a payload (e.g. of state.saved) are no '
+        "evidence. Items without "
         "valid evidence are discarded. A smooth run may return \"items\": []."
     )
 

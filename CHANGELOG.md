@@ -12,6 +12,19 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
+## [0.37.1] — Unreleased
+
+### Fixed
+
+- `adw improve`: the `improve_agent` now answers with the brief as plain Markdown
+  (first line an H1 = title; one enclosing ```` ```markdown ```` block is tolerated)
+  instead of JSON, which failed on long briefs.
+- `adw improve`: a rejected brief draft (missing H1 or required headings) is kept as
+  `reports/<week>-brief.rejected.md` and committed; the report names reason and file.
+  A valid brief in the same week removes it.
+- Retro: the task states that evidence `seq:<n>` means the top-level `seq` of the
+  event record, not `seq` values inside a payload (e.g. `state.saved`).
+
 ## [0.37.0] — 2026-11-08
 
 ### Added

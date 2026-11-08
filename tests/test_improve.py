@@ -38,7 +38,8 @@ BRIEF_MD = (
     "## Vorentscheidungen\n\nx\n\n## Deferred\n\nx\n\n## Akzeptanzkriterien\n\n1. x\n"
 )
 
-GOOD = json.dumps({"title": "T", "brief_markdown": BRIEF_MD})
+GOOD = BRIEF_MD
+TITLE = "W99: Besserer Orchestrator"
 
 
 def ago(days: float) -> str:
@@ -166,6 +167,14 @@ def brief_path(ledger: Path) -> Path:
     return ledger / "reports" / f"{WEEK}-brief.md"
 
 
+def rejected_path(ledger: Path) -> Path:
+    return ledger / "reports" / f"{WEEK}-brief.rejected.md"
+
+
+def head_files(ledger: Path) -> list[str]:
+    return git(ledger, "ls-tree", "-r", "--name-only", "HEAD").split()
+
+
 def section(text: str, heading: str) -> str:
     start = text.index(heading)
     later = [text.index(h) for h in SECTIONS if h in text and text.index(h) > start]
@@ -275,17 +284,35 @@ def test_orchestrator_group_gets_one_brief_from_adw_source(ledger, agent):
 
 
 @pytest.mark.parametrize("answer", [
-    "kein json",
-    json.dumps({"title": "T", "brief_markdown": 42}),
-    json.dumps({"title": "T", "brief_markdown": BRIEF_MD.replace("## Deferred", "## X")}),
-    json.dumps({"title": "T", "brief_markdown":
-                "## Ausgangslage Aufgabe Vorentscheidungen Deferred Akzeptanzkriterien\n"}),
-    json.dumps({"title": "T", "brief_markdown": BRIEF_MD.replace(
-        "## Deferred\n\nx\n", "```\n## Deferred\n```\n")}),
-    json.dumps({"title": "T", "brief_markdown": "````\n```\n" + BRIEF_MD + "````\n"}),
-], ids=["invalid-json", "wrong-type", "missing-heading", "combined-heading", "fenced",
-        "long-fence"])
-def test_invalid_brief_answer_is_rejected_and_noted(ledger, agent, answer):
+    BRIEF_MD,
+    "```markdown\n" + BRIEF_MD + "```\n",
+], ids=["plain", "markdown-fence"])
+def test_markdown_brief_is_accepted_with_h1_title(ledger, agent, answer):
+    install(ledger)
+    agent(answer)
+
+    res = improve()
+
+    assert res.exit_code == 0, res.output
+    brief = brief_path(ledger).read_text(encoding="utf-8")
+    assert brief.lstrip().startswith("# W99: Besserer Orchestrator")
+    assert "```markdown" not in brief
+    assert TITLE in report(ledger)
+    assert "Brief-Entwurf verworfen" not in report(ledger)
+    assert not rejected_path(ledger).exists()
+
+
+@pytest.mark.parametrize("answer, reason", [
+    (BRIEF_MD.replace("# W99: Besserer Orchestrator\n\n", ""), "H1"),
+    (BRIEF_MD.replace("## Deferred", "## X"), "Deferred"),
+    ("# T\n\n## Ausgangslage Aufgabe Vorentscheidungen Deferred Akzeptanzkriterien\n",
+     "Überschriften fehlen"),
+    (BRIEF_MD.replace("## Deferred\n\nx\n", "```\n## Deferred\n```\n"), "Deferred"),
+    ("````\n```\n" + BRIEF_MD + "````\n", "H1"),
+    ('{"title": "T", "brief_markdown": "# T"}\n', "H1"),
+], ids=["missing-h1", "missing-heading", "combined-heading", "fenced", "long-fence",
+        "json"])
+def test_invalid_brief_answer_is_rejected_and_saved(ledger, agent, answer, reason):
     install(ledger)
     calls = agent(answer)
 
@@ -294,7 +321,31 @@ def test_invalid_brief_answer_is_rejected_and_noted(ledger, agent, answer):
     assert res.exit_code == 0, res.output
     assert len(calls) == 1
     assert not brief_path(ledger).exists()
-    assert "Brief-Entwurf verworfen: " in report(ledger)
+    assert rejected_path(ledger).read_text(encoding="utf-8") == answer
+    note = [line for line in report(ledger).splitlines()
+            if "Brief-Entwurf verworfen: " in line]
+    assert note, report(ledger)
+    assert reason in note[0] and f"{WEEK}-brief.rejected.md" in note[0]
+    assert f"reports/{WEEK}-brief.rejected.md" in head_files(ledger)
+    assert git(ledger, "status", "--porcelain", "reports") == ""
+
+
+def test_valid_brief_after_rejected_one_removes_rejected_file(ledger, agent):
+    install(ledger)
+    agent(BRIEF_MD.replace("## Deferred", "## X"))
+    assert improve().exit_code == 0
+    assert rejected_path(ledger).exists()
+
+    agent(GOOD)
+    assert improve().exit_code == 0
+    assert brief_path(ledger).exists()
+    assert TITLE in report(ledger)
+    assert not rejected_path(ledger).exists()
+    files = head_files(ledger)
+    assert f"reports/{WEEK}-brief.rejected.md" not in files
+    assert f"reports/{WEEK}-brief.md" in files
+    status = git(ledger, "show", "--no-renames", "--name-status", "--format=", "HEAD")
+    assert f"D\treports/{WEEK}-brief.rejected.md" in status
 
 
 @pytest.mark.parametrize("exc", [RuntimeError("Agent kaputt"), TimeoutError("zu langsam")],
@@ -308,6 +359,7 @@ def test_agent_exception_is_noted_without_retry(ledger, agent, exc):
     assert res.exit_code == 0, res.output
     assert len(calls) == 1
     assert not brief_path(ledger).exists()
+    assert not rejected_path(ledger).exists()
     assert str(exc) in report(ledger)
     assert all(h in report(ledger) for h in SECTIONS)
 
@@ -345,7 +397,7 @@ def test_one_commit_per_call_overwrite_and_brief_removal(ledger, agent):
     assert sorted(files) == [f"reports/{WEEK}-brief.md", f"reports/{WEEK}.md"]
     assert ".improve.lock" not in git(ledger, "ls-files")
 
-    agent(json.dumps({"title": "T2", "brief_markdown": BRIEF_MD + "\nZweite Fassung\n"}))
+    agent(BRIEF_MD + "\nZweite Fassung\n")
     assert improve().exit_code == 0
     assert "Zweite Fassung" in brief_path(ledger).read_text(encoding="utf-8")
     assert commits(ledger) == before + 2

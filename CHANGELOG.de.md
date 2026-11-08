@@ -13,6 +13,19 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
+## [0.37.1] — Unreleased
+
+### Fixed
+
+- `adw improve`: Der `improve_agent` antwortet mit dem Brief als reinem Markdown
+  (erste Zeile eine H1 = Titel; ein umschließender ```` ```markdown ````-Block wird
+  toleriert) statt mit JSON, das bei langen Briefs scheiterte.
+- `adw improve`: Ein verworfener Brief-Entwurf (fehlende H1 oder Pflichtüberschriften)
+  wird als `reports/<Woche>-brief.rejected.md` abgelegt und committet; der Bericht nennt
+  Grund und Datei. Ein gültiger Brief derselben Woche entfernt ihn.
+- Retro: Der Auftrag stellt klar, dass der Beleg `seq:<n>` das Top-Level-Feld `seq` des
+  Event-Records meint, nicht `seq`-Werte in einer Payload (z. B. `state.saved`).
+
 ## [0.37.0] — 2026-11-08
 
 ### Added
