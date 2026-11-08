@@ -13,6 +13,32 @@ Stand: 2026-11-08, 14:10 · Basis jetzt: ADW **0.34.0** · Baseline: `uv run ruf
 | 5 | W4 Normalisierte Schlüssel (+C25) | `418c3347` | 0.32.1 | 25 min | $11,9 | ohne Befund |
 | 6 | W13 Lauf-Protokoll + Ledger | `00432093` | 0.33.0 | 51 min | $28,8 | 3 Runden, 3 P1 + 2 P2, behoben |
 | 7 | W3 `adw kpis` (+ Datenfehler aus W13) | `f1e8d455` | 0.34.0 | 30 min | $11,0 | ohne Befund |
+| 8 | W14 Retro-Agent + `rate`/`feedback` | `253d9d1d` | 0.35.0 | 50 min | $30,6 | 3 P2 + 1 P3, behoben |
+| 9 | W2 Effort pro Agent + Codex-Effort | `ae339fbb` | 0.36.0 | 31 min | $12,5 | ohne Befund (erste Retro: 3 Einträge) |
+| 10 | R3 GUI-Live-Ansicht (C5, C13–C18) | `4a8b2b50` | 0.36.1 | 52 min | $21,3 | 2 P2 + 1 P3, behoben |
+| 11 | R4 CI/Forge (C19–C23) | `4af7d8fb` | 0.36.2 | 33 min | $11,7 | 1 P2 + 1 P3, behoben |
+| 12 | R5 Robustheit (C24, C27–C30) | `67cd801a` | 0.36.3 | 39 min | $13,1 | 3 P2, behoben |
+| 13 | W15 `adw improve` | `a71e3162` | 0.37.0 | 57 min | $27,9 | 6 P2 + 4 P3, behoben |
+
+**C30** (doppelt protokollierte Triage) ist der erste Fehler, den die Retros selbst gefunden
+haben (R3 und R4 unabhängig); behoben in R5.
+
+**Offene Befunde aus dem ersten echten `adw improve` (2026-W45):**
+- **F19 — Brief-Entwurf scheitert:** `improve_agent` (Fable) antwortete nach ~5 min nicht mit
+  JSON; der Bericht vermerkt „Brief-Entwurf verworfen: Antwort ist kein JSON". Ein langer
+  Markdown-Brief als JSON-String ist fehleranfällig. Vorschlag: Brief als reines Markdown in
+  der Antwort, Prüfung der Pflichtüberschriften bleibt; Rohantwort im Fehlerfall sichern.
+- **F20 — `seq`-Kollision in Retro-Belegen:** Die Retro von W15 hat alle 4 Einträge verworfen,
+  weil der Agent `seq:1723` … aus der Payload von `state.saved` (repo-weiter State-Zähler,
+  ebenfalls `seq`) zitierte statt der Event-Seq (Log endet bei 691). Vorschlag: Hinweis im
+  Retro-Auftrag („Event-Seq = Top-Level-Feld `seq`") oder Payload-Feld umbenennen.
+- **F21 — Codex-Effort-Wirkung unbelegt:** Seit W2 steht `-c model_reasoning_effort=high` im
+  argv; die gemeldeten `reasoning_output_tokens` bleiben klein (115–399), ein Gegentest
+  low/high ergab 31/44. Die Kennzahl taugt vermutlich nicht als Maß; Wirkung über die Zahl
+  der Funde je Lauf beobachten (seit W2: R3 4, R4 3, R5 3, W15 10 Triage-Entscheidungen; davor 0–5 — Issues verschieden groß, also noch kein Beleg).
+- Der Bericht enthält bereits Läufe aus anderen Repos (Leasing): wiederkehrendes Muster
+  „Sandbox blockiert Netz bei Dependency-Upgrades, Triage dispatcht den unlösbaren Befund
+  erneut" — Kandidat für den nächsten Brief.
 
 Alle sechs Läufe mit `--gates none`, keine Eskalation. Die Briefs liegen unter
 `docs/briefs/` (`r1-…`, `r2-…`, `w1-…`, `w4-…`, `w13-…`, `w3-…`).
