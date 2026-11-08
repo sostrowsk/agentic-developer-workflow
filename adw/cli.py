@@ -744,13 +744,16 @@ def _append_feedback(repo: Path, run_id: str, entry: dict, finding: str | None =
         try:
             ledger_dir, rel = ledger.ledger_run_dir(repo, run_id)
             if finding is not None:
-                keys = [k for k in ledger.finding_keys(ledger_dir, rel) if k.startswith(finding)]
+                all_keys = ledger.finding_keys(ledger_dir, rel)
+                keys = [k for k in all_keys if k.startswith(finding)]
                 if len(keys) != 1:
-                    shown = ", ".join(keys[:5]) + (", …" if len(keys) > 5 else "")
+                    # No hit: every key of the run is a candidate for a usable prefix.
+                    candidates = keys or all_keys
+                    shown = ", ".join(candidates[:5]) + (", …" if len(candidates) > 5 else "")
                     problem = "trifft keinen" if not keys else "ist mehrdeutig"
                     raise ledger.FeedbackError(
                         f"--finding {finding!r} {problem} finding_key"
-                        + (f" (Kandidaten: {shown})" if keys else "")
+                        + (f" (Kandidaten: {shown})" if candidates else " (Lauf ohne Findings)")
                     )
                 entry["finding_key"] = keys[0]
             ledger.append_feedback(ledger_dir, rel, entry)

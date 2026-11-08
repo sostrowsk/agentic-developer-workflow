@@ -121,6 +121,8 @@ def test_feedback_with_ambiguous_or_unknown_prefix_writes_nothing(
     assert res.stderr.strip()
     if prefix == "spec.md|":
         assert KEYS[0] in res.stderr and KEYS[1] in res.stderr
+    else:  # no hit: all keys of the run are the candidates
+        assert all(key in res.stderr for key in KEYS)
     assert not (exported / "feedback.jsonl").exists()
     assert commit_count(ledger) == before
 
