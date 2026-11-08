@@ -1,111 +1,73 @@
-# Interface contract — R2: Event-Log und State überstehen Crash, Prune und Resume
+# Interface contract — W1: Jeder Agent-Lauf hat eine Grenze, jeder Abbruch eine Ursache
 #
 # Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec
-# („Contract (Single-Lane)") pinnt dieser Contract ausschließlich extern
-# beobachtbare Flächen:
-#   1. `adw resume <id>` eines Laufs in Phase `done`,
-#   2. Auto-Prune nach `done` (Dry-Run, eigener Lauf),
-#   3. das neue Lane-Feld `test_pass_done` in state.json,
-#   4. das Prune-Ergebnis bei belegtem Run-Lock bzw. geänderter Phase,
-#   5. `adw runs prune` bei Git-Timeout/OSError,
-#   6. die Lock-Datei des Laufs, die Executor und Prune teilen.
+# („Contract (Single-Lane, nur extern beobachtbare Flächen)") pinnt dieser
+# Contract ausschließlich:
+#   1. das `agent.run`-Start-Payload (zwei neue Felder),
+#   2. das `agent.run`-End-Payload bei Grenz-/Ursachen-Abbruch,
+#   3. die Ursachen-Meldungstexte,
+#   4. das CLI-Verhalten bei AgentRunError und bei git-Fehlern in context._git.
 #
-# NICHT Teil des Contracts: interne Helfer und ihre Signaturen (Lock-Helfer,
-# `retention.prune`-Parameter wie `exclude`, `_confirm_red`, `_write_snapshot`,
-# `_git`, Snapshot-Retry). Atomare Snapshot-Refs (A2) und fsync (A5) sind durch
-# .adw/spec.md verbindlich, aber keine Vertragsfläche. Keine HTTP-Routen, keine
-# neuen Events; das `snapshot`-Event behält sein Format. Der Thread-Nachweis aus
-# AC 3 begründet keinen Multi-Lane-Workflow.
+# NICHT Teil des Contracts: interne Helfer und ihre Signaturen (`_collect`,
+# `_collect_into`, Meldungs-/Payload-Helfer, `context._git`), die Grenzwerte
+# je Agent (bindend über .adw/spec.md Scope 1 / Issue E1, aber keine
+# Vertragsfläche), Ausnahmeklassen. Keine HTTP-Routen, keine neuen Event-Typen.
 
 version: 1
-scope: R2
+scope: W1
 workstreams:
   - backend
 
+events:
+  agent.run:
+    start:
+      added_fields:
+        max_turns: {type: integer, required: true, source: AgentSpec.max_turns}
+        timeout_s: {type: integer, required: true, source: AgentSpec.timeout_s}
+      existing_fields: unchanged  # agent, model, tools, allowed_tools, cwd, resume_session, prompt, system_append
+      applies_to: [real runner, mock runner]
+    end:
+      on_cause_abort:
+        triggers: [timeout, max_turns, sdk_exception]
+        emitted: true
+        is_error: true
+        added_fields:
+          error: {type: string, required: true, value: identisch mit der AgentRunError-Meldung}
+        existing_fields: unchanged  # session_id, result_text, usage, cost_usd, is_error
+        partial_data: bereits gemeldete session_id sowie bis dahin bekannte usage/cost_usd bleiben erhalten (keine leeren Defaults)
+      otherwise: unchanged
+
+messages:
+  timeout: "<agent>: Zeitlimit <timeout_s> s überschritten"
+  max_turns: "<agent>: max_turns <n> erreicht"   # n = max_turns des Agents
+  sdk_exception: "<ExceptionTypeName>: <exception text>"  # Typname und Text der Ursache; bestehende AgentRunError-Meldung unverändert
+  codex_code_review:
+    contains: [Ursache des CodexError, einschließlich Codex-Timeout]
+  git_execution:
+    applies_to: context._git   # nur dieser Helfer
+    contains: [ausgeführtes git-Kommando, Ursache]
+
 cli:
-  resume_done_run:
-    command: adw resume <run_id>
-    precondition: state.json des Laufs hat phase == done
-    exit_code: 0
-    message: "Run <run_id> ist bereits abgeschlossen"
-    side_effects:
-      preflight_executed: false
-      run_span_started: false
-      events_jsonl_created: false        # auch bei bereits komprimiertem Log
-      events_jsonl_or_gz_modified: false # byte-gleich
-      state_json_modified: false         # byte-gleich
-      auto_prune_executed: false
-  resume_escalated_run:
-    unchanged: true
+  agent_run_error:
+    triggers: [timeout, max_turns, sdk_exception, codex_error_in_code_review]
+    stream: stderr
+    message: |-
+      Agent-Lauf abgebrochen (z. B. Plan-Limit erschöpft): <Ursache>
+      Der Run <run_id> bleibt in Phase '<phase>' — später fortsetzen mit: adw resume <run_id>
     exit_code: 1
-    report: .adw/runs/<run_id>/escalation.md
-
-  auto_prune:
-    trigger: Lauf erreicht `done` über `adw run`, `adw resume` oder `adw approve`
-    dry_run: >-
-      Kein Auto-Prune; echte Läufe werden nicht verändert. Gilt auch beim
-      Fortsetzen eines persistierten Dry-Runs.
-    own_run: >-
-      Der eigene Lauf ist nie Kandidat, wird nie gelöscht und erscheint nicht im
-      Prune-Ergebnis — unabhängig von seiner Startzeit relativ zu keep_runs.
-    other_rules: unverändert (keep_runs, keep_runs == 0 deaktiviert, fail-open)
-
-  runs_prune:
-    command: adw runs prune [--keep N] [--older-than DAYS] [--gzip]
-    excludes_runs: keine (manueller Aufruf nimmt nichts aus)
-    run_lock_busy:
-      condition: >-
-        `.adw/runs/.lock-<run_id>` eines terminalen Kandidaten ist von einem
-        anderen Prozess bzw. Handle per flock gehalten.
-      action: skipped
-      reason: "läuft noch"
-      result_line: "<run_id>: skipped (läuft noch)"
-      waits: false
-      applies_to: [löschend, --gzip]
-      run_artifacts_modified: false  # Run-Ordner, Log, Worktrees, Snapshot-Refs
-    phase_not_terminal_under_lock:
-      condition: Unter dem Run-Lock neu gelesene Phase ist weder done noch escalated.
-      action: skipped
-      reason: "phase <aktuelle Phase>"
-      result_line: "<run_id>: skipped (phase <aktuelle Phase>)"
-      run_artifacts_modified: false
-    git_timeout_or_oserror:
-      exit_code: 1
-      traceback: false
-      output: >-
-        Ergebniszeilen der bis dahin bearbeiteten Läufe und des fehlgeschlagenen
-        Kandidaten, dann eine Fehlermeldung mit ausgeführtem git-Kommando und Ursache.
-      rollback: false  # bereits ausgeführte Löschungen bleiben
-
-lock_file:
-  path: .adw/runs/.lock-<run_id>
-  scope: run
-  shared_by: [adw run, adw resume, adw approve, adw runs prune, Auto-Prune]
-  semantics:
-    run_resume_approve: blockierend (unverändert)
-    prune: >-
-      nicht blockierend; gehalten bis zum Ende der Löschung bzw. Komprimierung
-      des Kandidaten
-  deleted: never
-
-state:
-  path: .adw/runs/<run_id>/state.json
-  added_fields:
-    lanes.<lane>.test_pass_done:
-      type: boolean
-      default: false
-      semantics:
-        false: >-
-          Der reine Test-Lauf ist nicht als regulär abgeschlossen bestätigt.
-          Resume startet den Test-Lauf erneut; eine vorhandene session_id wird
-          dabei fortgesetzt, sonst eine neue Session begonnen.
-        true: >-
-          Der Test-Lauf ist regulär zurückgekehrt und die Nach-Prüfungen (kein
-          Agent-Commit, Lane-Branch) sind bestanden — persistiert in derselben
-          Speicherung wie die session_id. Resume startet keinen weiteren Test-Lauf
-          und führt den ausstehenden RED-Check aus.
-      guarantees:
-        - Abbruch oder fehlgeschlagene Nach-Prüfung persistieren keinen Abschluss.
-        - Das Flag ersetzt keinen RED-Beweis.
-  compatibility:
-    missing_test_pass_done_loads_as: false  # keine Migration
+    traceback: false
+    escalation_md_created: false
+    phase_changed: false        # insbesondere nicht `escalated`
+    resumable: true             # zuvor gemeldete session_id wird fortgesetzt
+    automatic_retry: false
+  git_error_in_orchestrator:
+    triggers: [subprocess.TimeoutExpired, OSError]  # nur context._git
+    stream: stderr
+    message: |-
+      Eskalation: <Ursache>
+      Report: .adw/runs/<run_id>/escalation.md
+    cause_contains: [git-Kommando, Ursache]
+    exit_code: 1
+    traceback: false
+    escalation_md_created: true
+    phase: escalated

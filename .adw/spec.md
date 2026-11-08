@@ -1,191 +1,172 @@
-# Spec: R2 — Event-Log und State überstehen Crash, Prune und Resume
+# Spec — W1: Jeder Agent-Lauf hat eine Grenze, jeder Abbruch eine Ursache
+
+Basis: Stand 0.31.3 (main, `4a7f958`). Ausgangslage am 2026-11-08 gegen den Code
+geprüft: `AgentSpec` (`adw/agents.py:146`) ohne Grenzfelder; `SdkAgentRunner.run`
+baut `ClaudeAgentOptions` ohne `max_turns`; `_collect` (`adw/agents.py:587`)
+iteriert `query()` ohne Zeitlimit und ohne Ausnahmebehandlung; das
+`agent.run`-End-Payload (`:630–636`) hat kein Ursachenfeld; `agent_run_start_payload`
+(`:183`) kennt keine Grenzwerte; `run_codex_review_phase` (`adw/phases.py:~345`)
+fängt nur `FindingsParseError`/`ValidationError`; `context._git`
+(`adw/context.py:359`) prüft nur den Returncode; die CLI (`adw/cli.py:805–823`)
+behandelt nur `EscalationError` und `AgentRunError`. `REGISTRY` enthält acht
+Agenten: `spec_agent`, `plan_agent`, `spec_synthesis`, `plan_synthesis`,
+`build_agent`, `e2e_triage`, `log_analyst`, `final_reviewer`.
 
 ## Ziel
 
-`state.json`, `events.jsonl` und die Snapshot-Refs sind die Wiederherstellungsgrundlage
-jedes Laufs (ab W13 auch Datenquelle des Ledgers). Sieben Stellen (C6–C12) lassen sie
-heute bei Crash, paralleler Snapshot-Erfassung, Prune oder Resume Daten verlieren oder
-falsch werden. Dieser Lauf schließt genau diese sieben Stellen mit den bindenden
-Vorentscheidungen E1–E9 des Issues und ohne neue Mechanismen darüber hinaus:
-ein unterbrochener Test-Lauf wird korrekt fortgesetzt, abgeschlossene Läufe behalten
-ihre Historie, Prune und Executor koordinieren sich über den vorhandenen Run-Lock.
-
-Ausgangsstand: 0.31.2 (nach R1). Am 2026-11-08 im Code bestätigt (Zeilen können sich
-noch verschieben; maßgeblich ist das beschriebene Verhalten):
-`_confirm_red` prüft `lane_state.session_id is None` (`adw/lanes.py:299`);
-`snapshots.capture` vergibt die Seq per `_next_ref_seq` und schreibt mit einfachem
-`update-ref` (`adw/snapshots.py:65–67`); `retention.prune` (`adw/retention.py:421`)
-nimmt keinen Lock und kennt keinen Ausschluss; `retention._git` (`adw/retention.py:72`)
-übersetzt keine `TimeoutExpired`/`OSError`; `RunState._write_snapshot` (`adw/state.py:212`)
-ruft kein `fsync`; `resume` lehnt nur `escalated` ab (`adw/cli.py:332`);
-`_maybe_auto_prune` (`adw/cli.py:627`) prüft kein `dry_run`; der per-Run-Lock ist
-`_run_execution_lock` (`adw/cli.py:903`). `pyproject.toml` steht auf `0.31.2`.
+Kein Claude-Agent-Lauf kann den ADW-Lauf mehr unbegrenzt blockieren: jeder Agent
+hat eine feste Turn- und Zeitgrenze. Jeder Abbruch — Grenze erreicht, SDK-Fehler,
+`CodexError` im Code-Review, git-Timeout — endet mit einer benannten Ursache und
+einer klaren CLI-Meldung (Resume-Hinweis bzw. Eskalation) statt mit einem rohen
+Traceback. Transiente Abbrüche bleiben über `adw resume` fortsetzbar.
 
 ## Scope
 
-### A1 (C6) — Test-Lauf gilt erst nach regulärer Rückkehr als erledigt
-- Neues persistiertes Feld `LaneState.test_pass_done: bool = False` in `state.json`.
-- Es wird `True`, nachdem der reine Test-Lauf regulär zurückgekehrt ist **und**
-  `_require_no_agent_commit` sowie `_require_lane_branch` bestanden sind — in
-  **einer** Speicherung. Bei Abbruch oder fehlgeschlagener Nach-Prüfung bleibt es `False`.
-- `_confirm_red` startet den Test-Lauf, solange `test_pass_done` `False` ist.
-  Existiert bereits eine `session_id`, wird diese Session fortgesetzt
-  (`resume=<session_id>`), sonst eine neue gestartet. Eine gespeicherte `session_id`
-  bedeutet nur noch „Session vorhanden", nicht „Test-Lauf fertig".
-- Ist `test_pass_done` `True`, startet Resume keinen zweiten Test-Lauf, sondern geht
-  direkt zum RED-Check. Das Flag ersetzt keinen RED-Beweis: die bestehenden Prüfungen
-  auf Teständerungen und rote Gates bleiben unverändert.
-- Alte States ohne das Feld laden mit Default `False`; keine Migration (ein alter Lauf
-  setzt im schlimmsten Fall seinen Test-Lauf in derselben Session fort — akzeptiert).
-- Die Bestandstests
-  `tests/test_phases.py::test_resume_without_any_test_changes_does_not_prove_red` und
-  `::test_resume_after_the_test_run_repeats_only_the_red_check` werden an dieses
-  Verhalten angepasst (sie schreiben das Fehlverhalten fest).
+1. **Grenzen je Agent (A1, E1).** `AgentSpec` erhält die Pflichtfelder
+   `max_turns: int` und `timeout_s: int` ohne Default. Jeder `REGISTRY`-Eintrag
+   setzt beide ausdrücklich:
 
-### A2 (C7) — Atomare Vergabe der Snapshot-Refs
-- `capture` legt den Ref mit `git update-ref <ref> <commit> ""` an (leerer alter Wert:
-  nur anlegen, wenn er nicht existiert). Ein vorhandener Ref wird nie überschrieben.
-- Scheitert das Anlegen, weil der Ref bereits existiert, wird mit der nächsten Seq erneut
-  versucht, höchstens 10 Versuche; danach greift der bisherige Fehlerpfad (Warnung,
-  kein `snapshot`-Event, kein Abbruch des Laufs). Andere Fehler bleiben im bisherigen Pfad.
-- Das `snapshot`-Event nennt den tatsächlich vergebenen Ref und den zugehörigen Tree.
-- Ref-Schema `refs/adw/<run_id>/<seq>` bleibt; die vorhandenen Refs bleiben die einzige
-  Quelle der Seq-Wahl (kein Python-Lock, kein Lane-Name im Pfad, kein Zähler nebenher).
+   | Agent | `max_turns` | `timeout_s` |
+   |---|---:|---:|
+   | `build_agent` | 400 | 3600 |
+   | `final_reviewer` | 250 | 1200 |
+   | `spec_agent`, `plan_agent` | 150 | 1200 |
+   | `spec_synthesis`, `plan_synthesis` | 100 | 1200 |
+   | `e2e_triage`, `log_analyst` | 50 | 600 |
 
-### A3 (C8) — Prune nimmt den Lock des Laufs
-- `retention.prune` erwirbt je Kandidat den per-Run-Lock `.adw/runs/.lock-<run_id>`
-  **nicht blockierend**, bevor es löscht oder komprimiert, und hält ihn bis zum Ende
-  der Löschung bzw. Komprimierung dieses Kandidaten.
-- Lock belegt → Ergebnis `skipped` mit Grund „läuft noch"; Run-Ordner, Log, Worktrees
-  und Snapshot-Refs des Laufs bleiben unverändert. Es wird nicht gewartet.
-- Unter dem Lock wird die Phase aus `state.json` neu gelesen; nur `done` und
-  `escalated` sind terminal. Ist sie nicht terminal → `skipped` mit dem Grund, der die
-  Phase nennt (wie bisher beim Scan).
-- Lock-Helfer, Dateiname und Implementierung sind ein einziger, von CLI und Retention
-  gemeinsam genutzter. Die blockierende Semantik von `_run_execution_lock` für
-  `run`/`resume`/`approve` bleibt.
+   Die Werte sind Konstanten in `REGISTRY`, keine Felder in `.adw/config.yaml`.
+   `max_turns` wird an `ClaudeAgentOptions` übergeben. `timeout_s` begrenzt das
+   Einsammeln des `query()`-Streams per `anyio.fail_after(timeout_s)` um die
+   Iteration in `_collect` (E2). Der Modell-Check (`max_turns=1`) bleibt
+   unverändert.
 
-### A4 (C9) — `resume` eines fertigen Laufs ändert nichts
-- `adw resume <id>` eines Laufs in Phase `done` gibt „Run <id> ist bereits
-  abgeschlossen" aus und endet mit Exit 0 — **vor** Preflight, Emitter und jeder
-  State-Mutation.
-- Es wird nichts geschrieben: kein neues `events.jsonl`, keine neue Run-Spanne, keine
-  Änderung an `events.jsonl`/`events.jsonl.gz` oder `state.json`, kein Auto-Prune.
-  Das gilt insbesondere bei bereits komprimiertem `events.jsonl.gz`.
-- Das Verhalten für `escalated` (Exit 1 mit Hinweis auf `escalation.md`) bleibt.
+2. **Benannte Ursache (A2, E2, E3, E7).**
+   - Zeitlimit überschritten → `AgentRunError` mit Meldung
+     `"<agent>: Zeitlimit <timeout_s> s überschritten"`.
+   - Result `is_error=True` mit Subtype `error_max_turns` → `AgentRunError` mit
+     Meldung `"<agent>: max_turns <n> erreicht"`. Keine Eskalation; der Nutzer
+     entscheidet über den Resume.
+   - Das `agent.run`-End-Event wird in beiden Fällen geschrieben, hat
+     `is_error: true` und trägt die Ursache als zusätzliches Feld `error`
+     (Text gleich der `AgentRunError`-Meldung). Die bestehenden End-Payload-Felder
+     (`session_id`, `result_text`, `usage`, `cost_usd`, `is_error`) bleiben.
+   - Eine vor dem Abbruch gemeldete Session-ID ist über den bestehenden
+     `on_session_id`-Checkpoint persistiert; `adw resume` setzt dieselbe Session
+     fort. Die Kosten-Aufsummierung im `finally` von `_collect_into` greift
+     weiterhin, auch bei Timeout.
+   - Die Meldungen werden an einem gemeinsamen Ort erzeugt; keine neue
+     Ausnahmeklasse.
 
-### A5 (C10) — `state.json` dauerhaft schreiben
-- `_write_snapshot` in dieser Reihenfolge: Temp-Datei schreiben, `fh.flush()`,
-  `os.fsync(fh.fileno())`, `os.replace` nach `state.json`, dann `fsync` des per
-  `os.open(run_dir, O_RDONLY)` geöffneten Run-Verzeichnisses (Deskriptor danach schließen).
-- Nur hier; das Event-Log bleibt ohne fsync.
+3. **C26 — keine Tracebacks (A3).**
+   - **SDK (E4):** Jede Ausnahme aus `query()` in `_collect`, die nicht schon
+     `AgentRunError` ist, wird zu `AgentRunError` mit Typname und Text der
+     Ursache (resumierbar). Ein bereits vorhandener `AgentRunError` behält seine
+     Meldung. `KeyboardInterrupt`/`SystemExit` bleiben unberührt.
+   - **Codex im Code-Review (E5):** `CodexError` in der Codex-Code-Review-Phase
+     (einschließlich Codex-Timeout) wird zu `AgentRunError`. Die CLI gibt den
+     bestehenden Resume-Hinweis aus, Exit 1; der Lauf bleibt am Checkpoint und
+     wird nicht `escalated`. Die Behandlung in den Authoring-Phasen bleibt.
+   - **git (E6):** `subprocess.TimeoutExpired` und `OSError` in `context._git`
+     führen auf denselben Pfad wie Returncode ≠ 0: `escalate` mit Kommando und
+     Ursache → `escalation.md`, CLI-Meldung „Eskalation: …", Exit 1.
 
-### A6 (C11) — Kein Auto-Prune nach Dry-Run, eigener Lauf ausgenommen
-- `_maybe_auto_prune` kehrt sofort zurück, wenn `state.dry_run` gesetzt ist. Ein bis
-  `done` geführter Dry-Run verändert keine echten Läufe.
-- `retention.prune` bekommt `exclude: set[str]` (Default leer). Ausgenommene Läufe
-  zählen nicht als Kandidat und erscheinen nicht im Ergebnis.
-- Auto-Prune übergibt stets die eigene Run-ID — unabhängig davon, über welchen Befehl
-  (`run`, `resume`, `approve`) der Lauf `done` erreicht. Ein spät abgeschlossener Lauf,
-  dessen Startzeit älter ist als die durch `keep_runs` geschützten, bleibt so erhalten.
-- Manuelles `adw runs prune` übergibt nichts; die übrigen Retention-Regeln und die
-  Fail-open-Fehlerbehandlung von Auto-Prune bleiben.
+4. **Sichtbarkeit (A4).** `agent_run_start_payload` enthält zusätzlich die
+   Integer-Felder `max_turns` und `timeout_s` des Agents. Da der Payload am
+   Call-Site gebaut wird, gilt das für echten und Mock-Runner gleichermaßen;
+   bestehende Felder bleiben erhalten.
 
-### A7 (C12) — Git-Fehler der Retention werden `RetentionError`
-- `retention._git` fängt `subprocess.TimeoutExpired` und `OSError` und wirft
-  `RetentionError` mit ausgeführtem Kommando und Ursache.
-- Damit greift der bestehende Berichtspfad von `adw runs prune`: Exit 1, Meldung ohne
-  Traceback, Ausgabe der bis dahin bearbeiteten Läufe und des fehlgeschlagenen
-  Kandidaten. Bereits ausgeführte Löschungen bleiben bestehen (kein Rollback).
-
-### A8 — Changelog
-- `CHANGELOG.md` und `CHANGELOG.de.md` synchron: neue oberste Sektion
-  `## [0.31.3] — Unreleased` mit `### Fixed`, je Befund C6–C12 ein Punkt im Stil der
-  vorhandenen Einträge, in der jeweiligen Sprache inhaltlich gleich. Der C6-Punkt
-  erwähnt die Anpassung der beiden Bestandstests aus A1.
-- Version in `pyproject.toml` bleibt `0.31.2`.
+5. **Changelog (A5).** `CHANGELOG.md` und `CHANGELOG.de.md` synchron: neue
+   Sektion `## [0.32.0] — Unreleased` mit `### Added` (Grenzen je Agent,
+   benannte Ursache, Start-Payload-Felder) und `### Fixed` (C26: drei
+   Fehlerarten ohne Traceback), im Stil der vorhandenen Einträge. Version in
+   `pyproject.toml` bleibt `0.31.3`.
 
 ## Non-Goals
 
-- Repo-Lock (`_repo_lock`, `.adw/runs/.repo.lock`) und Lease-Logik aus R1 — unverändert.
-- Event-Format, Seq-Vergabe im Event-Log, fsync-Verzicht beim Event-Append
-  (`adw/events.py`) — unverändert.
-- Retention-Regeln (`--keep`, `--older-than`, `--gzip`, `keep_runs`) — unverändert,
-  abgesehen von Lock, Phasen-Neuprüfung und `exclude` aus A3/A6.
-- Neue Phasen oder persistierte Zustände über `test_pass_done` hinaus; Migration alter
-  States; Änderung des Snapshot-Ref-Schemas.
-- Ledger-Implementierung; Befunde C5 und C13–C29.
-- Versionssprung in `pyproject.toml`.
+- Grenzen in `.adw/config.yaml` konfigurierbar machen.
+- Budget-Grenzen in USD (`max_budget_usd`).
+- Automatischer Retry nach Timeout oder `max_turns`.
+- Effort-Feld pro Agent (Lauf W2).
+- Änderungen an Codex-Timeout (900 s), Gate-Timeouts, CI-Timeout.
+- Änderungen an der Semantik von `AgentRunError` (transient, resumierbar) und
+  `EscalationError` (endgültig).
+- Änderungen am Session-Checkpoint-Verfahren oder an der Kosten-Aufsummierung.
+- Änderungen an der `CodexError`-Behandlung in den Authoring-Phasen.
+- Neue Ausnahmeklassen; Eskalation bei `max_turns` oder Zeitlimit.
+- Fehlerbehandlung für weitere, im Issue nicht genannte Subsysteme; insbesondere
+  keine Änderungen an den `_git`-Helfern in `worktrees.py` und `retention.py` —
+  nur `context._git` ist betroffen.
+- Neue persistente Zustände oder zusätzliche Überwachungsmechanismen.
+- Versionsänderung in `pyproject.toml`.
 
-## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
+## Contract (Single-Lane, nur extern beobachtbare Flächen)
 
-- `fsync` für das Event-Log oder andere Dateien außer `state.json`.
-- Ein Python-Lock oder Lane-Namen in Snapshot-Refs; ein persistierter Snapshot-Seq-Zähler.
-- Wiederherstellung bereits verlorener Historie oder Reparatur leerer `state.json`.
-- Blockierendes Warten des Prune auf laufende Läufe.
-- Zusätzliche Journale oder Wiederherstellungsmarker.
-- Alle übrigen Befunde (C5, C13–C29).
+- **`agent.run`-Start-Payload:** zusätzliche Felder `max_turns` (int) und
+  `timeout_s` (int); bestehende Felder unverändert.
+- **`agent.run`-End-Payload bei Grenz-/Ursachen-Abbruch:** `is_error: true`,
+  zusätzliches Feld `error` (str) mit der Ursachenmeldung.
+- **Meldungstexte:** `"<agent>: Zeitlimit <timeout_s> s überschritten"`,
+  `"<agent>: max_turns <n> erreicht"`.
+- **CLI bei `AgentRunError`** (Zeitlimit, `max_turns`, SDK-Ausnahme, `CodexError`
+  im Code-Review): bestehende Meldung „Agent-Lauf abgebrochen … : <Ursache> …
+  später fortsetzen mit: adw resume <run_id>" auf stderr, Exit 1, kein
+  Traceback, kein `escalation.md`, Phase unverändert.
+- **CLI bei `TimeoutExpired`/`OSError` in `context._git`:** bestehende Meldung
+  „Eskalation: … Report: .adw/runs/<run_id>/escalation.md", Exit 1, kein
+  Traceback; die Ursache nennt das git-Kommando.
+- Interne Helper-Signaturen sind nicht Teil des Contracts.
 
 ## Akzeptanzkriterien
 
-AC 1–10 sind Regressionstests, die vor dem Fix rot sind; zusammengehörige Varianten
-dürfen parametrisiert werden.
+1. Jeder Eintrag in `REGISTRY` hat `max_turns` und `timeout_s` mit exakt den
+   Werten aus der Tabelle in Scope 1; `AgentSpec(...)` ohne eines der beiden
+   Felder wirft `TypeError`.
+2. Der von `SdkAgentRunner.run` gebaute `ClaudeAgentOptions` enthält
+   `max_turns` gleich `agent.max_turns` (Test über den Options-Bau).
+3. Ein gefakter `query()`-Stream, der nach Meldung einer Session-ID länger als
+   `timeout_s` hängt (Test mit kleinem Wert), endet mit `AgentRunError`, dessen
+   Meldung „Zeitlimit" und den Agentnamen enthält; `on_session_id` wurde mit der
+   Session-ID aufgerufen; das End-Event ist geschrieben und trägt `is_error: true`
+   und die Ursache.
+4. Ein Result mit `is_error=True` und Subtype `error_max_turns` endet mit
+   `AgentRunError`, dessen Meldung „max_turns", den Agentnamen und den Wert
+   enthält; das End-Event trägt die Ursache.
+5. Eine `RuntimeError` aus `query()` endet als `AgentRunError` mit Typ und Text
+   der Ursache; über die CLI ergibt das den Resume-Hinweis auf stderr, Exit 1,
+   keinen Traceback, kein `escalated`.
+6. `CodexError` in der Codex-Code-Review-Phase führt über die CLI zum
+   Resume-Hinweis (Exit 1); der Lauf ist danach nicht `escalated` und es
+   existiert kein `escalation.md`.
+7. `subprocess.TimeoutExpired` aus `context._git` führt zur Eskalation mit
+   `escalation.md`, die das git-Kommando und die Ursache nennt; kein Traceback.
+8. `agent_run_start_payload` enthält `max_turns` und `timeout_s` des übergebenen
+   Agents; bestehende Felder bleiben.
+9. `uv run ruff check .` und `uv run pytest -x -q` sind grün.
 
-1. **C6 Abbruch nach Session-ID:** Der Test-Lauf meldet eine Session-ID und bricht dann
-   mit `AgentRunError` ab; `test_pass_done` bleibt `False`. Der anschließende Resume
-   startet den Test-Lauf erneut mit `resume=<diese Session>` und eskaliert nicht wegen
-   „keine Änderungen".
-2. **C6 regulär beendet:** Der Test-Lauf kehrt regulär zurück (Nach-Prüfungen bestanden),
-   danach Crash vor dem RED-Check. `state.json` enthält `test_pass_done: true`; der
-   Resume startet **keinen** zweiten Test-Lauf und führt den ausstehenden RED-Check aus.
-3. **C7:** Zwei gleichzeitige `capture`-Aufrufe (Threads, gleicher Lauf) erzeugen zwei
-   verschiedene Refs; jeder zeigt auf seinen eigenen Commit, und jedes `snapshot`-Event
-   nennt seinen Ref.
-4. **C8 Lock belegt:** Während ein anderer Prozess/Thread `.lock-<run_id>` eines
-   terminalen Kandidaten hält, liefert `prune` (löschend und `--gzip`) für diesen Lauf
-   `skipped` mit Grund „läuft noch", ohne zu warten; Run-Ordner und Log sind unverändert.
-5. **C8 Phase unter dem Lock:** Ein beim Scan terminaler Kandidat ist beim Neu-Lesen
-   unter dem Lock nicht mehr terminal: `prune` meldet `skipped` mit der aktuellen Phase
-   und löscht oder komprimiert nicht.
-6. **C9:** `adw resume` eines `done`-Laufs mit `events.jsonl.gz`: Exit 0, Meldung
-   „Run <id> ist bereits abgeschlossen", kein neues `events.jsonl`, `.gz` und
-   `state.json` byte-gleich, kein Auto-Prune.
-7. **C10:** `_write_snapshot` ruft `os.fsync` für die Datei (vor `os.replace`) und für
-   das Run-Verzeichnis auf (per Monkeypatch nachgewiesen).
-8. **C11 Dry-Run:** Ein Dry-Run bis `done` mit `keep_runs: 1` und einem älteren echten,
-   terminalen Lauf: der ältere Lauf existiert danach noch.
-9. **C11 eigener Lauf:** Auto-Prune nach `done` mit `keep_runs: 1`, wobei der eigene
-   Lauf nach Startzeit nicht der neueste ist: der eigene Run-Ordner existiert danach noch
-   und erscheint nicht im Prune-Ergebnis.
-10. **C12:** Nach mindestens einem erfolgreich bearbeiteten Kandidaten wirft `git` in der
-    Retention `subprocess.TimeoutExpired`: `adw runs prune` endet mit Exit 1 und einer
-    Meldung mit Kommando und Ursache ohne Traceback und nennt die bis dahin bearbeiteten
-    Läufe. `OSError` wird gleich übersetzt.
-11. Die zwei Bestandstests aus A1 sind an das neue Verhalten angepasst und grün.
-12. Changelog-Sektion `## [0.31.3] — Unreleased` / `### Fixed` mit je einem Punkt für
-    C6–C12 in `CHANGELOG.md` und `CHANGELOG.de.md`, inhaltlich synchron, inkl. Hinweis
-    auf die angepassten Tests; `pyproject.toml`-Version unverändert `0.31.2`.
+Richtwert: 8–12 neue Tests. Das ist keine Mindestquote; deutlich mehr ist
+Gold-Plating.
 
-Richtwert: 10–14 neue Tests (plus die zwei angepassten). Deutlich mehr ist ein Zeichen
-für Gold-Plating.
+## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-## Contract (Single-Lane)
+- Grenzen in `.adw/config.yaml` überschreibbar machen.
+- Budget-Grenzen in USD (`max_budget_usd`) — Abrechnung läuft über den Plan.
+- Automatischer Retry nach Timeout oder `max_turns`.
+- Effort pro Agent (Lauf W2).
+- Dieselbe `TimeoutExpired`/`OSError`-Härtung für die `_git`-Helfer in
+  `worktrees.py` und `retention.py` — kein Befund mit realem Schaden im Issue.
 
-Nur extern beobachtbare Flächen:
-- CLI `adw resume <id>` bei Phase `done`: Exit 0, Meldung „Run <id> ist bereits
-  abgeschlossen", keine Schreibzugriffe.
-- CLI `adw run --dry-run` bis `done`: kein Auto-Prune. Auto-Prune nach echtem `done`
-  lässt den eigenen Lauf aus.
-- `state.json`: Lane-Feld `test_pass_done: bool` (Default `false`).
-- Prune-Ergebnis: Aktion `skipped` mit Grund „läuft noch" bei belegtem Run-Lock.
-- `adw runs prune` bei Git-Timeout/OSError: Exit 1, Meldung, bearbeitete Läufe genannt.
-
-Keine internen Helper-Signaturen. Der Thread-Nachweis aus AC 3 erweitert den Contract
-nicht um einen Multi-Lane-Workflow.
+Die Vorentscheidungen E1–E8 des Issues sind bindend und kein Finding-Gegenstand.
 
 ## Definition of Done
 
-- AC 1–12 erfüllt.
-- `uv run ruff check .` grün.
-- `uv run pytest -x -q` grün (gesamte Suite). Keine weitere Toolchain gefordert.
-- Keine Änderungen außerhalb des Scopes; Non-Goals und Deferred unangetastet.
+- Alle Akzeptanzkriterien 1–9 erfüllt und durch Tests abgedeckt (Options-Bau,
+  hängender Fake-Stream mit vorheriger Session-Meldung, `error_max_turns`,
+  SDK-Ausnahme, Codex- und git-Fehlerpfad, Start-Payload).
+- `uv run ruff check .` und `uv run pytest -x -q` grün; keine weiteren Linter
+  oder Typechecker (E8).
+- `CHANGELOG.md` und `CHANGELOG.de.md` enthalten synchron die Sektion
+  `## [0.32.0] — Unreleased` mit `### Added` und `### Fixed`;
+  `pyproject.toml`-Version unverändert `0.31.3`.
+- Bestehendes Verhalten außerhalb des Scopes (Session-Checkpoint,
+  Kosten-Aufsummierung, Codex-/Gate-/CI-Timeouts, Authoring-`CodexError`-Pfad,
+  Modell-Check, andere `_git`-Helfer) unverändert; bestehende Tests grün.
