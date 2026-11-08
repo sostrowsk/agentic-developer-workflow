@@ -42,7 +42,9 @@ class ImproveError(Exception):
 @contextlib.contextmanager
 def _improve_lock(path: Path):
     """Non-blocking flock on ``<ledger>/.improve.lock`` (pattern of ``_repo_lock``),
-    kept out of the ledger's commits via ``.git/info/exclude``."""
+    taken before anything is written. No ``.git/info/exclude`` entry is written: the
+    lock file stays untracked and out of every ``improve`` commit only because
+    ``_commit`` stages and commits explicit report/brief pathspecs."""
     with open(path / LOCK_FILE, "a+", encoding="utf-8") as fh:
         try:
             fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -283,6 +285,8 @@ def _commit(path: Path, week: str, paths: list[str]) -> None:
             raise RuntimeError(status.stderr.strip())
         if not status.stdout.strip():
             return
+        # Path-scoped add/commit: keeps .improve.lock, other untracked files and
+        # foreign staged changes out of the ``improve <week>`` commit.
         for args in (("add", "-A", "--", *present),
                      ("commit", "-m", f"improve {week}", "--only", "--", *present)):
             result = git(*args)
