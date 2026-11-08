@@ -4927,3 +4927,40 @@ def test_fanout_artifact_refresh_alone_is_no_fix_progress(pctx):
     plan.write_text(plan.read_text() + "\nNachgeschärft.\n")  # Seed-Commit beim Dispatch
     with pytest.raises(EscalationError, match="keine Änderungen"):
         _dispatch_lane_fixes(pctx, [_fanout_finding()], ["backend", "frontend"], "Review")
+
+
+REVERT_CONFIG = """\
+base_branch: staging
+lanes:
+  backend:
+    gates:
+      - {name: pass-gate, cmd: "true", timeout: 10}
+  frontend:
+    gates:
+      - {name: ohne-fix, cmd: "sh -c 'test ! -f fix.js'", timeout: 10}
+ci:
+  provider: gitlab
+  staging_job: deploy-staging
+"""
+
+
+def test_fanout_fix_reverted_in_a_later_iteration_is_no_progress(pctx, target_repo):
+    """R5/B1: progress is the NET change of the finished fix round — a fix that
+    breaks the gates and is then fully reverted leaves nothing behind."""
+    from adw.lanes import _dispatch_lane_fixes
+
+    write_config(target_repo, REVERT_CONFIG)
+    pctx.config = AdwConfig.load(target_repo)
+
+    def writes(cwd):
+        n = _calls_in(pctx, cwd)
+        if n <= 1:
+            return {f"{cwd.name}.py": f"# {cwd.name}\n"}
+        if cwd.name == "frontend" and n == 2:
+            return {"fix.js": "kaputt\n"}  # Gates rot
+        (cwd / "fix.js").unlink(missing_ok=True)  # komplett zurückgebaut
+        return {}
+
+    prepare_built_parallel(pctx, lane_files=writes, build_responses=5)
+    with pytest.raises(EscalationError, match="keine Änderungen"):
+        _dispatch_lane_fixes(pctx, [_fanout_finding()], ["backend", "frontend"], "Review")

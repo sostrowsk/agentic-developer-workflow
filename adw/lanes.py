@@ -213,11 +213,7 @@ def _build_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
             _restore_approved_artifacts(
                 ctx, worktree, lane_state.base_sha or ctx.config.base_branch
             )
-            dirty = _worktree_dirty(ctx, worktree)
-            if dirty:
-                with ctx.state_lock:
-                    ctx.changed_lanes.add(lane)  # Fortschritt VOR dem Commit erfassen
-            if lane_state.gate_iterations == 1 and not dirty:
+            if lane_state.gate_iterations == 1 and not _worktree_dirty(ctx, worktree):
                 _handle_idle_agent_run(ctx, lane, dispatch_findings)
             # Kein Save zwischen Gates und Feedback-Persistenz — jeder Checkpoint
             # nach einem Gate-Fail muss pending_task/last_failures bereits tragen.
@@ -247,7 +243,14 @@ def _build_lane(ctx: RunContext, lane: str, all_lanes: list[str]) -> None:
                 lane_state.pending_findings = []
                 ctx.save()
             dispatch_findings = []
+    # Netto-Fortschritt der abgeschlossenen Runde, VOR dem Commit erfasst:
+    # zwischendurch geänderte und wieder zurückgebaute Fixes zählen nicht.
+    changed = _worktree_dirty(ctx, worktree)
     with ctx.state_lock:
+        if changed:
+            ctx.changed_lanes.add(lane)
+        else:
+            ctx.changed_lanes.discard(lane)
         lane_state.pending_task = None
         lane_state.last_failures = []
         lane_state.pending_findings = []
