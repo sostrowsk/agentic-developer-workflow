@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [0.37.1] — Unreleased
+## [0.37.1] — 2026-11-08
 
 ### Fixed
 
@@ -1296,6 +1296,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.37.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.37.0...v0.37.1
 [0.37.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.36.3...v0.37.0
 [0.36.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.36.2...v0.36.3
 [0.36.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.36.1...v0.36.2
