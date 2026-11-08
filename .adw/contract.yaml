@@ -1,106 +1,92 @@
-# Contract — R3 (Single-Lane: nur extern beobachtbare Flächen, keine Helper-Signaturen)
-openapi: 3.1.0
-info:
-  title: ADW GUI — R3 Live-Stream, Host-Prüfung, Template-Verhalten
-  version: 0.36.1
-  description: >-
-    Ergänzender Minimal-Contract. Bestehende Routen, JSON-Antwortfelder, gültige Werte
-    und Event-Record-Strukturen bleiben unverändert.
+# Contract — R4: ADW liest das CI-Ergebnis richtig (Single-Lane).
+# Bindet nur extern beobachtbares Phase-7-Verhalten: done/Eskalation, Meldungen,
+# bestehendes ci.wait-End-Payload. Keine HTTP-Routen, Templates oder neuen Event-Typen.
+# Interne Helper-Signaturen (poll_until, _evaluate, _jobs, _failed_logs, ...) sind kein Contract.
+version: 1
+scope: phase7-ci
+workstreams: [backend]
 
-paths:
-  /api/runs/{repo}/{run_id}/stream:
-    get:
-      summary: SSE-Live-Stream eines Laufs
-      parameters:
-        - {name: repo, in: path, required: true, schema: {type: string}}
-        - {name: run_id, in: path, required: true, schema: {type: string}}
-        - name: Last-Event-ID
-          in: header
-          required: false
-          schema: {type: string}
-          description: >-
-            Zuletzt bestätigte Seq (Integer). Ein gültiger Wert hat Vorrang vor last_id.
-            Begrenzt nur die Ausgabe.
-        - name: last_id
-          in: query
-          required: false
-          schema: {type: string}
-          description: >-
-            Startpunkt (Integer, gleiche Semantik wie Last-Event-ID), wirksam ohne
-            gültigen Header. Ohne gültigen Cursor beginnt die Ausgabe am Log-Anfang.
-      responses:
-        "200":
-          description: text/event-stream, siehe x-sse.
-          content:
-            text/event-stream:
-              schema: {type: string}
-        "400":
-          description: Host nicht in der Allowlist (oder bestehender Validierungsfehler).
-        "404":
-          description: Repository/Lauf nicht auflösbar (unverändert).
-      x-sse:
-        record:
-          frame: "id: <seq>\ndata: <Event-Record als JSON>\n\n"
-          order: Log-Reihenfolge
-          filter: nur Records mit seq > Cursor
-        problem:
-          frame: "event: problem\ndata: <bestehendes Problemformat>\n\n"
-          behavior: beendet den Stream nicht (unverändert)
-        ping:
-          frame: ": ping\n\n"
-          behavior: bei jedem leeren Poll einer weiterhin offenen Verbindung
-        closed:
-          frame: "event: closed\ndata: {}\n\n"
-          behavior: genau einmal, als letztes Frame jedes regulären Stream-Endes
-        completion:
-          live_log: >-
-            Ein run-Ende beendet den Stream nur, wenn es zur letzten bisher gestarteten
-            Run-Spanne gehört (Span-ID, Ende nach Start) und der Run-State nicht auf
-            Approval wartet (awaiting_approval / awaiting_spec_approval). Enden früherer
-            Spannen beenden ihn nicht.
-          awaiting_approval: >-
-            Verbindung bleibt offen; spätere approve-/resume-Events aus demselben Log
-            kommen über dieselbe Verbindung.
-          cursor_independence: >-
-            Die maßgebliche Spanne wird aus dem gesamten Log bestimmt. Liegt ihr Ende
-            auf/unter dem Cursor und wartet der Lauf nicht auf Approval, folgt sofort
-            closed ohne erneute Record-Ausgabe.
-          no_trace: sofort closed
-          gzip: ausstehende Events einmal, dann closed auch ohne End-Record
-          disconnect: Client-Abbruch beendet Generator und Polling (kein belegter Thread)
-          open_without_end: ohne maßgebliches Ende weiter auf Events warten
+phase_7:
+  github:
+    workflow_runs:
+      green_conclusions: [success, skipped, neutral]   # unverändert, nur für Runs
+      subsequent_pages: >-
+        Runs auf Folgeseiten zählen gleichwertig: ein roter Run macht das Ergebnis rot,
+        ein laufender Run verhindert den vorzeitigen Abschluss.
+    staging_job:
+      applies_when: ci.staging_job ist konfiguriert
+      matching: exakte Gleichheit des Jobnamens (Jobs auf Folgeseiten zählen mit)
+      green_only_if: conclusion == "success"
+      not_green_includes: [skipped, neutral]
+      on_not_green: wie roter Staging-Job heute (Log-Auszug der Runs, kein done)
+    pagination:
+      collections: [workflow_runs, jobs_per_run]
+      filters: head_sha bzw. branch bleiben auf jeder Seite erhalten
+      max_pages: 10
+      on_limit_exceeded:
+        outcome: escalated
+        message_prefix: "CI-Monitoring fehlgeschlagen: "
+        message_requirement: nennt das Seitenlimit; kein done aus Teildaten
+    log_evidence:
+      usable: Log-Inhalt ist nach strip() nicht leer
+      empty_or_whitespace_log: Run trägt nichts bei (keine Überschrift)
+      log_fetch_error: Run wird übersprungen, übrige rote Runs werden gesammelt, poll_ci scheitert nicht
+      all_empty:
+        excerpt: ""
+        condition: rotes Ergebnis, Re-Entry-Budget noch nicht verbraucht
+        outcome: escalated
+        message: "Pipeline rot ohne verwertbare Job-Logs (Pipeline <ID>) — Mensch übernimmt"
+        log_analyst: false
+        reentry: false
 
-x-host-policy:
-  applies_to: alle GUI- und /api-Anfragen, vor Auslieferung von Inhalten
-  allowed: ["127.0.0.1", "localhost", "::1", "[::1]"]
-  port_in_host_header: erlaubt (z. B. 127.0.0.1:<port>)
-  cli_extension: >-
-    Bei --i-know und einem anderen --host wird genau dieser Host zusätzlich erlaubt.
-    Keine Wildcard. Bind-Prüfung und --i-know-Bedeutung unverändert.
-  foreign_host: 400
+  timeout:
+    providers: [github, gitlab]
+    budget: ci.timeout
+    measurement: monotone Deadline ab Beginn des Wartens (Fetch + Auswertung + Schlaf)
+    sleep_cap: jede Schlafdauer ist auf die unmittelbar davor verbleibende Restzeit begrenzt
+    non_final_after_deadline:
+      outcome: escalated
+      message_prefix: "CI-Timeout: "
+      further_fetch: false
+      further_sleep: false
+    final_after_deadline: wird ausgewertet, nicht als Timeout gemeldet
+    running_cli_call: wird nicht hart abgebrochen; _CLI_TIMEOUT (120 s) bleibt der Backstop
 
-x-template-behavior:
-  run_detail:
-    path: /runs/{repo}/{run_id}
-    body_attributes:
-      data-run-status: gerenderter Run-Status
-      data-last-seq: >-
-        höchste gültige Seq des für den Snapshot geladenen Logs (unabhängig von
-        Raw-/Tools-Filtern und Pagination); 0 ohne gültige Seq
-    event_source:
-      skip_when_status: [done, escalated]
-      initial_cursor: "?last_id=<data-last-seq>"
-      on_run_end: finaler Refresh wie bisher; Verbindung bleibt offen
-      on_closed: EventSource schließen
-    tools_navigation:
-      behavior: >-
-        Prev/Next entstehen aus dem aktuellen Query-String mit ersetztem tools_offset;
-        ein vorhandener focus wird nicht überschrieben.
-      preserved_parameters: [limit, raw_q, raw_type, raw_from_seq, raw_to_seq, focus]
+  gitlab_manual:
+    trigger: Pipeline-Status manual
+    final: true
+    outcome: escalated
+    message_with_job: "Pipeline wartet auf einen manuellen Job (<Name>) — Mensch übernimmt"
+    message_without_job: "Pipeline wartet auf einen manuellen Job — Mensch übernimmt"
+    job_name: aus einem Pipeline-Job mit Status manual, soweit ermittelbar
+    permitted_prefix: "CI-Monitoring fehlgeschlagen: "   # falls über den bestehenden CiError-Handler
+    further_polling: false
+    timeout_message: false
+    log_analyst: false
+    reentry: false
 
-x-unchanged:
-  - Felder und Werte aller /api-Antworten
-  - Resume-Semantik von Last-Event-ID (Seq-Cursor)
-  - Falsch typisierte E6-Felder (type, kind, span, parent, ts als Nicht-String;
-    payload als Nicht-Dict; payload.status als Nicht-String) gelten als fehlend und
-    erzeugen ein Problem im bestehenden Format; / und /api/runs antworten 200
+events:
+  ci.wait:
+    kind: end
+    payload:
+      status: {type: string, description: bestehender Ergebnisstatus; bei Timeout "timeout"}
+      polls: {type: integer, description: Anzahl der abgeschlossenen Fetches (unverändert)}
+      duration:
+        type: number
+        unit: seconds
+        description: >-
+          Mit der monotonen Uhr gemessene Gesamtzeit bis zum Verlassen der Spanne
+          (Fetches, Auswertung, Schlafen), auch bei Timeout oder Eskalation.
+          Feldname bleibt duration.
+    compatibility: Event-Hülle, ci.poll-Punkte und übrige Event-Strukturen unverändert
+
+files:
+  CHANGELOG.md: "## [0.36.2] — Unreleased / ### Fixed (je ein Eintrag C19–C23)"
+  CHANGELOG.de.md: inhaltlich synchron zu CHANGELOG.md
+  pyproject.toml: version bleibt 0.36.1
+
+preserved:
+  - Phase-7-Ablauf (Push, Polling, Log-Analyst, höchstens ein Re-Entry, dann Mensch); Ausnahme nur gitlab_manual
+  - SHA-Bindung des Pollings an den gepushten Commit
+  - Bedeutung und Defaults von ci.timeout, ci.poll_interval, ci.staging_job
+  - bestehende GitLab-Jobs-Pagination und Forge-Erkennung

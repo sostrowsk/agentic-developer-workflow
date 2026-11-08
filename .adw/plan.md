@@ -1,191 +1,168 @@
-# Plan — R3: Die Live-Ansicht bleibt live — und die GUI hält stand
+# Plan — R4: ADW liest das CI-Ergebnis richtig
 
-Maßgeblich ist `.adw/spec.md`; die Vorentscheidungen E1–E8 sind bindend und kein
-Finding. Single-Lane: Workstream **backend** umfasst auch `adw/gui/static/app.js`,
-die Templates und die Doku (keine eigene Frontend-Lane). Der Contract
-`.adw/contract.yaml` pinnt nur extern beobachtbare Flächen (SSE-Stream, Host-Prüfung,
-Datenattribute/Links im Template, `/api` unverändert), keine Helper-Signaturen.
+Basis: gemergter Stand 0.36.1 (`pyproject.toml` = `0.36.1`). Verbindliche Grundlage ist
+`.adw/spec.md`. Single-Lane: `.adw/config.yaml` definiert nur die Lane `backend`, ein
+Frontend-Workstream entfällt.
 
-## Ausgangslage (am 2026-11-08 im Code geprüft) und Abweichungen
+Contract (`.adw/contract.yaml`) bindet ausschließlich das extern beobachtbare Verhalten von
+Phase 7 (`done`/Eskalation, Meldungen, Felder im `ci.wait`-End-Payload). Es entstehen keine
+HTTP-Routen, Templates oder neuen Event-Typen. Interne Helper-Signaturen (`poll_until`,
+`_evaluate`, `_jobs`, `_failed_logs`, …) sind frei.
 
-Vor dem Bauen gegen den aktuellen Stand prüfen; Abweichungen melden, nicht umdeuten.
-
-- `adw/gui/app.py:151` `_stream`: synchroner Generator, `time.sleep`, endet beim ersten
-  `run`-Ende (auch unterhalb des Cursors, `:175`), kein `closed`, kein Ping, kein
-  Abgleich mit Run-State oder letzter gestarteter Spanne. `.gz` wird bereits einmalig
-  gelesen (`:181`).
-- **Abweichung zur Issue-Formulierung „vorhandener Mechanismus":** Die Route
-  `api_run_stream` (`app.py:313–320`) liest nur den Header `Last-Event-ID`
-  (`_parse_last_event_id`); ein Query-Parameter `last_id` existiert nicht, und der Client
-  öffnet `streamUrl` ohne Startpunkt (`app.js:35`, `:1334`). `last_id` muss ergänzt
-  werden — mit derselben Seq-Semantik und demselben Parser wie der Header.
-- `adw/gui/runs.py:114` `_run_span` ordnet das Ende bereits der letzten gestarteten
-  Span-ID zu. `runs.py:289–291` behandelt die State-Phasen `awaiting_approval` **und**
-  `awaiting_spec_approval` als Warten auf Approval; diese Abbildung ist für E1
-  wiederzuverwenden.
-- `app.js:1334–1348`: `EventSource` immer; `source.close()` beim `run`-Ende; der
-  finale Refresh (`setTimeout(refresh, 250)`) wird dort ausgelöst.
-- `run_detail.html:120` `window_nav` baut `?param=N[&focus=]` neu; `<body>` trägt
-  bereits `data-repo`/`data-run-id` (`app.js:14–17`), aber weder Status noch Start-Seq.
-- `create_app` (`app.py:210`) ohne Host-Middleware; `adw/cli.py:559–569` prüft
-  Bind-Adresse und `--i-know`.
-- `adw/gui/registry.py:167` `register_repo`: atomarer Ersatz vorhanden, Read-Modify-Write
-  ungeschützt.
-- `adw/gui/reader.py`: erkennt kaputte Zeilen und Seq-Lücken, prüft die E6-Feldtypen nicht.
-- Alle bestehenden HTTP-Tests nutzen `TestClient(create_app(...))` ohne `base_url`,
-  d. h. Host `testserver` — nach E4 würde das 400 liefern (siehe B5).
+Vor dem Bauen: Ausgangslage C19–C23 gegen den aktuellen Stand prüfen — `adw/ci.py`
+(`_TERMINAL_STATUSES`, `poll_until`, `_evaluate`), `adw/github.py` (`_GREEN_CONCLUSIONS`,
+`_workflow_runs`, `_evaluate`, `_jobs`, `_failed_logs`), `adw/phases.py:run_ci_phase`
+(`CiTimeoutError`-/`CiError`-Handler, Guard „rot ohne verwertbare Job-Logs").
+Zeilenangaben im Issue sind Orientierung, nicht Vertrag.
 
 ## Workstream: backend
 
-Reihenfolge: B7 (Reader) ist unabhängig und kommt zuerst; B1→B2→B3 vor B4 (Client
-braucht `last_id` und `closed`); B5, B6, B8 danach; B9 nach dem endgültigen Verhalten.
+**Verantwortung:** A1–A6, Tests für AK 1–5, Toolchain (AK 7).
+**Dateien:** `adw/ci.py`, `adw/github.py`, `adw/context.py`, `adw/phases.py` (nur
+Uhr-Durchreichung, ggf. `manual`-Sonderfall), `tests/test_ci.py`, `tests/test_github.py`,
+`tests/test_phases.py`, `CHANGELOG.md`, `CHANGELOG.de.md`.
 
-### B1 — Stream über Run-Spannen (A1/C13, E1) — `adw/gui/app.py`
+### B1 — GitHub Staging-Job nur bei `success` grün (A1, AK 1)
 
-- Die maßgebliche Spanne aus **allen bisher gelesenen** Records bestimmen (letzte
-  gestartete Run-Spanne, Abgleich wie `_run_span`: Ende gehört zur zuletzt gestarteten
-  Span-ID und liegt nach deren Start), unabhängig vom Ausgabe-Cursor.
-- Einen vollständig gelesenen Batch auswerten, bevor ein Ende als Abschluss gilt: ein
-  späterer Start im selben Batch macht das Ende historisch. Enden früherer Spannen
-  beenden den Stream nie.
-- Vor der Abschlussentscheidung den vorhandenen Run-State laden; die Approval-Phasen
-  (`awaiting_approval`, `awaiting_spec_approval`) nach der vorhandenen Abbildung aus
-  `runs.py` behandeln. Bei Approval-Wartezustand offen bleiben und weiterpollen;
-  spätere `approve`/`resume`-Events aus demselben Log laufen über dieselbe Verbindung.
-- Der Cursor (`Last-Event-ID`/`last_id`) begrenzt nur die Ausgabe (`seq > Cursor`).
-  Liegt das Ende der letzten Spanne auf oder unter dem Cursor und wartet der Lauf nicht
-  auf Approval → sofort `closed`, ohne erneute Record-Ausgabe.
-- Kein neuer persistenter Abschlusszustand; Log und Run-State sind die einzige Quelle.
-- `last_id` als Query-Parameter an denselben Parser und dieselbe Filterung wie
-  `Last-Event-ID` anschließen. Ein gültiger Header hat Vorrang (der Browser-Reconnect
-  trägt den fortgeschrittenen Cursor im Header, die URL den alten `last_id`).
+- `adw/github.py:_evaluate`: Für Jobs mit `name == cfg.staging_job` gilt nur
+  `conclusion == "success"`; `skipped`/`neutral` sind nicht grün.
+- `_GREEN_CONCLUSIONS` bleibt unverändert und gilt weiter für die Workflow-Runs (optionaler
+  Run `skipped`/`neutral` bleibt grün). Reihenfolge der Prüfung bleibt: erst rote Runs, dann
+  Staging.
+- Nicht-grüner Staging-Job nimmt den bestehenden roten Staging-Pfad (Sammlung der Run-Logs
+  über `_failed_logs`, kein `done`).
 
-### B2 — Async-Generator, Ping, Abbruch (A2/C14, E2) — `adw/gui/app.py`
+### B2 — GitHub Pagination für Runs und Jobs (A2, AK 2)
 
-- `_stream` → `async def`, `await asyncio.sleep(_POLL_SECONDS)` statt `time.sleep`;
-  Dateilesen über den bestehenden `EventReader` bleibt synchron.
-- Jeder leere Poll einer weiterhin offenen Verbindung liefert `": ping\n\n"`.
-- Client-Abbruch (Cancellation/`GeneratorExit` der `StreamingResponse`) beendet
-  Generator und Polling; Cancellation nicht unterdrücken, kein terminales Event an einen
-  abgebrochenen Client erzwingen. Keine neue Dependency, keine weitere Route auf async.
+- `_workflow_runs` und `_jobs` lesen alle Seiten. Empfohlen: Seiten-Schleife über
+  `per_page=100&page=N`, bis eine Seite weniger als `per_page` Einträge liefert — analog zur
+  bestehenden GitLab-`_jobs`-Schleife in `adw/ci.py` und direkt mit `FakeGh` (eine Antwort je
+  Aufruf) testbar. `gh api --paginate --jq '.workflow_runs[]'`/`'.jobs[]'` ist nach E2
+  ebenfalls zulässig (dann Zeilen-JSON parsen, Limit über Eintragszahl > 10 × `per_page`).
+- Filter `head_sha` bzw. URL-kodierter `branch` bleiben auf jeder Seite erhalten.
+- Fest höchstens 10 Seiten je Sammlung. Ist Seite 10 noch voll (Vollständigkeit nicht
+  festgestellt) → `CiError` mit Meldung zum Seitenlimit, keine Bewertung der Teildaten. Phase 7
+  eskaliert darüber wie heute mit „CI-Monitoring fehlgeschlagen: <Meldung>".
+- Erst die vollständige Run-Liste wird auf Abschluss (`is_terminal`) und Farbe geprüft: ein
+  laufender Run auf Seite 2 hält das Polling offen, ein roter Run auf Seite 2 macht rot.
+- Kein neues Python-Paket. GitLab-Jobs-Pagination unverändert.
 
-### B3 — Terminales `closed` (A3/C16, E3) — `adw/gui/app.py`
+### B3 — Monotone Deadline über das ganze Warten (A3, AK 3)
 
-- Jedes reguläre Ende sendet zuletzt genau einmal `event: closed\ndata: {}\n\n`:
-  Ende der letzten Spanne nach B1, Lauf ohne Trace (`events_path is None`), `.gz`-Log
-  nach einmaliger Ausgabe der ausstehenden Events auch ohne End-Record.
-- Bestehende Frames (`id:`/`data:`-Records, `event: problem`), Pfadprüfung und
-  Fehlerantworten (404) bleiben.
+- `adw/ci.py:poll_until`: neuer Keyword-Parameter `clock` (Default `time.monotonic`);
+  `deadline = clock() + cfg.timeout`. Nach jedem `fetch()`: finaler Status → `evaluate`,
+  auch wenn die Deadline inzwischen überschritten ist. Nicht final und `clock() >= deadline`
+  → `CiTimeoutError` wie heute, ohne weiteres Schlafen und ohne weiteren Fetch. Sonst
+  `sleep(min(poll_interval, deadline - clock()))`.
+- `duration` im `ci.wait`-End-Payload = `clock() - start` beim Verlassen der Spanne
+  (Erfolg, Timeout und Fehlerpfad), also Fetch-, Auswertungs- und Schlafzeit. Feldname bleibt
+  `duration`; `status` und `polls` bleiben wie heute.
+- Durchreichung der Uhr: `poll_ci` (`adw/github.py`) und `poll_pipeline` (`adw/ci.py`)
+  bekommen `clock` als Keyword mit Default `time.monotonic`; `RunContext` (`adw/context.py`)
+  erhält analog zu `sleep` ein Feld `clock` (Default `time.monotonic`), das `run_ci_phase`
+  an beide Poller übergibt. Dry-Run-Fakes (`adw/dry_run.py`) liefern beim ersten Poll einen
+  finalen Status und brauchen keine Änderung.
+- **Pflicht-Migration bestehender Tests:** Die vorhandenen `FakeSleep` (tests/test_ci.py,
+  tests/test_github.py) rücken keine Uhr vor. Mit echter `time.monotonic` würde
+  `test_ci_timeout_escalates` (tests/test_phases.py, `FakeGlab("running")` liefert endlos)
+  hängen und die Timeout-Tests in test_ci.py/test_github.py liefen, bis der Fake leer ist.
+  Daher: `FakeSleep` um eine Fake-Uhr ergänzen (jeder Schlaf rückt sie vor), Timeout-Tests
+  übergeben `clock=`, `test_ci_timeout_escalates` setzt `ctx.clock` gekoppelt an `ctx.sleep`.
+  Bestehende Erwartungen (`sleep.calls == [60, 30]` bei Budget 90/Intervall 60,
+  `sleep.total == 60` nach zwei Polls) bleiben gültig.
 
-### B4 — Client und gerenderter Startpunkt (A1/A3, E3) — `run_detail.html`, `app.js`, `app.py`
+### B4 — GitHub Log-Evidenz (A4, AK 4)
 
-- `<body>` erhält `data-run-status` (gerenderter Run-Status) und `data-last-seq`
-  (höchste gültige Seq des für den Snapshot geladenen Logs, nicht aus der
-  gefilterten/paginierten Raw-/Tools-Ansicht; `0` ohne gültige Seq). Keine neuen
-  JSON-API-Felder.
-- `app.js` (~Z. 1334): bei `done`/`escalated` keine `EventSource`; übrige
-  Initialisierung und Bedienung laufen weiter. Sonst Verbindung mit
-  `?last_id=<data-last-seq>`.
-- Beim `run`-Ende den finalen Refresh behalten, `source.close()` entfernen.
-  Listener für `closed` schließt die `EventSource`. Regionentausch, 200-ms-Entprellung,
-  Lazy-Panes unverändert.
+- `adw/github.py:_failed_logs`: je Run `gh run view <id> --log-failed` in `try/except
+  CiError`; bei Fehler trägt der Run nichts bei, die Schleife läuft weiter, `poll_ci`
+  scheitert nicht.
+- Überschrift „### Workflow-Run <id> (<conclusion>)" plus Auszug nur, wenn der Log-Inhalt
+  nach `strip()` nicht leer ist. Bestehendes Format und `_LOG_EXCERPT_LINES` bleiben.
+- Trägt kein Run etwas bei → Rückgabe exakt `""`; der vorhandene Guard in `run_ci_phase`
+  („Pipeline rot ohne verwertbare Job-Logs (Pipeline <ID>) — Mensch übernimmt") greift ohne
+  Änderung. Reihenfolge der Phase-7-Behandlung (Re-Entry-Budget zuerst) unverändert.
 
-### B5 — Host-Allowlist (A4/C5, E4) — `adw/gui/app.py`, `adw/cli.py`
+### B5 — GitLab `manual` eskaliert sofort (A5, AK 5)
 
-- `create_app` nimmt intern einen optionalen zusätzlichen Host entgegen und fügt
-  `TrustedHostMiddleware` mit `["127.0.0.1", "localhost", "::1", "[::1]"]` plus ggf.
-  genau diesem Host hinzu. Port im `Host`-Header ist zulässig; fremder Host → 400, bevor
-  GUI-/API-Inhalte ausgeliefert werden. Keine Wildcard.
-- `adw/cli.py`: bei `--i-know` und anderem `--host` diesen Host durchreichen;
-  Bind-Prüfung, Bedeutung von `--i-know` und Lazy-Imports unverändert.
-- Bestehende HTTP-Tests auf eine erlaubte Basisadresse umstellen (z. B.
-  `TestClient(..., base_url="http://127.0.0.1")`, zentral in `tests/gui_app_helpers.py`
-  und den direkten `TestClient(create_app(...))`-Stellen). `testserver` **nicht** in die
-  Produktions-Allowlist aufnehmen.
-
-### B6 — Registry-Lock (A5/C15, E5) — `adw/gui/registry.py`
-
-- `register_repo` (Z. 167): stabile Lock-Datei neben der tatsächlich verwendeten
-  Registry; `fcntl.flock(LOCK_EX)` über Laden → Ändern → atomares Ersetzen; Lock auch
-  im Fehlerfall freigeben. Registry-Verzeichnis bei Bedarf vor dem Öffnen anlegen; die
-  Lock-Datei nicht entfernen (gleiches Lock-Ziel für parallele Prozesse).
-- Format, kanonische Pfade, Slugs, Zeitstempel und Fehlerbehandlung unverändert; keine
-  anderen Registry-Schreiber sperren.
-
-### B7 — Typprüfung an einer Stelle (A6/C17, E6) — `adw/gui/reader.py`
-
-- Eine Funktion nach dem JSON-/dict-Check und vor den Projektionen: `type`, `kind`,
-  `span`, `parent`, `ts` → String; `payload` → dict; `payload.status` (bei
-  dict-Payload) → String. Fehlende/`None`-Werte bleiben fehlend.
-- Falsch typisiert → `None`, Record bleibt sonst nutzbar, `problem` über den bestehenden
-  Kanal mit Zeilenposition. Kein Ersatzwert, Quelldatei unverändert, keine Prüfungen in
-  `runs.py`/`serialize.py`/`model.py`/Templates.
-
-### B8 — Tools-Navigation (A7/C18, E7) — `run_detail.html`, ggf. `app.py`
-
-- Prev/Next von `window_nav(tool_window, "tools_offset", …)` aus dem aktuellen
-  Query-String mit ersetztem `tools_offset` bauen (wie `switch_qs`). `limit`, `raw_q`,
-  `raw_type`, `raw_from_seq`, `raw_to_seq` und ein vorhandener `focus` bleiben; ein
-  vorhandener `focus` wird nicht durch `node.seq` überschrieben, die bisherige
-  Fokus-Ergänzung bei fehlendem `focus` darf bleiben. Offset-Rechnung und Fenstergröße
+- `adw/ci.py`: `manual` in `_TERMINAL_STATUSES` aufnehmen.
+- `_evaluate` liefert für `pipeline["status"] == "manual"` kein Grün und keinen Log-Auszug,
+  sondern löst die Eskalation aus. Empfohlen: eigene `CiError`-Unterklasse, die der
+  bestehende `CiError`-Handler in `run_ci_phase` zur Eskalation macht (Meldung dann mit dem
+  vorhandenen Präfix „CI-Monitoring fehlgeschlagen: "). Ein direkter Pfad ist zulässig;
+  beobachtbar ist die Meldung, kein Log-Analyst, kein Re-Entry, keine Timeout-Meldung.
+- Jobname aus den Pipeline-Jobs (bestehendes `_jobs`) mit `status == "manual"`; Meldung
+  „Pipeline wartet auf einen manuellen Job (<Name>) — Mensch übernimmt". Kein manueller Job
+  ermittelbar (leer oder Job-Abfrage schlägt fehl) → „Pipeline wartet auf einen manuellen Job
+  — Mensch übernimmt" ohne Klammer.
+- Nach dem ersten Fetch mit `manual` kein weiterer Fetch und kein Schlafen. SHA-Bindung
   unverändert.
 
-### B9 — Dokumentation (A8)
+### B6 — Changelog (A6, AK 6)
 
-- `docs/GUI-SPEC.md` + `docs/GUI-SPEC.de.md` synchron: Spannen-Regel,
-  Approval-Wartezustand, Cursor-unabhängige Abschlussprüfung, `closed`, Ping und
-  Abbruch, kein Stream für fertige Seiten, Client-Startpunkt (`last_id`), Host-Allowlist.
-  Aussagen zum Schließen bei jedem `run`-Ende ersetzen.
-- `CHANGELOG.md` + `CHANGELOG.de.md`: oben `## [0.36.1] — Unreleased` mit `### Fixed`.
-- `pyproject.toml` **nicht** ändern.
+- `CHANGELOG.md` und `CHANGELOG.de.md`: oberhalb von `## [0.36.1] — 2026-11-08` neue Sektion
+  `## [0.36.2] — Unreleased` mit `### Fixed`, Format wie die bestehenden Sektionen
+  (ein Fett-Lead, darunter je ein Eintrag zu C19–C23: Staging-Grün, GitHub-Pagination,
+  Zeitbudget, Log-Evidenz, GitLab `manual`). Inhaltlich synchron EN/DE.
+- `pyproject.toml` bleibt `0.36.1`; kein neues Python-Paket.
 
-## Tests (Richtwert 10–14; bestehende Tests anpassen statt doppeln)
+### Tests (Richtwert 7–10 neue Tests; Parametrisierungen zählen als ein Test)
 
-| Nr. | Nachweis | Ort |
-|---|---|---|
-| 1 | AK1: A (Start/Ende) + B (Start, Phase, Events): alle Events beider Spannen in Reihenfolge, offen; B-Ende bei `done` → genau ein `closed` zuletzt. | `tests/test_gui_app_sse.py` |
-| 2 | AK2a: Cursor hinter A-Ende: keine Wiederholung, B kommt, kein sofortiges Ende; Header und `last_id` filtern gleich. | SSE-Tests |
-| 3 | AK2b: Cursor auf/hinter B-Ende bei `done`: keine Records, sofort ein `closed`; gültiger Header übersteuert älteren `last_id`. | SSE-Tests |
-| 4 | AK3: `awaiting_approval` nach A-Ende: kein `closed`; später angehängte Events kommen über dieselbe Verbindung. | SSE-Tests |
-| 5 | AK4: leeres offenes Log: `: ping`; Warten asynchron (kein Thread); simulierter Abbruch beendet Generator und Polling. | SSE-Tests, bestehende Async-/ASGI-Technik |
-| 6 | AK5a/b: Lauf ohne Trace → `closed`; `.gz` ohne End-Record → Events einmal + `closed`. | Archivtest anpassen, No-Trace-Fall ergänzen |
-| 7 | AK5c: JS-Harness: `done`/`escalated` → keine `EventSource`; sonst URL mit `last_id` = `data-last-seq`. | `tests/gui_js_harness.js`/`.py` |
-| 8 | AK5d: JS-Harness: `run`-Ende → Refresh, aber kein Close; `closed` → Close. | JS-Harness |
-| 9 | AK6a: `Host: evil.example` → 400 (GUI und `/api`); `127.0.0.1:<port>`, `localhost` → 200. | GUI-HTTP-Tests |
-| 10 | AK6b: `--i-know --host X`: X → 200, anderer fremder Host → 400. | `tests/test_gui_cli.py` |
-| 11 | AK7: zwei parallele `register_repo` (Threads oder Prozesse) verschiedener Pfade: beide + Altbestand vorhanden. | `tests/test_gui_registry.py` |
-| 12 | AK8: `payload.status` Liste / `ts` Zahl: Reader liefert `None` + `problem`; `/` und `/api/runs` → 200, Problem am Lauf, übrige unverändert. | `tests/test_gui_reader.py`, Runlist-Tests |
-| 13 | AK9: `?limit=400&raw_q=foo&tools_offset=200`: Prev/Next behalten `limit`, `raw_q` (und vorhandenen `focus`), ersetzen nur `tools_offset`. | `tests/test_gui_app_detail.py` |
+Vorhandene Fakes (`FakeGh`, `FakeGlab`, `FakeSleep`, `FakeGlab`/`FakeGhPhases` in
+test_phases.py) wiederverwenden. Zeitfälle mit Fake-Uhr und simuliertem Schlaf; kein Netz,
+kein echtes Warten. Für `duration` reicht ein kleiner Test-Emitter, der die `ci.wait`-Spanne
+(Handle mit `id` und `end_payload`) aufzeichnet.
 
-Für offene Streams koordinierte Append-/Disconnect-Signale und begrenzte Laufzeit
-nutzen; keine ungepufferten GETs auf dauerhaft offene Quellen. Bestehende SSE-Tests auf
-async, Ping-Kommentare und das terminale Frame anpassen.
+`tests/test_github.py`
+1. Staging-Job `skipped`/`neutral` (parametrisiert) bei sonst grünen Runs → `passed False`,
+   Log-Pfad (`gh run view … --log-failed` wird aufgerufen).
+2. Staging-Job `success` plus optionaler Run `completed/skipped` → `passed True`.
+3. Staging-Job erst auf Jobs-Seite 2 → `passed True`, keine Meldung „existiert in keinem
+   Workflow-Run"; der zweite Jobs-Aufruf trägt `page=2`.
+4. Runs auf Seite 2 (parametrisiert): roter Run → rot; `in_progress` → weiter pollen.
+   `head_sha`-Filter in jedem Runs-Aufruf.
+5. Mehr als 10 Seiten (Runs oder Jobs) → `CiError`, Meldung nennt das Seitenlimit, kein
+   `done`.
+6. Roter Run mit leerem bzw. Whitespace-Log → `log_excerpt == ""`.
+7. Zwei rote Runs, erster `gh run view` wirft `CiError` → kein Fehler aus `poll_ci`, Auszug
+   enthält Überschrift und Log des zweiten Runs.
 
-## Gates und Definition of Done
+`tests/test_ci.py`
+8. Budget 1 s, Fake-Uhr: zwei Fetches à 0,6 s, Status nie final → `CiTimeoutError` nach
+   Fetch 2, genau zwei Fetches, ein Schlaf ≤ 0,4 s, kein Schlaf nach dem Timeout,
+   `ci.wait.end_payload["duration"]` = gemessene Fake-Gesamtzeit.
+9. Finaler Status nach überschrittener Deadline (Fetch dauert länger als das Budget) →
+   ausgewertet, kein Timeout.
+10. Pipeline `manual` (parametrisiert: manueller Job vorhanden / keiner) → Eskalation mit
+    Meldung inkl. Name bzw. ohne Klammer; genau ein Pipeline-Fetch, kein Schlaf.
 
-- AK1–9 durch die Tests oben belegt; AK10: `uv run ruff check .` und
-  `uv run pytest -x -q` grün (in Build-Sandboxes ggf. `.venv/bin/python -m pytest`).
-- E1–E8 umgesetzt; `/api`-Felder und -Werte, Rendering, Bedienung,
-  Run-/Gate-/Approval-/Resume-Semantik, Loopback/`--i-know` unverändert.
-- GUI-Specs und Changelogs synchron; `pyproject.toml` unverändert.
-- Keine neue Laufzeit-Dependency, kein CDN, kein Frontend-Paket; kein Deferred-Punkt gebaut.
+`tests/test_phases.py`
+11. Phase 7 GitLab `manual` → `EscalationError` mit der E5-Meldung, keine
+    `log_analyst`-Aufrufe, `ci_reentries == 0`, Phase `escalated`, keine Timeout-Meldung.
 
-## Non-Goals
+Bereits abgedeckt, kein neuer Test: Guard „rot ohne verwertbare Job-Logs" auf Phase-Ebene
+(`test_ci_failure_without_logs_escalates_directly`). Bestehende Timeout-Tests werden nur auf
+die Fake-Uhr umgestellt (B3), nicht dupliziert. Keine Statusmatrix, keine Tests für
+Deferred-Punkte.
 
-Wie Spec: Gestaltung/Tastatur, Regionentausch/Entprellung/Panes, `/api`-Felder,
-Run-/Gate-/Approval-/Resume-Semantik, Loopback/`--i-know`; keine persistente
-Stream-Verwaltung (einzige neue Datei: Registry-Lock); keine Dependency/CDN/Frontend-
-Paket; keine Versionsänderung.
+### Gates (AK 7)
+
+- `uv run ruff check .` und `uv run pytest -x -q` grün.
+
+## Erhaltene Grenzen (Non-Goals)
+
+Ablauf von Phase 7 (Push, Polling, Log-Analyst, ein Re-Entry, dann Mensch) bleibt; einzige
+Ausnahme ist die geforderte direkte Eskalation bei GitLab `manual`. Bewertung optionaler
+GitHub-Runs (`skipped`/`neutral` grün), Bedeutung und Defaults von `ci.timeout`,
+`ci.poll_interval`, `ci.staging_job`, SHA-Bindung, Forge-Erkennung und GitLab-Jobs-Pagination
+bleiben unverändert. Kein Versionsbump, keine Stabilitätszusagen für interne Signaturen.
 
 ## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
 
-- Authentifizierung/Token für die GUI.
-- Live-Aktualisierung der Run-Liste.
-- Umstellung weiterer Routen auf async.
-- Weitere Härtungen über C5 und C13–C18 hinaus, insbesondere:
-  - Watchdogs, Inaktivitätsfristen oder serverseitige Reconnect-Verwaltung für den
-    Stream. Ein offener Lauf ohne End-Record darf bei bestehender Verbindung weiter auf
-    Events warten; asynchrones Polling plus Abbrucherkennung beheben C14.
-  - Lock für andere Registry-Schreiber als `register_repo`.
-  - Allgemeine Event-Schema-Validierung über die in E6 genannten Felder hinaus.
-  - Reconnect-Backoff im Client.
+- Automatisches Auslösen manueller Jobs.
+- Bewertung weiterer Spezialstatus (`waiting_for_resource`, `scheduled`, `preparing`) über
+  ihr heutiges Verhalten hinaus.
+- Mehrere Staging-Jobs, Job-Matching per Muster.
+- Konfigurierbares Seitenlimit für die Pagination (fest 10).
+- Hartes Abbrechen eines laufenden `gh`/`glab`-Aufrufs durch die Polling-Deadline; der
+  bestehende CLI-Timeout (`_CLI_TIMEOUT = 120` s) bleibt der Backstop.
+- Retry-, Cache- oder Persistenzmechanismen für fehlende Fehler-Logs.
