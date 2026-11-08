@@ -653,8 +653,9 @@ class SdkAgentRunner:
                 payload["error"] = error
             return payload
 
+        deadline = None
         try:
-            with anyio.fail_after(agent.timeout_s):
+            with anyio.fail_after(agent.timeout_s) as deadline:
                 async for message in query(prompt=task, options=options):
                     found = getattr(message, "session_id", None)
                     if found is None and isinstance(getattr(message, "data", None), dict):
@@ -691,14 +692,17 @@ class SdkAgentRunner:
                                 final_text = "; ".join(str(item) for item in errors)
         except AgentRunError:
             raise
-        except TimeoutError as exc:
-            reason = _timeout_message(agent.name, agent.timeout_s)
-            handle.end_payload = end_payload("\n".join(assistant_texts), reason)
-            raise AgentRunError(reason) from exc
         except Exception as exc:
             # C26: SDK failures (ProcessError, CLIConnectionError, …) are transient
             # and resumable, not a traceback. KeyboardInterrupt/SystemExit pass.
-            reason = _exception_message(exc)
+            # Only OUR deadline is the time limit — a TimeoutError raised inside
+            # query() keeps its own cause.
+            if isinstance(exc, TimeoutError) and deadline is not None and (
+                deadline.cancelled_caught
+            ):
+                reason = _timeout_message(agent.name, agent.timeout_s)
+            else:
+                reason = _exception_message(exc)
             handle.end_payload = end_payload("\n".join(assistant_texts), reason)
             raise AgentRunError(reason) from exc
         text = final_text if final_text else "\n".join(assistant_texts)

@@ -232,6 +232,26 @@ def test_hanging_stream_ends_with_timeout_error_after_checkpoint(monkeypatch, tm
     assert handle.end_payload["session_id"] == "sess-haengt"
 
 
+def test_sdk_timeout_error_keeps_its_cause_instead_of_the_deadline(monkeypatch, tmp_path):
+    """A TimeoutError raised inside query() is an SDK failure, not the agent's
+    timeout_s expiring — type and text of the cause are kept."""
+
+    def fake_query(*, prompt, options):
+        async def stream():
+            raise TimeoutError("upstream read timed out")
+            yield  # pragma: no cover — makes this an async generator
+
+        return stream()
+
+    monkeypatch.setattr("adw.agents.query", fake_query)
+    handle = SpanHandle("t")
+    with pytest.raises(AgentRunError) as exc_info:
+        SdkAgentRunner().run(REGISTRY["spec_agent"], "task", cwd=tmp_path, span=handle)
+    message = str(exc_info.value)
+    assert message == "TimeoutError: upstream read timed out"
+    assert handle.end_payload["error"] == message
+
+
 def test_max_turns_result_names_agent_and_limit(monkeypatch, tmp_path):
     """A2/E3: an error_max_turns result is a named, resumable AgentRunError."""
 
