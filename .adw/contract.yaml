@@ -1,68 +1,146 @@
-# Interface contract — W4: Gleicher Fehler, gleicher Schlüssel
+# Interface contract — W13: Jeder Lauf hinterlässt ein Protokoll im zentralen Ledger
 #
 # Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec
 # („Contract (Single-Lane)") pinnt dieser Contract ausschließlich extern
 # beobachtbare Flächen:
-#   1. das `circuit_breaker`-Event (Format unverändert, neue Auslöse-Semantik),
-#   2. `finding_key` im `triage.decision`- und `followup`-Payload,
-#   3. die persistierten Schlüsselformate im Run-State.
+#   1. Umgebungsvariable ADW_LEDGER,
+#   2. Ledger-Layout und Commit-Nachricht,
+#   3. Schema run-record.json (schema_version 1),
+#   4. CLI `adw ledger export`,
+#   5. Event `ledger.export`,
+#   6. Prune-Ergebnis bei fehlgeschlagenem Export.
 #
-# NICHT Teil des Contracts: interne Helfer und ihre Signaturen
-# (`_finding_key`, Gate-Schlüssel-Helfer, Baseline-/Severity-Helfer), die
-# einzelnen Regex. Die Normalisierungsregeln 1–8 sind über .adw/spec.md Scope 1
-# bindend; hier steht nur ihre Wirkung auf die Schlüssel. Keine HTTP-Routen,
-# keine neuen Event-Typen, keine neuen State-Felder.
+# NICHT Teil des Contracts: interne Helfer und ihre Signaturen, Ablageorte von
+# Hilfsfunktionen, Timeouts außer dem Push-Timeout, Formulierung der
+# stderr-Meldungen (nur ihr Vorhandensein). Die öffentlichen Funktionen von
+# adw/ledger.py (build_run_record, export_run) legt die Spec (DoD) fest; hier
+# stehen nur ihre beobachtbaren Ergebnisse. Keine HTTP-Routen, keine
+# State-Felder, kein Config-Feld.
 
 version: 1
-scope: W4
+scope: W13
 workstreams:
   - backend
 
-key_formats:
-  normalized_text: "Text nach den Regeln 1–8 aus .adw/spec.md Scope 1 (Reihenfolge fest, keine Kleinschreibung)"
-  gate_key: "<gate>|<exit_code>|<normalized_text(output)>"     # Gate-Name und Exit-Code unverändert
-  finding_key: "<file ohne Worktree-Präfix (nur Regel 1)>|<normalized_text(issue)>"
-  severity_key: "<P1|P2|P3>|<finding_key>"
+environment:
+  ADW_LEDGER:
+    default: "~/.adw/ledger"          # ~ expandiert
+    not_a_git_worktree: skipped       # fehlt oder kein Repo → kein Export, nichts angelegt, stderr-Zeile, Event reason no_ledger
+    created_or_cloned_by_adw: never
+    config_field: none                # kein Feld in .adw/config.yaml
+
+export_outcomes:
+  values: [exported, unchanged, skipped, failed]
+  exported: "Bündel geschrieben und lokal committed; ein Push-Fehler ändert das Ergebnis nicht"
+  unchanged: "nichts gestagt, kein neuer Commit; Push wird trotzdem versucht"
+  skipped: "dry_run oder no_ledger"
+  failed: "jede andere Ausnahme/Fehler (nicht: reiner Push-Fehler); stderr-Meldung"
+
+ledger_layout:
+  dir: "runs/<repo_slug mit '/' → '__'>/<run_id>/"
+  replaced_on_each_export: true       # Zielordner vor dem Schreiben vollständig gelöscht
+  files:
+    run-record.json: "json.dumps(record, sort_keys=True, indent=2) + '\\n'"
+    events.jsonl.gz: "gzip mit mtime=0, ohne Dateiname im Header; Quelle events.jsonl oder dekomprimierte .gz; ohne ledger.export-Events"
+    final.diff: "git diff <base_sha>..<branch> je Lane mit base_sha und existierendem Branch, aufsteigend nach Lane-Namen aneinandergehängt; fehlt, wenn keine Lane qualifiziert"
+    copied_if_present:
+      - issue.md
+      - spec.md
+      - plan.md
+      - contract.yaml
+      - spec-summary.md
+      - plan-summary.md
+      - followups.md
+      - escalation.md
+      - "authoring-*-known-findings.md"
+      - state.json
+    never: ["drafts/", "trees/", snapshot refs]
+  git:
+    stage: "git add -- runs/<slug>/<run_id>"          # erfasst auch Löschungen
+    commit_message: "run <run_id> <phase> (<repo_slug>)"   # nur wenn etwas gestagt ist → exported, sonst unchanged
+    identity: Git-Identität des Ledger-Klons
+    push:
+      command: "git push"
+      timeout_s: 60
+      attempted_for: [exported, unchanged]
+      failure: "nicht fatal (Ergebnis bleibt), stderr-Warnung, Event pushed false"
+    never: [pull, rebase, force-push]
+  target_repo_modified: never
+
+repo_slug:
+  from: "git remote get-url origin"
+  rule: "Schema/Host-Präfix und .git entfernt (git@host:a/b.git, https://host/a/b.git → a/b)"
+  fallback: "Verzeichnisname des Repos"
+
+run_record:
+  schema_version: 1
+  missing_values: "null; fehlende Ereignisse → leere Liste bzw. 0; nicht gemessen ≠ 0"
+  excluded: [prompts, system_append, session ids, message contents]
+  keys:
+    schema_version: int                      # 1
+    run_id: str
+    repo_slug: str
+    adw_version: "str | null"               # erster run-Start
+    adw_versions: "list[str]"               # verschieden, Reihenfolge des ersten Auftretens
+    started_at: "str | null"                # ts erster run-Start
+    ended_at: "str | null"                  # ts letztes run-Ende; null, wenn letzte Spanne ohne Ende
+    phase: str
+    dry_run: bool
+    parallel: bool
+    gates: {skip_approval: bool, spec_approval: bool}
+    issue_title: "str | null"               # erste nicht-leere Zeile von issue.md ohne führende '#'
+    escalation_reason: "str | null"         # erster Absatz unter '## Grund', sonst erster Nicht-Überschrift-Absatz
+    invocations: int                         # Anzahl run-Starts
+    approvals: int                           # Anzahl aller approval-Events (awaited und granted; ein Gate-Durchlauf zählt 2)
+    duration_s: "float | null"               # Summe totals.duration aller run-Enden
+    cost_usd: "float | null"                 # Summe totals.cost
+    tokens: "int | null"                     # Summe totals.tokens
+    lanes: "{<lane>: {gate_iterations: int, red_confirmed: bool}}"
+    review_rounds: int
+    ci_reentries: int
+    fix_cycles: int                          # Summe der Lane-fix_cycles
+    circuit_breakers: int                    # Anzahl circuit_breaker-Events
+    agents: "list[{agent, model, effort, max_turns, timeout_s, duration_s, cost_usd, usage, is_error}]"  # je agent.run-Spanne, Startreihenfolge; effort null; Spanne ohne Ende → Ende-Werte null
+    findings: "list[{finding_key, severity, action, reason, phase, round}]"  # je triage.decision, Log-Reihenfolge
+    review_counts: "list[{phase, round, n}]"  # je codex.review-Ende, n = Anzahl findings (fehlt die Liste → 0)
+    followups: int                           # Zeilen in followups.md mit Präfix '- '
 
 events:
-  circuit_breaker:
-    payload: unchanged          # {keys: list[str], scope: str}
-    emitted_when: aktuelle Schlüssel == Basis der Vorrunde nach Normalisierung (bestehender Breaker, bestehende Eskalation)
-    keys:
-      gates: gate_key           # scope lane:<lane> bzw. integration
-      codex_review: finding_key # ohne Severity-Präfix; Basis und aktuelle Findings auf Schwelle der aktuellen Runde gefiltert
-      authoring: finding_key    # dto.
-      final_review: finding_key # kein Schwellenfilter
-  triage.decision:
+  ledger.export:
+    kind: point
+    written_to: Event-Log des exportierten Laufs, nach jedem Exportversuch (auch failed)
     payload:
-      finding_key: finding_key  # identisch mit dem Schlüssel aller übrigen Breaker-/Dedupe-Stellen
-      other_fields: unchanged   # severity, action, reason
-  followup:
-    payload:
-      finding_key: finding_key
-      text: unchanged           # unnormalisierter issue-Text
-    emission: unchanged         # nur nach tatsächlich neu geschriebenem Reporteintrag
+      outcome: "exported | unchanged | skipped | failed"
+      pushed: "bool | null"                  # null ohne Push-Versuch
+      reason: "str | null"                   # skipped: no_ledger | dry_run; failed: Fehlermeldung; sonst null
+    fail_open: true                          # Logging-Fehler nie Lauf-Fehler; trace.enabled=false → kein Event
+    gzip_only_log: "liegt nur events.jsonl.gz vor, wird das Event als weiteres gzip-Member an diese Datei angehängt; es entsteht kein events.jsonl (sonst Überschreiben der .gz beim nächsten --gzip-Prune). Lesbar über die bestehenden gzip-Leser."
 
-state:
-  review_last_failures:
-    items: severity_key         # Checkpoint mit dem Fix-Task und Basis nach dem Dispatch (ohne vertagte Findings)
-    legacy_items_without_prefix: tolerated   # nur führendes P1|/P2|/P3| gilt als Präfix; ohne Präfix passt zu jeder Schwelle
-  authoring_last_findings:
-    items: severity_key
-    legacy_items_without_prefix: tolerated
-  comparison_in_round_n:
-    filter: Basis und aktuelle Findings auf die Severities der Runde N (1: P1/P2/P3, 2: P1/P2, ab 3: P1)
-    compared: finding_key ohne Severity-Präfix
-  deferred_findings: {items: finding_key}
-  final_review_last_failures: {items: finding_key}
-  integration_last_failures: {items: gate_key}
-  lanes.<lane>.last_failures: {items: gate_key}
-  new_fields: none
-  migration: none               # alte Einträge werden weder umgeschrieben noch normalisiert
+cli:
+  "adw ledger export [RUN_ID] --repo <pfad>":
+    repo_default: "."                        # wie runs list/prune; muss Git-Wurzel sein
+    stdout: "<run_id>: <ergebnis>  (je Lauf eine Zeile)"
+    without_run_id: alle Läufe unter .adw/runs/ in Startreihenfolge (retention.scan_runs); ein failed bricht nicht ab
+    unknown_run_id: {exit: 1}
+    exit: "1 bei mindestens einem failed, sonst 0 (auch bei lauter skipped)"
+    lock: Repo-Lock
+
+run_commands:                                # run / resume / approve
+  export_when: nach jeder stattgefundenen Ausführung, jeder Ausgang (done, Eskalation, Pause, AgentRunError, Ausnahme)
+  order: "Ende run-Spanne → Freigabe per-Run-Lock → Export → Auto-Prune (unter Repo-Lock, Auto-Prune nur im bisherigen Erfolgspfad)"
+  rejected_before_execution: kein Export
+  dry_run: "skipped, reason dry_run, keine Ledger-Dateien, kein Commit, kein Push (auch bei resume/approve, Prune und Nachtrag)"
+  exit_code_and_phase: unchanged             # 0/1/2 wie heute, auch bei Exportfehler; ursprüngliche Ausnahme/typer.Exit bleibt
+
+prune:
+  deleting_mode: Export jedes Löschkandidaten unter dessen per-Run-Lock, nach der Phasen-Prüfung, vor der Löschung (Run-Ordner, Worktrees, Snapshot-Refs)
+  applies_to: [adw runs prune, auto-prune]
+  export_failed: {action: skipped, reason: "Ledger-Export fehlgeschlagen"}   # Run-Ordner bleibt
+  export_exported_unchanged_or_skipped: Löschen wie heute (Push-Fehler allein blockiert nicht)
+  gzip_mode: kein Export
 
 unchanged:
-  - Texte an Agenten, escalation.md, Follow-up-Report und Event-Payloads außer finding_key (unnormalisiert)
-  - Rohtext-Vergleich gegen bestehende Einträge in followups.md
-  - Kürzung des Gate-Outputs auf MAX_OUTPUT_LINES (200)
-  - Severity-Schwellen, Runden- und Iterationslimits, Deferred-P3-Semantik
-  - pyproject.toml-Version (0.32.0)
+  - Event-Format, Phasen, Gate-Entscheidungen, Run-Ordner-Layout, Retention-Auswahlregeln
+  - .adw/config.yaml-Schema
+  - GUI
+  - pyproject.toml-Version (0.32.1)
