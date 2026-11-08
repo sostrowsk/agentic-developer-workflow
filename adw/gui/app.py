@@ -172,8 +172,9 @@ class _SpanTracker:
             return
         if record.get("kind") == "start":
             self.span, self.ended = record.get("span"), False
-        elif record.get("kind") == "end" and self.span is not None:
-            if record.get("span") == self.span:
+        elif record.get("kind") == "end":
+            # Like ``_run_span``: without any run start the last run end is the end.
+            if self.span is None or record.get("span") == self.span:
                 self.ended = True
 
 

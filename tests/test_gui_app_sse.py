@@ -361,3 +361,14 @@ def test_stream_rereads_log_before_closing_on_a_state_change(home, tmp_path, mon
     assert status == 200 and not ended
     assert _seqs(body) == [1, 2, 3]
     assert "event: closed" not in body
+
+
+def test_stream_with_run_end_but_no_start_closes(home, tmp_path):
+    """Final review P3: like ``_run_span``, a log with a run end but no run start
+    treats that end as the run's end — the stream closes instead of polling."""
+    lines = [rec(1, "run", "end", "R", None, sec=1, payload=run_end_payload("done"))]
+    app, slug, _ = _setup(tmp_path, lines, phase="done")
+    status, body, ended = _drive(app, f"/api/runs/{slug}/aaaa1111/stream")
+    assert status == 200 and ended
+    assert _seqs(body) == [1]
+    assert body.endswith(_CLOSED) and body.count("event: closed") == 1
