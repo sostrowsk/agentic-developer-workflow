@@ -1,258 +1,60 @@
-# Interface contract — GUI-Redesign 5: Die Seite überträgt, was niemand sieht
+# Interface contract — R1: Der Orchestrator schreibt und löscht nur, was ihm gehört
 #
-# Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Dieser Contract
-# pinnt ausschließlich extern beobachtbare Flächen — genau drei Dinge:
+# Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec
+# („Contract (Single-Lane)“) pinnt dieser Contract ausschließlich drei extern
+# beobachtbare Flächen:
+#   1. CLI-Verhalten von `adw run|resume|approve` bei belegtem Repo-Lock,
+#   2. die Lock-Datei `.adw/runs/.repo.lock`,
+#   3. das neue State-Feld `pushed_shas` in state.json.
 #
-#   1. die BEWUSSTE Verhaltensänderung an der bestehenden HTML-Route
-#      `GET /runs/{repo}/{run_id}` (Fragment bei `X-Requested-With: fetch`,
-#      sonst unverändert Vollantwort; Pane-Reduktion in beiden Modi),
-#   2. die UNVERÄNDERLICHKEIT aller Routen unter `/api` in Feldern, Typen und
-#      Werten — keine neue Route, kein neuer Query-Parameter,
-#   3. das extern beobachtbare BEDIEN-ERGEBNIS des Nachladens
-#      (x-adw-template-behavior) — als Ergebnis, nicht als Attribut- oder
-#      Funktionsname.
-#
-# NICHT Teil des Contracts (frei änderbar): Klassennamen, ARIA- und
-# `data-*`-Attributnamen, Markup-Wortlaut, interne Helfer und ihre Signaturen
-# (`_pane_nodes`, `loadToolBody`, `swapRegions`, `_loadPromise`, `stillOurs`,
-# `REGIONS`), die Wahl zwischen Fragment-Template und Regionen-Partial sowie
-# die flüchtigen Client-Zustandsstrukturen.
-openapi: 3.0.3
-info:
-  title: ADW GUI — Teilantworten und Pane-Nachladen
-  version: 5.0.0
-  description: >-
-    Minimaler externer Contract für den einzigen Workstream backend,
-    basierend auf .adw/spec.md und dem gemergten Stand 0.25.0.
-    Die Version bezeichnet dieses Vertragsdokument, keine API-Version.
-    Geändert werden ausschließlich die HTML-Auslieferung und das beobachtbare
-    Nachladen der Span-Panes. Bestehende API-Antworten bleiben unverändert.
-    Interne Helfersignaturen und Zustandsstrukturen sind nicht
-    Vertragsbestandteil.
+# NICHT Teil des Contracts: interne Helfer und ihre Signaturen (Artefakt-Helfer,
+# Repo-Lock-Kontextmanager, Preflight-Schalter, _push_branch, _run_worktrees).
+# Seeding, Push-Lease, Resume-Schutz und trees-Grenze sind durch .adw/spec.md
+# (A1–A4, AC 1–9) verbindlich, aber keine Vertragsfläche. Keine HTTP-Routen,
+# keine neuen Events.
 
-paths:
-  /runs/{repo}/{run_id}:
-    parameters:
-      - name: repo
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Bestehender Repository-Slug; Auflösung unverändert.
-      - name: run_id
-        in: path
-        required: true
-        schema:
-          type: string
-        description: Bestehende Run-ID; Validierung und Auflösung unverändert.
-    get:
-      summary: Vollständige Run-Detailseite oder ihre beiden Live-Regionen.
-      description: >-
-        Allein X-Requested-With mit dem Wert fetch wählt das Fragment.
-        Ohne diesen Wert bleibt der vollständige Dokumentmodus erhalten.
-        Bestehende Query-Parameter und ihre Auswertung bleiben erhalten;
-        die nachfolgende Parameterliste beschreibt nur die für diese Änderung
-        wesentlichen vorhandenen Parameter und schränkt weitere nicht ein.
-      parameters:
-        - name: X-Requested-With
-          in: header
-          required: false
-          schema:
-            type: string
-          description: Der Wert fetch fordert ausschließlich die Live-Regionen an.
-        - name: focus
-          in: query
-          required: false
-          schema:
-            type: string
-          description: >-
-            Bestehender seq-Fokus mit unveränderter toleranter Auswertung und
-            Fokusauflösung, einschließlich Zuordnung eines gefalteten
-            Tool-Ergebnisses zu seinem Aufruf. Kein neuer Parameter.
-        - name: tools_offset
-          in: query
-          required: false
-          schema:
-            type: string
-          description: >-
-            Bestehender Start des Tools-Fensters; Auswertung, Fensterverhalten
-            und 200er-Schranke bleiben unverändert.
-      responses:
-        "200":
-          description: >-
-            text/html als Vollantwort oder Fragment gemäß Header.
-            Die Pane-Reduktion gilt in beiden Modi.
-          content:
-            text/html:
-              schema:
-                type: string
-        default:
-          description: Bestehende Status- und Fehlerantworten bleiben unverändert.
-
-x-adw-workstreams:
+workstreams:
   - backend
 
-x-adw-template-behavior:
-  response_modes:
-    fragment:
-      trigger:
-        header: X-Requested-With
-        value: fetch
-      regions_in_document_order:
-        - header.run-header
-        - main.detail
-      document_wrapper: false
-      description: >-
-        Genau diese beiden Regionen, ohne html, head, body oder sonstigen
-        Dokumentrahmen. Keine außerhalb der Regionen stehenden Inhalte.
-        Der Client parst und tauscht das Fragment wie bisher.
-    full:
-      description: >-
-        Vollständiges Dokument einschließlich html, head und body.
-        Bisheriges Produktverhalten bleibt bestehen; Byteidentität zu 0.25.0
-        ist wegen der ausdrücklich geforderten Pane-Reduktion nicht zugesagt.
-    equivalence: >-
-      Bei identischen Renderdaten, Parametern und Auswertungszeitpunkten
-      entspricht der Inhalt beider Fragmentregionen dem entsprechenden
-      Ausschnitt der Vollantwort. Beide verwenden denselben Renderpfad und
-      dieselbe Markup-Erzeugung; es entsteht keine zweite Render-Wahrheit
-      für die Regionen.
-    selection_mechanism: >-
-      Nur der vorhandene Header bestimmt den Dokumentmodus; kein zusätzlicher
-      Query-Parameter, keine neue Route und kein Content-Negotiation-Verfahren
-      (E3).
+cli:
+  commands: [adw run, adw resume, adw approve]
+  repo_lock_busy:
+    condition: >-
+      `.adw/runs/.repo.lock` ist von einem anderen Prozess bzw. Handle per flock
+      exklusiv gehalten.
+    exit_code: 1
+    message_semantics: Nennt, dass in diesem Repo bereits ein ADW-Kommando läuft.
+    side_effects:
+      preflight_executed: false
+      self_healing_executed: false
+      run_directory_created: false
+      state_created_or_modified: false
+      main_checkout_artifacts_modified: false
+      escalation_created: false
 
-  span_panes:
-    maximum_bodies_per_response: 1
-    without_focus: >-
-      Kein Span-Pane-Körper in der ausgelieferten Voll- oder Teilantwort.
-    with_focus: >-
-      Bei aufgelöstem Span-Fokus ausschließlich dessen Pane-Körper.
-      Bestehende Fokusauflösung und Deep-Link-Verhalten bleiben erhalten.
-      Ein Punktknoten erfordert keinen zusätzlichen Span-Pane-Körper.
-    excluded_from_body_count:
-      - Leere Span-Pane-Hüllen.
-      - Der vorhandene gemeinsame Pane für Punktknoten.
-    initial_behavior: >-
-      Die bestehende automatische Auswahl des ersten Knotens bleibt erhalten;
-      ihr fehlender Span-Inhalt wird bei Bedarf nachgeladen. Ohne explizite
-      Auswahl bleibt das Kontext-Panel beim neuesten Run-Kontext.
+lock_file:
+  path: .adw/runs/.repo.lock
+  scope: repository
+  mechanism: flock, LOCK_EX | LOCK_NB (nicht blockierend)
+  acquired_before: [preflight, per_run_lock]
+  held_until: Ende des Kommandos (einschließlich Auto-Prune); auf jedem Ausstiegspfad freigegeben
+  deleted: never (auch nicht durch Retention/Prune)
 
-  latest_context:
-    description: >-
-      Der neueste Kontextwert bleibt in einer Teilantwort erreichbar.
-      Nach Regionentausch zeigt das Kontext-Panel ohne explizite Auswahl
-      diesen Wert statt des Werts vom ersten Seitenaufruf. Bestehende
-      Kontextfelder, Typen, Werte und Darstellung bleiben unverändert.
-      Die genaue Platzierung des Transportattributs ist nicht festgelegt.
-
-  lazy_selection:
-    request: >-
-      GET derselben /runs/{repo}/{run_id}-Seite mit dem vorhandenen
-      focus=<seq> und X-Requested-With: fetch. Keine neue Route, kein neuer
-      Query-Parameter.
-    query_preservation: >-
-      Bestehende relevante URL-Parameter bleiben wirksam, insbesondere
-      tools_offset; der Abruf setzt den Fokus auf den ausgewählten Knoten.
-    rendering: >-
-      Der Client übernimmt den passenden servergerenderten Pane-Inhalt.
-      Während des Abrufs erscheint ein lokalisierter Ladezustand, kein
-      leerer Kasten. Ein nachgeladener Pane-Körper verhält sich nach der
-      Übernahme wie ein servergerendert ausgelieferter: seine Registerkarten
-      behalten Rollen, Panel-Zuordnungen und Tastaturbedienung, und ein vor
-      einem Regionentausch geöffneter Abschnitt in ihm ist nach Tausch und
-      abgeschlossenem Nachladen weiterhin offen — der festgehaltene
-      Klappzustand geht durch das asynchrone Nachladen nicht verloren.
-    deduplication: >-
-      Für denselben Knoten in derselben angezeigten Pane-Instanz wird eine
-      laufende Anfrage wiederverwendet, auch bei A → B → A.
-    stale_responses: >-
-      Antworten schreiben keinen Inhalt und keinen Fehlerhinweis, wenn ihr
-      Knoten nicht mehr ausgewählt oder ihr Ziel-Pane inzwischen durch einen
-      Regionentausch ersetzt ist. Es bleibt kein halber Ladezustand zurück.
-    loaded_lifetime: >-
-      Ein erfolgreich geladener Pane wird bis zum Austausch seiner Region
-      nicht erneut abgerufen. Ein fehlgeschlagener Abruf gilt nicht als
-      geladen.
-    failure: >-
-      Die letzte gute übrige Ansicht bleibt erhalten. Der noch aktuelle
-      Ziel-Pane zeigt einen lokalisierten Fehlerhinweis statt eines leeren
-      Kastens oder dauerhaften Ladehinweises und kann erneut geladen werden.
-    input_methods: >-
-      Klick und Tastaturauswahl verwenden denselben Nachladeweg.
-      Bloße Tastaturnavigation ohne Auswahl löst keinen Pane-Abruf aus.
-    existing_tool_body_request: >-
-      GET /api/runs/{repo}/{run_id}/events?from_seq=X&to_seq=X bleibt
-      für den vorhandenen Einzelereignis-Abruf erhalten; das Span-Pane-
-      Nachladen ergänzt ihn und ersetzt ihn nicht.
-
-  preserved_behavior:
-    - Auswahl und focus-Deep-Links aus der Timeline.
-    - Klappzustand und Wiederanwendung der Auswahl nach Regionentausch.
-    - Bestehende Standard-Faltung.
-    - Tools-Fenster mit tools_offset und 200er-Schranke.
-    - Gestaltung, Zeitachse, Kennzahlen und Blockreihenfolge.
-    - Vollständiger Trace-Baum mit bestehender Verdichtung.
-    - Registerkarten, Run-Kontext-Panel und Tastaturpfad.
-    - Alle neuen sichtbaren Hinweise sind in Deutsch und Englisch mit
-      identischer Schlüsselmenge verfügbar.
-
-  deferred_note: >-
-    Die Zusage „Live-updating" der Run-Liste (§7.2 A) wird als noch nicht
-    umgesetzt gekennzeichnet und in die Deferred-Liste aufgenommen; sie wird
-    nicht gebaut (E5). Kein inkrementelles Patchen des Baums (E2).
-
-x-adw-api-invariance:
-  baseline: Gemergter Stand 0.25.0 bei identischen Eingaben und Auswertungszeitpunkten.
-  routes:
-    - GET /api/runs
-    - GET /api/runs/{repo}/{run_id}
-    - GET /api/runs/{repo}/{run_id}/events
-    - GET /api/runs/{repo}/{run_id}/diff
-    - GET /api/runs/{repo}/{run_id}/artifacts/{name}
-    - GET /api/runs/{repo}/{run_id}/stream
-  guarantee: >-
-    Vollständige bestehende Antworten bleiben in Feldern, Typen, Werten,
-    Reihenfolgen und Fehlerverhalten unverändert, auch nach vorausgehendem
-    Voll- oder Fragment-HTML-Abruf. Artefaktantworten behalten ihre
-    vollständigen Bytes. Bestehende Query-Parameter, Ereignisschemas und
-    SSE-Daten bleiben unverändert. Keine neue Route, kein neuer
-    Query-Parameter und keine zusätzlichen API-Felder (AC 13, E3). Die
-    verkürzte Bezeichnung „artifact" im Issue begründet keine zusätzliche
-    Route — `artifacts/{name}` ist die vorhandene Artifact-Route.
-
-x-adw-events:
-  endpoint: /api/runs/{repo}/{run_id}/stream
-  transport: text/event-stream
-  schema: Unverändert gegenüber 0.25.0; keine neuen Ereignistypen.
-  refresh: >-
-    Der vorhandene Ereignisstrom löst den um 200 ms entprellten HTML-Neuabruf
-    und Regionentausch aus. Kein inkrementelles Patchen des Baums, kein
-    Polling, keine Ratenbegrenzung als Ersatz (E2/E4).
-  reconnect: Unverändert über Last-Event-ID mit der letzten seq.
-  run_end: >-
-    Bestehenden abschließenden Refresh ausführen und den Stream beim
-    Lauf-Ende wie bisher schließen.
-
-x-adw-response-size:
-  reference_run: "16f39431"
-  reference_date: "2026-09-15"
-  request: GET /runs/{repo}/16f39431 ohne focus und ohne Fetch-Header.
-  measurement: Unkomprimierte vollständige HTTP-Antwort in Byte.
-  reference_bytes: 847791
-  maximum_bytes: 551064
-  minimum_reduction_percent: 35
-  baseline_rule: >-
-    Aktuelle Ausgangsmessung vor dem Bauen prüfen und Abweichungen ausweisen.
-    Weder Referenzwert noch Abnahmeziel stillschweigend ersetzen. Ein
-    fehlender oder nicht reproduzierbarer Referenzlauf ist als fehlender
-    Abnahmenachweis auszuweisen; eine synthetische Fixture ersetzt ihn nicht.
-
-x-adw-contract-boundary:
-  description: >-
-    Dieser Single-Workstream-Contract pinnt ausschließlich HTTP-Antworten,
-    bestehende Ereignisse und beobachtbares Template-/Client-Verhalten.
-    Er definiert keine internen Helfersignaturen, neuen Anwendungstypen
-    oder neuen Ereignisschemas; Klassennamen, ARIA- und data-*-Attributnamen
-    und Markup-Wortlaut sind frei änderbar. .adw/spec.md bleibt für Scope,
-    Vorentscheidungen E1–E8 und Deferred verbindlich.
+state:
+  path: .adw/runs/<run_id>/state.json
+  added_fields:
+    pushed_shas:
+      type: object
+      keys: Branch-Name (refs/heads/<branch> ohne Präfix)
+      additionalProperties:
+        type: string
+        description: SHA des zuletzt erfolgreich gepushten Commits dieses Branches.
+      default: {}
+  compatibility:
+    missing_pushed_shas_loads_as: {}
+  persistence: >-
+    Nach erfolgreichem Push wird der SHA für den Branch zusammen mit dem übrigen
+    Fortschritt nach dem Push über den bestehenden State-Speicherpfad persistiert.
+    Dasselbe gilt, wenn nach einer Lease-Ablehnung bestätigt wurde, dass der
+    Remote-Branch bereits auf dem lokalen HEAD steht (Crash-Fenster, E4).
+    Dry-Run pusht nicht und schreibt das Feld nicht.

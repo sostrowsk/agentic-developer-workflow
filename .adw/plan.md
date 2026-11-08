@@ -1,348 +1,208 @@
-# Plan — GUI-Redesign 5: Die Seite überträgt, was niemand sieht
+# Plan — R1: Der Orchestrator schreibt und löscht nur, was ihm gehört
 
-Single-Lane-Projekt (`.adw/config.yaml`): nur der Workstream **backend**. Er
-umfasst hier auch Templates, Client-JS, i18n, den JS-Harness und die Doku — die
-GUI-Assets sind Teil des Python-Pakets; es gibt keinen frontend-Lane.
+Maßgeblich ist `.adw/spec.md`. Single-Lane-Projekt (`.adw/config.yaml`): nur der
+Workstream **backend**; er umfasst Code, Tests und Changelogs. Umgesetzt werden
+ausschließlich A1–A5 (Befunde C1–C4).
 
-Setzt auf dem gemergten Stand **0.25.0** auf (Briefe 1 bis 4). Gestaltung
-(Brief 1), Zahlen (Brief 2), Anordnung (Brief 3) und Tastaturpfad (Brief 4)
-werden **benutzt, nicht revidiert** (E7). Dieser Brief ändert den **Live-Pfad**:
-was während eines laufenden Laufs über die Leitung geht, nicht das, was die
-Seite zeigt (E6). Zwei verifizierte Verschwendungen werden beseitigt — die
-Vollantwort auf einen entprellten Refresh (A1) und die 62 unsichtbaren
-Detail-Panes (A2) — und die Spec wird an den Code angeglichen (A3).
+Basis: Stand **0.31.1**. Die Code-Stellen der Spec sind am 2026-11-08 erneut geprüft
+und stimmen: `adw/lanes.py:526` (`_seed_artifacts`), `adw/lanes.py:585`
+(`_restore_approved_artifacts`), `adw/phases.py:642` (`_push_branch`, nacktes
+`--force-with-lease` in Zeile 653; Aufrufer `run_ci_phase`, Zeile 548, der in Dry-Run
+nicht pusht), `adw/cli.py:112` (`_preflight`), `adw/cli.py:183/310/348`
+(`run`/`resume`/`approve`), `adw/cli.py:860` (`_run_execution_lock`),
+`adw/preflight.py:27/139/193` (`SELF_HEAL_ARTIFACTS`, `check_worktree`, `run_all`),
+`adw/context.py:33` (`ARTIFACTS`), `adw/retention.py:225/268/399` (`_run_worktrees`,
+`_delete_run`, `prune`), `adw/state.py:108` (`RunState`, pydantic mit
+`extra="forbid"`; `authoring_session` Zeile 167). Vor dem Bauen gegen den dann
+aktuellen Stand prüfen.
 
-Betroffene Dateien (aus der Spec, abschließend):
-`adw/gui/app.py` (Header-Auswertung in `run_detail_page`, Teilantwort als
-engerer Ausschnitt desselben Renderpfads, Steuerung welcher Pane-Körper
-gerendert wird), `adw/gui/templates/run_detail.html` (die beiden Regionen
-`header.run-header` und `main.detail` als gemeinsam genutzte Bausteine für Voll-
-und Teilantwort; Trennung von Pane-Hülle und Pane-Körper; `data-latest-context`
-in der Teilantwort erreichbar; ggf. ein kleines Fragment-Template bzw. eine
-Regionen-Partial), `adw/gui/static/app.js` (`swapRegions` verträgt das Fragment
-und liest `data-latest-context` aus der Region; neuer Pane-Nachladeweg nach dem
-`loadToolBody`-Muster; Verdrahtung in `applySelection`), `adw/gui/i18n.py`
-(Lade-/Fehlertexte des Panes), `tests/gui_js_harness.js` /
-`tests/gui_js_harness.py` (Pane-Nachladen samt Wettlauf, Doppelanfrage,
-Fehlerfall — Entwicklungswerkzeug, keine Laufzeit-Dependency), neue
-`tests/test_gui_*.py`, `docs/GUI-SPEC.md`, `docs/GUI-SPEC.de.md`,
-`CHANGELOG.md`, `CHANGELOG.de.md`.
-Die Datenableitung (`_run_detail`, `_summary`, `build_tree`, Verdichtung, die
-`/api`-Routen) bleibt **unberührt** (E8); `_pane_nodes` bestimmt weiterhin, wer
-einen Span-Pane bekommt — geändert wird nur, welcher Körper mit ausgeliefert
-wird.
+Betroffene Dateien (abschließend): `adw/lanes.py`, `adw/phases.py`, `adw/state.py`,
+`adw/cli.py`, `adw/preflight.py`, `adw/retention.py`, Tests unter `tests/`,
+`CHANGELOG.md`, `CHANGELOG.de.md`. `pyproject.toml` bleibt unverändert.
 
-## Contract-Fläche (`.adw/contract.yaml`)
+Contract: `.adw/contract.yaml` pinnt nur CLI-Exit/Meldung bei belegtem Repo-Lock, das
+State-Feld `pushed_shas` und die Lock-Datei. Helfernamen, Signaturen und Schalter in
+diesem Plan sind Empfehlungen, keine Vertragsfläche.
 
-Der Contract pinnt für diesen Brief drei Dinge:
+## Workstream backend
 
-1. Die **bewusste Verhaltensänderung** an der HTML-Route
-   `GET /runs/{repo}/{run_id}`: **mit** dem Header `X-Requested-With: fetch`
-   antwortet sie mit einem Fragment (genau die Regionen `header.run-header` und
-   `main.detail`, in Dokumentreihenfolge, ohne `<html>`/`<head>`/`<body>`);
-   **ohne** den Header unverändert mit einem vollständigen Dokument
-   (unveränderter Dokumentmodus). Allein der Header entscheidet. Mit
-   `?focus=<seq>` enthält die Antwort den durch die bestehende Fokusauflösung
-   adressierten Pane-Körper; die Pane-Reduktion aus A2 gilt in beiden Modi.
-2. Die **Unveränderlichkeit** aller Routen unter `/api` in Feldern, Typen und
-   Werten (AC 13) — keine neue Route, kein neuer Query-Parameter.
-3. Das extern beobachtbare **Bedien-Ergebnis** des Nachladens (Panes bei Bedarf,
-   Ladezustand, Wettlauf-Sieger, keine Doppelanfrage, Fehlerhinweis,
-   Kontext-Panel folgt der Teilantwort) — beschrieben als Ergebnis, nicht als
-   Attribut- oder Funktionsname.
+### B1 — Gemeinsamer Artefakt-Helfer und sicheres Seeding (A1, AC 1–3)
 
-**Ausdrücklich NICHT Contract (frei änderbar):** Klassennamen, ARIA- und
-`data-*`-Attributnamen, Markup-Wortlaut, interne Helfer und ihre Signaturen
-(`_pane_nodes`, `loadToolBody`, `swapRegions`, `_loadPromise`, `stillOurs`,
-`REGIONS`), die konkrete Wahl zwischen Fragment-Template und Regionen-Partial
-sowie die flüchtigen Client-Zustandsstrukturen. Diese Namen stehen zur
-Orientierung in Spec und Plan, nicht im Vertrag.
+Datei: `adw/lanes.py`.
 
-**Bindender Architektur-Fakt (A1, E3):** Voll- und Teilantwort verwenden
-denselben Renderpfad und dieselbe Markup-Erzeugung; die Teilantwort ist deren
-engerer Ausschnitt (dieselben Regionen), und bei gleichen Eingabedaten und
-Parametern entspricht der Regionsinhalt dem der Vollantwort. Es entsteht
-**keine** zweite Render-Wahrheit für die Regionen. Ausgelöst wird die
-Teilantwort **allein** vom vorhandenen Header, das Nachladen **allein** vom
-vorhandenen `?focus` — keine neue Route, kein neuer Query-Parameter, kein
-Content-Negotiation-Verfahren.
+1. Die heutige Symlink-/Datei-/Verzeichnis-Behandlung aus
+   `_restore_approved_artifacts` (Zeilen 591–612) in **einen** privaten Helfer ziehen:
+   `.adw` als Symlink oder Datei entfernen (nie folgen) und als echtes Verzeichnis
+   anlegen; je Artefaktpfad einen Symlink entfernen bzw. ein Verzeichnis entfernen;
+   erst dann aus dem Run-Ordner kopieren, sodass eine reguläre Datei entsteht (E1).
+2. `_restore_approved_artifacts` nutzt den Helfer; beobachtbares Verhalten exakt wie
+   heute: fehlende Run-Ordner-Artefakte werden übersprungen, kopiert wird nur bei
+   Abweichung, Config-Restore (Zeilen 613–642) unverändert.
+3. `_seed_artifacts` nutzt denselben Helfer für die drei Einträge aus `ARTIFACTS`,
+   bei jedem Lane-Start einschließlich Resume. Die bestehende Eskalation bei
+   fehlendem Run-Ordner-Artefakt bleibt und greift **vor** jeder Änderung im Worktree.
+4. Commit nur über die drei Pfade `.adw/<name>` (E2): `git status --porcelain --
+   <Pfade>` entscheidet, `git add -- <Pfade>`, `git commit -m … -- <Pfade>`. Kein
+   `git add .adw`. Fremddateien in `.adw/` und anderweitig gestagte Änderungen bleiben
+   unberührt (gestagt, uncommittet) und lösen allein keinen Seed-Commit aus.
 
-## Workstream: backend
+### B2 — Push mit festem Erwartungswert (A2, AC 4–6)
 
-### B1 — Messbasis prüfen (vor dem Bauen)
+Dateien: `adw/state.py`, `adw/phases.py`.
 
-Die Referenzwerte (2026-09-15, Lauf `16f39431`, Stand 0.25.0: **847 791 Byte**
-HTML, **62** Span-Panes mit zusammen **384 044 Byte = 45,3 %**, ~481 Refreshes)
-sind Referenzwerte **genau dieses Laufs**, keine allgemeingültigen
-Fixture-Größen. Vor dem Bauen gegen den dann aktuellen Stand prüfen und
-protokollieren: Revision, Anfrageparameter, die unkomprimierte Seitengröße ohne
-`?focus`, Zahl und gemeinsamer Byteumfang der ausgelieferten
-Span-Pane-Körper, die Auswertung des `X-Requested-With`-Headers (heute null
-Fundstellen in `adw/gui/app.py`); Abweichungen zu den Referenzwerten
-festhalten. Die ~481 Refreshes sind Kontext, kein neues Mess- oder
-Telemetrievorhaben. Das Abnahmeziel bleibt höchstens **551 064 Byte** für die
-vollständige Antwort ohne `?focus`; eine abweichende aktuelle Ausgangsmessung
-wird kenntlich gemacht und ersetzt weder Referenzwert noch Abnahmeziel (AC 5).
-Ein fehlender oder nicht reproduzierbarer Referenzlauf ist als fehlender
-Abnahmenachweis auszuweisen; eine ähnlich benannte synthetische Fixture ersetzt
-ihn nicht, und Messwerte werden **nicht** erfunden.
+1. `RunState.pushed_shas: dict[str, str]` mit `Field(default_factory=dict)`; alte
+   `state.json` ohne das Feld laden mit `{}` (pydantic-Default, kein Migrationscode).
+2. `_push_branch`:
+   - Lokalen HEAD des Worktrees vor dem Push ermitteln.
+   - Lease ausschließlich aus dem gespeicherten Eintrag bilden (E3):
+     `--force-with-lease=refs/heads/<branch>:<pushed_shas[branch]>`, ohne Eintrag
+     `--force-with-lease=refs/heads/<branch>:`. Remote-Tracking-Refs und ein
+     zwischenzeitliches `git fetch` beeinflussen die Erwartung nicht. Übrige Argumente
+     (`-u origin <branch>`, Timeout 600, `safe_env`, `SSH_AUTH_SOCK`) unverändert.
+   - Erfolg → `pushed_shas[branch] = HEAD`, unter `ctx.state_lock` mit dem bestehenden
+     `ctx.save()` persistiert (kein neuer Persistenzweg, kein weiteres Feld).
+   - Lease-Ablehnung erkennen (rc ≠ 0 und git meldet `rejected` / `stale info` im
+     stderr). Dann `git ls-remote origin refs/heads/<branch>` mit gleicher Env und
+     Timeout (E4): Remote-SHA == HEAD → wie Erfolg (speichern, kein Fehler); sonst
+     `escalate` mit einer Meldung, die „Remote-Branch hat fremde Commits“ und den
+     Branch enthält. Schlägt `ls-remote` selbst fehl → normale Eskalation.
+   - Timeout und alle anderen Push-Fehler (Netz, Auth) eskalieren wie heute und werden
+     nie über den Crash-Fenster-Pfad zu Erfolgen.
+3. `run_ci_phase` bleibt bis auf den Aufruf unverändert; `pushed_sha` für das
+   CI-Polling wird weiter wie heute ermittelt. Dry-Run pusht wie heute nicht, also
+   bleibt `pushed_shas` dort leer. Der Neuaufbau des Integrations-Branches als
+   Non-Fast-Forward funktioniert weiter, solange der Remote auf dem zuletzt selbst
+   gepushten SHA steht.
 
-Für AC 13 vor der Änderung bestätigen, dass die bestehende API-Regression
-(`tests/test_gui_display_only_contract.py` bzw. das dortige eingefrorene
-Baseline-Fixture) gegen 0.25.0 grün ist; Erwartungswerte niemals aus dem gerade
-geänderten Antwortpfad neu erzeugen.
+### B3 — Repo-Lock und Resume-Schutz (A3, AC 7–8)
 
-### B2 — Tests zuerst (`tdd: true`)
+Dateien: `adw/cli.py`, `adw/preflight.py`.
 
-Das `pytest`-Gate trägt `tdd: true` (`.adw/config.yaml`): neue/geänderte
-Verhaltenstests erst RED bestätigen, dann implementieren; Invarianten-Tests
-(Seitengröße, Pane-Zahl, API-Regression) dürfen sofort grün sein. Vorhandene
-Helfer in `tests/gui_app_helpers.py`, bestehende API-Fixtures und der Harness
-`tests/gui_js_harness.js` / `tests/gui_js_harness.py` (reiner `node`-Prozess
-gegen das ausgelieferte `app.js`, kein Browser) werden verwendet. Keine Tests
-für Deferred-Themen. Richtwert **~13 neue Tests**:
+1. Neuer Kontextmanager analog zu `_run_execution_lock`: zuerst
+   `ensure_runs_gitignored(repo)` (`adw/worktrees.py:52`; legt `.adw/runs/` samt
+   selbst-ignorierender `.gitignore` an, idempotent), dann `.adw/runs/.repo.lock`
+   öffnen (`a+`) und `fcntl.flock(LOCK_EX | LOCK_NB)`; bei `BlockingIOError`
+   `_fail(...)` (Exit 1) mit der Meldung, dass in diesem Repo bereits ein
+   ADW-Kommando läuft. Die Datei wird nie gelöscht; ihr Name passt wie
+   `.seq`/`.lock-*` nicht auf `RUN_ID_RE`, Retention zählt sie also nicht als Lauf (E5).
+   **Warum `ensure_runs_gitignored` statt `mkdir`:** `run` ruft es heute erst nach dem
+   Preflight (`adw/cli.py:283`). Legte der Lock vorher nur den Ordner an, stünde beim
+   ersten Lauf in einem Repo ohne `.adw/runs/` der Pfad `.adw/runs/` untracked im
+   `git status`, gehört nicht zu `SELF_HEAL_ARTIFACTS`, und `check_worktree` würde
+   einen sonst sauberen Checkout verweigern — dauerhaft, weil die Lock-Datei bleibt.
+   Die `.gitignore` ist selbst ignoriert; sie ist weder Run-Ordner noch
+   `.adw`-Artefakt noch State, der Abbruch bei belegtem Lock bleibt also wie in E5
+   gefordert ohne beobachtbare Mutation. Der spätere Aufruf in `run` (Zeile 283) bleibt
+   unverändert stehen (idempotent).
+2. Einbau, jeweils gehalten bis zum Kommandoende einschließlich `_maybe_auto_prune`
+   und auf allen Ausstiegspfaden freigegeben; der per-Run-Lock liegt innerhalb:
+   - `run`: Erwerb nach `_load_config`, unmittelbar vor `_preflight`. Die
+     Issue-Quellen-Prüfung, `_resolve_gate_mode` und `register_repo` (GUI-Registry,
+     nicht `.adw`) bleiben davor.
+   - `resume`/`approve`: Erwerb direkt nach `repo.resolve()`, vor der Existenzprüfung
+     und vor `_run_execution_lock`.
+   - Bei belegtem Lock: kein Preflight, keine Selbstheilung, kein Run-Ordner, kein
+     State angelegt oder verändert, keine Eskalation (alle drei Kommandos).
+3. Resume-Schutz in `adw/preflight.py` (E6): `run_all` erhält einen Schalter (z. B.
+   `protect_artifacts: bool = False`). Ist er gesetzt und besteht die dirty Menge
+   ausschließlich aus `SELF_HEAL_ARTIFACTS`, kehrt die Arbeitsbaum-Prüfung ohne
+   Heilung zurück; fremde oder gemischte dirty Pfade verweigern wie heute, ohne etwas
+   zu verwerfen. Ohne Schalter bleibt das Verhalten byte-gleich.
+   **Kompatibilität:** `tests/test_cli.py:836` patcht `adw.preflight.check_worktree`
+   mit `lambda repo: None`. `run_all` ruft im Normalfall weiterhin
+   `check_worktree(repo)` ohne Zusatzargument auf; der Schutzpfad läuft über einen
+   separaten Aufruf bzw. ein nur bei gesetztem Schalter übergebenes Argument.
+4. `_preflight` reicht den Schalter durch. `resume` und `approve` setzen ihn auf
+   `state.authoring_session is not None` (State ist dort vor dem Preflight unter dem
+   per-Run-Lock geladen). `run` setzt ihn nie. Reihenfolge Forge → Arbeitsbaum →
+   Modelle und die Menge der sechs Pfade bleiben.
 
-| Nr. | Nachweis | Ort / AC |
-| --- | --- | --- |
-| 1 | Fetch-Header liefert genau die beiden Regionen in Dokumentreihenfolge, ohne `<html>`/`<head>`/`<body>`; der Regionsinhalt entspricht bei gleichen Daten und Parametern der Vollantwort; der aktuelle Kontextwert steht an einem Element **innerhalb** des Fragments | `tests/test_gui_*.py`; AC 1, 3 |
-| 2 | Ohne Header vollständiger Dokumentmodus und bisheriges Produktverhalten unter A2 (Byteidentität zu 0.25.0 wird **nicht** verlangt — mit A2 unvereinbar) | `tests/test_gui_*.py`; AC 2, 13 |
-| 3 | Beide Modi liefern ohne `?focus` **null** und mit Span-Fokus genau **einen** Span-Pane-Körper; leere Hüllen und der gemeinsame Punktknoten-Pane zählen nicht; die bestehende Fokusauflösung einschließlich der Umleitung eines foldbaren Tool-Ergebnisses auf seinen Call bleibt korrekt (mit und ohne Header) | `tests/test_gui_*.py`; AC 4, 10 |
-| 4 | Referenzlauf `16f39431`: Vollantwort ohne `?focus` höchstens 551 064 unkomprimierte Byte; Lauf, Anfrageparameter und Bytezahl im Nachweis | `tests/test_gui_*.py`; AC 5 |
-| 5 | Alle sechs `/api`-Routen unverändert in Feldern, Typen und Werten — auch nach vorausgehendem Voll- und Fragment-Abruf; nutzt die in B1 verifizierte Baseline, keine featurebedingten Unterschiede weg-normalisieren | `tests/test_gui_*.py`; AC 13 |
-| 6 | Fragment mit neuerem Kontextwert aktualisiert das Kontext-Panel ohne Auswahl nach dem Regionentausch; kein Einfrieren auf dem Wert des Seitenaufrufs | Node-Harness; AC 3 |
-| 7 | Auswahl eines ungeladenen Span-Panes fordert die vorhandene Seite mit `?focus=<seq>`, dem Header und erhaltenen Parametern (insb. `?tools_offset`) an; Ladezustand wird durch den Zielinhalt ersetzt, kein leerer Kasten; die Registerkarten des eingesetzten Körpers tragen Tab-Rollen, Panel-Zuordnungen und Tastaturbedienung wie ein servergerendert ausgelieferter Pane | Node-Harness; AC 6, 12 |
-| 8 | Späte Antwort nach Auswahl eines anderen Knotens schreibt nichts; der zuletzt gewählte Knoten zeigt seinen eigenen Inhalt | Node-Harness; AC 7 |
-| 9 | Späte Antwort auf einen inzwischen durch Regionentausch ersetzten Ziel-Pane schreibt weder Inhalt noch Fehlerhinweis | Node-Harness; AC 7 |
-| 10 | Zweimalige Auswahl und A → B → A teilen den laufenden Abruf; ein geladener Pane wird bis zum Regionentausch nicht erneut geholt | Node-Harness; AC 8 |
-| 11 | Fehlgeschlagener Abruf erhält die übrige Ansicht, zeigt den Fehlerhinweis statt eines dauerhaften Ladehinweises und gilt nicht als geladen (Retry möglich) | Node-Harness; AC 9 |
-| 12 | Tastaturauswahl nutzt denselben Nachladeweg wie ein Klick; bloße Navigation ohne Auswahl fordert keinen Pane an | Node-Harness; AC 11 |
-| 13 | Nach einem Regionentausch verhalten sich Klappzustand, Auswahl, Standard-Faltung und Tools-Fenster (samt 200er-Schranke) unverändert; der ausgewählte Pane wird gegen die frischen Hüllen erneut nachgeladen. Szenario ausdrücklich: Abschnitt (Tool/Raw) **innerhalb** eines nachgeladenen Panes öffnen, Refresh auslösen, Pane-Abruf abschließen lassen — der Abschnitt ist danach weiterhin offen (Klappzustand überlebt den asynchronen Nachladevorgang) | Node-Harness (+ Serverassertions); AC 12 |
+### B4 — `trees`-Grenze beim Prune (A4, AC 9)
 
-Für API-Vergleiche unveränderte Felder, Typen, Werte und Reihenfolgen prüfen;
-bei Artefakten die vollständigen Bytes, beim Stream die bestehenden Ereignisse
-und Reconnect-/Endbedingungen; zeitabhängige Antworten unter gleichen
-Auswertungsbedingungen vergleichen. Vorhandene Route-Tests weiterverwenden,
-keine neue umfassende API-Testmatrix aufbauen. Nur die für die Szenarien
-erforderlichen DOM-/Fetch-Simulationen im Harness ergänzen; kein
-Browser-Test-Subsystem.
+Datei: `adw/retention.py`.
 
-### B3 — A1 serverseitig: Teilantwort auf den vorhandenen Header
+1. `_run_worktrees` prüft **vor** dem Auflösen den unaufgelösten Pfad
+   `repo.resolve() / RUNS_RELPATH / run_id / "trees"` (E7):
+   - `is_symlink()` (auch dangling) → `RetentionError`;
+   - existiert und ist kein Verzeichnis → `RetentionError`;
+   - aufgelöster Pfad nicht innerhalb des aufgelösten Run-Ordners → `RetentionError`;
+   - existiert nicht → weiter wie heute (Läufe ohne Worktrees bleiben prunebar).
+2. Sweep-Verhalten (verifiziert): `prune` (Zeile 432–438) **re-raist** heute jede
+   `RetentionError` aus `_delete_run` und bricht den Sweep ab. AC 9 verlangt aber, dass
+   der betroffene Lauf als Fehler erscheint und weitere Läufe bearbeitet werden.
+   Deshalb: `_run_worktrees` wirft die `RetentionError` mit gesetztem
+   `failed=PruneResult(run_id, "failed", reason=…)`; `_delete_run` fängt genau diese
+   Ablehnung um den `_run_worktrees`-Aufruf und gibt `exc.failed` zurück — dasselbe
+   „partial failure, not an abort“-Muster wie bei einem nicht sicher entfernbaren
+   Worktree (Zeilen 304–314). `adw runs prune` endet dadurch wie heute über die
+   `failed`-Ergebnisse mit Exit 1; `_maybe_auto_prune` meldet es fail-open. Die
+   `RetentionError` aus `git worktree list` (Zeile 231, repo-weiter Fehler) bleibt ein
+   Abbruch wie heute.
+3. Da `_run_worktrees` vor jeder Löschung läuft, bleiben Worktrees, Snapshot-Refs und
+   Run-Ordner des betroffenen Laufs unberührt. `--keep`, `--older-than` und
+   Auto-Prune unverändert.
 
-In `run_detail_page` (`adw/gui/app.py`) den Header `X-Requested-With: fetch`
-auswerten (Groß-/Kleinschreibung wie beim Client). Ist er gesetzt, liefert die
-Route ein HTML-Fragment aus genau den Regionen `header.run-header` und
-`main.detail`, in Dokumentreihenfolge, **ohne** `<html>`, `<head>`, `<body>`
-oder sonstigen Dokumentrahmen; ist er nicht gesetzt, unverändert das
-vollständige Dokument. Ausgelöst **allein** durch den Header — kein neuer
-Query-Parameter, keine neue Route, keine Content-Negotiation (E3). Bestehende
-Sprachwahl, Query-Auswertung sowie Status- und Fehlerantworten (`require_run`,
-404) bleiben unverändert.
+### B5 — Changelog (A5, AC 10)
 
-Voll- und Teilantwort **müssen denselben Renderpfad und dieselbe
-Markup-Erzeugung teilen** (A1): die beiden Regionen werden aus **einem**
-gemeinsamen Template-Baustein erzeugt (empfohlen: die Region-Markup je in eine
-Jinja-Partial/Makro heben, die sowohl `run_detail.html` als auch ein schlankes
-Fragment-Template aufruft). Ein serverseitiges Nach-Parsen des gerenderten
-Voll-HTML (neue Parser-Abhängigkeit) ist ausgeschlossen (E1). Die konkrete
-Mechanik ist Gestaltungsspielraum und **nicht** vom Contract gepinnt; bindend
-ist, dass bei gleichen Eingabedaten und Parametern der Regionsinhalt der
-Teilantwort dem der Vollantwort entspricht und keine zweite Regionsvorlage mit
-abweichender Darstellung entsteht.
+- `CHANGELOG.md` und `CHANGELOG.de.md` synchron: neue Sektion
+  `## [0.31.2] — Unreleased` mit `### Fixed`, je ein Punkt für C1 (Seeding), C2
+  (Push-Lease), C3 (Repo-Lock + Resume-Schutz), C4 (`trees`-Grenze) im Stil der
+  vorhandenen Einträge (fetter Leitsatz, dann Problem → Folge → Fix). Angepasste
+  bestehende Tests, die altes Fehlverhalten festschrieben, dort nennen.
+- `pyproject.toml` bleibt `0.31.1`.
 
-Das `data-latest-context`-Attribut, das der Client heute vom `<body>` liest und
-das **nicht** Teil der getauschten Regionen ist, muss in der Teilantwort
-erreichbar bleiben — an einem Element **innerhalb** einer Region (empfohlen:
-`main.detail`). Auf der Vollseite bleibt es zusätzlich am `<body>` (der
-Erstaufruf und bisherige Verbraucher lesen es dort). Ohne das friert das
-Kontext-Panel ohne Auswahl auf dem Wert des Seitenaufrufs ein (AC 3).
+## Reihenfolge
 
-### B4 — A2 serverseitig: Detail-Panes bei Bedarf
+B1–B4 unabhängig voneinander; B2 umfasst State-Modell und Push-Pfad gemeinsam, B3 CLI
+und Preflight gemeinsam. B5 nach den funktionalen Änderungen. Jeden Regressionstest
+zuerst gegen den Ausgangsstand rot sehen, dann den Fix bauen.
 
-Die ausgelieferte Voll- oder Teilantwort enthält höchstens den **Körper** des
-Panes des durch `?focus` aufgelösten Knotens; ohne `?focus` keinen. Betroffen
-sind die Span-Knoten-Panes aus `_pane_nodes` (`_pane_nodes` selbst und die
-Menge der Panes bleiben unverändert — jeder Span-Knoten bekommt weiterhin seine
-**Hülle**). Geändert wird ausschließlich, dass der **Körper** (Tabs,
-`node_body`, Tools-Fenster, Prompt-Diff, Findings-Tabelle usw.) nur für den
-fokussierten Knoten gerendert wird; alle übrigen Panes bleiben als **leere
-Hülle** stehen, maschinenlesbar als „noch nicht geladen" markiert und für die
-Auswahl weiterhin von Punktknoten unterscheidbar. **Keine** Körper durch bloßes
-CSS-Verstecken in der Antwort behalten — sie dürfen gar nicht erst ausgeliefert
-werden. Leere Hüllen und der gemeinsame Punktknoten-Pane zählen nicht als
-Span-Pane-Körper.
+## Tests (Richtwert 10–16 neue Tests)
 
-Die bestehende Fokusauflösung (`_focus_index`, die Umleitung eines foldbaren
-Tool-Ergebnisses auf seinen Call) bleibt unverändert und bestimmt, welcher Pane
-seinen Körper erhält (AC 10). `?tools_offset` samt 200er-Schranke und alle
-übrigen bestehenden URL-Parameter bleiben wirksam (der ausgelieferte
-Pane-Körper trägt sein bestehendes Tools-Fenster). Der Renderpfad des
-Pane-Körpers ist unverändert — es entsteht kein neues Markup für den Körper
-selbst, nur die leeren Hüllen und ihr Marker kommen hinzu. Die anfängliche
-Auto-Auswahl des ersten Knotens (heute `applySelection()` beim Init) bleibt
-erhalten und läuft über den Nachladeweg, ohne dadurch das Kontext-Panel ohne
-explizite Auswahl an den ersten Knoten zu binden. Weder Baumaufbau und
-Verdichtung noch JSON-Detaildaten ändern (E8).
+Reale git-Repos in `tmp_path`, keine Mocks für git-Semantik. Die Tabelle ergibt 14
+neue Tests (Test 7 parametrisiert zählt als einer). Push-Tests nutzen den
+vorhandenen Helfer `add_bare_origin` (`tests/test_phases.py:2947`). Parametrisierung
+nur für die ausdrücklich genannten Varianten.
 
-### B5 — A1/A2 clientseitig: Fragment-Tausch und Pane-Nachladen
+| AC | Test (Kurzbeschreibung) | Ort |
+|----|-------------------------|-----|
+| 1 | Artefakt-Symlink nach außen: Ziel byte-gleich, Worktree-Datei regulär mit Run-Inhalt | `tests/test_phases.py` (bei den Restore-Tests, ab Zeile 1508) |
+| 2 | `.adw`-Symlink nach außen: außen keine Datei, `.adw` echtes Verzeichnis mit drei Artefakten | dto. |
+| 3a | Seed-Commit enthält nur geänderte Artefaktpfade; fremde gestagte Datei bleibt gestagt und uncommittet; Fremddatei in `.adw` uncommittet | dto. |
+| 3b | Unveränderte Artefakte + Fremddatei in `.adw` → kein Seed-Commit | dto. |
+| 4 | Bare-Origin, fremder Commit + `git fetch` → Eskalation „Remote-Branch hat fremde Commits“, Remote-Spitze unverändert | `tests/test_phases.py` (bei den CI-Tests) |
+| 5 | Erster Push neuer Branch → `pushed_shas` persistiert; zweiter Push als Non-Fast-Forward gelingt und aktualisiert | dto. |
+| 6 | Remote == HEAD, `pushed_shas` leer → kein Fehler, SHA gespeichert | dto. |
+| — | Alte `state.json` ohne `pushed_shas` lädt mit `{}` | `tests/test_state.py` |
+| 7 | Gehaltener `.repo.lock` → `run`, `resume`, `approve` (parametrisiert): Exit 1 mit Meldung, kein neuer Run-Ordner, dirty `.adw`-Artefakt unverändert, State unverändert | `tests/test_cli.py` |
+| 7c | Erster `adw run` in einem sauberen Repo ohne `.adw/runs/` und ohne Ignore-Regel: der Preflight verweigert nicht wegen der Lock-Datei, `.adw/runs/.gitignore` existiert, `git status` zeigt `.adw/runs` nicht | `tests/test_cli.py` |
+| 8 | `resume` mit `authoring_session` + dirty `.adw/plan.md` → Datei byte-gleich, Preflight verweigert nicht | `tests/test_cli.py` |
+| 8b | Dasselbe mit zusätzlich fremdem dirty Pfad → Verweigerung wie heute, nichts verworfen | dto. |
+| 9 | `trees`-Symlink auf fremden registrierten Worktree → fremder Worktree + Registrierung bleiben, Run-Ordner bleibt, Ergebnis `failed`, zweiter Lauf im Sweep geprunt | `tests/test_retention.py` |
+| 10 | Changelog-Sektion EN/DE und Version 0.31.1 — per Review, kein eigener Test | — |
 
-In `adw/gui/static/app.js`:
+Bestehende Tests nur anpassen, wo sie altes Fehlverhalten festschreiben, und das im
+Changelog nennen. Kein bestehender Test referenziert `_push_branch` oder
+`--force-with-lease`; die CI-Tests pushen echt gegen ein Bare-Origin. Pusht einer
+davon auf einen bereits vorbefüllten Remote-Branch ohne `pushed_shas`, wäre das die
+zu nennende Anpassung.
 
-- **`swapRegions` verträgt das Fragment (A1).** Der `DOMParser` parst das
-  Fragment wie bisher; die Regionen werden wie bisher getauscht
-  (`REGIONS`-Reihenfolge). Da das Fragment kein `<body>` mit
-  `data-latest-context` trägt, wird der Wert aus dem Element der Teilantwort
-  gelesen (empfohlen: `main.detail`) und auf das Live-`<body>` übernommen —
-  der bisherige Body-Lesepfad kann als Rückfall bestehen bleiben; sonst friert
-  das unausgewählte Kontext-Panel ein (AC 3). Der bestehende
-  Klappzustand-Erhalt, `applySelection`, `updateContextPanel`, `initTreeFold`,
-  `initTabs` und die Tastatur-Init nach dem Tausch bleiben unverändert (AC 12).
-  **Achtung (Review-Finding):** `captureOpenState`/`reapplyOpenState` laufen
-  heute um den Tauschzeitpunkt herum — mit nachgeladenen Panes existieren die
-  `<details>`-Elemente eines noch nicht geladenen Pane-Körpers zu diesem
-  Zeitpunkt nicht. Der festgehaltene Klappzustand wird deshalb über den
-  asynchronen Nachladevorgang hinweg aufbewahrt und beim Einsetzen des
-  Pane-Körpers auf diesen angewandt (siehe Nachladeweg unten); er darf beim
-  Tausch nicht verworfen werden, nur weil sein Ziel noch fehlt (AC 12).
-  Auslöser und 200-ms-Entprellung von `refresh()` bleiben unverändert (E4);
-  `refresh()` schickt den Header bereits heute.
-- **Pane-Körper bei Bedarf nachladen (A2).** Ein neuer, nach dem
-  `loadToolBody`-Muster gebauter Weg lädt den Körper eines noch nicht geladenen
-  Span-Panes: er fordert die **vorhandene** Seite mit dem bestehenden
-  `?focus=<seq>` und dem Header aus A1 an (bestehende URL-Parameter,
-  insbesondere `?tools_offset`, bleiben erhalten; nur `focus` wird auf den
-  Zielknoten gesetzt), parst die Teilantwort, entnimmt den Körper des
-  Ziel-Panes und setzt ihn in die vorhandene Hülle ein. **Kein** vollständiger
-  Regionentausch für ein Pane-Nachladen. Übernommen werden die erprobten
-  Absicherungen (nicht neu erfunden):
-  - Eine bereits laufende Anfrage für denselben Knoten und dieselbe
-    Pane-Instanz wird wiederverwendet (`_loadPromise`), nicht verdoppelt —
-    auch bei A → B → A (AC 8).
-  - Vor jeder sichtbaren Änderung prüfen, ob derselbe Knoten noch ausgewählt
-    und der Ziel-Pane noch im aktuellen Dokument ist
-    (`stillOurs`/Knoten-Identität). Überholte Antworten schreiben weder Inhalt
-    noch Fehlerhinweis und hinterlassen keinen halben Zustand — auch wenn die
-    Ziel-Hülle inzwischen durch einen Regionentausch ersetzt wurde (AC 7).
-  - Während des Ladens zeigt der Pane einen Ladezustand (i18n), keinen leeren
-    Kasten (AC 6).
-  - **Nach erfolgreichem Einsetzen wird der eingesetzte Körper initialisiert
-    (Review-Finding):** die Tab-Initialisierung (`initTabs`: Tab-Rollen,
-    Panel-Zuordnungen, Roving-Tabindex) läuft heute nur beim Seiten-Init und
-    beim Regionentausch — also bevor nachgeladener Inhalt ankommt. Sie wird
-    nach dem Einsetzen auf den frischen Pane-Körper (erneut) angewandt, damit
-    dessen Registerkarten Barrierefreiheit und Tastaturbedienung behalten.
-    Ebenso wird der über den Nachladevorgang aufbewahrte Klappzustand dieses
-    Panes jetzt auf die eingesetzten `<details>`-Elemente angewandt (AC 12).
-  - Erst die erfolgreiche Übernahme gilt als geladen; ein geladener Pane wird
-    bis zum Austausch seiner Region nicht erneut geholt, ein fehlgeschlagener
-    Abruf gilt nicht als geladen (AC 8).
-  - Netzwerkfehler, nicht erfolgreiche HTTP-Antworten oder fehlender
-    Zielinhalt erhalten die letzte gute übrige Ansicht; der noch aktuelle
-    Ziel-Pane sagt, dass er nicht geladen werden konnte (i18n), und bleibt
-    erneut ladbar — wie `refresh()` es heute mit `/* transient read error:
-    keep the last good view */` hält (AC 9).
-- **Verdrahtung in `applySelection`.** Klick, Timeline-Auswahl und
-  Tastaturauswahl laufen weiter durch den gemeinsamen Auswahlpfad
-  (`selectNode`; keine synthetischen Klicks); wählt ein Knoten seinen eigenen
-  Span-Pane, wird dessen Körper bei Bedarf über den neuen Weg nachgeladen. Die
-  anfängliche Auto-Auswahl des ersten Knotens zeigt dessen Pane weiterhin —
-  jetzt über das Nachladen; das sichtbare Verhalten bleibt gleich (E6). Bloße
-  Tastaturnavigation ohne Auswahl löst **keinen** Abruf aus (AC 11). Nach
-  einem Regionentausch sind die Hüllen frisch und leer, sodass der ausgewählte
-  Pane erneut nachgeladen wird (AC 12) — das ist genau das gewünschte
-  Live-Verhalten des ausgewählten Panes.
-- **Punktknoten-Pane und Einzelereignis-Abruf unverändert.** Der gemeinsame
-  Punktknoten-Pane und der bestehende `loadToolBody`-Abruf über
-  `GET …/events?from_seq=X&to_seq=X` bleiben erhalten; A2 **ergänzt** das
-  Nachladen der Span-Panes und ersetzt diesen Weg nicht. SSE-Auslöser,
-  Reconnect über `Last-Event-ID` und der abschließende Refresh samt
-  Stream-Schließen beim Lauf-Ende bleiben unverändert (E8).
+## Gates / Definition of Done
 
-### B6 — A3: Die Spec sagt, was der Code tut
+- `uv run ruff check .` und `uv run pytest -x -q` grün (in Build-Sandboxes ggf. direkt
+  `.venv/bin/python -m pytest -x -q`); die bestehenden 1362 Tests bleiben grün.
+- AC 1–11 erfüllt; AC 1–9 durch Regressionstests belegt, die gegen 0.31.1 rot sind.
+- Changelogs EN/DE synchron, Version unverändert.
+- Contract beschränkt auf CLI-Exit/Meldung, `pushed_shas` und Lock-Datei.
+- Keine Änderungen außerhalb A1–A5; keine neue Toolchain (E8).
 
-`docs/GUI-SPEC.md` §7.3 auf den tatsächlichen Mechanismus bringen: SSE als
-Auslöser des um 200 ms entprellten Neuabrufs, **Regionentausch** (nicht
-inkrementelles Patchen — die Aussage zum inkrementellen Patchen entfällt), die
-Teilantwort aus A1 auf den `X-Requested-With: fetch`-Header, das Nachladen der
-Detail-Panes aus A2 sowie den **unveränderten** Reconnect über `Last-Event-ID`
-und das **unveränderte** Verhalten beim Lauf-Ende. Die Zusage „Live-updating"
-der Run-Liste in §7.2 A wird als **noch nicht umgesetzt** gekennzeichnet und in
-die Deferred-Liste der Spec/Doku aufgenommen; sie wird in diesem Issue
-**nicht** gebaut (E5). Deferred-Funktionen werden nicht als umgesetzt
-dargestellt.
+## Deferred (bewusst nicht gebaut)
 
-### B7 — A4: i18n
+- Feineres Lock nur über die Authoring-Phasen (paralleles Bauen zweier Läufe im
+  selben Repo) — E5 serialisiert bewusst ganze Kommandos.
+- Blockierendes Warten auf den Repo-Lock oder Anzeige des Lock-Halters.
+- Nutzung gepushter SHAs für andere Zwecke (GUI, Kennzahlen).
+- Symlink-Prüfungen an weiteren Stellen als den hier genannten.
+- Alle Befunde C5–C29.
 
-Jeder neue sichtbare Text (Ladezustand und Fehlerhinweis eines Span-Panes)
-liegt in `adw/gui/i18n.py` in **beiden** Sprachen mit identischer
-Schlüsselmenge vor. Passende bestehende Texte (`hint_loading`,
-`hint_load_failed_*`) dürfen wiederverwendet werden — aber nur, wenn ihr
-Wortlaut zum Pane passt: die bestehenden Fehlertexte sagen „erneut
-aufklappen"/„erneut öffnen", was für einen Pane, der per Auswahl erneut geladen
-wird, nicht zutrifft; in dem Fall eigener Schlüssel statt unpassender
-Wiederverwendung. Der bestehende Sprach-Paritätstest
-(`tests/test_gui_language.py`) bleibt grün. Keine weiteren sichtbaren
-Informationen oder gestalterischen Änderungen (E6).
-
-### B8 — A5: Doku, Changelog, Nachmessung, Gates (DoD)
-
-`docs/GUI-SPEC.md` und `docs/GUI-SPEC.de.md` synchron nach B6. `CHANGELOG.md`
-und `CHANGELOG.de.md` synchron ergänzen — einschließlich der **bewusst
-geänderten** HTML-Antwort (Teilantwort auf den Header, Panes bei Bedarf) und
-der **unveränderten** API. Die Referenzmessung aus B1 nach der Änderung
-wiederholen und die Größenabnahme belegen (AC 5). Der veraltete
-„flake8 + isort"-Hinweis (Abnahmepunkt 10 in `docs/GUI-SPEC.md`) begründet
-**keine** zusätzlichen Gates und wird nicht befolgt; `ruff format` ist kein
-Gate. Gates grün: `uv run ruff check .` und `uv run pytest -x -q`. Keine neue
-Laufzeit-Dependency, kein Frontend-Paket, kein CDN (E1).
-
-## Testumfang
-
-Richtwert **~13 neue Tests** unter `tests/` (Tabelle in B2); deutlich mehr als
-**~18** ist Scope-Drift. Parametrisierte Fälle zählen zum Budget;
-zusammengehörige Fälle in Szenarien bündeln. Serverseitig die Teilantwort, die
-Pane-Zahl, die Seitengröße, den Deep-Link und die API-Regression (AC 1–5, 10,
-13) in `tests/test_gui_*.py`; der Größentest weist Referenzlauf,
-Anfrageparameter und unkomprimierte Bytezahl aus. Das Client-Verhalten —
-Nachladen, Ladezustand, Wettlauf, Doppelanfrage, Fehlerfall, Tastaturauslösung,
-Zustand über den Tausch (AC 6–9, 11–12) — im vorhandenen Harness
-`tests/gui_js_harness.js` / `tests/gui_js_harness.py` gegen das ausgelieferte
-`app.js`. Der Harness bleibt ein reiner `node`-Prozess ohne Browser; kein neues
-Browser-Test-Subsystem entsteht. Fixtures reproduzierbar über die bestehenden
-`tests/gui_app_helpers.py`-Konventionen, nicht aus lokalen Run-Verzeichnissen
-(Retention).
-
-**Einzige erlaubte inhaltliche Änderung an bestehenden Tests:** Tests, die
-heute voraussetzen, dass jeder Span-Pane-Körper im ausgelieferten HTML steht,
-werden auf den Nachladeweg bzw. die fokussierte Antwort gehoben — mit einem
-Kommentar, der sagt warum. Alle übrigen bestehenden GUI-Tests bleiben grün,
-ohne inhaltlich umgeschrieben zu werden.
-
-## Grenzen
-
-Keine neue Route, kein neuer Query-Parameter, kein neues Tab, keine neue
-Ansicht, keine Änderung an der Run-Liste, keine Persistenz, kein neues
-Zustands-Subsystem, keine Änderung an den Routen unter `/api`. Kein
-inkrementelles Patchen des Baums — der Regionentausch bleibt der Mechanismus
-(E2). Entprellung bleibt 200 ms, Auslöser bleibt der Ereignisstrom (E4); kein
-Polling, keine Ratenbegrenzung als Ersatz für A1/A2. Keine Kompression, kein
-ETag/Caching-Header-Tuning, keine bedingten Anfragen — die Seite soll weniger
-enthalten, nicht dasselbe kleiner verpackt. Keine Änderung an Ereignistypen,
-Instrumentierung, `build_tree`, der Verdichtung, dem Tools-Fenster, der
-Retention oder der Reconnect-Logik über `Last-Event-ID` (E8). Was die Seite
-**zeigt**, ändert sich nicht — ausgenommen die geforderten vorübergehenden
-Lade- und Fehlerhinweise (E6). Gestaltung, Zahlen, Anordnung und Tastaturpfad
-(Briefe 1–4) werden benutzt, nicht revidiert (E7). Auswahl per Klick und per
-Tastatur, `?focus`-Deep-Links, das Tools-Fenster samt 200er-Schranke,
-`captureOpenState` / `reapplyOpenState`, `applySelection`, `initTreeFold`
-bleiben in Verhalten und Aussehen unverändert. Die Vorentscheidungen E1–E8
-sind entschieden — kein Finding, auch nicht im Review-Loop.
-
-## Deferred (bewusst nicht gebaut — bindet auch den Review-Loop)
-
-- Live-Aktualisierung der Run-Liste (E5).
-- Inkrementelles Patchen des Trace-Baums (E2).
-- Virtualisiertes Rendern der Baum-Spalte, Lazy-Rendering nach Sichtbarkeit.
-- Kompression, ETags, bedingte Anfragen, Caching-Strategie.
-- Nachladen weiterer Flächen (Artefakte, Raw-Tab, Change-Scope).
-- Vorausladen des wahrscheinlich nächsten Panes.
-- Messpunkte oder Telemetrie über die Nutzlast im Betrieb.
+Diese Punkte sind keine Findings im Review-Loop.
