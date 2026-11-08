@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [0.33.0] — Unreleased
+## [0.33.0] — 2026-11-08
 
 ### Added
 - **Every run leaves a record in a central ledger (W13).** Auto-pruning deleted old run directories including state, event log, spec/plan/contract and follow-ups; there was no second copy.
@@ -1138,6 +1138,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.33.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.1...v0.33.0
 [0.32.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.3...v0.32.0
 [0.31.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.2...v0.31.3
