@@ -1,60 +1,111 @@
-# Interface contract — R1: Der Orchestrator schreibt und löscht nur, was ihm gehört
+# Interface contract — R2: Event-Log und State überstehen Crash, Prune und Resume
 #
 # Single-Lane-Projekt (nur `backend`, siehe .adw/config.yaml). Gemäß Spec
-# („Contract (Single-Lane)“) pinnt dieser Contract ausschließlich drei extern
+# („Contract (Single-Lane)") pinnt dieser Contract ausschließlich extern
 # beobachtbare Flächen:
-#   1. CLI-Verhalten von `adw run|resume|approve` bei belegtem Repo-Lock,
-#   2. die Lock-Datei `.adw/runs/.repo.lock`,
-#   3. das neue State-Feld `pushed_shas` in state.json.
+#   1. `adw resume <id>` eines Laufs in Phase `done`,
+#   2. Auto-Prune nach `done` (Dry-Run, eigener Lauf),
+#   3. das neue Lane-Feld `test_pass_done` in state.json,
+#   4. das Prune-Ergebnis bei belegtem Run-Lock bzw. geänderter Phase,
+#   5. `adw runs prune` bei Git-Timeout/OSError,
+#   6. die Lock-Datei des Laufs, die Executor und Prune teilen.
 #
-# NICHT Teil des Contracts: interne Helfer und ihre Signaturen (Artefakt-Helfer,
-# Repo-Lock-Kontextmanager, Preflight-Schalter, _push_branch, _run_worktrees).
-# Seeding, Push-Lease, Resume-Schutz und trees-Grenze sind durch .adw/spec.md
-# (A1–A4, AC 1–9) verbindlich, aber keine Vertragsfläche. Keine HTTP-Routen,
-# keine neuen Events.
+# NICHT Teil des Contracts: interne Helfer und ihre Signaturen (Lock-Helfer,
+# `retention.prune`-Parameter wie `exclude`, `_confirm_red`, `_write_snapshot`,
+# `_git`, Snapshot-Retry). Atomare Snapshot-Refs (A2) und fsync (A5) sind durch
+# .adw/spec.md verbindlich, aber keine Vertragsfläche. Keine HTTP-Routen, keine
+# neuen Events; das `snapshot`-Event behält sein Format. Der Thread-Nachweis aus
+# AC 3 begründet keinen Multi-Lane-Workflow.
 
+version: 1
+scope: R2
 workstreams:
   - backend
 
 cli:
-  commands: [adw run, adw resume, adw approve]
-  repo_lock_busy:
-    condition: >-
-      `.adw/runs/.repo.lock` ist von einem anderen Prozess bzw. Handle per flock
-      exklusiv gehalten.
-    exit_code: 1
-    message_semantics: Nennt, dass in diesem Repo bereits ein ADW-Kommando läuft.
+  resume_done_run:
+    command: adw resume <run_id>
+    precondition: state.json des Laufs hat phase == done
+    exit_code: 0
+    message: "Run <run_id> ist bereits abgeschlossen"
     side_effects:
       preflight_executed: false
-      self_healing_executed: false
-      run_directory_created: false
-      state_created_or_modified: false
-      main_checkout_artifacts_modified: false
-      escalation_created: false
+      run_span_started: false
+      events_jsonl_created: false        # auch bei bereits komprimiertem Log
+      events_jsonl_or_gz_modified: false # byte-gleich
+      state_json_modified: false         # byte-gleich
+      auto_prune_executed: false
+  resume_escalated_run:
+    unchanged: true
+    exit_code: 1
+    report: .adw/runs/<run_id>/escalation.md
+
+  auto_prune:
+    trigger: Lauf erreicht `done` über `adw run`, `adw resume` oder `adw approve`
+    dry_run: >-
+      Kein Auto-Prune; echte Läufe werden nicht verändert. Gilt auch beim
+      Fortsetzen eines persistierten Dry-Runs.
+    own_run: >-
+      Der eigene Lauf ist nie Kandidat, wird nie gelöscht und erscheint nicht im
+      Prune-Ergebnis — unabhängig von seiner Startzeit relativ zu keep_runs.
+    other_rules: unverändert (keep_runs, keep_runs == 0 deaktiviert, fail-open)
+
+  runs_prune:
+    command: adw runs prune [--keep N] [--older-than DAYS] [--gzip]
+    excludes_runs: keine (manueller Aufruf nimmt nichts aus)
+    run_lock_busy:
+      condition: >-
+        `.adw/runs/.lock-<run_id>` eines terminalen Kandidaten ist von einem
+        anderen Prozess bzw. Handle per flock gehalten.
+      action: skipped
+      reason: "läuft noch"
+      result_line: "<run_id>: skipped (läuft noch)"
+      waits: false
+      applies_to: [löschend, --gzip]
+      run_artifacts_modified: false  # Run-Ordner, Log, Worktrees, Snapshot-Refs
+    phase_not_terminal_under_lock:
+      condition: Unter dem Run-Lock neu gelesene Phase ist weder done noch escalated.
+      action: skipped
+      reason: "phase <aktuelle Phase>"
+      result_line: "<run_id>: skipped (phase <aktuelle Phase>)"
+      run_artifacts_modified: false
+    git_timeout_or_oserror:
+      exit_code: 1
+      traceback: false
+      output: >-
+        Ergebniszeilen der bis dahin bearbeiteten Läufe und des fehlgeschlagenen
+        Kandidaten, dann eine Fehlermeldung mit ausgeführtem git-Kommando und Ursache.
+      rollback: false  # bereits ausgeführte Löschungen bleiben
 
 lock_file:
-  path: .adw/runs/.repo.lock
-  scope: repository
-  mechanism: flock, LOCK_EX | LOCK_NB (nicht blockierend)
-  acquired_before: [preflight, per_run_lock]
-  held_until: Ende des Kommandos (einschließlich Auto-Prune); auf jedem Ausstiegspfad freigegeben
-  deleted: never (auch nicht durch Retention/Prune)
+  path: .adw/runs/.lock-<run_id>
+  scope: run
+  shared_by: [adw run, adw resume, adw approve, adw runs prune, Auto-Prune]
+  semantics:
+    run_resume_approve: blockierend (unverändert)
+    prune: >-
+      nicht blockierend; gehalten bis zum Ende der Löschung bzw. Komprimierung
+      des Kandidaten
+  deleted: never
 
 state:
   path: .adw/runs/<run_id>/state.json
   added_fields:
-    pushed_shas:
-      type: object
-      keys: Branch-Name (refs/heads/<branch> ohne Präfix)
-      additionalProperties:
-        type: string
-        description: SHA des zuletzt erfolgreich gepushten Commits dieses Branches.
-      default: {}
+    lanes.<lane>.test_pass_done:
+      type: boolean
+      default: false
+      semantics:
+        false: >-
+          Der reine Test-Lauf ist nicht als regulär abgeschlossen bestätigt.
+          Resume startet den Test-Lauf erneut; eine vorhandene session_id wird
+          dabei fortgesetzt, sonst eine neue Session begonnen.
+        true: >-
+          Der Test-Lauf ist regulär zurückgekehrt und die Nach-Prüfungen (kein
+          Agent-Commit, Lane-Branch) sind bestanden — persistiert in derselben
+          Speicherung wie die session_id. Resume startet keinen weiteren Test-Lauf
+          und führt den ausstehenden RED-Check aus.
+      guarantees:
+        - Abbruch oder fehlgeschlagene Nach-Prüfung persistieren keinen Abschluss.
+        - Das Flag ersetzt keinen RED-Beweis.
   compatibility:
-    missing_pushed_shas_loads_as: {}
-  persistence: >-
-    Nach erfolgreichem Push wird der SHA für den Branch zusammen mit dem übrigen
-    Fortschritt nach dem Push über den bestehenden State-Speicherpfad persistiert.
-    Dasselbe gilt, wenn nach einer Lease-Ablehnung bestätigt wurde, dass der
-    Remote-Branch bereits auf dem lokalen HEAD steht (Crash-Fenster, E4).
-    Dry-Run pusht nicht und schreibt das Feld nicht.
+    missing_test_pass_done_loads_as: false  # keine Migration
