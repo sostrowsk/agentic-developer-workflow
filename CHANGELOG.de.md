@@ -13,7 +13,7 @@ gepushten Stände.
 
 English edition: [CHANGELOG.md](CHANGELOG.md)
 
-## [0.32.1] — Unreleased
+## [0.32.1] — 2026-11-08
 
 ### Behoben
 - **Der Gate-Circuit-Breaker konnte bei pytest praktisch nie auslösen (W4).** Die Breaker-Schlüssel der Gates enthielten den vollen Gate-Output, `check_progress` vergleicht Schlüssel exakt. Die pytest-Zusammenfassung trägt immer die Laufzeit (`… failed in 36.02s`), zwei Iterationen mit demselben Fehler unterschieden sich also fast immer — der Lauf reizte das Iterationslimit aus, statt zu eskalieren; in keinem der 15 vorhandenen Läufe gab es ein `circuit_breaker`-Event.
@@ -1204,6 +1204,7 @@ Erstes Release.
   Beispiel-Config; ADW als Claude-Skill paketiert (in eigenes Repo
   ausgelagert).
 
+[0.32.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.3...v0.32.0
 [0.31.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.2...v0.31.3
 [0.31.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.1...v0.31.2

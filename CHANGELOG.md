@@ -12,7 +12,7 @@ retroactively from the push history; their tags point to the pushed states.
 
 Deutsche Fassung: [CHANGELOG.de.md](CHANGELOG.de.md)
 
-## [0.32.1] — Unreleased
+## [0.32.1] — 2026-11-08
 
 ### Fixed
 - **The gate circuit breaker practically never fired for pytest (W4).** Gate breaker keys contained the full gate output, and `check_progress` compares keys exactly. The pytest summary always carries the duration (`… failed in 36.02s`), so two iterations with the same failure almost always differed — the run exhausted the iteration limit instead of escalating; none of the 15 existing runs had a `circuit_breaker` event.
@@ -1129,6 +1129,7 @@ Initial release.
 - README, user handbook, technical spec (HTML handouts), example config;
   ADW packaged as a Claude skill (extracted to its own repo).
 
+[0.32.1]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.3...v0.32.0
 [0.31.3]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.2...v0.31.3
 [0.31.2]: https://github.com/sostrowsk/agentic-developer-workflow/compare/v0.31.1...v0.31.2
