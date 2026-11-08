@@ -538,9 +538,18 @@ Fail-open wie der Emitter.
 ## 5. Agent-Registry
 
 Jeder Agent ist eine eingefrorene `AgentSpec(name, model, tools, allowed_tools,
-system_append, permission_mode="default", sandbox_bash=False)`. `tools`
-**beschränkt**, was dem Agent überhaupt angeboten wird; `allowed_tools` genehmigt
-(pfadbeschränkt). Beides ist nötig.
+system_append, max_turns, timeout_s, permission_mode="default", sandbox_bash=False)`.
+`tools` **beschränkt**, was dem Agent überhaupt angeboten wird; `allowed_tools`
+genehmigt (pfadbeschränkt). Beides ist nötig.
+
+`max_turns` und `timeout_s` sind Pflichtfelder (ohne Default) und Konstanten in
+`REGISTRY`, keine Config-Felder: `build_agent` 400 / 3600 s, `final_reviewer`
+250 / 1200 s, `spec_agent` und `plan_agent` 150 / 1200 s, `spec_synthesis` und
+`plan_synthesis` 100 / 1200 s, `e2e_triage` und `log_analyst` 50 / 600 s. `max_turns`
+geht an `ClaudeAgentOptions`; `timeout_s` begrenzt das Einsammeln des Streams. Eine
+erreichte Grenze beendet den Lauf mit `AgentRunError` (`<agent>: Zeitlimit
+<timeout_s> s überschritten` bzw. `<agent>: max_turns <n> erreicht`) — resumierbar,
+keine Eskalation.
 
 ![Schreibgrenzen: wer was schreiben darf und wer committet](diagrams/spec/write-boundaries.de.svg)
 

@@ -204,7 +204,7 @@ Span-bildend (`start`/`end`):
 | `phase` | `name`, `from_phase` | `name`, `to_phase` |
 | `lane` | `name`, `branch`, `worktree`, `base_sha`, `ports` | `completed`, `gate_iterations`, `fix_cycles` |
 | `round` | `loop` (`authoring`\|`gates`\|`integration`\|`codex_review`\|`final_review`), `n`, `cap` | `outcome` |
-| `agent.run` | `agent`, `model`, `tools[]`, `allowed_tools[]`, `cwd`, `resume_session`, **`prompt`** (voller Task-String), `system_append` | `session_id`, **`result_text`**, `usage` (`input`, `output`, `cache_read`, `cache_creation`), `cost_usd`, `is_error` |
+| `agent.run` | `agent`, `model`, `tools[]`, `allowed_tools[]`, `cwd`, `resume_session`, **`prompt`** (voller Task-String), `system_append`, `max_turns`, `timeout_s` | `session_id`, **`result_text`**, `usage` (`input`, `output`, `cache_read`, `cache_creation`), `cost_usd`, `is_error`, `error` (nur bei Abbruch durch `timeout_s`, `max_turns` oder eine SDK-Ausnahme: die Ursache, identisch mit der `AgentRunError`-Meldung; die bis dahin gesammelte Session-ID, Usage und Kosten bleiben erhalten) |
 | `gate` | `name`, `cmd`, `timeout`, `cwd` | `passed`, `exit_code`, `timed_out`, **`output`** |
 | `codex.review` | `kind`, `argv[]`, `cwd`, `custom_prompt`, `prompt` (geht über stdin; argv endet auf `-`) | `findings[]` (vollständige `Finding`-Objekte), `raw_stdout` (die finale Antwort, `codex exec -o`), `parse_ok`, `usage` (Token-Zahlen aus `--json`) |
 | `codex.author` | `kind`, `argv[]`, `cwd`, `task`, `prompt` | `artifacts[]` (zurückgelieferte Dateinamen), `raw_stdout` (die finale Antwort), `parse_ok`, `usage` — Dual Authoring ist ein erheblicher Zeit- und Kostenblock; ohne diesen Span zeigt die Timeline dort eine Lücke, wo der Codex-Entwurf entstand |

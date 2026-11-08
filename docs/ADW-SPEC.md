@@ -528,8 +528,17 @@ no diff is ever written into the log. Fail-open like the emitter.
 ## 5. Agent registry
 
 Each agent is a frozen `AgentSpec(name, model, tools, allowed_tools, system_append,
-permission_mode="default", sandbox_bash=False)`. `tools` **restricts** what the
-agent is offered at all; `allowed_tools` approves (path-scoped). Both are needed.
+max_turns, timeout_s, permission_mode="default", sandbox_bash=False)`. `tools`
+**restricts** what the agent is offered at all; `allowed_tools` approves
+(path-scoped). Both are needed.
+
+`max_turns` and `timeout_s` are required (no defaults) and are constants in
+`REGISTRY`, not config fields: `build_agent` 400 / 3600 s, `final_reviewer`
+250 / 1200 s, `spec_agent` and `plan_agent` 150 / 1200 s, `spec_synthesis` and
+`plan_synthesis` 100 / 1200 s, `e2e_triage` and `log_analyst` 50 / 600 s. `max_turns`
+goes to `ClaudeAgentOptions`; `timeout_s` bounds collecting the stream. Reaching
+either limit ends the run with `AgentRunError` (`<agent>: Zeitlimit <timeout_s> s
+überschritten` or `<agent>: max_turns <n> erreicht`) — resumable, no escalation.
 
 ![Write boundaries: who may write what, and who commits](diagrams/spec/write-boundaries.svg)
 

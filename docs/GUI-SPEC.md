@@ -196,7 +196,7 @@ Span-forming (`start`/`end`):
 | `phase` | `name`, `from_phase` | `name`, `to_phase` |
 | `lane` | `name`, `branch`, `worktree`, `base_sha`, `ports` | `completed`, `gate_iterations`, `fix_cycles` |
 | `round` | `loop` (`authoring`\|`gates`\|`integration`\|`codex_review`\|`final_review`), `n`, `cap` | `outcome` |
-| `agent.run` | `agent`, `model`, `tools[]`, `allowed_tools[]`, `cwd`, `resume_session`, **`prompt`** (full task string), `system_append` | `session_id`, **`result_text`**, `usage` (`input`, `output`, `cache_read`, `cache_creation`), `cost_usd`, `is_error` |
+| `agent.run` | `agent`, `model`, `tools[]`, `allowed_tools[]`, `cwd`, `resume_session`, **`prompt`** (full task string), `system_append`, `max_turns`, `timeout_s` | `session_id`, **`result_text`**, `usage` (`input`, `output`, `cache_read`, `cache_creation`), `cost_usd`, `is_error`, `error` (only when the run is aborted by `timeout_s`, `max_turns` or an SDK exception: the cause, identical to the `AgentRunError` message; the session id, usage and cost collected so far are kept) |
 | `gate` | `name`, `cmd`, `timeout`, `cwd` | `passed`, `exit_code`, `timed_out`, **`output`** |
 | `codex.review` | `kind`, `argv[]`, `cwd`, `custom_prompt`, `prompt` (sent on stdin; argv ends in `-`) | `findings[]` (full `Finding` objects), `raw_stdout` (the final answer, `codex exec -o`), `parse_ok`, `usage` (token counts from `--json`) |
 | `codex.author` | `kind`, `argv[]`, `cwd`, `task`, `prompt` | `artifacts[]` (returned file names), `raw_stdout` (the final answer), `parse_ok`, `usage` — dual authoring is a substantial slice of a run's time and cost; without this span the timeline shows a gap where the Codex draft was written |
